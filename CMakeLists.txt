@@ -24,9 +24,13 @@ qt_policy(SET QTP0004 NEW)
 add_library(driftengine STATIC
     src/engine/MediaProbe.h
     src/engine/MediaProbe.cpp
+    src/engine/MediaThumbnail.h
+    src/engine/MediaThumbnail.cpp
+    src/engine/TimelineExporter.h
+    src/engine/TimelineExporter.cpp
 )
 target_include_directories(driftengine PUBLIC src)
-target_link_libraries(driftengine PUBLIC Qt6::Core FFmpeg::FFmpeg)
+target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui FFmpeg::FFmpeg)
 
 if(WITH_BGREMOVAL)
     target_include_directories(driftengine PRIVATE ${OpenCV_INCLUDE_DIRS})
@@ -39,6 +43,8 @@ qt_add_executable(drift
     src/main.cpp
     src/models/AssetLibrary.h
     src/models/AssetLibrary.cpp
+    src/models/EditorState.h
+    src/models/EditorState.cpp
 )
 
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
@@ -67,6 +73,7 @@ target_link_libraries(drift PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::Multimedia
+    Qt6::Gui
     driftengine
 )
 

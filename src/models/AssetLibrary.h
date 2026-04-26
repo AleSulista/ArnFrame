@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QAbstractListModel>
+#include <QJsonArray>
 #include <QStringList>
 #include <QUrl>
 
@@ -13,7 +14,9 @@ public:
         NameRole = Qt::UserRole + 1,
         KindRole,
         DurationRole,
+        DurationSecondsRole,
         PathRole,
+        ThumbnailPathRole,
     };
     Q_ENUM(Role)
 
@@ -24,13 +27,21 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     Q_INVOKABLE void importUrls(const QList<QUrl> &urls);
+    Q_INVOKABLE QVariantMap assetAt(int index) const;
+    Q_INVOKABLE QString thumbnailAt(int index) const;
+
+    QJsonArray toJsonArray() const;
+    void loadFromJsonArray(const QJsonArray &assets);
+    void clear();
 
 private:
     struct Asset {
         QString name;
         QString kind;
         QString duration;
+        double durationSeconds = 0.0;
         QString path;
+        QString thumbnailPath;
     };
 
     void importFiles(const QStringList &paths);

@@ -8,30 +8,10 @@ PanelFrame {
 
     property real zoom: 1.0
     readonly property real pxPerSecond: Theme.pixelsPerSecondBase * zoom
-    property real playheadSeconds: 3.2
-    property var selectedClip: ({ track: 0, clip: 0 })
-
-    property var tracks: [
-        {
-            type: "video",
-            clips: [
-                { name: "beach-sunset.mp4", start: 0, duration: 8 },
-                { name: "b-roll-city.mp4", start: 8.2, duration: 4 }
-            ]
-        },
-        {
-            type: "text",
-            clips: [
-                { name: "Title", start: 2, duration: 3 }
-            ]
-        },
-        {
-            type: "audio",
-            clips: [
-                { name: "background-music.mp3", start: 0, duration: 10 }
-            ]
-        }
-    ]
+    readonly property var tracks: EditorState.tracks
+    readonly property real playheadSeconds: EditorState.playheadSeconds
+    readonly property int selectedTrack: EditorState.selectedTrack
+    readonly property int selectedClip: EditorState.selectedClip
 
     function trackHeight(type) {
         if (type === "video") return Theme.trackHeightVideo;
@@ -56,6 +36,23 @@ PanelFrame {
         return h;
     }
 
+    function formatTime(seconds) {
+        const total = Math.max(0, Math.round(seconds));
+        const m = Math.floor(total / 60);
+        const s = total % 60;
+        return m.toString().padStart(2, "0") + ":" + s.toString().padStart(2, "0");
+    }
+
+    function ensurePlayheadVisible() {
+        const playheadX = EditorState.playheadSeconds * pxPerSecond;
+        const margin = 64;
+        if (playheadX < flick.contentX + margin)
+            flick.contentX = Math.max(0, playheadX - margin);
+        else if (playheadX > flick.contentX + flick.width - margin)
+            flick.contentX = Math.min(Math.max(0, flick.contentWidth - flick.width),
+                                      playheadX - flick.width + margin);
+    }
+
     Column {
         anchors.fill: parent
 
@@ -78,13 +75,34 @@ PanelFrame {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 2
 
+                IconButton {
+                    icon: EditorState.playing ? Theme.icons.pause : Theme.icons.play
+                    variant: "text"
+                    onClicked: EditorState.playing = !EditorState.playing
+                }
+
+                Text {
+                    text: root.formatTime(EditorState.playheadSeconds) + " / " + root.formatTime(EditorState.durationSeconds)
+                    color: Theme.mutedForeground
+                    font.family: Theme.monoFontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Rectangle {
+                    width: 1
+                    height: 24
+                    color: Theme.panelBorder
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
                 IconButton { icon: Theme.icons.scissors; variant: "text" }
                 IconButton { icon: Theme.icons.alignLeft; variant: "text" }
                 IconButton { icon: Theme.icons.alignRight; variant: "text" }
                 IconButton { icon: Theme.icons.linkTwo; variant: "text" }
                 IconButton { icon: Theme.icons.copy; variant: "text" }
                 IconButton { icon: Theme.icons.snowflake; variant: "text"; buttonEnabled: false }
-                IconButton { icon: Theme.icons.trash; variant: "text" }
+                IconButton { icon: Theme.icons.trash; variant: "text"; onClicked: EditorState.deleteSelectedClip() }
 
                 Rectangle {
                     width: 1
@@ -297,6 +315,11 @@ PanelFrame {
                         width: parent.width
                         height: Theme.timelineRulerHeight
 
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: (mouse) => EditorState.playheadSeconds = mouse.x / root.pxPerSecond
+                        }
+
                         Repeater {
                             model: Math.ceil(flick.contentWidth / root.pxPerSecond) + 1
                             delegate: Item {
@@ -351,18 +374,37 @@ PanelFrame {
                                 height: root.trackHeight(root.tracks[trackIndex].type)
                                 color: "transparent"
 
+                                DropArea {
+                                    anchors.fill: parent
+                                    keys: ["text/plain"]
+                                    onDropped: (drop) => {
+                                        const assetIndex = parseInt(drop.text)
+                                        if (isNaN(assetIndex))
+                                            return
+                                        const atSeconds = drop.x / root.pxPerSecond
+                                        EditorState.addClipFromAssetAt(assetIndex, trackRow.trackIndex, atSeconds)
+                                    }
+                                }
+
                                 Repeater {
                                     model: root.tracks[trackRow.trackIndex].clips.length
                                     delegate: Item {
                                         id: clipItem
                                         property var clipData: root.tracks[trackRow.trackIndex].clips[modelData]
-                                        property bool selected: root.selectedClip.track === trackRow.trackIndex && root.selectedClip.clip === modelData
+                                        property bool selected: root.selectedTrack === trackRow.trackIndex
+                                                                  && root.selectedClip === modelData
                                         property string trackType: root.tracks[trackRow.trackIndex].type
 
-                                        x: clipData.start * root.pxPerSecond + Theme.clipSelectionRingWidth
                                         y: Theme.clipSelectionRingWidth
                                         width: clipData.duration * root.pxPerSecond - 2 * Theme.clipSelectionRingWidth
                                         height: parent.height - 2 * Theme.clipSelectionRingWidth
+
+                                        Binding {
+                                            target: clipItem
+                                            property: "x"
+                                            when: !clipMouse.drag.active
+                                            value: clipData.start * root.pxPerSecond + Theme.clipSelectionRingWidth
+                                        }
 
                                         Rectangle {
                                             anchors.fill: parent
@@ -371,6 +413,18 @@ PanelFrame {
                                             border.width: clipItem.selected ? Theme.clipSelectionRingWidth : 0
                                             border.color: Theme.primary
                                             clip: true
+
+                                            Image {
+                                                anchors.fill: parent
+                                                visible: clipItem.clipData.thumbnailPath
+                                                         && clipItem.clipData.thumbnailPath.length > 0
+                                                         && (clipItem.trackType === "video" || clipItem.clipData.kind === "image")
+                                                source: clipItem.clipData.thumbnailPath
+                                                        ? EditorState.fileUrl(clipItem.clipData.thumbnailPath)
+                                                        : ""
+                                                fillMode: Image.PreserveAspectCrop
+                                                opacity: 0.65
+                                            }
 
                                             Rectangle {
                                                 visible: clipItem.trackType === "video" || clipItem.trackType === "audio"
@@ -427,9 +481,17 @@ PanelFrame {
                                         }
 
                                         MouseArea {
+                                            id: clipMouse
                                             anchors.fill: parent
                                             cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.selectedClip = { track: trackRow.trackIndex, clip: modelData }
+                                            drag.target: clipItem
+                                            drag.axis: Drag.XAxis
+                                            drag.minimumX: Theme.clipSelectionRingWidth
+                                            onPressed: EditorState.selectClip(trackRow.trackIndex, modelData)
+                                            onReleased: {
+                                                const newStart = (clipItem.x - Theme.clipSelectionRingWidth) / root.pxPerSecond
+                                                EditorState.moveClip(trackRow.trackIndex, modelData, newStart)
+                                            }
                                         }
                                     }
                                 }
@@ -440,10 +502,16 @@ PanelFrame {
                     // playhead ---------------------------------------------------------------
                     Item {
                         id: playhead
-                        x: root.playheadSeconds * root.pxPerSecond
                         y: 0
                         width: Theme.playheadLineWidth
                         height: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight + root.totalTracksHeight()
+
+                        Binding {
+                            target: playhead
+                            property: "x"
+                            value: EditorState.playheadSeconds * root.pxPerSecond
+                            when: !playheadDragArea.drag.active
+                        }
 
                         Rectangle {
                             anchors.left: parent.left
@@ -464,6 +532,7 @@ PanelFrame {
                             border.color: Theme.primary
 
                             MouseArea {
+                                id: playheadDragArea
                                 anchors.fill: parent
                                 anchors.margins: -4
                                 cursorShape: Qt.SizeHorCursor
@@ -471,12 +540,20 @@ PanelFrame {
                                 drag.axis: Drag.XAxis
                                 drag.minimumX: 0
                                 drag.maximumX: flick.contentWidth - Theme.playheadLineWidth
-                                onReleased: root.playheadSeconds = playhead.x / root.pxPerSecond
+                                onReleased: EditorState.playheadSeconds = playhead.x / root.pxPerSecond
                             }
                         }
                     }
                 }
             }
+        }
+    }
+
+    Connections {
+        target: EditorState
+        function onPlayheadSecondsChanged() {
+            if (EditorState.playing)
+                root.ensurePlayheadVisible()
         }
     }
 }

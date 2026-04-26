@@ -1,8 +1,10 @@
 #include "AssetLibrary.h"
 
 #include "engine/MediaProbe.h"
+#include "engine/MediaThumbnail.h"
 
 #include <QFileInfo>
+#include <QJsonObject>
 
 namespace {
 
@@ -81,8 +83,12 @@ QVariant AssetLibrary::data(const QModelIndex &index, int role) const
         return asset.kind;
     case DurationRole:
         return asset.duration;
+    case DurationSecondsRole:
+        return asset.durationSeconds;
     case PathRole:
         return asset.path;
+    case ThumbnailPathRole:
+        return asset.thumbnailPath;
     default:
         return {};
     }
@@ -94,14 +100,17 @@ QHash<int, QByteArray> AssetLibrary::roleNames() const
         {NameRole, "name"},
         {KindRole, "kind"},
         {DurationRole, "duration"},
+        {DurationSecondsRole, "durationSeconds"},
         {PathRole, "path"},
+        {ThumbnailPathRole, "thumbnailPath"},
     };
 }
 
 bool AssetLibrary::containsPath(const QString &path) const
 {
+    const QString normalized = QFileInfo(path).absoluteFilePath();
     for (const Asset &asset : m_assets) {
-        if (asset.path == path)
+        if (asset.path == normalized)
             return true;
     }
     return false;
@@ -113,6 +122,75 @@ void AssetLibrary::appendAsset(Asset asset)
     beginInsertRows({}, row, row);
     m_assets.append(std::move(asset));
     endInsertRows();
+}
+
+QVariantMap AssetLibrary::assetAt(int index) const
+{
+    if (index < 0 || index >= m_assets.size())
+        return {};
+
+    const Asset &asset = m_assets.at(index);
+    return {
+        {QStringLiteral("name"), asset.name},
+        {QStringLiteral("kind"), asset.kind},
+        {QStringLiteral("duration"), asset.duration},
+        {QStringLiteral("durationSeconds"), asset.durationSeconds},
+        {QStringLiteral("path"), asset.path},
+        {QStringLiteral("thumbnailPath"), asset.thumbnailPath},
+    };
+}
+
+QString AssetLibrary::thumbnailAt(int index) const
+{
+    if (index < 0 || index >= m_assets.size())
+        return {};
+    return m_assets.at(index).thumbnailPath;
+}
+
+void AssetLibrary::clear()
+{
+    if (m_assets.isEmpty())
+        return;
+
+    beginResetModel();
+    m_assets.clear();
+    endResetModel();
+}
+
+QJsonArray AssetLibrary::toJsonArray() const
+{
+    QJsonArray assets;
+    for (const Asset &asset : m_assets) {
+        assets.append(QJsonObject{
+            {QStringLiteral("name"), asset.name},
+            {QStringLiteral("kind"), asset.kind},
+            {QStringLiteral("duration"), asset.duration},
+            {QStringLiteral("durationSeconds"), asset.durationSeconds},
+            {QStringLiteral("path"), asset.path},
+            {QStringLiteral("thumbnailPath"), asset.thumbnailPath},
+        });
+    }
+    return assets;
+}
+
+void AssetLibrary::loadFromJsonArray(const QJsonArray &assets)
+{
+    beginResetModel();
+    m_assets.clear();
+
+    for (const QJsonValue &value : assets) {
+        const QJsonObject object = value.toObject();
+        m_assets.append({
+            .name = object.value(QStringLiteral("name")).toString(),
+            .kind = object.value(QStringLiteral("kind")).toString(),
+            .duration = object.value(QStringLiteral("duration")).toString(),
+            .durationSeconds = object.value(QStringLiteral("durationSeconds")).toDouble(),
+            .path = object.value(QStringLiteral("path")).toString(),
+            .thumbnailPath = object.value(QStringLiteral("thumbnailPath")).toString(),
+        });
+    }
+
+    endResetModel();
 }
 
 void AssetLibrary::importUrls(const QList<QUrl> &urls)
@@ -132,29 +210,36 @@ void AssetLibrary::importFiles(const QStringList &paths)
 {
     for (const QString &path : paths) {
         const QFileInfo fileInfo(path);
-        if (!fileInfo.isFile() || containsPath(path))
+        const QString absolutePath = fileInfo.absoluteFilePath();
+        if (!fileInfo.isFile() || containsPath(absolutePath))
             continue;
 
         if (isImagePath(path)) {
+            const QString kind = QStringLiteral("image");
             appendAsset({
                 .name = fileInfo.fileName(),
-                .kind = QStringLiteral("image"),
+                .kind = kind,
                 .duration = {},
-                .path = fileInfo.absoluteFilePath(),
+                .durationSeconds = 0.0,
+                .path = absolutePath,
+                .thumbnailPath = MediaThumbnail::generate(absolutePath, kind),
             });
             continue;
         }
 
-        const MediaInfo info = MediaProbe::probe(fileInfo.absoluteFilePath());
+        const MediaInfo info = MediaProbe::probe(absolutePath);
         if (!info.ok)
             continue;
 
         const QString kind = kindFrom(info, path);
+        const double durationSeconds = info.durationUs > 0 ? info.durationUs / 1'000'000.0 : 0.0;
         appendAsset({
             .name = fileInfo.fileName(),
             .kind = kind,
             .duration = kind == QStringLiteral("image") ? QString() : formatDuration(info.durationUs),
-            .path = fileInfo.absoluteFilePath(),
+            .durationSeconds = durationSeconds,
+            .path = absolutePath,
+            .thumbnailPath = MediaThumbnail::generate(absolutePath, kind),
         });
     }
 }

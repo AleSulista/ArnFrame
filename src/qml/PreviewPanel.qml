@@ -1,13 +1,18 @@
 import QtQuick
+import QtMultimedia
 import Drift
 import "components"
 
 PanelFrame {
     id: root
 
-    property bool playing: false
-    property real currentSeconds: 4.5
-    property real durationSeconds: 42.0
+    readonly property real currentSeconds: EditorState.playheadSeconds
+    readonly property real durationSeconds: EditorState.durationSeconds
+    readonly property bool playing: EditorState.playing
+
+    property string previewKind: "none"
+    property string currentSource: ""
+    property real pendingSeekMs: -1
 
     function formatTimecode(seconds) {
         const fps = 30;
@@ -20,10 +25,78 @@ PanelFrame {
         return pad(h) + ":" + pad(m) + ":" + pad(s) + ":" + pad(f);
     }
 
+    function applySeek() {
+        if (pendingSeekMs < 0)
+            return
+        mediaPlayer.position = pendingSeekMs
+        pendingSeekMs = -1
+    }
+
+    function syncPreview() {
+        const clip = EditorState.activeVideoClipAtPlayhead()
+        if (!clip || !clip.path) {
+            previewKind = "none"
+            currentSource = ""
+            pendingSeekMs = -1
+            mediaPlayer.stop()
+            stillImage.source = ""
+            return
+        }
+
+        previewKind = clip.kind
+        if (clip.kind === "image") {
+            stillImage.source = EditorState.fileUrl(clip.path)
+            mediaPlayer.stop()
+            return
+        }
+
+        const url = EditorState.fileUrl(clip.path)
+        const sourceTime = Math.max(0, EditorState.sourceTimeAtPlayhead() * 1000)
+        const urlString = url.toString()
+
+        if (currentSource !== urlString) {
+            currentSource = urlString
+            mediaPlayer.source = url
+            pendingSeekMs = sourceTime
+        } else {
+            const drift = Math.abs(mediaPlayer.position - sourceTime)
+            if (drift > 120)
+                mediaPlayer.position = sourceTime
+        }
+
+        if (EditorState.playing) {
+            if (mediaPlayer.playbackState !== MediaPlayer.PlayingState)
+                mediaPlayer.play()
+        } else {
+            pendingSeekMs = sourceTime
+            if (mediaPlayer.mediaStatus === MediaPlayer.LoadedMedia
+                    || mediaPlayer.mediaStatus === MediaPlayer.BufferedMedia) {
+                applySeek()
+            }
+            mediaPlayer.pause()
+        }
+    }
+
+    MediaPlayer {
+        id: mediaPlayer
+        videoOutput: videoOutput
+        audioOutput: AudioOutput {
+            volume: 0.8
+        }
+
+        onMediaStatusChanged: {
+            if (mediaStatus === MediaPlayer.LoadedMedia
+                    || mediaStatus === MediaPlayer.BufferedMedia) {
+                root.applySeek()
+                if (EditorState.playing)
+                    play()
+            }
+        }
+    }
+
     Column {
         anchors.fill: parent
 
-        // --- viewport ------------------------------------------------------------
         Item {
             id: viewportOuter
             width: parent.width
@@ -47,10 +120,25 @@ PanelFrame {
                     color: "#000000"
                     border.width: 1
                     border.color: Theme.border
+                    clip: true
+
+                    VideoOutput {
+                        id: videoOutput
+                        anchors.fill: parent
+                        visible: root.previewKind === "video"
+                    }
+
+                    Image {
+                        id: stillImage
+                        anchors.fill: parent
+                        visible: root.previewKind === "image"
+                        fillMode: Image.PreserveAspectFit
+                    }
 
                     Text {
                         anchors.centerIn: parent
-                        text: "Preview"
+                        visible: root.previewKind === "none"
+                        text: "No clip at playhead"
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSm
@@ -59,7 +147,6 @@ PanelFrame {
             }
         }
 
-        // --- transport toolbar -------------------------------------------------------
         Item {
             id: toolbar
             width: parent.width
@@ -98,7 +185,7 @@ PanelFrame {
                 anchors.centerIn: parent
                 icon: root.playing ? Theme.icons.pause : Theme.icons.play
                 variant: "text"
-                onClicked: root.playing = !root.playing
+                onClicked: EditorState.playing = !EditorState.playing
             }
 
             Row {
@@ -130,4 +217,13 @@ PanelFrame {
             }
         }
     }
+
+    Connections {
+        target: EditorState
+        function onPlayheadSecondsChanged() { root.syncPreview() }
+        function onTracksChanged() { root.syncPreview() }
+        function onPlayingChanged() { root.syncPreview() }
+    }
+
+    Component.onCompleted: syncPreview()
 }

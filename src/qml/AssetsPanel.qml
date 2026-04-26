@@ -180,8 +180,26 @@ PanelFrame {
                     Repeater {
                         model: AssetLibrary
                         delegate: Column {
+                            id: assetCard
                             width: Theme.assetCardWidth
                             spacing: 4
+
+                            property int assetIndex: index
+
+                            Drag.active: assetDrag.active
+                            Drag.dragType: Drag.Automatic
+                            Drag.supportedActions: Qt.CopyAction
+                            Drag.mimeData: {
+                                "text/plain": assetIndex.toString()
+                            }
+
+                            TapHandler {
+                                onTapped: EditorState.addClipFromAsset(assetIndex)
+                            }
+
+                            DragHandler {
+                                id: assetDrag
+                            }
 
                             Rectangle {
                                 width: Theme.assetCardWidth
@@ -190,8 +208,18 @@ PanelFrame {
                                 color: Theme.panelAccent
                                 clip: true
 
+                                Image {
+                                    anchors.fill: parent
+                                    visible: model.thumbnailPath && model.thumbnailPath.length > 0
+                                    source: model.thumbnailPath
+                                           ? EditorState.fileUrl(model.thumbnailPath)
+                                           : ""
+                                    fillMode: Image.PreserveAspectCrop
+                                }
+
                                 IconGlyph {
                                     anchors.centerIn: parent
+                                    visible: !model.thumbnailPath || model.thumbnailPath.length === 0
                                     glyph: model.kind === "audio" ? Theme.icons.music
                                          : model.kind === "image" ? Theme.icons.image
                                          : Theme.icons.film

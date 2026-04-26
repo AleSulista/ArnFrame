@@ -1,4 +1,5 @@
 #include "models/AssetLibrary.h"
+#include "models/EditorState.h"
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -11,7 +12,9 @@ int main(int argc, char *argv[])
     QGuiApplication::setOrganizationName("CutWire Drift");
 
     static AssetLibrary assetLibrary;
+    static EditorState editorState(&assetLibrary);
     qmlRegisterSingletonInstance("Drift", 1, 0, "AssetLibrary", &assetLibrary);
+    qmlRegisterSingletonInstance("Drift", 1, 0, "EditorState", &editorState);
 
     QQmlApplicationEngine engine;
     QObject::connect(

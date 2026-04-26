@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Dialogs
 import Drift
 import "components"
 
@@ -8,9 +9,47 @@ Rectangle {
     height: Theme.headerHeight
     color: Theme.appBackground
 
-    property string projectName: "Untitled Project"
+    property string projectName: EditorState.projectName
 
-    // --- left: logo + project name -----------------------------------------
+    FileDialog {
+        id: openProjectDialog
+        title: qsTr("Open Project")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("Drift project (*.drift.json)")]
+        onAccepted: EditorState.loadProject(selectedFile)
+    }
+
+    FileDialog {
+        id: saveProjectDialog
+        title: qsTr("Save Project")
+        fileMode: FileDialog.SaveFile
+        nameFilters: [qsTr("Drift project (*.drift.json)")]
+        defaultSuffix: "drift.json"
+        onAccepted: EditorState.saveProject(selectedFile)
+    }
+
+    FileDialog {
+        id: exportDialog
+        title: qsTr("Export Video")
+        fileMode: FileDialog.SaveFile
+        nameFilters: [qsTr("MP4 video (*.mp4)")]
+        defaultSuffix: "mp4"
+        onAccepted: EditorState.exportProject(selectedFile)
+    }
+
+    Connections {
+        target: EditorState
+        function onProjectNameChanged() { root.projectName = EditorState.projectName }
+    }
+
+    Rectangle {
+        anchors.bottom: parent.bottom
+        width: parent.width
+        height: 1
+        color: Theme.panelBorder
+        opacity: 0.5
+    }
+
     Row {
         anchors.left: parent.left
         anchors.leftMargin: 12
@@ -36,6 +75,7 @@ Rectangle {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                onClicked: openProjectDialog.open()
             }
         }
 
@@ -57,7 +97,7 @@ Rectangle {
                 font.family: Theme.fontFamily
                 font.pixelSize: Math.round(14.4)
                 selectByMouse: true
-                onEditingFinished: root.projectName = text
+                onEditingFinished: EditorState.projectName = text
             }
 
             MouseArea {
@@ -67,9 +107,24 @@ Rectangle {
                 acceptedButtons: Qt.NoButton
             }
         }
+
+        IconButton {
+            icon: Theme.icons.copy
+            variant: "ghost"
+            onClicked: saveProjectDialog.open()
+        }
     }
 
-    // --- right: feedback / export / theme toggle ----------------------------
+    Text {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.verticalCenter: parent.verticalCenter
+        text: EditorState.lastMessage
+        color: Theme.mutedForeground
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontSizeXs
+        visible: text.length > 0
+    }
+
     Row {
         anchors.right: parent.right
         anchors.rightMargin: 12
@@ -127,6 +182,7 @@ Rectangle {
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
+                onClicked: exportDialog.open()
             }
         }
 
