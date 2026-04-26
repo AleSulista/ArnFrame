@@ -37,6 +37,8 @@ endif()
 # --- application ------------------------------------------------------------
 qt_add_executable(drift
     src/main.cpp
+    src/models/AssetLibrary.h
+    src/models/AssetLibrary.cpp
 )
 
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE true)

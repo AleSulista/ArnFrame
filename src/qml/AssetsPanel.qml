@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Dialogs
 import Drift
 import "components"
 
@@ -27,14 +28,14 @@ PanelFrame {
     ]
     property int activeTab: 0
 
-    ListModel {
-        id: mediaModel
-        ListElement { name: "beach-sunset.mp4"; kind: "video"; duration: "00:42" }
-        ListElement { name: "interview-a.mp4"; kind: "video"; duration: "03:15" }
-        ListElement { name: "b-roll-city.mp4"; kind: "video"; duration: "01:08" }
-        ListElement { name: "background-music.mp3"; kind: "audio"; duration: "02:30" }
-        ListElement { name: "voiceover.wav"; kind: "audio"; duration: "00:54" }
-        ListElement { name: "logo.png"; kind: "image"; duration: "" }
+    FileDialog {
+        id: importDialog
+        title: qsTr("Import Media")
+        fileMode: FileDialog.OpenFiles
+        nameFilters: [
+            qsTr("Media files (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.mp3 *.wav *.aac *.flac *.ogg *.m4a *.png *.jpg *.jpeg *.gif *.webp *.bmp)")
+        ]
+        onAccepted: AssetLibrary.importUrls(selectedFiles)
     }
 
     Row {
@@ -68,8 +69,10 @@ PanelFrame {
 
         // --- header + content -----------------------------------------------------
         Column {
+            id: assetsContent
             width: parent.width - Theme.tabRailWidth - 1
             height: parent.height
+            property bool gridMode: true
 
             Rectangle {
                 width: parent.width
@@ -102,14 +105,14 @@ PanelFrame {
                     IconButton {
                         icon: Theme.icons.grid
                         variant: "ghost"
-                        active: gridMode
-                        onClicked: gridMode = true
+                        active: assetsContent.gridMode
+                        onClicked: assetsContent.gridMode = true
                     }
                     IconButton {
                         icon: Theme.icons.list
                         variant: "ghost"
-                        active: !gridMode
-                        onClicked: gridMode = false
+                        active: !assetsContent.gridMode
+                        onClicked: assetsContent.gridMode = false
                     }
                     IconButton {
                         icon: Theme.icons.sort
@@ -149,14 +152,13 @@ PanelFrame {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
                             hoverEnabled: true
+                            onClicked: importDialog.open()
                             onEntered: parent.color = Theme.panelAccent
                             onExited: parent.color = "transparent"
                         }
                     }
                 }
             }
-
-            property bool gridMode: true
 
             Flickable {
                 id: flick
@@ -176,7 +178,7 @@ PanelFrame {
                     rowSpacing: Theme.assetCardGap
 
                     Repeater {
-                        model: mediaModel
+                        model: AssetLibrary
                         delegate: Column {
                             width: Theme.assetCardWidth
                             spacing: 4
