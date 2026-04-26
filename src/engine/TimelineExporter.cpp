@@ -1,5 +1,6 @@
 #include "TimelineExporter.h"
 
+#include <QFile>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -35,7 +36,7 @@ bool runFfmpeg(const QStringList &args, QString *errorOut)
     return true;
 }
 
-QStringList baseOutputArgs(const QString &outputPath)
+QStringList encodeOutputArgs(const QString &outputPath)
 {
     return {
         QStringLiteral("-c:v"), QStringLiteral("libx264"),
@@ -48,38 +49,47 @@ QStringList baseOutputArgs(const QString &outputPath)
     };
 }
 
-} // namespace
+QStringList inputArgsForSegment(const ExportSegment &segment)
+{
+    QStringList args;
+    if (segment.kind == QStringLiteral("image")) {
+        args << QStringLiteral("-loop") << QStringLiteral("1")
+             << QStringLiteral("-i") << segment.path
+             << QStringLiteral("-t") << QString::number(segment.duration, 'f', 3);
+    } else {
+        args << QStringLiteral("-ss") << QString::number(segment.inPoint, 'f', 3)
+             << QStringLiteral("-i") << segment.path
+             << QStringLiteral("-t") << QString::number(segment.duration, 'f', 3);
+    }
+    return args;
+}
 
-bool TimelineExporter::exportVideo(const QList<ExportSegment> &segments, const QString &outputPath,
-                                   QString *errorOut)
+QList<ExportSegment> sortedSegments(QList<ExportSegment> segments)
+{
+    std::stable_sort(segments.begin(), segments.end(), [](const ExportSegment &a, const ExportSegment &b) {
+        return a.timelineStart < b.timelineStart;
+    });
+    return segments;
+}
+
+bool exportSegmentList(const QList<ExportSegment> &segments, const QString &outputPath, bool videoOnly,
+                       QString *errorOut)
 {
     if (segments.isEmpty()) {
         if (errorOut)
-            *errorOut = QStringLiteral("No clips to export");
+            *errorOut = QStringLiteral("No segments to export");
         return false;
     }
 
-    QList<ExportSegment> ordered = segments;
-    std::stable_sort(ordered.begin(), ordered.end(), [](const ExportSegment &a, const ExportSegment &b) {
-        return a.timelineStart < b.timelineStart;
-    });
+    const QList<ExportSegment> ordered = sortedSegments(segments);
 
     if (ordered.size() == 1) {
-        const ExportSegment &segment = ordered.front();
         QStringList args;
         args << QStringLiteral("-hide_banner") << QStringLiteral("-loglevel") << QStringLiteral("error");
-
-        if (segment.kind == QStringLiteral("image")) {
-            args << QStringLiteral("-loop") << QStringLiteral("1")
-                 << QStringLiteral("-i") << segment.path
-                 << QStringLiteral("-t") << QString::number(segment.duration, 'f', 3);
-        } else {
-            args << QStringLiteral("-ss") << QString::number(segment.inPoint, 'f', 3)
-                 << QStringLiteral("-i") << segment.path
-                 << QStringLiteral("-t") << QString::number(segment.duration, 'f', 3);
-        }
-
-        args << baseOutputArgs(outputPath);
+        args << inputArgsForSegment(ordered.front());
+        if (videoOnly)
+            args << QStringLiteral("-an");
+        args << encodeOutputArgs(outputPath);
         return runFfmpeg(args, errorOut);
     }
 
@@ -94,23 +104,13 @@ bool TimelineExporter::exportVideo(const QList<ExportSegment> &segments, const Q
     segmentPaths.reserve(ordered.size());
 
     for (int i = 0; i < ordered.size(); ++i) {
-        const ExportSegment &segment = ordered.at(i);
         const QString segmentPath = tempDir.filePath(QStringLiteral("segment_%1.mp4").arg(i));
-
         QStringList args;
         args << QStringLiteral("-hide_banner") << QStringLiteral("-loglevel") << QStringLiteral("error");
-
-        if (segment.kind == QStringLiteral("image")) {
-            args << QStringLiteral("-loop") << QStringLiteral("1")
-                 << QStringLiteral("-i") << segment.path
-                 << QStringLiteral("-t") << QString::number(segment.duration, 'f', 3);
-        } else {
-            args << QStringLiteral("-ss") << QString::number(segment.inPoint, 'f', 3)
-                 << QStringLiteral("-i") << segment.path
-                 << QStringLiteral("-t") << QString::number(segment.duration, 'f', 3);
-        }
-
-        args << baseOutputArgs(segmentPath);
+        args << inputArgsForSegment(ordered.at(i));
+        if (videoOnly)
+            args << QStringLiteral("-an");
+        args << encodeOutputArgs(segmentPath);
 
         if (!runFfmpeg(args, errorOut))
             return false;
@@ -140,4 +140,93 @@ bool TimelineExporter::exportVideo(const QList<ExportSegment> &segments, const Q
          << outputPath;
 
     return runFfmpeg(args, errorOut);
+}
+
+bool muxAudioOverlay(const QString &videoPath, const QList<ExportSegment> &audioSegments,
+                     const QString &outputPath, QString *errorOut)
+{
+    QStringList args;
+    args << QStringLiteral("-hide_banner") << QStringLiteral("-loglevel") << QStringLiteral("error")
+         << QStringLiteral("-i") << videoPath;
+
+    QStringList filterParts;
+    QStringList mixInputs;
+
+    for (int i = 0; i < audioSegments.size(); ++i) {
+        const ExportSegment &segment = audioSegments.at(i);
+        args << QStringLiteral("-ss") << QString::number(segment.inPoint, 'f', 3)
+             << QStringLiteral("-i") << segment.path
+             << QStringLiteral("-t") << QString::number(segment.duration, 'f', 3);
+
+        const int inputIndex = i + 1;
+        const int delayMs = static_cast<int>(segment.timelineStart * 1000.0);
+        const QString label = QStringLiteral("a%1").arg(i);
+        filterParts.append(QStringLiteral("[%1:a]asetpts=PTS-STARTPTS,adelay=%2|%2[%3]")
+                               .arg(inputIndex)
+                               .arg(delayMs)
+                               .arg(delayMs)
+                               .arg(label));
+        mixInputs.append(QStringLiteral("[%1]").arg(label));
+    }
+
+    if (mixInputs.isEmpty()) {
+        if (errorOut)
+            *errorOut = QStringLiteral("No audio segments to mix");
+        return false;
+    }
+
+    const QString filter = filterParts.join(QLatin1Char(';'))
+                           + QStringLiteral(";")
+                           + mixInputs.join(QString())
+                           + QStringLiteral("amix=inputs=%1:duration=longest:dropout_transition=0[aout]")
+                                 .arg(mixInputs.size());
+
+    args << QStringLiteral("-filter_complex") << filter
+         << QStringLiteral("-map") << QStringLiteral("0:v:0")
+         << QStringLiteral("-map") << QStringLiteral("[aout]")
+         << QStringLiteral("-c:v") << QStringLiteral("copy")
+         << QStringLiteral("-c:a") << QStringLiteral("aac")
+         << QStringLiteral("-movflags") << QStringLiteral("+faststart")
+         << QStringLiteral("-shortest")
+         << QStringLiteral("-y")
+         << outputPath;
+
+    return runFfmpeg(args, errorOut);
+}
+
+} // namespace
+
+bool TimelineExporter::exportTimeline(const QList<ExportSegment> &videoSegments,
+                                      const QList<ExportSegment> &audioSegments,
+                                      const QString &outputPath, QString *errorOut)
+{
+    if (videoSegments.isEmpty() && audioSegments.isEmpty()) {
+        if (errorOut)
+            *errorOut = QStringLiteral("No clips to export");
+        return false;
+    }
+
+    if (videoSegments.isEmpty()) {
+        return exportSegmentList(audioSegments, outputPath, false, errorOut);
+    }
+
+    QTemporaryDir tempDir;
+    if (!tempDir.isValid()) {
+        if (errorOut)
+            *errorOut = QStringLiteral("Failed to create temporary directory");
+        return false;
+    }
+
+    const QString videoPath = tempDir.filePath(QStringLiteral("video.mp4"));
+    const bool videoOnly = !audioSegments.isEmpty();
+    if (!exportSegmentList(videoSegments, videoPath, videoOnly, errorOut))
+        return false;
+
+    if (audioSegments.isEmpty()) {
+        if (QFile::exists(outputPath))
+            QFile::remove(outputPath);
+        return QFile::copy(videoPath, outputPath);
+    }
+
+    return muxAudioOverlay(videoPath, sortedSegments(audioSegments), outputPath, errorOut);
 }

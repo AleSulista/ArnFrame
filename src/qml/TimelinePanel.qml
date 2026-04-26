@@ -96,7 +96,7 @@ PanelFrame {
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
-                IconButton { icon: Theme.icons.scissors; variant: "text" }
+                IconButton { icon: Theme.icons.scissors; variant: "text"; onClicked: EditorState.splitAtPlayhead() }
                 IconButton { icon: Theme.icons.alignLeft; variant: "text" }
                 IconButton { icon: Theme.icons.alignRight; variant: "text" }
                 IconButton { icon: Theme.icons.linkTwo; variant: "text" }
@@ -155,7 +155,8 @@ PanelFrame {
                     id: magnetButton
                     icon: Theme.icons.magnet
                     variant: "text"
-                    active: true
+                    active: EditorState.snapEnabled
+                    onClicked: EditorState.snapEnabled = !EditorState.snapEnabled
                 }
                 IconButton {
                     id: rippleButton
@@ -414,16 +415,81 @@ PanelFrame {
                                             border.color: Theme.primary
                                             clip: true
 
-                                            Image {
-                                                anchors.fill: parent
-                                                visible: clipItem.clipData.thumbnailPath
-                                                         && clipItem.clipData.thumbnailPath.length > 0
-                                                         && (clipItem.trackType === "video" || clipItem.clipData.kind === "image")
-                                                source: clipItem.clipData.thumbnailPath
-                                                        ? EditorState.fileUrl(clipItem.clipData.thumbnailPath)
-                                                        : ""
-                                                fillMode: Image.PreserveAspectCrop
-                                                opacity: 0.65
+                                            Rectangle {
+                                                id: leftTrimHandle
+                                                width: 12
+                                                anchors.left: parent.left
+                                                anchors.top: parent.top
+                                                anchors.bottom: parent.bottom
+                                                visible: clipItem.selected
+                                                color: Theme.primary
+                                                opacity: leftTrimMouse.pressed ? 1.0 : 0.75
+                                                z: 3
+
+                                                MouseArea {
+                                                    id: leftTrimMouse
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: -10
+                                                    anchors.rightMargin: -4
+                                                    anchors.topMargin: -6
+                                                    anchors.bottomMargin: -6
+                                                    preventStealing: true
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.SizeHorCursor
+                                                    onPositionChanged: (mouse) => {
+                                                        if (!pressed)
+                                                            return
+                                                        const timelineX = mapToItem(trackRow, mouse.x, mouse.y).x
+                                                        EditorState.trimClipLeft(trackRow.trackIndex, modelData,
+                                                                               timelineX / root.pxPerSecond)
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                id: rightTrimHandle
+                                                width: 12
+                                                anchors.right: parent.right
+                                                anchors.top: parent.top
+                                                anchors.bottom: parent.bottom
+                                                visible: clipItem.selected
+                                                color: Theme.primary
+                                                opacity: rightTrimMouse.pressed ? 1.0 : 0.75
+                                                z: 3
+
+                                                MouseArea {
+                                                    id: rightTrimMouse
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: -4
+                                                    anchors.rightMargin: -10
+                                                    anchors.topMargin: -6
+                                                    anchors.bottomMargin: -6
+                                                    preventStealing: true
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.SizeHorCursor
+                                                    onPositionChanged: (mouse) => {
+                                                        if (!pressed)
+                                                            return
+                                                        const timelineX = mapToItem(trackRow, mouse.x, mouse.y).x
+                                                        EditorState.trimClipRight(trackRow.trackIndex, modelData,
+                                                                                timelineX / root.pxPerSecond)
+                                                    }
+                                                }
+                                            }
+
+                                            ClipFilmstrip {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.top: parent.top
+                                                anchors.bottom: parent.bottom
+                                                anchors.bottomMargin: (clipItem.trackType === "video"
+                                                                       || clipItem.trackType === "audio") ? 20 : 0
+                                                visible: clipItem.clipData.filmstripPath
+                                                         && clipItem.clipData.filmstripPath.length > 0
+                                                         && (clipItem.trackType === "video"
+                                                             || clipItem.clipData.kind === "image")
+                                                filmstripPath: clipItem.clipData.filmstripPath
+                                                z: 0
                                             }
 
                                             Rectangle {
@@ -483,6 +549,9 @@ PanelFrame {
                                         MouseArea {
                                             id: clipMouse
                                             anchors.fill: parent
+                                            anchors.leftMargin: clipItem.selected ? 14 : 0
+                                            anchors.rightMargin: clipItem.selected ? 14 : 0
+                                            enabled: !leftTrimMouse.pressed && !rightTrimMouse.pressed
                                             cursorShape: Qt.PointingHandCursor
                                             drag.target: clipItem
                                             drag.axis: Drag.XAxis

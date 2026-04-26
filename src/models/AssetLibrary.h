@@ -17,6 +17,7 @@ public:
         DurationSecondsRole,
         PathRole,
         ThumbnailPathRole,
+        FilmstripPathRole,
     };
     Q_ENUM(Role)
 
@@ -29,6 +30,9 @@ public:
     Q_INVOKABLE void importUrls(const QList<QUrl> &urls);
     Q_INVOKABLE QVariantMap assetAt(int index) const;
     Q_INVOKABLE QString thumbnailAt(int index) const;
+    Q_INVOKABLE QString filmstripAt(int index) const;
+    Q_INVOKABLE void ensureMedia(int index);
+    Q_INVOKABLE void ensureAllMedia();
 
     QJsonArray toJsonArray() const;
     void loadFromJsonArray(const QJsonArray &assets);
@@ -42,11 +46,14 @@ private:
         double durationSeconds = 0.0;
         QString path;
         QString thumbnailPath;
+        QString filmstripPath;
     };
 
     void importFiles(const QStringList &paths);
     bool containsPath(const QString &path) const;
     void appendAsset(Asset asset);
+    int indexOfPath(const QString &path) const;
+    void refreshMediaAt(int index);
 
     QList<Asset> m_assets;
 };

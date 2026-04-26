@@ -41,6 +41,8 @@ endif()
 # --- application ------------------------------------------------------------
 qt_add_executable(drift
     src/main.cpp
+    src/DriftImageProvider.h
+    src/DriftImageProvider.cpp
     src/models/AssetLibrary.h
     src/models/AssetLibrary.cpp
     src/models/EditorState.h
@@ -63,6 +65,7 @@ qt_add_qml_module(drift
         src/qml/components/IconGlyph.qml
         src/qml/components/IconButton.qml
         src/qml/components/PanelFrame.qml
+        src/qml/components/ClipFilmstrip.qml
         src/qml/components/AppScrollBar.qml
     RESOURCES
         resources/fonts/Inter.ttf

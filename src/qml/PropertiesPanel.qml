@@ -68,12 +68,9 @@ PanelFrame {
 
             Repeater {
                 model: [
-                    { label: "Kind", value: clip.kind || "—" },
-                    { label: "Start", value: formatSeconds(clip.start) },
-                    { label: "Duration", value: formatSeconds(clip.duration) },
-                    { label: "In point", value: formatSeconds(clip.inPoint) },
-                    { label: "Out point", value: formatSeconds(clip.outPoint) },
-                    { label: "Path", value: clip.path || "—" }
+                    { label: "Kind", value: clip.kind || "—", editable: false },
+                    { label: "Start", value: formatSeconds(clip.start), editable: false },
+                    { label: "Duration", value: formatSeconds(clip.duration), editable: false }
                 ]
 
                 Column {
@@ -90,12 +87,85 @@ PanelFrame {
                     Text {
                         text: modelData.value
                         color: Theme.panelForeground
-                        font.family: modelData.label === "Path" ? Theme.monoFontFamily : Theme.fontFamily
+                        font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSm
-                        width: parent.width
-                        wrapMode: modelData.label === "Path" ? Text.WrapAnywhere : Text.NoWrap
-                        elide: modelData.label === "Path" ? Text.ElideNone : Text.ElideRight
                     }
+                }
+            }
+
+            Column {
+                width: propsColumn.width
+                spacing: 8
+
+                Text {
+                    text: "Trim"
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                }
+
+                Row {
+                    width: parent.width
+                    spacing: 8
+
+                    Column {
+                        width: (parent.width - parent.spacing) / 2
+                        spacing: 4
+                        Text {
+                            text: "In point (s)"
+                            color: Theme.mutedForeground
+                            font.pixelSize: Theme.fontSizeXs
+                            font.family: Theme.fontFamily
+                        }
+                        TextField {
+                            width: parent.width
+                            text: (clip.inPoint || 0).toFixed(2)
+                            color: Theme.panelForeground
+                            font.family: Theme.monoFontFamily
+                            font.pixelSize: Theme.fontSizeSm
+                            onEditingFinished: applyTrim(parseFloat(text), clip.outPoint)
+                        }
+                    }
+
+                    Column {
+                        width: (parent.width - parent.spacing) / 2
+                        spacing: 4
+                        Text {
+                            text: "Out point (s)"
+                            color: Theme.mutedForeground
+                            font.pixelSize: Theme.fontSizeXs
+                            font.family: Theme.fontFamily
+                        }
+                        TextField {
+                            width: parent.width
+                            text: (clip.outPoint || 0).toFixed(2)
+                            color: Theme.panelForeground
+                            font.family: Theme.monoFontFamily
+                            font.pixelSize: Theme.fontSizeSm
+                            onEditingFinished: applyTrim(clip.inPoint, parseFloat(text))
+                        }
+                    }
+                }
+            }
+
+            Column {
+                width: propsColumn.width
+                spacing: 4
+
+                Text {
+                    text: "Path"
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                }
+
+                Text {
+                    text: clip.path || "—"
+                    color: Theme.panelForeground
+                    font.family: Theme.monoFontFamily
+                    font.pixelSize: Theme.fontSizeSm
+                    width: parent.width
+                    wrapMode: Text.WrapAnywhere
                 }
             }
         }
@@ -108,5 +178,11 @@ PanelFrame {
         const m = Math.floor(total / 60)
         const s = total % 60
         return m.toString().padStart(2, "0") + ":" + s.toString().padStart(2, "0")
+    }
+
+    function applyTrim(inPoint, outPoint) {
+        if (!root.hasSelection || isNaN(inPoint) || isNaN(outPoint))
+            return
+        EditorState.setClipTrim(EditorState.selectedTrack, EditorState.selectedClip, inPoint, outPoint)
     }
 }

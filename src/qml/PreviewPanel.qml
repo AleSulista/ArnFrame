@@ -11,8 +11,10 @@ PanelFrame {
     readonly property bool playing: EditorState.playing
 
     property string previewKind: "none"
-    property string currentSource: ""
-    property real pendingSeekMs: -1
+    property string currentVideoSource: ""
+    property string currentAudioSource: ""
+    property real pendingVideoSeekMs: -1
+    property real pendingAudioSeekMs: -1
 
     function formatTimecode(seconds) {
         const fps = 30;
@@ -25,20 +27,27 @@ PanelFrame {
         return pad(h) + ":" + pad(m) + ":" + pad(s) + ":" + pad(f);
     }
 
-    function applySeek() {
-        if (pendingSeekMs < 0)
+    function applyVideoSeek() {
+        if (pendingVideoSeekMs < 0)
             return
-        mediaPlayer.position = pendingSeekMs
-        pendingSeekMs = -1
+        videoPlayer.position = pendingVideoSeekMs
+        pendingVideoSeekMs = -1
     }
 
-    function syncPreview() {
+    function applyAudioSeek() {
+        if (pendingAudioSeekMs < 0)
+            return
+        audioPlayer.position = pendingAudioSeekMs
+        pendingAudioSeekMs = -1
+    }
+
+    function syncVideo() {
         const clip = EditorState.activeVideoClipAtPlayhead()
         if (!clip || !clip.path) {
             previewKind = "none"
-            currentSource = ""
-            pendingSeekMs = -1
-            mediaPlayer.stop()
+            currentVideoSource = ""
+            pendingVideoSeekMs = -1
+            videoPlayer.stop()
             stillImage.source = ""
             return
         }
@@ -46,48 +55,105 @@ PanelFrame {
         previewKind = clip.kind
         if (clip.kind === "image") {
             stillImage.source = EditorState.fileUrl(clip.path)
-            mediaPlayer.stop()
+            videoPlayer.stop()
             return
         }
 
         const url = EditorState.fileUrl(clip.path)
-        const sourceTime = Math.max(0, EditorState.sourceTimeAtPlayhead() * 1000)
+        const sourceTime = Math.max(0, EditorState.sourceTimeForClip(clip) * 1000)
         const urlString = url.toString()
 
-        if (currentSource !== urlString) {
-            currentSource = urlString
-            mediaPlayer.source = url
-            pendingSeekMs = sourceTime
+        if (currentVideoSource !== urlString) {
+            currentVideoSource = urlString
+            videoPlayer.source = url
+            pendingVideoSeekMs = sourceTime
         } else {
-            const drift = Math.abs(mediaPlayer.position - sourceTime)
+            const drift = Math.abs(videoPlayer.position - sourceTime)
             if (drift > 120)
-                mediaPlayer.position = sourceTime
+                videoPlayer.position = sourceTime
         }
 
         if (EditorState.playing) {
-            if (mediaPlayer.playbackState !== MediaPlayer.PlayingState)
-                mediaPlayer.play()
+            if (videoPlayer.playbackState !== MediaPlayer.PlayingState)
+                videoPlayer.play()
         } else {
-            pendingSeekMs = sourceTime
-            if (mediaPlayer.mediaStatus === MediaPlayer.LoadedMedia
-                    || mediaPlayer.mediaStatus === MediaPlayer.BufferedMedia) {
-                applySeek()
+            pendingVideoSeekMs = sourceTime
+            if (videoPlayer.mediaStatus === MediaPlayer.LoadedMedia
+                    || videoPlayer.mediaStatus === MediaPlayer.BufferedMedia) {
+                applyVideoSeek()
             }
-            mediaPlayer.pause()
+            videoPlayer.pause()
         }
     }
 
+    function syncAudio() {
+        const clip = EditorState.activeAudioClipAtPlayhead()
+        if (!clip || !clip.path) {
+            currentAudioSource = ""
+            pendingAudioSeekMs = -1
+            audioPlayer.stop()
+            return
+        }
+
+        const url = EditorState.fileUrl(clip.path)
+        const sourceTime = Math.max(0, EditorState.sourceTimeForClip(clip) * 1000)
+        const urlString = url.toString()
+
+        if (currentAudioSource !== urlString) {
+            currentAudioSource = urlString
+            audioPlayer.source = url
+            pendingAudioSeekMs = sourceTime
+        } else {
+            const drift = Math.abs(audioPlayer.position - sourceTime)
+            if (drift > 120)
+                audioPlayer.position = sourceTime
+        }
+
+        if (EditorState.playing) {
+            if (audioPlayer.playbackState !== MediaPlayer.PlayingState)
+                audioPlayer.play()
+        } else {
+            pendingAudioSeekMs = sourceTime
+            if (audioPlayer.mediaStatus === MediaPlayer.LoadedMedia
+                    || audioPlayer.mediaStatus === MediaPlayer.BufferedMedia) {
+                applyAudioSeek()
+            }
+            audioPlayer.pause()
+        }
+    }
+
+    function syncPreview() {
+        syncVideo()
+        syncAudio()
+    }
+
     MediaPlayer {
-        id: mediaPlayer
+        id: videoPlayer
         videoOutput: videoOutput
         audioOutput: AudioOutput {
-            volume: 0.8
+            volume: 0.0
         }
 
         onMediaStatusChanged: {
             if (mediaStatus === MediaPlayer.LoadedMedia
                     || mediaStatus === MediaPlayer.BufferedMedia) {
-                root.applySeek()
+                root.applyVideoSeek()
+                if (EditorState.playing)
+                    play()
+            }
+        }
+    }
+
+    MediaPlayer {
+        id: audioPlayer
+        audioOutput: AudioOutput {
+            volume: 0.9
+        }
+
+        onMediaStatusChanged: {
+            if (mediaStatus === MediaPlayer.LoadedMedia
+                    || mediaStatus === MediaPlayer.BufferedMedia) {
+                root.applyAudioSeek()
                 if (EditorState.playing)
                     play()
             }
@@ -138,7 +204,7 @@ PanelFrame {
                     Text {
                         anchors.centerIn: parent
                         visible: root.previewKind === "none"
-                        text: "No clip at playhead"
+                        text: EditorState.activeAudioClipAtPlayhead().path ? "Audio only" : "No clip at playhead"
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSm

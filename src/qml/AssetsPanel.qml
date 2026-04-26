@@ -7,6 +7,8 @@ import "components"
 PanelFrame {
     id: root
 
+    Component.onCompleted: AssetLibrary.ensureAllMedia()
+
     ListModel {
         id: tabsModel
         ListElement { tabId: "media"; icon: 0; label: "Media" }
@@ -184,6 +186,15 @@ PanelFrame {
                             width: Theme.assetCardWidth
                             spacing: 4
 
+                            required property int index
+                            required property string name
+                            required property string kind
+                            required property string duration
+                            required property double durationSeconds
+                            required property string path
+                            required property string thumbnailPath
+                            required property string filmstripPath
+
                             property int assetIndex: index
 
                             Drag.active: assetDrag.active
@@ -210,25 +221,24 @@ PanelFrame {
 
                                 Image {
                                     anchors.fill: parent
-                                    visible: model.thumbnailPath && model.thumbnailPath.length > 0
-                                    source: model.thumbnailPath
-                                           ? EditorState.fileUrl(model.thumbnailPath)
-                                           : ""
+                                    visible: thumbnailPath.length > 0
+                                    source: thumbnailPath.length > 0 ? EditorState.imageUrl(thumbnailPath) : ""
                                     fillMode: Image.PreserveAspectCrop
+                                    asynchronous: true
                                 }
 
                                 IconGlyph {
                                     anchors.centerIn: parent
-                                    visible: !model.thumbnailPath || model.thumbnailPath.length === 0
-                                    glyph: model.kind === "audio" ? Theme.icons.music
-                                         : model.kind === "image" ? Theme.icons.image
+                                    visible: thumbnailPath.length === 0
+                                    glyph: kind === "audio" ? Theme.icons.music
+                                         : kind === "image" ? Theme.icons.image
                                          : Theme.icons.film
                                     iconSize: 24
                                     iconColor: Theme.mutedForeground
                                 }
 
                                 Rectangle {
-                                    visible: model.duration.length > 0
+                                    visible: duration.length > 0
                                     anchors.right: parent.right
                                     anchors.bottom: parent.bottom
                                     anchors.margins: 4
@@ -240,7 +250,7 @@ PanelFrame {
                                     Text {
                                         id: durationLabel
                                         anchors.centerIn: parent
-                                        text: model.duration
+                                        text: duration
                                         color: "white"
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
@@ -250,7 +260,7 @@ PanelFrame {
 
                             Text {
                                 width: parent.width
-                                text: model.name
+                                text: name
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeCard

@@ -9,6 +9,7 @@
 #include <QJsonObject>
 #include <QUrl>
 #include <QtMath>
+#include <algorithm>
 
 EditorState::EditorState(AssetLibrary *assetLibrary, QObject *parent)
     : QObject(parent)
@@ -65,6 +66,7 @@ QVariantMap EditorState::clipToMap(const Clip &clip) const
         {QStringLiteral("path"), clip.path},
         {QStringLiteral("kind"), clip.kind},
         {QStringLiteral("thumbnailPath"), clip.thumbnailPath},
+        {QStringLiteral("filmstripPath"), clip.filmstripPath},
         {QStringLiteral("start"), clip.start},
         {QStringLiteral("duration"), clip.duration},
         {QStringLiteral("inPoint"), clip.inPoint},
@@ -116,11 +118,27 @@ void EditorState::setPlaying(bool playing)
     emit playingChanged();
 }
 
+void EditorState::setSnapEnabled(bool enabled)
+{
+    if (m_snapEnabled == enabled)
+        return;
+
+    m_snapEnabled = enabled;
+    emit snapEnabledChanged();
+}
+
 QUrl EditorState::fileUrl(const QString &path) const
 {
     if (path.isEmpty())
         return {};
     return QUrl::fromLocalFile(path);
+}
+
+QString EditorState::imageUrl(const QString &path) const
+{
+    if (path.isEmpty())
+        return {};
+    return QStringLiteral("image://drift/") + QString::fromUtf8(QUrl::toPercentEncoding(path));
 }
 
 void EditorState::setProjectName(const QString &name)
@@ -139,6 +157,73 @@ void EditorState::setLastMessage(const QString &message)
 
     m_lastMessage = message;
     emit lastMessageChanged();
+}
+
+bool EditorState::clipContainsTime(const Clip &clip, double seconds) const
+{
+    return seconds >= clip.start && seconds < clip.start + clip.duration;
+}
+
+double EditorState::snapTime(double seconds) const
+{
+    if (!m_snapEnabled)
+        return qMax(0.0, seconds);
+
+    QList<double> targets = {0.0, m_playheadSeconds};
+    for (const Track &track : m_tracks) {
+        for (const Clip &clip : track.clips) {
+            targets.append(clip.start);
+            targets.append(clip.start + clip.duration);
+        }
+    }
+
+    double best = seconds;
+    double bestDistance = kSnapThresholdSeconds;
+    for (double target : targets) {
+        const double distance = qAbs(target - seconds);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = target;
+        }
+    }
+
+    return qMax(0.0, best);
+}
+
+double EditorState::resolveClipStart(const Track &track, int excludeClipIndex, double desiredStart,
+                                     double duration) const
+{
+    double start = snapTime(desiredStart);
+
+    struct Interval {
+        double begin;
+        double end;
+    };
+    QList<Interval> intervals;
+    intervals.reserve(track.clips.size());
+
+    for (int i = 0; i < track.clips.size(); ++i) {
+        if (i == excludeClipIndex)
+            continue;
+        const Clip &clip = track.clips.at(i);
+        intervals.append({clip.start, clip.start + clip.duration});
+    }
+
+    std::sort(intervals.begin(), intervals.end(),
+              [](const Interval &a, const Interval &b) { return a.begin < b.begin; });
+
+    bool adjusted = true;
+    while (adjusted) {
+        adjusted = false;
+        for (const Interval &interval : intervals) {
+            if (start < interval.end && start + duration > interval.begin) {
+                start = interval.end;
+                adjusted = true;
+            }
+        }
+    }
+
+    return qMax(0.0, start);
 }
 
 int EditorState::defaultTrackForKind(const QString &kind) const
@@ -168,6 +253,22 @@ double EditorState::clipDurationForAsset(int assetIndex) const
     return kImageClipDurationSeconds;
 }
 
+double EditorState::sourceDurationForClip(const Clip &clip) const
+{
+    if (clip.assetIndex >= 0) {
+        const double assetDuration = m_assetLibrary->assetAt(clip.assetIndex)
+                                         .value(QStringLiteral("durationSeconds"))
+                                         .toDouble();
+        if (assetDuration > 0.0)
+            return assetDuration;
+    }
+
+    if (clip.kind == QStringLiteral("image"))
+        return kImageClipDurationSeconds;
+
+    return qMax(clip.outPoint, clip.duration);
+}
+
 QString EditorState::thumbnailForAsset(int assetIndex) const
 {
     return m_assetLibrary->thumbnailAt(assetIndex);
@@ -185,27 +286,47 @@ QVariantMap EditorState::clipAt(int trackIndex, int clipIndex) const
 
 QVariantMap EditorState::activeVideoClipAtPlayhead() const
 {
+    QVariantMap result;
     for (const Track &track : m_tracks) {
         if (track.type != QStringLiteral("video"))
             continue;
 
         for (const Clip &clip : track.clips) {
-            if (m_playheadSeconds >= clip.start && m_playheadSeconds < clip.start + clip.duration)
-                return clipToMap(clip);
+            if (clipContainsTime(clip, m_playheadSeconds))
+                result = clipToMap(clip);
         }
     }
-    return {};
+    return result;
 }
 
-double EditorState::sourceTimeAtPlayhead() const
+QVariantMap EditorState::activeAudioClipAtPlayhead() const
 {
-    const QVariantMap clip = activeVideoClipAtPlayhead();
+    QVariantMap result;
+    for (const Track &track : m_tracks) {
+        if (track.type != QStringLiteral("audio"))
+            continue;
+
+        for (const Clip &clip : track.clips) {
+            if (clipContainsTime(clip, m_playheadSeconds))
+                result = clipToMap(clip);
+        }
+    }
+    return result;
+}
+
+double EditorState::sourceTimeForClip(const QVariantMap &clip) const
+{
     if (clip.isEmpty())
         return 0.0;
 
     const double start = clip.value(QStringLiteral("start")).toDouble();
     const double inPoint = clip.value(QStringLiteral("inPoint")).toDouble();
     return inPoint + (m_playheadSeconds - start);
+}
+
+double EditorState::sourceTimeAtPlayhead() const
+{
+    return sourceTimeForClip(activeVideoClipAtPlayhead());
 }
 
 void EditorState::addClipFromAsset(int assetIndex)
@@ -231,6 +352,10 @@ void EditorState::addClipFromAssetAt(int assetIndex, int trackIndex, double atSe
     if (asset.isEmpty())
         return;
 
+    m_assetLibrary->ensureMedia(assetIndex);
+    const QString thumbnailPath = m_assetLibrary->thumbnailAt(assetIndex);
+    const QString filmstripPath = m_assetLibrary->filmstripAt(assetIndex);
+
     const QString kind = asset.value(QStringLiteral("kind")).toString();
     const QString trackType = m_tracks[trackIndex].type;
 
@@ -242,14 +367,15 @@ void EditorState::addClipFromAssetAt(int assetIndex, int trackIndex, double atSe
         return;
 
     const double duration = clipDurationForAsset(assetIndex);
-    const double start = qMax(0.0, atSeconds);
-
     Track &track = m_tracks[trackIndex];
+    const double start = resolveClipStart(track, -1, atSeconds, duration);
+
     track.clips.append({
         .name = asset.value(QStringLiteral("name")).toString(),
         .path = asset.value(QStringLiteral("path")).toString(),
         .kind = kind,
-        .thumbnailPath = asset.value(QStringLiteral("thumbnailPath")).toString(),
+        .thumbnailPath = thumbnailPath,
+        .filmstripPath = filmstripPath,
         .start = start,
         .duration = duration,
         .inPoint = 0.0,
@@ -309,7 +435,127 @@ void EditorState::moveClip(int trackIndex, int clipIndex, double newStart)
     if (clipIndex < 0 || clipIndex >= track.clips.size())
         return;
 
-    track.clips[clipIndex].start = qMax(0.0, newStart);
+    Clip &clip = track.clips[clipIndex];
+    clip.start = resolveClipStart(track, clipIndex, newStart, clip.duration);
+    emit tracksChanged();
+}
+
+void EditorState::splitAtPlayhead()
+{
+    bool splitAny = false;
+
+    for (Track &track : m_tracks) {
+        for (int clipIndex = 0; clipIndex < track.clips.size(); ++clipIndex) {
+            Clip &clip = track.clips[clipIndex];
+            if (!clipContainsTime(clip, m_playheadSeconds))
+                continue;
+            if (qFuzzyCompare(m_playheadSeconds, clip.start))
+                continue;
+
+            const double offset = m_playheadSeconds - clip.start;
+            if (clip.duration - offset < kMinClipDurationSeconds)
+                continue;
+            if (offset < kMinClipDurationSeconds)
+                continue;
+
+            Clip tail = clip;
+            tail.start = m_playheadSeconds;
+            tail.inPoint = clip.inPoint + offset;
+            tail.duration = clip.duration - offset;
+
+            clip.duration = offset;
+            clip.outPoint = clip.inPoint + offset;
+
+            track.clips.insert(clipIndex + 1, tail);
+            splitAny = true;
+            ++clipIndex;
+        }
+    }
+
+    if (splitAny) {
+        emit tracksChanged();
+        setLastMessage(QStringLiteral("Split at playhead"));
+    } else {
+        setLastMessage(QStringLiteral("Nothing to split at playhead"));
+    }
+}
+
+void EditorState::trimClipLeft(int trackIndex, int clipIndex, double newStart)
+{
+    if (trackIndex < 0 || trackIndex >= m_tracks.size())
+        return;
+
+    Track &track = m_tracks[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    Clip &clip = track.clips[clipIndex];
+    const double snappedStart = snapTime(newStart);
+    const double delta = snappedStart - clip.start;
+    if (qFuzzyIsNull(delta))
+        return;
+
+    if (delta > 0.0) {
+        if (clip.duration - delta < kMinClipDurationSeconds)
+            return;
+        if (clip.inPoint + delta > clip.outPoint - kMinClipDurationSeconds)
+            return;
+
+        clip.start += delta;
+        clip.inPoint += delta;
+        clip.duration -= delta;
+    } else {
+        const double extendBy = -delta;
+        if (extendBy > clip.inPoint + 1e-6)
+            return;
+
+        clip.start = snappedStart;
+        clip.inPoint -= extendBy;
+        clip.duration += extendBy;
+    }
+
+    emit tracksChanged();
+}
+
+void EditorState::trimClipRight(int trackIndex, int clipIndex, double newEnd)
+{
+    if (trackIndex < 0 || trackIndex >= m_tracks.size())
+        return;
+
+    Track &track = m_tracks[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    Clip &clip = track.clips[clipIndex];
+    const double snappedEnd = snapTime(newEnd);
+    double newDuration = snappedEnd - clip.start;
+
+    const double maxDuration = sourceDurationForClip(clip) - clip.inPoint;
+    newDuration = qBound(kMinClipDurationSeconds, newDuration, maxDuration);
+
+    clip.duration = newDuration;
+    clip.outPoint = clip.inPoint + newDuration;
+    emit tracksChanged();
+}
+
+void EditorState::setClipTrim(int trackIndex, int clipIndex, double inPoint, double outPoint)
+{
+    if (trackIndex < 0 || trackIndex >= m_tracks.size())
+        return;
+
+    Track &track = m_tracks[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    Clip &clip = track.clips[clipIndex];
+    const double sourceDuration = sourceDurationForClip(clip);
+    const double clampedIn = qBound(0.0, inPoint, sourceDuration - kMinClipDurationSeconds);
+    const double clampedOut = qBound(clampedIn + kMinClipDurationSeconds, outPoint, sourceDuration);
+    const double newDuration = clampedOut - clampedIn;
+
+    clip.inPoint = clampedIn;
+    clip.outPoint = clampedOut;
+    clip.duration = newDuration;
     emit tracksChanged();
 }
 
@@ -330,6 +576,7 @@ void EditorState::saveProject(const QUrl &url)
                 {QStringLiteral("path"), clip.path},
                 {QStringLiteral("kind"), clip.kind},
                 {QStringLiteral("thumbnailPath"), clip.thumbnailPath},
+                {QStringLiteral("filmstripPath"), clip.filmstripPath},
                 {QStringLiteral("start"), clip.start},
                 {QStringLiteral("duration"), clip.duration},
                 {QStringLiteral("inPoint"), clip.inPoint},
@@ -348,6 +595,7 @@ void EditorState::saveProject(const QUrl &url)
         {QStringLiteral("version"), 1},
         {QStringLiteral("projectName"), m_projectName},
         {QStringLiteral("playheadSeconds"), m_playheadSeconds},
+        {QStringLiteral("snapEnabled"), m_snapEnabled},
         {QStringLiteral("assets"), m_assetLibrary->toJsonArray()},
         {QStringLiteral("tracks"), tracksArray},
     };
@@ -378,12 +626,28 @@ void EditorState::loadTracksFromJson(const QJsonArray &tracksArray)
                 .path = clipObject.value(QStringLiteral("path")).toString(),
                 .kind = clipObject.value(QStringLiteral("kind")).toString(),
                 .thumbnailPath = clipObject.value(QStringLiteral("thumbnailPath")).toString(),
+                .filmstripPath = clipObject.value(QStringLiteral("filmstripPath")).toString(),
                 .start = clipObject.value(QStringLiteral("start")).toDouble(),
                 .duration = clipObject.value(QStringLiteral("duration")).toDouble(),
                 .inPoint = clipObject.value(QStringLiteral("inPoint")).toDouble(),
                 .outPoint = clipObject.value(QStringLiteral("outPoint")).toDouble(),
                 .assetIndex = clipObject.value(QStringLiteral("assetIndex")).toInt(-1),
             });
+        }
+    }
+
+    if (m_assetLibrary) {
+        for (Track &track : m_tracks) {
+            for (Clip &clip : track.clips) {
+                if (!clip.filmstripPath.isEmpty())
+                    continue;
+                if (clip.assetIndex >= 0) {
+                    m_assetLibrary->ensureMedia(clip.assetIndex);
+                    clip.filmstripPath = m_assetLibrary->filmstripAt(clip.assetIndex);
+                }
+                if (clip.filmstripPath.isEmpty())
+                    clip.filmstripPath = clip.thumbnailPath;
+            }
         }
     }
 }
@@ -411,6 +675,7 @@ void EditorState::loadProject(const QUrl &url)
     const QJsonObject root = document.object();
     setPlaying(false);
     setProjectName(root.value(QStringLiteral("projectName")).toString(QStringLiteral("Untitled Project")));
+    setSnapEnabled(root.value(QStringLiteral("snapEnabled")).toBool(true));
     m_assetLibrary->loadFromJsonArray(root.value(QStringLiteral("assets")).toArray());
     loadTracksFromJson(root.value(QStringLiteral("tracks")).toArray());
     clearSelection();
@@ -428,27 +693,38 @@ void EditorState::exportProject(const QUrl &outputUrl)
         return;
     }
 
-    QList<ExportSegment> segments;
+    QList<ExportSegment> videoSegments;
+    QList<ExportSegment> audioSegments;
+
     for (const Track &track : m_tracks) {
-        if (track.type != QStringLiteral("video"))
-            continue;
+        if (track.type == QStringLiteral("video")) {
+            for (const Clip &clip : track.clips) {
+                if (clip.kind != QStringLiteral("video") && clip.kind != QStringLiteral("image"))
+                    continue;
 
-        for (const Clip &clip : track.clips) {
-            if (clip.kind != QStringLiteral("video") && clip.kind != QStringLiteral("image"))
-                continue;
-
-            segments.append({
-                .path = clip.path,
-                .kind = clip.kind,
-                .timelineStart = clip.start,
-                .inPoint = clip.inPoint,
-                .duration = clip.duration,
-            });
+                videoSegments.append({
+                    .path = clip.path,
+                    .kind = clip.kind,
+                    .timelineStart = clip.start,
+                    .inPoint = clip.inPoint,
+                    .duration = clip.duration,
+                });
+            }
+        } else if (track.type == QStringLiteral("audio")) {
+            for (const Clip &clip : track.clips) {
+                audioSegments.append({
+                    .path = clip.path,
+                    .kind = QStringLiteral("audio"),
+                    .timelineStart = clip.start,
+                    .inPoint = clip.inPoint,
+                    .duration = clip.duration,
+                });
+            }
         }
     }
 
     QString error;
-    const bool ok = TimelineExporter::exportVideo(segments, outputPath, &error);
+    const bool ok = TimelineExporter::exportTimeline(videoSegments, audioSegments, outputPath, &error);
     setLastMessage(ok ? QStringLiteral("Export complete") : error);
     emit exportFinished(ok);
 }

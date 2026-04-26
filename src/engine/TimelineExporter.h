@@ -14,5 +14,8 @@ struct ExportSegment {
 class TimelineExporter
 {
 public:
-    static bool exportVideo(const QList<ExportSegment> &segments, const QString &outputPath, QString *errorOut);
+    static bool exportTimeline(const QList<ExportSegment> &videoSegments,
+                               const QList<ExportSegment> &audioSegments,
+                               const QString &outputPath,
+                               QString *errorOut);
 };

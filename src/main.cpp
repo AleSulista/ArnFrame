@@ -1,5 +1,6 @@
 #include "models/AssetLibrary.h"
 #include "models/EditorState.h"
+#include "DriftImageProvider.h"
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -17,6 +18,7 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("Drift", 1, 0, "EditorState", &editorState);
 
     QQmlApplicationEngine engine;
+    engine.addImageProvider(QStringLiteral("drift"), new DriftImageProvider());
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QGuiApplication::exit(-1); }, Qt::QueuedConnection);
     engine.loadFromModule("Drift", "Main");
