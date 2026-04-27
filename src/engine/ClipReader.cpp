@@ -1,0 +1,394 @@
+#include "ClipReader.h"
+
+#include <QtMath>
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/hwcontext.h>
+#include <libavutil/imgutils.h>
+#include <libswresample/swresample.h>
+#include <libswscale/swscale.h>
+}
+
+namespace {
+
+thread_local AVPixelFormat g_hwPixFmt = AV_PIX_FMT_NONE;
+
+AVPixelFormat hwGetFormat(AVCodecContext *, const AVPixelFormat *pixFmts)
+{
+    for (const AVPixelFormat *p = pixFmts; *p != AV_PIX_FMT_NONE; ++p) {
+        if (*p == g_hwPixFmt)
+            return *p;
+    }
+    return AV_PIX_FMT_NONE;
+}
+
+QImage frameToRgba(const AVFrame *frame, SwsContext *&sws, int targetWidth, int targetHeight)
+{
+    if (!frame || targetWidth <= 0 || targetHeight <= 0)
+        return {};
+
+    sws = sws_getCachedContext(sws, frame->width, frame->height,
+                               static_cast<AVPixelFormat>(frame->format), targetWidth, targetHeight,
+                               AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
+    if (!sws)
+        return {};
+
+    AVFrame *rgba = av_frame_alloc();
+    if (!rgba)
+        return {};
+
+    rgba->format = AV_PIX_FMT_RGBA;
+    rgba->width = targetWidth;
+    rgba->height = targetHeight;
+    if (av_frame_get_buffer(rgba, 0) < 0) {
+        av_frame_free(&rgba);
+        return {};
+    }
+
+    sws_scale(sws, frame->data, frame->linesize, 0, frame->height, rgba->data, rgba->linesize);
+
+    QImage image(rgba->data[0], targetWidth, targetHeight, rgba->linesize[0], QImage::Format_RGBA8888);
+    const QImage copy = image.copy();
+    av_frame_free(&rgba);
+    return copy;
+}
+
+drift::TimeUs ptsToUs(const AVFrame *frame, const AVRational &timeBase)
+{
+    if (!frame || frame->pts == AV_NOPTS_VALUE)
+        return 0;
+    return av_rescale_q(frame->pts, timeBase, {1, drift::kUsPerSecond});
+}
+
+} // namespace
+
+ClipReader::ClipReader() = default;
+
+ClipReader::~ClipReader()
+{
+    close();
+}
+
+void ClipReader::close()
+{
+    if (m_swr)
+        swr_free(&m_swr);
+    if (m_sws)
+        sws_freeContext(m_sws);
+    m_sws = nullptr;
+
+    if (m_videoCtx)
+        avcodec_free_context(&m_videoCtx);
+    if (m_audioCtx)
+        avcodec_free_context(&m_audioCtx);
+    if (m_hwDeviceCtx)
+        av_buffer_unref(&m_hwDeviceCtx);
+    if (m_fmt)
+        avformat_close_input(&m_fmt);
+
+    m_videoStream = -1;
+    m_audioStream = -1;
+    m_hwAccelActive = false;
+    m_hwPixFmt = AV_PIX_FMT_NONE;
+    m_path.clear();
+}
+
+bool ClipReader::open(const QString &path)
+{
+    if (path.isEmpty())
+        return false;
+    if (m_path == path && isOpen())
+        return true;
+
+    close();
+    m_path = path;
+
+    AVFormatContext *fmt = nullptr;
+    if (avformat_open_input(&fmt, path.toUtf8().constData(), nullptr, nullptr) < 0)
+        return false;
+    if (avformat_find_stream_info(fmt, nullptr) < 0) {
+        avformat_close_input(&fmt);
+        return false;
+    }
+
+    m_fmt = fmt;
+    for (unsigned i = 0; i < m_fmt->nb_streams; ++i) {
+        const AVMediaType type = m_fmt->streams[i]->codecpar->codec_type;
+        if (type == AVMEDIA_TYPE_VIDEO && m_videoStream < 0)
+            m_videoStream = static_cast<int>(i);
+        else if (type == AVMEDIA_TYPE_AUDIO && m_audioStream < 0)
+            m_audioStream = static_cast<int>(i);
+    }
+
+    return hasVideo() || hasAudio();
+}
+
+bool ClipReader::tryOpenHardwareDecoder()
+{
+    if (!m_fmt || m_videoStream < 0 || m_hwAccelActive)
+        return m_hwAccelActive;
+
+    const AVCodecParameters *par = m_fmt->streams[m_videoStream]->codecpar;
+    const AVCodec *codec = avcodec_find_decoder(par->codec_id);
+    if (!codec)
+        return false;
+
+    for (int i = 0;; ++i) {
+        const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
+        if (!config)
+            break;
+        if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)
+            && config->device_type == AV_HWDEVICE_TYPE_VAAPI) {
+            m_hwPixFmt = config->pix_fmt;
+            break;
+        }
+    }
+
+    if (m_hwPixFmt == AV_PIX_FMT_NONE)
+        return false;
+
+    if (av_hwdevice_ctx_create(&m_hwDeviceCtx, AV_HWDEVICE_TYPE_VAAPI, nullptr, nullptr, 0) < 0) {
+        m_hwPixFmt = AV_PIX_FMT_NONE;
+        if (m_hwDeviceCtx)
+            av_buffer_unref(&m_hwDeviceCtx);
+        return false;
+    }
+
+    m_videoCtx = avcodec_alloc_context3(codec);
+    if (!m_videoCtx) {
+        av_buffer_unref(&m_hwDeviceCtx);
+        m_hwPixFmt = AV_PIX_FMT_NONE;
+        return false;
+    }
+
+    avcodec_parameters_to_context(m_videoCtx, par);
+    m_videoCtx->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
+    g_hwPixFmt = m_hwPixFmt;
+    m_videoCtx->get_format = hwGetFormat;
+
+    if (avcodec_open2(m_videoCtx, codec, nullptr) < 0) {
+        avcodec_free_context(&m_videoCtx);
+        av_buffer_unref(&m_hwDeviceCtx);
+        m_hwPixFmt = AV_PIX_FMT_NONE;
+        return false;
+    }
+
+    m_hwAccelActive = true;
+    return true;
+}
+
+bool ClipReader::ensureVideoDecoder()
+{
+    if (!m_fmt || m_videoStream < 0)
+        return false;
+    if (m_videoCtx)
+        return true;
+
+    if (tryOpenHardwareDecoder())
+        return true;
+
+    const AVCodecParameters *par = m_fmt->streams[m_videoStream]->codecpar;
+    const AVCodec *codec = avcodec_find_decoder(par->codec_id);
+    if (!codec)
+        return false;
+
+    m_videoCtx = avcodec_alloc_context3(codec);
+    avcodec_parameters_to_context(m_videoCtx, par);
+    return avcodec_open2(m_videoCtx, codec, nullptr) >= 0;
+}
+
+bool ClipReader::transferHwFrameToImage(const AVFrame *hwFrame, QImage &out, int targetWidth, int targetHeight)
+{
+    AVFrame *swFrame = av_frame_alloc();
+    if (!swFrame)
+        return false;
+
+    if (av_hwframe_transfer_data(swFrame, hwFrame, 0) < 0) {
+        av_frame_free(&swFrame);
+        return false;
+    }
+
+    const QImage image = frameToRgba(swFrame, m_sws, targetWidth, targetHeight);
+    av_frame_free(&swFrame);
+    if (image.isNull())
+        return false;
+
+    out = image;
+    return true;
+}
+
+bool ClipReader::ensureAudioDecoder()
+{
+    if (!m_fmt || m_audioStream < 0)
+        return false;
+    if (m_audioCtx)
+        return true;
+
+    const AVCodecParameters *par = m_fmt->streams[m_audioStream]->codecpar;
+    const AVCodec *codec = avcodec_find_decoder(par->codec_id);
+    if (!codec)
+        return false;
+
+    m_audioCtx = avcodec_alloc_context3(codec);
+    avcodec_parameters_to_context(m_audioCtx, par);
+    return avcodec_open2(m_audioCtx, codec, nullptr) >= 0;
+}
+
+bool ClipReader::seekVideoStream(drift::TimeUs sourceUs)
+{
+    if (!ensureVideoDecoder())
+        return false;
+
+    AVStream *stream = m_fmt->streams[m_videoStream];
+    const int64_t targetTs = av_rescale_q(sourceUs, {1, AV_TIME_BASE}, stream->time_base);
+    if (av_seek_frame(m_fmt, m_videoStream, targetTs, AVSEEK_FLAG_BACKWARD) < 0) {
+        if (sourceUs > 0)
+            return false;
+        av_seek_frame(m_fmt, m_videoStream, 0, AVSEEK_FLAG_BACKWARD);
+    }
+    avcodec_flush_buffers(m_videoCtx);
+    return true;
+}
+
+bool ClipReader::seekAudioStream(drift::TimeUs sourceUs)
+{
+    if (!ensureAudioDecoder())
+        return false;
+
+    AVStream *stream = m_fmt->streams[m_audioStream];
+    const int64_t targetTs = av_rescale_q(sourceUs, {1, AV_TIME_BASE}, stream->time_base);
+    if (av_seek_frame(m_fmt, m_audioStream, targetTs, AVSEEK_FLAG_BACKWARD) < 0)
+        return false;
+    avcodec_flush_buffers(m_audioCtx);
+    if (m_swr)
+        swr_free(&m_swr);
+    return true;
+}
+
+bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int targetWidth, int targetHeight)
+{
+    if (!seekVideoStream(sourceUs))
+        return false;
+
+    AVPacket *packet = av_packet_alloc();
+    AVFrame *frame = av_frame_alloc();
+    if (!packet || !frame)
+        return false;
+
+    const AVRational timeBase = m_fmt->streams[m_videoStream]->time_base;
+    QImage best;
+    drift::TimeUs bestDelta = INT64_MAX;
+    bool found = false;
+
+    while (av_read_frame(m_fmt, packet) >= 0) {
+        if (packet->stream_index != m_videoStream) {
+            av_packet_unref(packet);
+            continue;
+        }
+
+        if (avcodec_send_packet(m_videoCtx, packet) < 0) {
+            av_packet_unref(packet);
+            continue;
+        }
+        av_packet_unref(packet);
+
+        while (true) {
+            const int rc = avcodec_receive_frame(m_videoCtx, frame);
+            if (rc == AVERROR(EAGAIN) || rc == AVERROR_EOF)
+                break;
+            if (rc < 0)
+                break;
+
+            const drift::TimeUs ptsUs = ptsToUs(frame, timeBase);
+            const drift::TimeUs delta = qAbs(ptsUs - sourceUs);
+            if (delta < bestDelta) {
+                bestDelta = delta;
+                if (m_hwAccelActive && frame->format == m_hwPixFmt) {
+                    QImage hwImage;
+                    if (transferHwFrameToImage(frame, hwImage, targetWidth, targetHeight))
+                        best = hwImage;
+                } else {
+                    best = frameToRgba(frame, m_sws, targetWidth, targetHeight);
+                }
+                found = !best.isNull();
+            }
+
+            if (ptsUs > sourceUs + drift::kUsPerSecond / 10)
+                goto done;
+        }
+    }
+
+done:
+    av_frame_free(&frame);
+    av_packet_free(&packet);
+
+    if (found)
+        out = best;
+    return found;
+}
+
+int ClipReader::readAudioInterleaved(drift::TimeUs sourceStartUs, int sampleCount, int outputSampleRate,
+                                     float *interleavedStereoOut)
+{
+    if (!interleavedStereoOut || sampleCount <= 0 || outputSampleRate <= 0)
+        return 0;
+    if (!seekAudioStream(sourceStartUs))
+        return 0;
+
+    m_outputSampleRate = outputSampleRate;
+
+    AVChannelLayout outLayout = AV_CHANNEL_LAYOUT_STEREO;
+    if (!m_swr) {
+        if (swr_alloc_set_opts2(&m_swr, &outLayout, AV_SAMPLE_FMT_FLT, outputSampleRate,
+                                &m_audioCtx->ch_layout, static_cast<AVSampleFormat>(m_audioCtx->sample_fmt),
+                                m_audioCtx->sample_rate, 0, nullptr)
+            < 0) {
+            return 0;
+        }
+        if (swr_init(m_swr) < 0) {
+            swr_free(&m_swr);
+            return 0;
+        }
+    }
+
+    AVPacket *packet = av_packet_alloc();
+    AVFrame *frame = av_frame_alloc();
+    if (!packet || !frame)
+        return 0;
+
+    int written = 0;
+    while (written < sampleCount) {
+        const int rc = avcodec_receive_frame(m_audioCtx, frame);
+        if (rc == AVERROR(EAGAIN)) {
+            if (av_read_frame(m_fmt, packet) < 0)
+                break;
+            if (packet->stream_index != m_audioStream) {
+                av_packet_unref(packet);
+                continue;
+            }
+            if (avcodec_send_packet(m_audioCtx, packet) < 0) {
+                av_packet_unref(packet);
+                continue;
+            }
+            av_packet_unref(packet);
+            continue;
+        }
+        if (rc == AVERROR_EOF)
+            break;
+        if (rc < 0)
+            break;
+
+        const int maxOut = sampleCount - written;
+        uint8_t *outData[1] = {reinterpret_cast<uint8_t *>(interleavedStereoOut + written * 2)};
+        const int converted = swr_convert(m_swr, outData, maxOut, const_cast<const uint8_t **>(frame->data),
+                                          frame->nb_samples);
+        if (converted > 0)
+            written += converted;
+    }
+
+    av_frame_free(&frame);
+    av_packet_free(&packet);
+    return written;
+}

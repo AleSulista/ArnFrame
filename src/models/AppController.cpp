@@ -25,25 +25,43 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     if (m_assetLibrary)
         m_assetLibrary->setProject(&m_project);
 
+    m_timelineModel.setProject(&m_project);
+    m_clipListModel.setProject(&m_project);
+
     m_undoStack.setUndoLimit(kMaxUndoSteps);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, &AppController::undoStackChanged);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, [this] {
+        m_timelineModel.refresh();
+        m_clipListModel.refresh();
         emit tracksChanged();
         emit bookmarksChanged();
         emit projectNameChanged();
         emit selectionChanged();
     });
 
-    const int tickMs = static_cast<int>(drift::usToSeconds(drift::frameDurationUs(m_project.fps())) * 1000.0);
-    m_playbackTimer.setInterval(qMax(1, tickMs));
-    connect(&m_playbackTimer, &QTimer::timeout, this, [this] {
-        const drift::TimeUs next = m_playheadUs + drift::frameDurationUs(m_project.fps());
-        if (next >= m_project.durationUs()) {
-            setPlayheadUs(m_project.durationUs());
-            setPlaying(false);
+    m_playback.setProject(&m_project);
+    connect(&m_playback, &PlaybackEngine::playheadUsChanged, this, [this](quint64 us) {
+        if (!m_playing)
             return;
+        const drift::TimeUs newUs = static_cast<drift::TimeUs>(us);
+        if (m_playheadUs == newUs)
+            return;
+        m_playheadUs = newUs;
+        emit playheadSecondsChanged();
+    });
+    connect(&m_playback, &PlaybackEngine::playingChanged, this, [this] {
+        if (!m_playback.isPlaying() && m_playing) {
+            m_playing = false;
+            emit playingChanged();
         }
-        setPlayheadUs(next);
+    });
+    connect(this, &AppController::tracksChanged, this, [this] {
+        m_timelineModel.refresh();
+        m_clipListModel.refresh();
+        m_playback.setProject(&m_project);
+    });
+    connect(this, &AppController::selectionChanged, this, [this] {
+        m_clipListModel.setTrackIndex(m_selectedTrack >= 0 ? m_selectedTrack : 0);
     });
 }
 
@@ -86,7 +104,7 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("outPoint"), drift::usToSeconds(clip.srcOut)},
         {QStringLiteral("assetId"), clip.assetId},
         {QStringLiteral("assetIndex"), assetIndexForClip(clip)},
-        {QStringLiteral("volume"), clip.volume},
+        {QStringLiteral("volume"), clip.volume.isEmpty() ? 1.0 : clip.volume.evaluateAt(0)},
     };
 }
 
@@ -126,6 +144,7 @@ void AppController::setPlayheadUs(drift::TimeUs us)
         return;
 
     m_playheadUs = clamped;
+    m_playback.setPlayheadUs(clamped);
     emit playheadSecondsChanged();
 }
 
@@ -141,11 +160,12 @@ void AppController::setPlaying(bool playing)
 
     m_playing = playing;
     if (m_playing) {
-        if (m_playheadUs == m_project.durationUs() && m_project.durationUs() > 0)
+        if (m_playheadUs >= m_project.durationUs() && m_project.durationUs() > 0)
             setPlayheadUs(0);
-        m_playbackTimer.start();
+        m_playback.setPlayheadUs(m_playheadUs);
+        m_playback.play();
     } else {
-        m_playbackTimer.stop();
+        m_playback.pause();
     }
     emit playingChanged();
 }
@@ -280,6 +300,7 @@ void AppController::pushProjectEdit(const drift::Project &before, const QString 
 
 void AppController::finishEdit(const QString &message)
 {
+    m_playback.setPlayheadUs(m_playheadUs);
     emit tracksChanged();
     setLastMessage(message);
 }
@@ -736,8 +757,10 @@ void AppController::setTrackMuted(int trackIndex, bool muted)
     if (m_project.tracks()[trackIndex].muted == muted)
         return;
 
+    const drift::Project before = m_project;
     m_project.tracks()[trackIndex].muted = muted;
-    emit tracksChanged();
+    pushProjectEdit(before, QStringLiteral("Track mute"));
+    finishEdit(muted ? QStringLiteral("Track muted") : QStringLiteral("Track unmuted"));
 }
 
 void AppController::setTrackHidden(int trackIndex, bool hidden)
@@ -747,8 +770,10 @@ void AppController::setTrackHidden(int trackIndex, bool hidden)
     if (m_project.tracks()[trackIndex].hidden == hidden)
         return;
 
+    const drift::Project before = m_project;
     m_project.tracks()[trackIndex].hidden = hidden;
-    emit tracksChanged();
+    pushProjectEdit(before, QStringLiteral("Track visibility"));
+    finishEdit(hidden ? QStringLiteral("Track hidden") : QStringLiteral("Track shown"));
 }
 
 bool AppController::trackMuted(int trackIndex) const
@@ -779,20 +804,24 @@ QVariantList AppController::bookmarks() const
 
 void AppController::addBookmark(double seconds, const QString &label)
 {
+    const drift::Project before = m_project;
     m_project.bookmarks().append({
         .timeUs = qMax<drift::TimeUs>(0, drift::secondsToUs(seconds)),
         .label = label.isEmpty() ? QStringLiteral("Bookmark") : label,
     });
-    emit bookmarksChanged();
-    setLastMessage(QStringLiteral("Bookmark added"));
+    pushProjectEdit(before, QStringLiteral("Add bookmark"));
+    finishEdit(QStringLiteral("Bookmark added"));
 }
 
 void AppController::removeBookmark(int index)
 {
     if (index < 0 || index >= m_project.bookmarks().size())
         return;
+
+    const drift::Project before = m_project;
     m_project.bookmarks().removeAt(index);
-    emit bookmarksChanged();
+    pushProjectEdit(before, QStringLiteral("Remove bookmark"));
+    finishEdit(QStringLiteral("Bookmark removed"));
 }
 
 void AppController::goToBookmark(int index)
@@ -946,6 +975,7 @@ void AppController::loadProject(const QUrl &url)
     }
 
     restoreFilmstripsAfterLoad();
+    m_playback.setProject(&m_project);
     m_undoStack.clear();
     clearSelection();
     emit snapEnabledChanged();

@@ -34,8 +34,12 @@ struct Clip
     QString filmstripPath;
 
     KeyframeTrack<double> opacity;
+    KeyframeTrack<double> posX;
+    KeyframeTrack<double> posY;
+    KeyframeTrack<double> scale;
+    KeyframeTrack<double> rotation;
+    KeyframeTrack<double> volume;
     QList<Effect> effects;
-    double volume = 1.0;
 
     TimeUs timelineEnd() const { return timelineStart + timelineDuration; }
 

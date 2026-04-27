@@ -2,14 +2,17 @@
 
 #include "core/Project.h"
 #include "core/Time.h"
+#include "ClipListModel.h"
+#include "TimelineModel.h"
 #include "models/AssetLibrary.h"
 
 #include <QObject>
 #include <QUndoStack>
-#include <QTimer>
 #include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
+
+#include "playback/PlaybackEngine.h"
 
 // QML-facing controller over the core project model and undo stack.
 class AppController : public QObject
@@ -17,6 +20,9 @@ class AppController : public QObject
     Q_OBJECT
 
     Q_PROPERTY(AssetLibrary *assetLibrary READ assetLibrary CONSTANT)
+    Q_PROPERTY(TimelineModel *timelineModel READ timelineModel CONSTANT)
+    Q_PROPERTY(ClipListModel *clipListModel READ clipListModel CONSTANT)
+    Q_PROPERTY(PlaybackEngine *playback READ playback CONSTANT)
     Q_PROPERTY(QVariantList tracks READ tracks NOTIFY tracksChanged)
     Q_PROPERTY(double playheadSeconds READ playheadSeconds WRITE setPlayheadSeconds NOTIFY playheadSecondsChanged)
     Q_PROPERTY(double durationSeconds READ durationSeconds NOTIFY tracksChanged)
@@ -37,6 +43,9 @@ public:
     explicit AppController(AssetLibrary *assetLibrary, QObject *parent = nullptr);
 
     AssetLibrary *assetLibrary() const { return m_assetLibrary; }
+    TimelineModel *timelineModel() { return &m_timelineModel; }
+    ClipListModel *clipListModel() { return &m_clipListModel; }
+    PlaybackEngine *playback() { return &m_playback; }
     drift::Project *project() { return &m_project; }
     const drift::Project *project() const { return &m_project; }
 
@@ -133,9 +142,11 @@ protected:
     void restoreFilmstripsAfterLoad();
 
     AssetLibrary *m_assetLibrary = nullptr;
+    TimelineModel m_timelineModel;
+    ClipListModel m_clipListModel;
+    PlaybackEngine m_playback;
     drift::Project m_project;
     QUndoStack m_undoStack;
-    QTimer m_playbackTimer;
     drift::TimeUs m_playheadUs = 0;
     bool m_playing = false;
     bool m_snapEnabled = true;

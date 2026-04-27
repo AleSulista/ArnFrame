@@ -88,8 +88,12 @@ QJsonObject clipToJson(const Clip &clip)
         {QStringLiteral("timelineDurationUs"), static_cast<double>(clip.timelineDuration)},
         {QStringLiteral("srcInUs"), static_cast<double>(clip.srcIn)},
         {QStringLiteral("srcOutUs"), static_cast<double>(clip.srcOut)},
-        {QStringLiteral("volume"), clip.volume},
+        {QStringLiteral("volume"), keyframesToJson(clip.volume)},
         {QStringLiteral("opacity"), keyframesToJson(clip.opacity)},
+        {QStringLiteral("posX"), keyframesToJson(clip.posX)},
+        {QStringLiteral("posY"), keyframesToJson(clip.posY)},
+        {QStringLiteral("scale"), keyframesToJson(clip.scale)},
+        {QStringLiteral("rotation"), keyframesToJson(clip.rotation)},
         {QStringLiteral("effects"), effectsToJson(clip.effects)},
     };
 }
@@ -109,8 +113,16 @@ Clip clipFromJsonV2(const QJsonObject &object)
     clip.timelineDuration = static_cast<TimeUs>(object.value(QStringLiteral("timelineDurationUs")).toDouble());
     clip.srcIn = static_cast<TimeUs>(object.value(QStringLiteral("srcInUs")).toDouble());
     clip.srcOut = static_cast<TimeUs>(object.value(QStringLiteral("srcOutUs")).toDouble());
-    clip.volume = object.value(QStringLiteral("volume")).toDouble(1.0);
+    if (object.value(QStringLiteral("volume")).isObject()) {
+        clip.volume = keyframesFromJson(object.value(QStringLiteral("volume")).toObject());
+    } else {
+        clip.volume.setKeyframe(0, object.value(QStringLiteral("volume")).toDouble(1.0));
+    }
     clip.opacity = keyframesFromJson(object.value(QStringLiteral("opacity")).toObject());
+    clip.posX = keyframesFromJson(object.value(QStringLiteral("posX")).toObject());
+    clip.posY = keyframesFromJson(object.value(QStringLiteral("posY")).toObject());
+    clip.scale = keyframesFromJson(object.value(QStringLiteral("scale")).toObject());
+    clip.rotation = keyframesFromJson(object.value(QStringLiteral("rotation")).toObject());
     clip.effects = effectsFromJson(object.value(QStringLiteral("effects")).toArray());
     return clip;
 }

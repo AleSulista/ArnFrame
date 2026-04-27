@@ -50,6 +50,18 @@ add_library(driftengine STATIC
     src/engine/MediaWaveform.cpp
     src/engine/TimelineExporter.h
     src/engine/TimelineExporter.cpp
+    src/engine/ClipReader.h
+    src/engine/ClipReader.cpp
+    src/engine/ClipReaderWorker.h
+    src/engine/ClipReaderWorker.cpp
+    src/engine/ClipReaderPool.h
+    src/engine/ClipReaderPool.cpp
+    src/engine/EffectProcessor.h
+    src/engine/EffectProcessor.cpp
+    src/engine/FrameCompositor.h
+    src/engine/FrameCompositor.cpp
+    src/engine/AudioMixer.h
+    src/engine/AudioMixer.cpp
 )
 target_include_directories(driftengine PUBLIC src)
 target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui FFmpeg::FFmpeg driftcore)
@@ -70,6 +82,18 @@ qt_add_executable(drift
     src/models/EditorState.h
     src/models/AssetLibrary.h
     src/models/AssetLibrary.cpp
+    src/models/TimelineModel.h
+    src/models/TimelineModel.cpp
+    src/models/ClipListModel.h
+    src/models/ClipListModel.cpp
+    src/playback/PlaybackEngine.h
+    src/playback/PlaybackEngine.cpp
+    src/playback/PlaybackClock.h
+    src/playback/PlaybackClock.cpp
+    src/playback/CompositorService.h
+    src/playback/CompositorService.cpp
+    src/preview/PreviewItem.h
+    src/preview/PreviewItem.cpp
 )
 
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
@@ -104,6 +128,7 @@ target_link_libraries(drift PRIVATE
     driftcore
     driftengine
 )
+target_include_directories(drift PRIVATE src src/preview)
 
 # --- CLI tools (headless engine testing, no GUI) ----------------------------
 add_subdirectory(tools)

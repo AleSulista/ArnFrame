@@ -21,11 +21,11 @@ ApplicationWindow {
         onActivated: EditorState.deleteSelectedClip()
     }
     Shortcut {
-        sequence: StandardKey.Undo
+        sequences: [StandardKey.Undo]
         onActivated: EditorState.undo()
     }
     Shortcut {
-        sequence: StandardKey.Redo
+        sequences: [StandardKey.Redo]
         onActivated: EditorState.redo()
     }
     Shortcut {

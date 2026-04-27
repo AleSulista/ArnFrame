@@ -2,6 +2,7 @@
 #include "models/AssetLibrary.h"
 #include "models/EditorState.h"
 #include "DriftImageProvider.h"
+#include "preview/PreviewItem.h"
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -12,6 +13,8 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName("CutWire Drift");
     QGuiApplication::setOrganizationName("CutWire Drift");
+
+    qmlRegisterType<PreviewItem>("Drift", 1, 0, "PreviewItem");
 
     static AssetLibrary assetLibrary;
     static EditorState editorState(&assetLibrary);

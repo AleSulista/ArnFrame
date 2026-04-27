@@ -1,5 +1,4 @@
 import QtQuick
-import QtMultimedia
 import Drift
 import "components"
 
@@ -10,12 +9,6 @@ PanelFrame {
     readonly property real durationSeconds: EditorState.durationSeconds
     readonly property bool playing: EditorState.playing
 
-    property string previewKind: "none"
-    property string currentVideoSource: ""
-    property string currentAudioSource: ""
-    property real pendingVideoSeekMs: -1
-    property real pendingAudioSeekMs: -1
-
     function formatTimecode(seconds) {
         const fps = 30;
         const totalFrames = Math.round(seconds * fps);
@@ -25,139 +18,6 @@ PanelFrame {
         const f = totalFrames % fps;
         function pad(n) { return n.toString().padStart(2, "0"); }
         return pad(h) + ":" + pad(m) + ":" + pad(s) + ":" + pad(f);
-    }
-
-    function applyVideoSeek() {
-        if (pendingVideoSeekMs < 0)
-            return
-        videoPlayer.position = pendingVideoSeekMs
-        pendingVideoSeekMs = -1
-    }
-
-    function applyAudioSeek() {
-        if (pendingAudioSeekMs < 0)
-            return
-        audioPlayer.position = pendingAudioSeekMs
-        pendingAudioSeekMs = -1
-    }
-
-    function syncVideo() {
-        const clip = EditorState.activeVideoClipAtPlayhead()
-        if (!clip || !clip.path) {
-            previewKind = "none"
-            currentVideoSource = ""
-            pendingVideoSeekMs = -1
-            videoPlayer.stop()
-            stillImage.source = ""
-            return
-        }
-
-        previewKind = clip.kind
-        if (clip.kind === "image") {
-            stillImage.source = EditorState.fileUrl(clip.path)
-            videoPlayer.stop()
-            return
-        }
-
-        const url = EditorState.fileUrl(clip.path)
-        const sourceTime = Math.max(0, EditorState.sourceTimeForClip(clip) * 1000)
-        const urlString = url.toString()
-
-        if (currentVideoSource !== urlString) {
-            currentVideoSource = urlString
-            videoPlayer.source = url
-            pendingVideoSeekMs = sourceTime
-        } else {
-            const drift = Math.abs(videoPlayer.position - sourceTime)
-            if (drift > 120)
-                videoPlayer.position = sourceTime
-        }
-
-        if (EditorState.playing) {
-            if (videoPlayer.playbackState !== MediaPlayer.PlayingState)
-                videoPlayer.play()
-        } else {
-            pendingVideoSeekMs = sourceTime
-            if (videoPlayer.mediaStatus === MediaPlayer.LoadedMedia
-                    || videoPlayer.mediaStatus === MediaPlayer.BufferedMedia) {
-                applyVideoSeek()
-            }
-            videoPlayer.pause()
-        }
-    }
-
-    function syncAudio() {
-        const clip = EditorState.activeAudioClipAtPlayhead()
-        if (!clip || !clip.path) {
-            currentAudioSource = ""
-            pendingAudioSeekMs = -1
-            audioPlayer.stop()
-            return
-        }
-
-        const url = EditorState.fileUrl(clip.path)
-        const sourceTime = Math.max(0, EditorState.sourceTimeForClip(clip) * 1000)
-        const urlString = url.toString()
-
-        if (currentAudioSource !== urlString) {
-            currentAudioSource = urlString
-            audioPlayer.source = url
-            pendingAudioSeekMs = sourceTime
-        } else {
-            const drift = Math.abs(audioPlayer.position - sourceTime)
-            if (drift > 120)
-                audioPlayer.position = sourceTime
-        }
-
-        if (EditorState.playing) {
-            if (audioPlayer.playbackState !== MediaPlayer.PlayingState)
-                audioPlayer.play()
-        } else {
-            pendingAudioSeekMs = sourceTime
-            if (audioPlayer.mediaStatus === MediaPlayer.LoadedMedia
-                    || audioPlayer.mediaStatus === MediaPlayer.BufferedMedia) {
-                applyAudioSeek()
-            }
-            audioPlayer.pause()
-        }
-    }
-
-    function syncPreview() {
-        syncVideo()
-        syncAudio()
-    }
-
-    MediaPlayer {
-        id: videoPlayer
-        videoOutput: videoOutput
-        audioOutput: AudioOutput {
-            volume: 0.0
-        }
-
-        onMediaStatusChanged: {
-            if (mediaStatus === MediaPlayer.LoadedMedia
-                    || mediaStatus === MediaPlayer.BufferedMedia) {
-                root.applyVideoSeek()
-                if (EditorState.playing)
-                    play()
-            }
-        }
-    }
-
-    MediaPlayer {
-        id: audioPlayer
-        audioOutput: AudioOutput {
-            volume: 0.9
-        }
-
-        onMediaStatusChanged: {
-            if (mediaStatus === MediaPlayer.LoadedMedia
-                    || mediaStatus === MediaPlayer.BufferedMedia) {
-                root.applyAudioSeek()
-                if (EditorState.playing)
-                    play()
-            }
-        }
     }
 
     Column {
@@ -189,22 +49,21 @@ PanelFrame {
                     border.color: Theme.border
                     clip: true
 
-                    VideoOutput {
-                        id: videoOutput
+                    PreviewItem {
+                        id: preview
                         anchors.fill: parent
-                        visible: root.previewKind === "video"
                     }
 
-                    Image {
-                        id: stillImage
-                        anchors.fill: parent
-                        visible: root.previewKind === "image"
-                        fillMode: Image.PreserveAspectFit
+                    Connections {
+                        target: EditorState.playback
+                        function onCurrentFrameChanged() {
+                            preview.frame = EditorState.playback.currentFrame
+                        }
                     }
 
                     Text {
                         anchors.centerIn: parent
-                        visible: root.previewKind === "none"
+                        visible: !EditorState.playback.hasFrame
                         text: EditorState.activeAudioClipAtPlayhead().path ? "Audio only" : "No clip at playhead"
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
@@ -298,10 +157,18 @@ PanelFrame {
 
     Connections {
         target: EditorState
-        function onPlayheadSecondsChanged() { root.syncPreview() }
-        function onTracksChanged() { root.syncPreview() }
-        function onPlayingChanged() { root.syncPreview() }
+        function onPlayheadSecondsChanged() {
+            if (!EditorState.playing)
+                EditorState.playback.refreshFrame()
+        }
+        function onTracksChanged() {
+            EditorState.playback.refreshFrame()
+        }
+        function onPlayingChanged() {
+            if (!EditorState.playing)
+                EditorState.playback.refreshFrame()
+        }
     }
 
-    Component.onCompleted: syncPreview()
+    Component.onCompleted: EditorState.playback.refreshFrame()
 }

@@ -216,7 +216,7 @@ PanelFrame {
             Column {
                 width: propsColumn.width
                 spacing: 4
-                visible: clip.path && clip.path.length > 0
+                visible: clip.path !== undefined && clip.path.length > 0
 
                 Text {
                     text: "Path"
