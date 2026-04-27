@@ -20,6 +20,26 @@ endif()
 qt_standard_project_setup(REQUIRES 6.5)
 qt_policy(SET QTP0004 NEW)
 
+# --- core: domain model, no GUI ---------------------------------------------
+add_library(driftcore STATIC
+    src/core/Effect.h
+    src/core/Effect.cpp
+    src/core/MediaAsset.h
+    src/core/MediaAsset.cpp
+    src/core/Clip.h
+    src/core/Clip.cpp
+    src/core/Track.h
+    src/core/Track.cpp
+    src/core/Project.h
+    src/core/Project.cpp
+    src/core/TimelineOps.h
+    src/core/TimelineOps.cpp
+    src/core/commands/ProjectCommands.h
+    src/core/commands/ProjectCommands.cpp
+)
+target_include_directories(driftcore PUBLIC src)
+target_link_libraries(driftcore PUBLIC Qt6::Core Qt6::Gui)
+
 # --- engine: FFmpeg-facing code, no QML deps -------------------------------
 add_library(driftengine STATIC
     src/engine/MediaProbe.h
@@ -32,7 +52,7 @@ add_library(driftengine STATIC
     src/engine/TimelineExporter.cpp
 )
 target_include_directories(driftengine PUBLIC src)
-target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui FFmpeg::FFmpeg)
+target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui FFmpeg::FFmpeg driftcore)
 
 if(WITH_BGREMOVAL)
     target_include_directories(driftengine PRIVATE ${OpenCV_INCLUDE_DIRS})
@@ -45,11 +65,11 @@ qt_add_executable(drift
     src/main.cpp
     src/DriftImageProvider.h
     src/DriftImageProvider.cpp
+    src/models/AppController.h
+    src/models/AppController.cpp
+    src/models/EditorState.h
     src/models/AssetLibrary.h
     src/models/AssetLibrary.cpp
-    src/models/EditorState.h
-    src/models/EditorState.cpp
-    src/models/EditorStateOps.cpp
 )
 
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
@@ -81,6 +101,7 @@ target_link_libraries(drift PRIVATE
     Qt6::Multimedia
     Qt6::Gui
     Qt6::Concurrent
+    driftcore
     driftengine
 )
 

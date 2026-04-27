@@ -1,3 +1,4 @@
+#include "models/AppController.h"
 #include "models/AssetLibrary.h"
 #include "models/EditorState.h"
 #include "DriftImageProvider.h"
@@ -16,6 +17,7 @@ int main(int argc, char *argv[])
     static EditorState editorState(&assetLibrary);
     qmlRegisterSingletonInstance("Drift", 1, 0, "AssetLibrary", &assetLibrary);
     qmlRegisterSingletonInstance("Drift", 1, 0, "EditorState", &editorState);
+    qmlRegisterSingletonInstance("Drift", 1, 0, "AppController", &editorState);
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("drift"), new DriftImageProvider());

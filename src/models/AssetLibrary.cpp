@@ -1,11 +1,14 @@
 #include "AssetLibrary.h"
 
+#include "core/Project.h"
+
 #include "engine/MediaProbe.h"
 #include "engine/MediaThumbnail.h"
 
 #include <QFileInfo>
 #include <QJsonObject>
 #include <QUrl>
+#include <QUuid>
 #include <algorithm>
 
 namespace {
@@ -20,28 +23,28 @@ bool isImagePath(const QString &path)
     return extensions.contains(QFileInfo(path).suffix().toLower());
 }
 
-QString kindFrom(const MediaInfo &info, const QString &path)
+drift::MediaKind kindFrom(const MediaInfo &info, const QString &path)
 {
     if (isImagePath(path))
-        return QStringLiteral("image");
+        return drift::MediaKind::Image;
 
     for (const StreamInfo &stream : info.streams) {
         if (stream.type == StreamInfo::Type::Video)
-            return QStringLiteral("video");
+            return drift::MediaKind::Video;
     }
     for (const StreamInfo &stream : info.streams) {
         if (stream.type == StreamInfo::Type::Audio)
-            return QStringLiteral("audio");
+            return drift::MediaKind::Audio;
     }
-    return QStringLiteral("other");
+    return drift::MediaKind::Other;
 }
 
-QString formatDuration(int64_t durationUs)
+QString formatDuration(drift::TimeUs durationUs)
 {
     if (durationUs <= 0)
         return {};
 
-    const int totalSeconds = static_cast<int>(durationUs / 1'000'000);
+    const int totalSeconds = static_cast<int>(durationUs / drift::kUsPerSecond);
     const int hours = totalSeconds / 3600;
     const int minutes = (totalSeconds % 3600) / 60;
     const int seconds = totalSeconds % 60;
@@ -65,34 +68,57 @@ AssetLibrary::AssetLibrary(QObject *parent)
 {
 }
 
+void AssetLibrary::setProject(drift::Project *project)
+{
+    beginResetModel();
+    m_project = project;
+    endResetModel();
+}
+
 int AssetLibrary::rowCount(const QModelIndex &parent) const
 {
-    if (parent.isValid())
+    if (parent.isValid() || !m_project)
         return 0;
-    return m_assets.size();
+    return m_project->assetOrder().size();
+}
+
+const drift::MediaAsset *AssetLibrary::assetAtIndex(int index) const
+{
+    if (!m_project || index < 0 || index >= m_project->assetOrder().size())
+        return nullptr;
+    return m_project->asset(m_project->assetIdAt(index));
+}
+
+drift::MediaAsset *AssetLibrary::assetAtIndex(int index)
+{
+    if (!m_project || index < 0 || index >= m_project->assetOrder().size())
+        return nullptr;
+    return m_project->asset(m_project->assetIdAt(index));
 }
 
 QVariant AssetLibrary::data(const QModelIndex &index, int role) const
 {
-    if (!index.isValid() || index.row() < 0 || index.row() >= m_assets.size())
+    const drift::MediaAsset *asset = assetAtIndex(index.row());
+    if (!index.isValid() || !asset)
         return {};
 
-    const Asset &asset = m_assets.at(index.row());
     switch (role) {
+    case IdRole:
+        return asset->id;
     case NameRole:
-        return asset.name;
+        return asset->name;
     case KindRole:
-        return asset.kind;
+        return drift::mediaKindToString(asset->kind);
     case DurationRole:
-        return asset.duration;
+        return asset->durationLabel;
     case DurationSecondsRole:
-        return asset.durationSeconds;
+        return drift::usToSeconds(asset->durationUs);
     case PathRole:
-        return asset.path;
+        return asset->path;
     case ThumbnailPathRole:
-        return asset.thumbnailPath;
+        return asset->thumbnailPath;
     case FilmstripPathRole:
-        return asset.filmstripPath;
+        return asset->filmstripPath;
     default:
         return {};
     }
@@ -101,6 +127,7 @@ QVariant AssetLibrary::data(const QModelIndex &index, int role) const
 QHash<int, QByteArray> AssetLibrary::roleNames() const
 {
     return {
+        {IdRole, "id"},
         {NameRole, "name"},
         {KindRole, "kind"},
         {DurationRole, "duration"},
@@ -118,40 +145,58 @@ bool AssetLibrary::containsPath(const QString &path) const
 
 int AssetLibrary::indexOfPath(const QString &path) const
 {
+    if (!m_project)
+        return -1;
+
     const QString normalized = QFileInfo(path).absoluteFilePath();
-    for (int i = 0; i < m_assets.size(); ++i) {
-        if (m_assets.at(i).path == normalized)
+    for (int i = 0; i < m_project->assetOrder().size(); ++i) {
+        const drift::MediaAsset *asset = assetAtIndex(i);
+        if (asset && asset->path == normalized)
             return i;
     }
     return -1;
 }
 
+int AssetLibrary::indexOfId(const QString &id) const
+{
+    if (!m_project)
+        return -1;
+    return m_project->assetIndex(id);
+}
+
+QString AssetLibrary::assetIdAt(int index) const
+{
+    if (!m_project)
+        return {};
+    return m_project->assetIdAt(index);
+}
+
 void AssetLibrary::refreshMediaAt(int index)
 {
-    if (index < 0 || index >= m_assets.size())
+    drift::MediaAsset *asset = assetAtIndex(index);
+    if (!asset)
         return;
 
-    Asset &asset = m_assets[index];
     bool changed = false;
 
-    if (asset.thumbnailPath.isEmpty() || !QFileInfo::exists(asset.thumbnailPath)) {
-        const QString thumb = MediaThumbnail::generate(asset.path, asset.kind);
+    if (asset->thumbnailPath.isEmpty() || !QFileInfo::exists(asset->thumbnailPath)) {
+        const QString thumb = MediaThumbnail::generate(asset->path, drift::mediaKindToString(asset->kind));
         if (!thumb.isEmpty()) {
-            asset.thumbnailPath = thumb;
+            asset->thumbnailPath = thumb;
             changed = true;
         }
     }
 
-    if (asset.kind == QStringLiteral("video")) {
-        if (asset.filmstripPath.isEmpty() || !QFileInfo::exists(asset.filmstripPath)) {
-            const QString strip = MediaThumbnail::generateFilmstrip(asset.path, asset.kind);
+    if (asset->kind == drift::MediaKind::Video) {
+        if (asset->filmstripPath.isEmpty() || !QFileInfo::exists(asset->filmstripPath)) {
+            const QString strip = MediaThumbnail::generateFilmstrip(asset->path, drift::mediaKindToString(asset->kind));
             if (!strip.isEmpty()) {
-                asset.filmstripPath = strip;
+                asset->filmstripPath = strip;
                 changed = true;
             }
         }
-    } else if (!asset.thumbnailPath.isEmpty() && asset.filmstripPath != asset.thumbnailPath) {
-        asset.filmstripPath = asset.thumbnailPath;
+    } else if (!asset->thumbnailPath.isEmpty() && asset->filmstripPath != asset->thumbnailPath) {
+        asset->filmstripPath = asset->thumbnailPath;
         changed = true;
     }
 
@@ -162,43 +207,35 @@ void AssetLibrary::refreshMediaAt(int index)
     emit dataChanged(modelIndex, modelIndex, {ThumbnailPathRole, FilmstripPathRole});
 }
 
-void AssetLibrary::appendAsset(Asset asset)
-{
-    const int row = m_assets.size();
-    beginInsertRows({}, row, row);
-    m_assets.append(std::move(asset));
-    endInsertRows();
-}
-
 QVariantMap AssetLibrary::assetAt(int index) const
 {
-    if (index < 0 || index >= m_assets.size())
+    const drift::MediaAsset *asset = assetAtIndex(index);
+    if (!asset)
         return {};
 
-    const Asset &asset = m_assets.at(index);
     return {
-        {QStringLiteral("name"), asset.name},
-        {QStringLiteral("kind"), asset.kind},
-        {QStringLiteral("duration"), asset.duration},
-        {QStringLiteral("durationSeconds"), asset.durationSeconds},
-        {QStringLiteral("path"), asset.path},
-        {QStringLiteral("thumbnailPath"), asset.thumbnailPath},
-        {QStringLiteral("filmstripPath"), asset.filmstripPath},
+        {QStringLiteral("id"), asset->id},
+        {QStringLiteral("name"), asset->name},
+        {QStringLiteral("kind"), drift::mediaKindToString(asset->kind)},
+        {QStringLiteral("duration"), asset->durationLabel},
+        {QStringLiteral("durationSeconds"), drift::usToSeconds(asset->durationUs)},
+        {QStringLiteral("path"), asset->path},
+        {QStringLiteral("thumbnailPath"), asset->thumbnailPath},
+        {QStringLiteral("filmstripPath"), asset->filmstripPath},
+        {QStringLiteral("assetIndex"), index},
     };
 }
 
 QString AssetLibrary::thumbnailAt(int index) const
 {
-    if (index < 0 || index >= m_assets.size())
-        return {};
-    return m_assets.at(index).thumbnailPath;
+    const drift::MediaAsset *asset = assetAtIndex(index);
+    return asset ? asset->thumbnailPath : QString{};
 }
 
 QString AssetLibrary::filmstripAt(int index) const
 {
-    if (index < 0 || index >= m_assets.size())
-        return {};
-    return m_assets.at(index).filmstripPath;
+    const drift::MediaAsset *asset = assetAtIndex(index);
+    return asset ? asset->filmstripPath : QString{};
 }
 
 void AssetLibrary::ensureMedia(int index)
@@ -208,55 +245,87 @@ void AssetLibrary::ensureMedia(int index)
 
 void AssetLibrary::ensureAllMedia()
 {
-    for (int i = 0; i < m_assets.size(); ++i)
+    if (!m_project)
+        return;
+    for (int i = 0; i < m_project->assetOrder().size(); ++i)
         refreshMediaAt(i);
 }
 
 void AssetLibrary::sortByName()
 {
-    if (m_assets.size() < 2)
+    if (!m_project || m_project->assetOrder().size() < 2)
         return;
+
     beginResetModel();
-    std::sort(m_assets.begin(), m_assets.end(), [](const Asset &a, const Asset &b) {
-        return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
+    QList<QString> order = m_project->assetOrder();
+    std::sort(order.begin(), order.end(), [this](const QString &a, const QString &b) {
+        const drift::MediaAsset *assetA = m_project->asset(a);
+        const drift::MediaAsset *assetB = m_project->asset(b);
+        if (!assetA || !assetB)
+            return a < b;
+        return assetA->name.compare(assetB->name, Qt::CaseInsensitive) < 0;
     });
+    m_project->assetOrder() = order;
     endResetModel();
 }
 
 void AssetLibrary::sortByKind()
 {
-    if (m_assets.size() < 2)
+    if (!m_project || m_project->assetOrder().size() < 2)
         return;
+
     beginResetModel();
-    std::sort(m_assets.begin(), m_assets.end(), [](const Asset &a, const Asset &b) {
-        const int cmp = a.kind.compare(b.kind, Qt::CaseInsensitive);
-        return cmp != 0 ? cmp < 0 : a.name.compare(b.name, Qt::CaseInsensitive) < 0;
+    QList<QString> order = m_project->assetOrder();
+    std::sort(order.begin(), order.end(), [this](const QString &a, const QString &b) {
+        const drift::MediaAsset *assetA = m_project->asset(a);
+        const drift::MediaAsset *assetB = m_project->asset(b);
+        if (!assetA || !assetB)
+            return a < b;
+        const int cmp = drift::mediaKindToString(assetA->kind)
+                            .compare(drift::mediaKindToString(assetB->kind), Qt::CaseInsensitive);
+        return cmp != 0 ? cmp < 0 : assetA->name.compare(assetB->name, Qt::CaseInsensitive) < 0;
     });
+    m_project->assetOrder() = order;
     endResetModel();
 }
 
 void AssetLibrary::clear()
 {
-    if (m_assets.isEmpty())
+    if (!m_project || m_project->assetOrder().isEmpty())
         return;
 
     beginResetModel();
-    m_assets.clear();
+    m_project->assets().clear();
+    m_project->assetOrder().clear();
     endResetModel();
 }
 
 QJsonArray AssetLibrary::toJsonArray() const
 {
+    if (!m_project)
+        return {};
+
     QJsonArray assets;
-    for (const Asset &asset : m_assets) {
+    for (const QString &id : m_project->assetOrder()) {
+        const drift::MediaAsset *asset = m_project->asset(id);
+        if (!asset)
+            continue;
         assets.append(QJsonObject{
-            {QStringLiteral("name"), asset.name},
-            {QStringLiteral("kind"), asset.kind},
-            {QStringLiteral("duration"), asset.duration},
-            {QStringLiteral("durationSeconds"), asset.durationSeconds},
-            {QStringLiteral("path"), asset.path},
-            {QStringLiteral("thumbnailPath"), asset.thumbnailPath},
-            {QStringLiteral("filmstripPath"), asset.filmstripPath},
+            {QStringLiteral("id"), asset->id},
+            {QStringLiteral("name"), asset->name},
+            {QStringLiteral("kind"), drift::mediaKindToString(asset->kind)},
+            {QStringLiteral("durationUs"), static_cast<double>(asset->durationUs)},
+            {QStringLiteral("duration"), asset->durationLabel},
+            {QStringLiteral("path"), asset->path},
+            {QStringLiteral("width"), asset->width},
+            {QStringLiteral("height"), asset->height},
+            {QStringLiteral("fps"), asset->fps},
+            {QStringLiteral("rotationDegrees"), asset->rotationDegrees},
+            {QStringLiteral("sampleRate"), asset->sampleRate},
+            {QStringLiteral("channels"), asset->channels},
+            {QStringLiteral("codecName"), asset->codecName},
+            {QStringLiteral("thumbnailPath"), asset->thumbnailPath},
+            {QStringLiteral("filmstripPath"), asset->filmstripPath},
         });
     }
     return assets;
@@ -264,25 +333,41 @@ QJsonArray AssetLibrary::toJsonArray() const
 
 void AssetLibrary::loadFromJsonArray(const QJsonArray &assets)
 {
+    if (!m_project)
+        return;
+
     beginResetModel();
-    m_assets.clear();
+    m_project->assets().clear();
+    m_project->assetOrder().clear();
 
     for (const QJsonValue &value : assets) {
         const QJsonObject object = value.toObject();
-        m_assets.append({
-            .name = object.value(QStringLiteral("name")).toString(),
-            .kind = object.value(QStringLiteral("kind")).toString(),
-            .duration = object.value(QStringLiteral("duration")).toString(),
-            .durationSeconds = object.value(QStringLiteral("durationSeconds")).toDouble(),
-            .path = object.value(QStringLiteral("path")).toString(),
-            .thumbnailPath = object.value(QStringLiteral("thumbnailPath")).toString(),
-            .filmstripPath = object.value(QStringLiteral("filmstripPath")).toString(),
-        });
+        drift::MediaAsset asset;
+        asset.id = object.value(QStringLiteral("id")).toString(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        asset.name = object.value(QStringLiteral("name")).toString();
+        asset.kind = drift::mediaKindFromString(object.value(QStringLiteral("kind")).toString());
+        asset.durationLabel = object.value(QStringLiteral("duration")).toString();
+        if (object.contains(QStringLiteral("durationUs"))) {
+            asset.durationUs = static_cast<drift::TimeUs>(object.value(QStringLiteral("durationUs")).toDouble());
+        } else {
+            asset.durationUs = drift::secondsToUs(object.value(QStringLiteral("durationSeconds")).toDouble());
+        }
+        asset.path = object.value(QStringLiteral("path")).toString();
+        asset.width = object.value(QStringLiteral("width")).toInt();
+        asset.height = object.value(QStringLiteral("height")).toInt();
+        asset.fps = object.value(QStringLiteral("fps")).toDouble();
+        asset.rotationDegrees = object.value(QStringLiteral("rotationDegrees")).toInt();
+        asset.sampleRate = object.value(QStringLiteral("sampleRate")).toInt();
+        asset.channels = object.value(QStringLiteral("channels")).toInt();
+        asset.codecName = object.value(QStringLiteral("codecName")).toString();
+        asset.thumbnailPath = object.value(QStringLiteral("thumbnailPath")).toString();
+        asset.filmstripPath = object.value(QStringLiteral("filmstripPath")).toString();
+        m_project->addAsset(asset);
     }
 
     endResetModel();
 
-    for (int i = 0; i < m_assets.size(); ++i)
+    for (int i = 0; i < m_project->assetOrder().size(); ++i)
         refreshMediaAt(i);
 }
 
@@ -306,6 +391,9 @@ void AssetLibrary::importUrls(const QList<QUrl> &urls)
 
 void AssetLibrary::importFiles(const QStringList &paths)
 {
+    if (!m_project)
+        return;
+
     for (const QString &path : paths) {
         const QFileInfo fileInfo(path);
         const QString absolutePath = fileInfo.absoluteFilePath();
@@ -319,17 +407,18 @@ void AssetLibrary::importFiles(const QStringList &paths)
         }
 
         if (isImagePath(path)) {
-            const QString kind = QStringLiteral("image");
+            const QString kind = drift::mediaKindToString(drift::MediaKind::Image);
             const QString thumb = MediaThumbnail::generate(absolutePath, kind);
-            appendAsset({
-                .name = fileInfo.fileName(),
-                .kind = kind,
-                .duration = {},
-                .durationSeconds = 0.0,
-                .path = absolutePath,
-                .thumbnailPath = thumb,
-                .filmstripPath = thumb,
-            });
+            drift::MediaAsset asset;
+            asset.name = fileInfo.fileName();
+            asset.kind = drift::MediaKind::Image;
+            asset.path = absolutePath;
+            asset.thumbnailPath = thumb;
+            asset.filmstripPath = thumb;
+            const int row = m_project->assetOrder().size();
+            beginInsertRows({}, row, row);
+            m_project->addAsset(asset);
+            endInsertRows();
             continue;
         }
 
@@ -337,20 +426,40 @@ void AssetLibrary::importFiles(const QStringList &paths)
         if (!info.ok)
             continue;
 
-        const QString kind = kindFrom(info, path);
-        const double durationSeconds = info.durationUs > 0 ? info.durationUs / 1'000'000.0 : 0.0;
-        const QString thumb = MediaThumbnail::generate(absolutePath, kind);
-        const QString strip = kind == QStringLiteral("video")
-                                  ? MediaThumbnail::generateFilmstrip(absolutePath, kind)
+        const drift::MediaKind kind = kindFrom(info, path);
+        const QString kindString = drift::mediaKindToString(kind);
+        const QString thumb = MediaThumbnail::generate(absolutePath, kindString);
+        const QString strip = kind == drift::MediaKind::Video
+                                  ? MediaThumbnail::generateFilmstrip(absolutePath, kindString)
                                   : thumb;
-        appendAsset({
-            .name = fileInfo.fileName(),
-            .kind = kind,
-            .duration = kind == QStringLiteral("image") ? QString() : formatDuration(info.durationUs),
-            .durationSeconds = durationSeconds,
-            .path = absolutePath,
-            .thumbnailPath = thumb,
-            .filmstripPath = strip,
-        });
+
+        drift::MediaAsset asset;
+        asset.name = fileInfo.fileName();
+        asset.kind = kind;
+        asset.durationUs = info.durationUs;
+        asset.durationLabel = kind == drift::MediaKind::Image ? QString() : formatDuration(info.durationUs);
+        asset.path = absolutePath;
+        asset.thumbnailPath = thumb;
+        asset.filmstripPath = strip;
+
+        for (const StreamInfo &stream : info.streams) {
+            if (stream.type == StreamInfo::Type::Video) {
+                asset.width = stream.width;
+                asset.height = stream.height;
+                asset.fps = stream.fps;
+                asset.rotationDegrees = stream.rotationDegrees;
+                asset.codecName = stream.codecName;
+            } else if (stream.type == StreamInfo::Type::Audio) {
+                asset.sampleRate = stream.sampleRate;
+                asset.channels = stream.channels;
+                if (asset.codecName.isEmpty())
+                    asset.codecName = stream.codecName;
+            }
+        }
+
+        const int row = m_project->assetOrder().size();
+        beginInsertRows({}, row, row);
+        m_project->addAsset(asset);
+        endInsertRows();
     }
 }

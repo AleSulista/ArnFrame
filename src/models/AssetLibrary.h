@@ -1,17 +1,25 @@
 #pragma once
 
+#include "core/MediaAsset.h"
+
 #include <QAbstractListModel>
 #include <QJsonArray>
 #include <QStringList>
 #include <QUrl>
 
+namespace drift {
+class Project;
+}
+
+// Media bin model backed by the project's asset table.
 class AssetLibrary : public QAbstractListModel
 {
     Q_OBJECT
 
 public:
     enum Role {
-        NameRole = Qt::UserRole + 1,
+        IdRole = Qt::UserRole + 1,
+        NameRole,
         KindRole,
         DurationRole,
         DurationSecondsRole,
@@ -23,12 +31,17 @@ public:
 
     explicit AssetLibrary(QObject *parent = nullptr);
 
+    void setProject(drift::Project *project);
+    drift::Project *project() const { return m_project; }
+
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
 
     Q_INVOKABLE void importUrls(const QList<QUrl> &urls);
     Q_INVOKABLE QVariantMap assetAt(int index) const;
+    Q_INVOKABLE QString assetIdAt(int index) const;
+    Q_INVOKABLE int indexOfId(const QString &id) const;
     Q_INVOKABLE QString thumbnailAt(int index) const;
     Q_INVOKABLE QString filmstripAt(int index) const;
     Q_INVOKABLE void ensureMedia(int index);
@@ -41,21 +54,12 @@ public:
     void clear();
 
 private:
-    struct Asset {
-        QString name;
-        QString kind;
-        QString duration;
-        double durationSeconds = 0.0;
-        QString path;
-        QString thumbnailPath;
-        QString filmstripPath;
-    };
-
     void importFiles(const QStringList &paths);
     bool containsPath(const QString &path) const;
-    void appendAsset(Asset asset);
     int indexOfPath(const QString &path) const;
     void refreshMediaAt(int index);
+    const drift::MediaAsset *assetAtIndex(int index) const;
+    drift::MediaAsset *assetAtIndex(int index);
 
-    QList<Asset> m_assets;
+    drift::Project *m_project = nullptr;
 };
