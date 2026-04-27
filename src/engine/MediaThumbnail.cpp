@@ -287,3 +287,33 @@ QString MediaThumbnail::generateFilmstrip(const QString &sourcePath, const QStri
 
     return outPath;
 }
+
+QString MediaThumbnail::generateAtTime(const QString &sourcePath, double sourceSeconds)
+{
+    const QString absolutePath = QFileInfo(sourcePath).absoluteFilePath();
+    if (absolutePath.isEmpty() || !QFile::exists(absolutePath))
+        return {};
+
+    const QString outPath = cacheDir() + QLatin1Char('/')
+                              + cacheKeyFor(absolutePath) + QLatin1Char('_')
+                              + QString::number(static_cast<int>(sourceSeconds * 1000))
+                              + QStringLiteral(".jpg");
+    if (isValidCacheFile(outPath))
+        return outPath;
+
+    AVFormatContext *fmt = nullptr;
+    int videoStreamIndex = -1;
+    AVCodecContext *codecCtx = nullptr;
+    if (!openVideoDecoder(absolutePath, &fmt, &videoStreamIndex, &codecCtx))
+        return {};
+
+    const int64_t timeUs = static_cast<int64_t>(sourceSeconds * 1'000'000.0);
+    QImage frame;
+    const bool ok = seekAndDecodeFrame(fmt, videoStreamIndex, codecCtx, timeUs, frame, 320, 180)
+                    && frame.save(outPath, "JPG", 85);
+
+    avcodec_free_context(&codecCtx);
+    avformat_close_input(&fmt);
+
+    return ok ? outPath : QString();
+}

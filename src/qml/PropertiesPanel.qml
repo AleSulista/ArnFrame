@@ -66,36 +66,101 @@ PanelFrame {
                 elide: Text.ElideRight
             }
 
-            Repeater {
-                model: [
-                    { label: "Kind", value: clip.kind || "—", editable: false },
-                    { label: "Start", value: formatSeconds(clip.start), editable: false },
-                    { label: "Duration", value: formatSeconds(clip.duration), editable: false }
-                ]
+            Column {
+                width: propsColumn.width
+                spacing: 4
+                Text {
+                    text: "Kind"
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                }
+                Text {
+                    text: clip.kind || "—"
+                    color: Theme.panelForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSm
+                }
+            }
+
+            Row {
+                width: parent.width
+                spacing: 8
 
                 Column {
-                    width: propsColumn.width
+                    width: (parent.width - parent.spacing) / 2
                     spacing: 4
-
                     Text {
-                        text: modelData.label
+                        text: "Start (s)"
                         color: Theme.mutedForeground
-                        font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeXs
-                    }
-
-                    Text {
-                        text: modelData.value
-                        color: Theme.panelForeground
                         font.family: Theme.fontFamily
+                    }
+                    TextField {
+                        width: parent.width
+                        text: (clip.start || 0).toFixed(2)
+                        color: Theme.panelForeground
+                        font.family: Theme.monoFontFamily
                         font.pixelSize: Theme.fontSizeSm
+                        onEditingFinished: {
+                            const v = parseFloat(text)
+                            if (!isNaN(v))
+                                EditorState.setClipStart(EditorState.selectedTrack, EditorState.selectedClip, v)
+                        }
+                    }
+                }
+
+                Column {
+                    width: (parent.width - parent.spacing) / 2
+                    spacing: 4
+                    Text {
+                        text: "Duration (s)"
+                        color: Theme.mutedForeground
+                        font.pixelSize: Theme.fontSizeXs
+                        font.family: Theme.fontFamily
+                    }
+                    TextField {
+                        width: parent.width
+                        text: (clip.duration || 0).toFixed(2)
+                        color: Theme.panelForeground
+                        font.family: Theme.monoFontFamily
+                        font.pixelSize: Theme.fontSizeSm
+                        onEditingFinished: {
+                            const v = parseFloat(text)
+                            if (!isNaN(v))
+                                EditorState.setClipDuration(EditorState.selectedTrack, EditorState.selectedClip, v)
+                        }
                     }
                 }
             }
 
             Column {
                 width: propsColumn.width
+                spacing: 4
+                visible: clip.kind === "text"
+                Text {
+                    text: "Text content"
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                }
+                TextArea {
+                    width: parent.width
+                    height: 80
+                    text: clip.textContent || ""
+                    color: Theme.panelForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSm
+                    wrapMode: TextArea.Wrap
+                    onEditingFinished: EditorState.setClipTextContent(
+                                           EditorState.selectedTrack, EditorState.selectedClip, text)
+                }
+            }
+
+            Column {
+                width: propsColumn.width
                 spacing: 8
+                visible: clip.kind !== "text"
 
                 Text {
                     text: "Trim"
@@ -151,6 +216,7 @@ PanelFrame {
             Column {
                 width: propsColumn.width
                 spacing: 4
+                visible: clip.path && clip.path.length > 0
 
                 Text {
                     text: "Path"
@@ -169,15 +235,6 @@ PanelFrame {
                 }
             }
         }
-    }
-
-    function formatSeconds(seconds) {
-        if (seconds === undefined || seconds === null)
-            return "—"
-        const total = Math.max(0, Math.round(seconds))
-        const m = Math.floor(total / 60)
-        const s = total % 60
-        return m.toString().padStart(2, "0") + ":" + s.toString().padStart(2, "0")
     }
 
     function applyTrim(inPoint, outPoint) {

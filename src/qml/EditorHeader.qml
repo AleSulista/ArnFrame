@@ -136,6 +136,9 @@ Rectangle {
             icon: Theme.icons.messageSquare
             variant: "ghost"
             anchors.verticalCenter: parent.verticalCenter
+            onClicked: EditorState.lastMessage = EditorState.lastMessage.length > 0
+                        ? EditorState.lastMessage
+                        : "No messages"
         }
 
         Rectangle {
@@ -176,12 +179,19 @@ Rectangle {
                         font.weight: Font.Medium
                         anchors.verticalCenter: parent.verticalCenter
                     }
+                    Text {
+                        visible: EditorState.exportInProgress
+                        text: "…"
+                        color: "white"
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
             }
 
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
+                enabled: !EditorState.exportInProgress
                 onClicked: exportDialog.open()
             }
         }

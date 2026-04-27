@@ -11,4 +11,5 @@ public:
 
     static QString generate(const QString &sourcePath, const QString &kind);
     static QString generateFilmstrip(const QString &sourcePath, const QString &kind);
+    static QString generateAtTime(const QString &sourcePath, double sourceSeconds);
 };

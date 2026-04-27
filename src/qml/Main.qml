@@ -12,6 +12,35 @@ ApplicationWindow {
     title: "CutWire Drift"
     color: Theme.appBackground
 
+    Shortcut {
+        sequence: "Space"
+        onActivated: EditorState.playing = !EditorState.playing
+    }
+    Shortcut {
+        sequence: "Delete"
+        onActivated: EditorState.deleteSelectedClip()
+    }
+    Shortcut {
+        sequence: StandardKey.Undo
+        onActivated: EditorState.undo()
+    }
+    Shortcut {
+        sequence: StandardKey.Redo
+        onActivated: EditorState.redo()
+    }
+    Shortcut {
+        sequence: "Escape"
+        onActivated: EditorState.clearSelection()
+    }
+    Shortcut {
+        sequence: "Ctrl+D"
+        onActivated: EditorState.duplicateSelectedClip()
+    }
+    Shortcut {
+        sequence: "S"
+        onActivated: EditorState.splitAtPlayhead()
+    }
+
     Column {
         anchors.fill: parent
         spacing: 0

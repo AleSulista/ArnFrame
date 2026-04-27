@@ -36,6 +36,19 @@ bool runFfmpeg(const QStringList &args, QString *errorOut)
     return true;
 }
 
+QStringList encodeVideoArgs(const QString &outputPath)
+{
+    return {
+        QStringLiteral("-c:v"), QStringLiteral("libx264"),
+        QStringLiteral("-preset"), QStringLiteral("fast"),
+        QStringLiteral("-crf"), QStringLiteral("23"),
+        QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+        QStringLiteral("-an"),
+        QStringLiteral("-y"),
+        outputPath,
+    };
+}
+
 QStringList encodeOutputArgs(const QString &outputPath)
 {
     return {
@@ -72,50 +85,69 @@ QList<ExportSegment> sortedSegments(QList<ExportSegment> segments)
     return segments;
 }
 
-bool exportSegmentList(const QList<ExportSegment> &segments, const QString &outputPath, bool videoOnly,
-                       QString *errorOut)
+struct TimelinePiece {
+    bool isGap = false;
+    double duration = 0.0;
+    ExportSegment segment;
+};
+
+QList<TimelinePiece> buildTimelinePieces(const QList<ExportSegment> &segments)
 {
-    if (segments.isEmpty()) {
+    const QList<ExportSegment> ordered = sortedSegments(segments);
+    QList<TimelinePiece> pieces;
+    double cursor = 0.0;
+
+    for (const ExportSegment &segment : ordered) {
+        if (segment.timelineStart > cursor + 0.001) {
+            pieces.append({true, segment.timelineStart - cursor, {}});
+            cursor = segment.timelineStart;
+        }
+        pieces.append({false, segment.duration, segment});
+        cursor = segment.timelineStart + segment.duration;
+    }
+
+    return pieces;
+}
+
+bool exportBlackGap(double duration, const QString &outputPath, QString *errorOut)
+{
+    QStringList args;
+    args << QStringLiteral("-hide_banner") << QStringLiteral("-loglevel") << QStringLiteral("error")
+         << QStringLiteral("-f") << QStringLiteral("lavfi")
+         << QStringLiteral("-i")
+         << QStringLiteral("color=black:s=1920x1080:d=%1:r=30").arg(duration, 0, 'f', 3)
+         << encodeVideoArgs(outputPath);
+    return runFfmpeg(args, errorOut);
+}
+
+bool exportSinglePiece(const TimelinePiece &piece, const QString &outputPath, QString *errorOut)
+{
+    if (piece.isGap)
+        return exportBlackGap(piece.duration, outputPath, errorOut);
+
+    QStringList args;
+    args << QStringLiteral("-hide_banner") << QStringLiteral("-loglevel") << QStringLiteral("error");
+    args << inputArgsForSegment(piece.segment);
+    args << encodeVideoArgs(outputPath);
+    return runFfmpeg(args, errorOut);
+}
+
+bool concatFiles(const QStringList &segmentPaths, const QString &outputPath, QString *errorOut)
+{
+    if (segmentPaths.isEmpty()) {
         if (errorOut)
             *errorOut = QStringLiteral("No segments to export");
         return false;
     }
 
-    const QList<ExportSegment> ordered = sortedSegments(segments);
-
-    if (ordered.size() == 1) {
-        QStringList args;
-        args << QStringLiteral("-hide_banner") << QStringLiteral("-loglevel") << QStringLiteral("error");
-        args << inputArgsForSegment(ordered.front());
-        if (videoOnly)
-            args << QStringLiteral("-an");
-        args << encodeOutputArgs(outputPath);
-        return runFfmpeg(args, errorOut);
-    }
+    if (segmentPaths.size() == 1)
+        return QFile::copy(segmentPaths.front(), outputPath);
 
     QTemporaryDir tempDir;
     if (!tempDir.isValid()) {
         if (errorOut)
             *errorOut = QStringLiteral("Failed to create temporary directory");
         return false;
-    }
-
-    QStringList segmentPaths;
-    segmentPaths.reserve(ordered.size());
-
-    for (int i = 0; i < ordered.size(); ++i) {
-        const QString segmentPath = tempDir.filePath(QStringLiteral("segment_%1.mp4").arg(i));
-        QStringList args;
-        args << QStringLiteral("-hide_banner") << QStringLiteral("-loglevel") << QStringLiteral("error");
-        args << inputArgsForSegment(ordered.at(i));
-        if (videoOnly)
-            args << QStringLiteral("-an");
-        args << encodeOutputArgs(segmentPath);
-
-        if (!runFfmpeg(args, errorOut))
-            return false;
-
-        segmentPaths.append(segmentPath);
     }
 
     const QString listPath = tempDir.filePath(QStringLiteral("concat.txt"));
@@ -126,8 +158,10 @@ bool exportSegmentList(const QList<ExportSegment> &segments, const QString &outp
         return false;
     }
 
-    for (const QString &segmentPath : segmentPaths)
-        listFile.write(QStringLiteral("file '%1'\n").arg(segmentPath).toUtf8());
+    for (const QString &segmentPath : segmentPaths) {
+        const QString escaped = segmentPath;
+        listFile.write(QStringLiteral("file '%1'\n").arg(escaped).toUtf8());
+    }
     listFile.close();
 
     QStringList args;
@@ -140,6 +174,40 @@ bool exportSegmentList(const QList<ExportSegment> &segments, const QString &outp
          << outputPath;
 
     return runFfmpeg(args, errorOut);
+}
+
+bool exportSegmentList(const QList<ExportSegment> &segments, const QString &outputPath, bool videoOnly,
+                       QString *errorOut)
+{
+    if (segments.isEmpty()) {
+        if (errorOut)
+            *errorOut = QStringLiteral("No segments to export");
+        return false;
+    }
+
+    const QList<TimelinePiece> pieces = buildTimelinePieces(segments);
+
+    QTemporaryDir tempDir;
+    if (!tempDir.isValid()) {
+        if (errorOut)
+            *errorOut = QStringLiteral("Failed to create temporary directory");
+        return false;
+    }
+
+    QStringList segmentPaths;
+    segmentPaths.reserve(pieces.size());
+
+    for (int i = 0; i < pieces.size(); ++i) {
+        const QString segmentPath = tempDir.filePath(QStringLiteral("piece_%1.mp4").arg(i));
+        if (!exportSinglePiece(pieces.at(i), segmentPath, errorOut))
+            return false;
+        segmentPaths.append(segmentPath);
+    }
+
+    if (!videoOnly)
+        return concatFiles(segmentPaths, outputPath, errorOut);
+
+    return concatFiles(segmentPaths, outputPath, errorOut);
 }
 
 bool muxAudioOverlay(const QString &videoPath, const QList<ExportSegment> &audioSegments,
@@ -194,13 +262,68 @@ bool muxAudioOverlay(const QString &videoPath, const QList<ExportSegment> &audio
     return runFfmpeg(args, errorOut);
 }
 
+QString escapeDrawText(const QString &text)
+{
+    QString escaped;
+    escaped.reserve(text.size() + 8);
+    for (const QChar ch : text) {
+        if (ch == QLatin1Char('\\') || ch == QLatin1Char('\'') || ch == QLatin1Char(':')
+            || ch == QLatin1Char('%'))
+            escaped += QLatin1Char('\\');
+        escaped += ch;
+    }
+    return escaped;
+}
+
+bool burnTextOverlays(const QString &inputPath, const QList<ExportTextOverlay> &overlays,
+                      const QString &outputPath, QString *errorOut)
+{
+    if (overlays.isEmpty()) {
+        if (QFile::exists(outputPath))
+            QFile::remove(outputPath);
+        return QFile::copy(inputPath, outputPath);
+    }
+
+    QStringList filterParts;
+    QString inLabel = QStringLiteral("[0:v]");
+    QString outLabel = inLabel;
+
+    for (int i = 0; i < overlays.size(); ++i) {
+        const ExportTextOverlay &overlay = overlays.at(i);
+        const QString nextLabel = QStringLiteral("[vt%1]").arg(i);
+        const double end = overlay.timelineStart + overlay.duration;
+        filterParts.append(QStringLiteral("%1drawtext=text='%2':fontsize=42:fontcolor=white:borderw=2:bordercolor=black@0.5:x=(w-text_w)/2:y=h*0.85:enable='between(t,%3,%4)'%5")
+                               .arg(outLabel,
+                                    escapeDrawText(overlay.text),
+                                    QString::number(overlay.timelineStart, 'f', 3),
+                                    QString::number(end, 'f', 3),
+                                    nextLabel));
+        outLabel = nextLabel;
+    }
+
+    QStringList args;
+    args << QStringLiteral("-hide_banner") << QStringLiteral("-loglevel") << QStringLiteral("error")
+         << QStringLiteral("-i") << inputPath
+         << QStringLiteral("-filter_complex") << filterParts.join(QLatin1Char(';'))
+         << QStringLiteral("-map") << outLabel
+         << QStringLiteral("-c:v") << QStringLiteral("libx264")
+         << QStringLiteral("-preset") << QStringLiteral("fast")
+         << QStringLiteral("-crf") << QStringLiteral("23")
+         << QStringLiteral("-an")
+         << QStringLiteral("-y")
+         << outputPath;
+
+    return runFfmpeg(args, errorOut);
+}
+
 } // namespace
 
 bool TimelineExporter::exportTimeline(const QList<ExportSegment> &videoSegments,
                                       const QList<ExportSegment> &audioSegments,
+                                      const QList<ExportTextOverlay> &textOverlays,
                                       const QString &outputPath, QString *errorOut)
 {
-    if (videoSegments.isEmpty() && audioSegments.isEmpty()) {
+    if (videoSegments.isEmpty() && audioSegments.isEmpty() && textOverlays.isEmpty()) {
         if (errorOut)
             *errorOut = QStringLiteral("No clips to export");
         return false;
@@ -218,15 +341,23 @@ bool TimelineExporter::exportTimeline(const QList<ExportSegment> &videoSegments,
     }
 
     const QString videoPath = tempDir.filePath(QStringLiteral("video.mp4"));
-    const bool videoOnly = !audioSegments.isEmpty();
-    if (!exportSegmentList(videoSegments, videoPath, videoOnly, errorOut))
+    const bool hasAudio = !audioSegments.isEmpty();
+    if (!exportSegmentList(videoSegments, videoPath, true, errorOut))
         return false;
 
-    if (audioSegments.isEmpty()) {
-        if (QFile::exists(outputPath))
-            QFile::remove(outputPath);
-        return QFile::copy(videoPath, outputPath);
+    const QString videoWithTextPath = textOverlays.isEmpty()
+                                          ? videoPath
+                                          : tempDir.filePath(QStringLiteral("video_text.mp4"));
+    if (!textOverlays.isEmpty()) {
+        if (!burnTextOverlays(videoPath, textOverlays, videoWithTextPath, errorOut))
+            return false;
     }
 
-    return muxAudioOverlay(videoPath, sortedSegments(audioSegments), outputPath, errorOut);
+    if (!hasAudio) {
+        if (QFile::exists(outputPath))
+            QFile::remove(outputPath);
+        return QFile::copy(videoWithTextPath, outputPath);
+    }
+
+    return muxAudioOverlay(videoWithTextPath, sortedSegments(audioSegments), outputPath, errorOut);
 }

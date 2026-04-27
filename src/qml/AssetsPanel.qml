@@ -9,6 +9,21 @@ PanelFrame {
 
     Component.onCompleted: AssetLibrary.ensureAllMedia()
 
+    function kindsForTab(tabId) {
+        if (tabId === "media") return ["video", "image"]
+        if (tabId === "sounds") return ["audio"]
+        return []
+    }
+
+    function assetVisible(kind) {
+        const tabId = tabsModel.get(activeTab).tabId
+        if (tabId === "text" || tabId === "stickers" || tabId === "effects"
+                || tabId === "adjustment" || tabId === "settings")
+            return false
+        const kinds = kindsForTab(tabId)
+        return kinds.length === 0 || kinds.indexOf(kind) >= 0
+    }
+
     ListModel {
         id: tabsModel
         ListElement { tabId: "media"; icon: 0; label: "Media" }
@@ -29,6 +44,7 @@ PanelFrame {
         Theme.icons.settings
     ]
     property int activeTab: 0
+    property bool sortByKind: false
 
     FileDialog {
         id: importDialog
@@ -40,11 +56,19 @@ PanelFrame {
         onAccepted: AssetLibrary.importUrls(selectedFiles)
     }
 
+    DropArea {
+        anchors.fill: parent
+        keys: ["text/uri-list"]
+        onDropped: (drop) => {
+            if (drop.hasUrls)
+                AssetLibrary.importUrls(drop.urls)
+        }
+    }
+
     Row {
         anchors.fill: parent
         spacing: 0
 
-        // --- vertical tab rail --------------------------------------------------
         Column {
             width: Theme.tabRailWidth
             height: parent.height
@@ -69,7 +93,6 @@ PanelFrame {
             color: Theme.panelBorder
         }
 
-        // --- header + content -----------------------------------------------------
         Column {
             id: assetsContent
             width: parent.width - Theme.tabRailWidth - 1
@@ -119,6 +142,13 @@ PanelFrame {
                     IconButton {
                         icon: Theme.icons.sort
                         variant: "ghost"
+                        onClicked: {
+                            if (root.sortByKind)
+                                AssetLibrary.sortByName()
+                            else
+                                AssetLibrary.sortByKind()
+                            root.sortByKind = !root.sortByKind
+                        }
                     }
 
                     Rectangle {
@@ -162,16 +192,80 @@ PanelFrame {
                 }
             }
 
-            Flickable {
-                id: flick
+            // Text tab panel
+            Column {
+                visible: tabsModel.get(activeTab).tabId === "text"
                 width: parent.width
                 height: parent.height - Theme.panelHeaderHeight
-                contentHeight: grid.height + 24
+                spacing: 8
+                padding: 12
+
+                TextField {
+                    id: textClipInput
+                    width: parent.width - 24
+                    placeholderText: "Enter text for timeline clip"
+                    color: Theme.panelForeground
+                    font.family: Theme.fontFamily
+                }
+
+                Rectangle {
+                    width: addTextRow.implicitWidth + 20
+                    height: 32
+                    radius: Theme.radiusSm
+                    color: Theme.primary
+
+                    Row {
+                        id: addTextRow
+                        anchors.centerIn: parent
+                        spacing: 6
+                        IconGlyph {
+                            glyph: Theme.icons.type
+                            iconSize: 14
+                            iconColor: "white"
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Text {
+                            text: "Add to timeline"
+                            color: "white"
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSm
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            EditorState.addTextClip(textClipInput.text, -1)
+                            textClipInput.clear()
+                        }
+                    }
+                }
+            }
+
+            Text {
+                visible: ["stickers", "effects", "adjustment", "settings"].indexOf(tabsModel.get(activeTab).tabId) >= 0
+                anchors.centerIn: parent
+                anchors.verticalCenterOffset: Theme.panelHeaderHeight / 2
+                text: tabsModel.get(activeTab).label + " — coming soon"
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSm
+            }
+
+            Flickable {
+                id: flick
+                visible: kindsForTab(tabsModel.get(activeTab).tabId).length > 0
+                width: parent.width
+                height: parent.height - Theme.panelHeaderHeight
+                contentHeight: assetsContent.gridMode ? grid.height + 24 : listColumn.height + 24
                 clip: true
                 ScrollBar.vertical: AppScrollBar { }
 
                 Grid {
                     id: grid
+                    visible: assetsContent.gridMode
                     x: 12
                     y: 12
                     width: flick.width - 24
@@ -182,9 +276,9 @@ PanelFrame {
                     Repeater {
                         model: AssetLibrary
                         delegate: Column {
-                            id: assetCard
                             width: Theme.assetCardWidth
                             spacing: 4
+                            visible: root.assetVisible(kind)
 
                             required property int index
                             required property string name
@@ -200,17 +294,10 @@ PanelFrame {
                             Drag.active: assetDrag.active
                             Drag.dragType: Drag.Automatic
                             Drag.supportedActions: Qt.CopyAction
-                            Drag.mimeData: {
-                                "text/plain": assetIndex.toString()
-                            }
+                            Drag.mimeData: { "text/plain": assetIndex.toString() }
 
-                            TapHandler {
-                                onTapped: EditorState.addClipFromAsset(assetIndex)
-                            }
-
-                            DragHandler {
-                                id: assetDrag
-                            }
+                            TapHandler { onTapped: EditorState.addClipFromAsset(assetIndex) }
+                            DragHandler { id: assetDrag }
 
                             Rectangle {
                                 width: Theme.assetCardWidth
@@ -246,7 +333,6 @@ PanelFrame {
                                     radius: 3
                                     width: durationLabel.implicitWidth + 8
                                     height: durationLabel.implicitHeight + 4
-
                                     Text {
                                         id: durationLabel
                                         anchors.centerIn: parent
@@ -265,6 +351,86 @@ PanelFrame {
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeCard
                                 elide: Text.ElideRight
+                            }
+                        }
+                    }
+                }
+
+                Column {
+                    id: listColumn
+                    visible: !assetsContent.gridMode
+                    x: 12
+                    y: 12
+                    width: flick.width - 24
+                    spacing: 6
+
+                    Repeater {
+                        model: AssetLibrary
+                        delegate: Rectangle {
+                            width: listColumn.width
+                            height: 48
+                            radius: Theme.radiusSm
+                            color: Theme.panelAccent
+                            visible: root.assetVisible(kind)
+
+                            required property int index
+                            required property string name
+                            required property string kind
+                            required property string duration
+                            required property string thumbnailPath
+
+                            property int assetIndex: index
+
+                            Row {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                spacing: 10
+
+                                Rectangle {
+                                    width: 56
+                                    height: 32
+                                    radius: 4
+                                    color: Theme.panelBackground
+                                    clip: true
+                                    Image {
+                                        anchors.fill: parent
+                                        visible: thumbnailPath.length > 0
+                                        source: thumbnailPath.length > 0 ? EditorState.imageUrl(thumbnailPath) : ""
+                                        fillMode: Image.PreserveAspectCrop
+                                    }
+                                    IconGlyph {
+                                        anchors.centerIn: parent
+                                        visible: thumbnailPath.length === 0
+                                        glyph: kind === "audio" ? Theme.icons.music : Theme.icons.film
+                                        iconSize: 16
+                                        iconColor: Theme.mutedForeground
+                                    }
+                                }
+
+                                Column {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width - 66
+                                    Text {
+                                        text: name
+                                        color: Theme.panelForeground
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSm
+                                        elide: Text.ElideRight
+                                        width: parent.width
+                                    }
+                                    Text {
+                                        text: kind + (duration.length > 0 ? " · " + duration : "")
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: EditorState.addClipFromAsset(assetIndex)
                             }
                         }
                     }

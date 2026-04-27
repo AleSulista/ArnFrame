@@ -36,6 +36,17 @@ PanelFrame {
         return h;
     }
 
+    function trackIndexAtY(y) {
+        var cursor = 0;
+        for (var i = 0; i < tracks.length; i++) {
+            const th = trackHeight(tracks[i].type);
+            if (y >= cursor && y < cursor + th)
+                return i;
+            cursor += th + Theme.trackGap;
+        }
+        return -1;
+    }
+
     function formatTime(seconds) {
         const total = Math.max(0, Math.round(seconds));
         const m = Math.floor(total / 60);
@@ -97,11 +108,11 @@ PanelFrame {
                 }
 
                 IconButton { icon: Theme.icons.scissors; variant: "text"; onClicked: EditorState.splitAtPlayhead() }
-                IconButton { icon: Theme.icons.alignLeft; variant: "text" }
-                IconButton { icon: Theme.icons.alignRight; variant: "text" }
-                IconButton { icon: Theme.icons.linkTwo; variant: "text" }
-                IconButton { icon: Theme.icons.copy; variant: "text" }
-                IconButton { icon: Theme.icons.snowflake; variant: "text"; buttonEnabled: false }
+                IconButton { icon: Theme.icons.alignLeft; variant: "text"; onClicked: EditorState.alignSelectedClipLeft() }
+                IconButton { icon: Theme.icons.alignRight; variant: "text"; onClicked: EditorState.alignSelectedClipRight() }
+                IconButton { icon: Theme.icons.linkTwo; variant: "text"; onClicked: EditorState.rippleEnabled = !EditorState.rippleEnabled }
+                IconButton { icon: Theme.icons.copy; variant: "text"; onClicked: EditorState.duplicateSelectedClip() }
+                IconButton { icon: Theme.icons.snowflake; variant: "text"; onClicked: EditorState.freezeFrameAtPlayhead() }
                 IconButton { icon: Theme.icons.trash; variant: "text"; onClicked: EditorState.deleteSelectedClip() }
 
                 Rectangle {
@@ -111,8 +122,17 @@ PanelFrame {
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
-                IconButton { icon: Theme.icons.bookmark; variant: "text" }
-                IconButton { icon: Theme.icons.layers; variant: "text" }
+                IconButton {
+                    icon: Theme.icons.bookmark
+                    variant: "text"
+                    onClicked: EditorState.addBookmark(EditorState.playheadSeconds, "Mark " + Math.round(EditorState.playheadSeconds))
+                }
+                IconButton {
+                    icon: Theme.icons.layers
+                    variant: "text"
+                    onClicked: EditorState.undo()
+                    buttonEnabled: EditorState.undoAvailable
+                }
             }
 
             Rectangle {
@@ -162,7 +182,8 @@ PanelFrame {
                     id: rippleButton
                     icon: Theme.icons.linkTwo
                     variant: "text"
-                    active: false
+                    active: EditorState.rippleEnabled
+                    onClicked: EditorState.rippleEnabled = !EditorState.rippleEnabled
                 }
 
                 Rectangle {
@@ -254,32 +275,30 @@ PanelFrame {
 
                             IconGlyph {
                                 visible: root.tracks[index].type !== "text"
-                                glyph: muted ? Theme.icons.volumeOff : Theme.icons.volumeHigh
+                                glyph: EditorState.trackMuted(index) ? Theme.icons.volumeOff : Theme.icons.volumeHigh
                                 iconSize: 16
-                                iconColor: muted ? Theme.destructive : Theme.mutedForeground
-                                property bool muted: false
+                                iconColor: EditorState.trackMuted(index) ? Theme.destructive : Theme.mutedForeground
                                 anchors.verticalCenter: parent.verticalCenter
 
                                 MouseArea {
                                     anchors.fill: parent
                                     anchors.margins: -4
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: parent.muted = !parent.muted
+                                    onClicked: EditorState.setTrackMuted(index, !EditorState.trackMuted(index))
                                 }
                             }
 
                             IconGlyph {
-                                glyph: hidden ? Theme.icons.eyeOff : Theme.icons.eye
+                                glyph: EditorState.trackHidden(index) ? Theme.icons.eyeOff : Theme.icons.eye
                                 iconSize: 16
-                                iconColor: hidden ? Theme.destructive : Theme.mutedForeground
-                                property bool hidden: false
+                                iconColor: EditorState.trackHidden(index) ? Theme.destructive : Theme.mutedForeground
                                 anchors.verticalCenter: parent.verticalCenter
 
                                 MouseArea {
                                     anchors.fill: parent
                                     anchors.margins: -4
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: parent.hidden = !parent.hidden
+                                    onClicked: EditorState.setTrackHidden(index, !EditorState.trackHidden(index))
                                 }
                             }
 
@@ -318,7 +337,10 @@ PanelFrame {
 
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: (mouse) => EditorState.playheadSeconds = mouse.x / root.pxPerSecond
+                            onClicked: (mouse) => {
+                                EditorState.clearSelection()
+                                EditorState.playheadSeconds = EditorState.snapTime(mouse.x / root.pxPerSecond)
+                            }
                         }
 
                         Repeater {
@@ -357,6 +379,32 @@ PanelFrame {
                         y: Theme.timelineRulerHeight
                         width: parent.width
                         height: Theme.timelineBookmarkRowHeight
+
+                        Repeater {
+                            model: EditorState.bookmarks
+                            delegate: Rectangle {
+                                x: modelData.seconds * root.pxPerSecond - width / 2
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: Theme.primary
+
+                                ToolTip {
+                                    visible: bookmarkMouse.containsMouse
+                                    text: modelData.label + " @ " + root.formatTime(modelData.seconds)
+                                }
+
+                                MouseArea {
+                                    id: bookmarkMouse
+                                    anchors.fill: parent
+                                    anchors.margins: -6
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: EditorState.goToBookmark(index)
+                                }
+                            }
+                        }
                     }
 
                     // track rows ---------------------------------------------------------
@@ -405,6 +453,13 @@ PanelFrame {
                                             property: "x"
                                             when: !clipMouse.drag.active
                                             value: clipData.start * root.pxPerSecond + Theme.clipSelectionRingWidth
+                                        }
+
+                                        Binding {
+                                            target: clipItem
+                                            property: "y"
+                                            when: !clipMouse.drag.active
+                                            value: Theme.clipSelectionRingWidth
                                         }
 
                                         Rectangle {
@@ -516,28 +571,39 @@ PanelFrame {
                                                 anchors.left: parent.left
                                                 anchors.leftMargin: 8
                                                 anchors.verticalCenter: parent.verticalCenter
-                                                text: clipItem.clipData.name
+                                                text: clipItem.clipData.textContent || clipItem.clipData.name
                                                 color: "white"
                                                 font.pixelSize: Theme.fontSizeXs
                                                 font.family: Theme.fontFamily
+                                                width: parent.width - 16
+                                                elide: Text.ElideRight
                                             }
 
                                             Canvas {
+                                                id: waveformCanvas
                                                 visible: clipItem.trackType === "audio"
+                                                property var peaks: clipItem.clipData.path
+                                                              ? EditorState.waveformPeaks(clipItem.clipData.path)
+                                                              : []
                                                 anchors.left: parent.left
                                                 anchors.right: parent.right
                                                 anchors.top: parent.top
                                                 anchors.topMargin: 20
                                                 anchors.bottom: parent.bottom
+                                                onPeaksChanged: requestPaint()
                                                 onPaint: {
                                                     var ctx = getContext("2d");
                                                     ctx.clearRect(0, 0, width, height);
+                                                    if (!peaks || peaks.length === 0)
+                                                        return;
                                                     ctx.strokeStyle = Theme.waveformColor;
                                                     ctx.lineWidth = 1;
                                                     ctx.beginPath();
                                                     var mid = height / 2;
-                                                    for (var px = 0; px < width; px += 3) {
-                                                        var amp = (Math.sin(px * 0.3) * 0.5 + Math.sin(px * 0.13) * 0.3) * mid * 0.8;
+                                                    var step = width / peaks.length;
+                                                    for (var i = 0; i < peaks.length; i++) {
+                                                        var amp = peaks[i] * mid * 0.9;
+                                                        var px = i * step;
                                                         ctx.moveTo(px, mid - amp);
                                                         ctx.lineTo(px, mid + amp);
                                                     }
@@ -554,12 +620,25 @@ PanelFrame {
                                             enabled: !leftTrimMouse.pressed && !rightTrimMouse.pressed
                                             cursorShape: Qt.PointingHandCursor
                                             drag.target: clipItem
-                                            drag.axis: Drag.XAxis
+                                            drag.axis: Drag.XAndYAxis
                                             drag.minimumX: Theme.clipSelectionRingWidth
-                                            onPressed: EditorState.selectClip(trackRow.trackIndex, modelData)
+                                            drag.minimumY: -trackRow.height
+                                            drag.maximumY: trackRow.height * 2
+                                            property int originTrack: trackRow.trackIndex
+
+                                            onPressed: {
+                                                originTrack = trackRow.trackIndex
+                                                EditorState.selectClip(trackRow.trackIndex, modelData)
+                                            }
                                             onReleased: {
                                                 const newStart = (clipItem.x - Theme.clipSelectionRingWidth) / root.pxPerSecond
-                                                EditorState.moveClip(trackRow.trackIndex, modelData, newStart)
+                                                const pos = clipItem.mapToItem(trackColumn, clipItem.width / 2, clipItem.height / 2)
+                                                const targetTrack = root.trackIndexAtY(pos.y)
+                                                clipItem.y = Theme.clipSelectionRingWidth
+                                                if (targetTrack >= 0 && targetTrack !== originTrack)
+                                                    EditorState.moveClipToTrack(originTrack, modelData, targetTrack, newStart)
+                                                else
+                                                    EditorState.moveClip(trackRow.trackIndex, modelData, newStart)
                                             }
                                         }
                                     }
@@ -609,7 +688,7 @@ PanelFrame {
                                 drag.axis: Drag.XAxis
                                 drag.minimumX: 0
                                 drag.maximumX: flick.contentWidth - Theme.playheadLineWidth
-                                onReleased: EditorState.playheadSeconds = playhead.x / root.pxPerSecond
+                                onReleased: EditorState.playheadSeconds = EditorState.snapTime(playhead.x / root.pxPerSecond)
                             }
                         }
                     }

@@ -10,7 +10,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 option(WITH_BGREMOVAL "Enable OpenCV-based background removal" OFF)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent)
 find_package(FFmpeg REQUIRED)
 
 if(WITH_BGREMOVAL)
@@ -26,6 +26,8 @@ add_library(driftengine STATIC
     src/engine/MediaProbe.cpp
     src/engine/MediaThumbnail.h
     src/engine/MediaThumbnail.cpp
+    src/engine/MediaWaveform.h
+    src/engine/MediaWaveform.cpp
     src/engine/TimelineExporter.h
     src/engine/TimelineExporter.cpp
 )
@@ -47,6 +49,7 @@ qt_add_executable(drift
     src/models/AssetLibrary.cpp
     src/models/EditorState.h
     src/models/EditorState.cpp
+    src/models/EditorStateOps.cpp
 )
 
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
@@ -77,6 +80,7 @@ target_link_libraries(drift PRIVATE
     Qt6::QuickControls2
     Qt6::Multimedia
     Qt6::Gui
+    Qt6::Concurrent
     driftengine
 )
 

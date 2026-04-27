@@ -33,6 +33,8 @@ public:
     Q_INVOKABLE QString filmstripAt(int index) const;
     Q_INVOKABLE void ensureMedia(int index);
     Q_INVOKABLE void ensureAllMedia();
+    Q_INVOKABLE void sortByName();
+    Q_INVOKABLE void sortByKind();
 
     QJsonArray toJsonArray() const;
     void loadFromJsonArray(const QJsonArray &assets);

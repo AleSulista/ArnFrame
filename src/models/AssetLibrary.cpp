@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QJsonObject>
 #include <QUrl>
+#include <algorithm>
 
 namespace {
 
@@ -209,6 +210,29 @@ void AssetLibrary::ensureAllMedia()
 {
     for (int i = 0; i < m_assets.size(); ++i)
         refreshMediaAt(i);
+}
+
+void AssetLibrary::sortByName()
+{
+    if (m_assets.size() < 2)
+        return;
+    beginResetModel();
+    std::sort(m_assets.begin(), m_assets.end(), [](const Asset &a, const Asset &b) {
+        return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
+    });
+    endResetModel();
+}
+
+void AssetLibrary::sortByKind()
+{
+    if (m_assets.size() < 2)
+        return;
+    beginResetModel();
+    std::sort(m_assets.begin(), m_assets.end(), [](const Asset &a, const Asset &b) {
+        const int cmp = a.kind.compare(b.kind, Qt::CaseInsensitive);
+        return cmp != 0 ? cmp < 0 : a.name.compare(b.name, Qt::CaseInsensitive) < 0;
+    });
+    endResetModel();
 }
 
 void AssetLibrary::clear()

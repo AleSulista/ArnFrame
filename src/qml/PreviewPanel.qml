@@ -176,8 +176,9 @@ PanelFrame {
                 anchors.bottomMargin: 0
 
                 property real aspect: 16 / 9
-                property real fitWidth: Math.min(width, height * aspect)
-                property real fitHeight: fitWidth / aspect
+                property bool fitMode: true
+                property real fitWidth: fitMode ? Math.min(width, height * aspect) : width
+                property real fitHeight: fitMode ? fitWidth / aspect : height
 
                 Rectangle {
                     width: viewport.fitWidth
@@ -261,11 +262,17 @@ PanelFrame {
                 spacing: 10
 
                 Text {
-                    text: "Fit"
+                    text: viewport.fitMode ? "Fit" : "Fill"
                     color: Theme.panelForeground
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeXs
                     anchors.verticalCenter: parent.verticalCenter
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: viewport.fitMode = !viewport.fitMode
+                    }
                 }
 
                 Rectangle {
@@ -279,6 +286,11 @@ PanelFrame {
                     icon: Theme.icons.maximize
                     variant: "text"
                     anchors.verticalCenter: parent.verticalCenter
+                    onClicked: {
+                        const win = root.Window.window
+                        if (win)
+                            win.visibility = win.visibility === Window.FullScreen ? Window.Windowed : Window.FullScreen
+                    }
                 }
             }
         }
