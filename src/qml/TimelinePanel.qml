@@ -109,6 +109,20 @@ PanelFrame {
         return h;
     }
 
+    // Finds the clip (if any) under a given x position (px) on a track, for
+    // dropping an effect card directly onto a clip.
+    function clipIndexAtPosition(trackIndex, xPixels) {
+        if (trackIndex < 0 || trackIndex >= tracks.length)
+            return -1
+        const seconds = xPixels / pxPerSecond
+        const clips = tracks[trackIndex].clips
+        for (var i = 0; i < clips.length; i++) {
+            if (seconds >= clips[i].start && seconds < clips[i].start + clips[i].duration)
+                return i
+        }
+        return -1
+    }
+
     function trackIndexAtY(y) {
         var cursor = 0;
         for (var i = 0; i < tracks.length; i++) {
@@ -521,22 +535,37 @@ PanelFrame {
 
                                 DropArea {
                                     anchors.fill: parent
-                                    keys: ["text/plain"]
+                                    keys: ["text/plain", "application/x-drift-effect"]
 
-                                    function updatePreview(dropX) {
+                                    function isEffectDrag(drop) {
+                                        return drop.keys.indexOf("application/x-drift-effect") !== -1
+                                    }
+
+                                    function updatePreview(drop) {
+                                        if (isEffectDrag(drop))
+                                            return
                                         const assetIndex = EditorState.draggingAssetIndex
                                         if (assetIndex < 0)
                                             return
                                         const duration = root.assetDurationSeconds(assetIndex)
-                                        const desired = Math.max(0, dropX / root.pxPerSecond)
+                                        const desired = Math.max(0, drop.x / root.pxPerSecond)
                                         root.showLandingPreview(trackRow.trackIndex, desired, duration)
                                     }
 
-                                    onEntered: (drop) => updatePreview(drop.x)
-                                    onPositionChanged: (drop) => updatePreview(drop.x)
+                                    onEntered: (drop) => updatePreview(drop)
+                                    onPositionChanged: (drop) => updatePreview(drop)
                                     onExited: root.clearLandingPreview()
                                     onDropped: (drop) => {
                                         root.clearLandingPreview()
+                                        if (isEffectDrag(drop)) {
+                                            const effectId = drop.getDataAsString("application/x-drift-effect")
+                                            const clipIndex = root.clipIndexAtPosition(trackRow.trackIndex, drop.x)
+                                            if (clipIndex >= 0) {
+                                                EditorState.addEffect(trackRow.trackIndex, clipIndex, effectId)
+                                                EditorState.selectClip(trackRow.trackIndex, clipIndex)
+                                            }
+                                            return
+                                        }
                                         const assetIndex = EditorState.draggingAssetIndex >= 0
                                                          ? EditorState.draggingAssetIndex : parseInt(drop.text)
                                         if (isNaN(assetIndex) || assetIndex < 0)

@@ -121,6 +121,7 @@ qt_add_qml_module(drift
         src/qml/components/ClipFilmstrip.qml
         src/qml/components/AppScrollBar.qml
         src/qml/components/KeyframeDiamond.qml
+        src/qml/components/PropertyKeyframeRow.qml
     RESOURCES
         resources/fonts/Inter.ttf
         resources/fonts/lucide.ttf

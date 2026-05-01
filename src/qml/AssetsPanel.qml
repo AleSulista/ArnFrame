@@ -261,17 +261,18 @@ PanelFrame {
                 readonly property string category: tabsModel.get(root.activeTab).tabId === "adjustment" ? "adjustment" : "stylize"
 
                 Text {
-                    visible: EditorState.selectedClip < 0
                     anchors.horizontalCenter: parent.horizontalCenter
-                    topPadding: 24
-                    text: "Select a clip to add effects"
+                    topPadding: 8
+                    bottomPadding: 4
+                    text: EditorState.selectedClip >= 0
+                          ? "Click + or drag an effect onto a clip"
+                          : "Select a clip to use +, or drag an effect onto any clip"
                     color: Theme.mutedForeground
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSm
+                    font.pixelSize: Theme.fontSizeXs
                 }
 
                 Flickable {
-                    visible: EditorState.selectedClip >= 0
                     width: parent.width
                     height: parent.height
                     contentHeight: effectsGrid.height + 24
@@ -296,24 +297,37 @@ PanelFrame {
                                 width: visible ? Theme.assetCardWidth : 0
                                 height: visible ? 56 : 0
                                 radius: Theme.radiusSm
-                                color: cardMouse.containsMouse ? Theme.panelSecondaryBg : Theme.panelAccent
+                                color: cardHover.hovered ? Theme.panelSecondaryBg : Theme.panelAccent
+
+                                Drag.active: effectDrag.active
+                                Drag.dragType: Drag.Automatic
+                                Drag.supportedActions: Qt.CopyAction
+                                Drag.mimeData: { "application/x-drift-effect": effectCard.modelData.id }
+
+                                HoverHandler { id: cardHover }
+                                DragHandler { id: effectDrag }
 
                                 Text {
                                     anchors.centerIn: parent
+                                    anchors.margins: 4
                                     text: effectCard.modelData.label
                                     color: Theme.panelForeground
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeCard
                                     wrapMode: Text.WordWrap
-                                    width: parent.width - 8
+                                    width: parent.width - 28
                                     horizontalAlignment: Text.AlignHCenter
                                 }
 
-                                MouseArea {
-                                    id: cardMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
+                                IconButton {
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: 3
+                                    icon: Theme.icons.plus
+                                    variant: "ghost"
+                                    buttonSize: 18
+                                    iconSize: 12
+                                    buttonEnabled: EditorState.selectedClip >= 0
                                     onClicked: EditorState.addEffect(
                                                    EditorState.selectedTrack, EditorState.selectedClip,
                                                    effectCard.modelData.id)
