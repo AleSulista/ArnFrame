@@ -1,5 +1,6 @@
 #include <QtTest>
 
+#include <QColor>
 #include <QJsonArray>
 #include <QJsonObject>
 
@@ -20,6 +21,8 @@ private slots:
     void volumeKeyframeSerialization();
     void projectLoadsLegacyV1Format();
     void trackAllowsClipTypes();
+    void textStyleAndBlendModeSerialization();
+    void effectCatalogIdSerialization();
 };
 
 void CoreTest::timeConversion()
@@ -199,6 +202,78 @@ void CoreTest::trackAllowsClipTypes()
     drift::Track audioTrack{.type = drift::TrackType::Audio};
     QVERIFY(audioTrack.allowsClipType(drift::ClipType::Audio));
     QVERIFY(!audioTrack.allowsClipType(drift::ClipType::Video));
+}
+
+void CoreTest::textStyleAndBlendModeSerialization()
+{
+    drift::Project project;
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-textstyle");
+    clip.type = drift::ClipType::Text;
+    clip.name = QStringLiteral("Title");
+    clip.textContent = QStringLiteral("Hello");
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(3.0);
+    clip.blendMode = drift::BlendMode::Multiply;
+    clip.textStyle.fontFamily = QStringLiteral("Courier New");
+    clip.textStyle.pixelSize = 88;
+    clip.textStyle.color = QColor(10, 20, 30, 200);
+    clip.textStyle.bold = false;
+    clip.textStyle.italic = true;
+    clip.textStyle.align = drift::TextAlign::Right;
+    clip.textStyle.outlineWidth = 2.5;
+    clip.textStyle.outlineColor = QColor(255, 0, 0);
+    clip.textStyle.boxEnabled = true;
+    clip.textStyle.boxColor = QColor(0, 0, 0, 100);
+    clip.textStyle.boxPadding = 12.0;
+    project.tracks()[2].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    const drift::Clip &loadedClip = loaded.tracks()[2].clips[0];
+    QCOMPARE(loadedClip.blendMode, drift::BlendMode::Multiply);
+    QCOMPARE(loadedClip.textStyle.fontFamily, QStringLiteral("Courier New"));
+    QCOMPARE(loadedClip.textStyle.pixelSize, 88);
+    QCOMPARE(loadedClip.textStyle.color, QColor(10, 20, 30, 200));
+    QCOMPARE(loadedClip.textStyle.bold, false);
+    QCOMPARE(loadedClip.textStyle.italic, true);
+    QCOMPARE(loadedClip.textStyle.align, drift::TextAlign::Right);
+    QCOMPARE(loadedClip.textStyle.outlineWidth, 2.5);
+    QCOMPARE(loadedClip.textStyle.outlineColor, QColor(255, 0, 0));
+    QCOMPARE(loadedClip.textStyle.boxEnabled, true);
+    QCOMPARE(loadedClip.textStyle.boxColor, QColor(0, 0, 0, 100));
+    QCOMPARE(loadedClip.textStyle.boxPadding, 12.0);
+}
+
+void CoreTest::effectCatalogIdSerialization()
+{
+    drift::Project project;
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-effects");
+    clip.type = drift::ClipType::Video;
+    clip.name = QStringLiteral("Video");
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(2.0);
+
+    drift::Effect effect;
+    effect.name = QStringLiteral("eq");
+    effect.catalogId = QStringLiteral("adjust.contrast");
+    effect.parameters.insert(QStringLiteral("contrast"), 1.4);
+    clip.effects.append(effect);
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
+    QCOMPARE(loadedClip.effects.size(), 1);
+    QCOMPARE(loadedClip.effects[0].catalogId, QStringLiteral("adjust.contrast"));
+    QCOMPARE(loadedClip.effects[0].parameters.value(QStringLiteral("contrast")).toDouble(), 1.4);
 }
 
 QTEST_MAIN(CoreTest)

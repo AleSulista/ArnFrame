@@ -4,13 +4,36 @@
 #include "EffectProcessor.h"
 #include "core/Clip.h"
 
+#include <QFont>
+#include <QFontMetrics>
 #include <QImageReader>
 #include <QPainter>
-#include <QFont>
+#include <QPainterPath>
 #include <QSet>
 #include <QtMath>
 
 namespace {
+
+QPainter::CompositionMode toQtComposition(drift::BlendMode mode)
+{
+    switch (mode) {
+    case drift::BlendMode::Multiply:
+        return QPainter::CompositionMode_Multiply;
+    case drift::BlendMode::Screen:
+        return QPainter::CompositionMode_Screen;
+    case drift::BlendMode::Overlay:
+        return QPainter::CompositionMode_Overlay;
+    case drift::BlendMode::Add:
+        return QPainter::CompositionMode_Plus;
+    case drift::BlendMode::Darken:
+        return QPainter::CompositionMode_Darken;
+    case drift::BlendMode::Lighten:
+        return QPainter::CompositionMode_Lighten;
+    case drift::BlendMode::Normal:
+        break;
+    }
+    return QPainter::CompositionMode_SourceOver;
+}
 
 void collectActivePaths(const drift::Project *project, drift::TimeUs timelineUs, QSet<QString> &videoPaths,
                         QSet<QString> &audioPaths)
@@ -88,11 +111,46 @@ void drawClipFrame(QPainter &painter, const QImage &frame, const drift::Clip &cl
 
     painter.save();
     painter.setOpacity(opacityForClip(clip, timelineUs));
+    painter.setCompositionMode(toQtComposition(clip.blendMode));
     painter.translate(posX * canvasWidth, posY * canvasHeight);
     painter.rotate(rotation);
     painter.scale(scale, scale);
     painter.drawImage(QPointF(-frame.width() / 2.0, -frame.height() / 2.0), frame);
     painter.restore();
+}
+
+void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, int w, int h, double scale)
+{
+    const drift::TextStyle &s = clip.textStyle;
+    QFont font(s.fontFamily);
+    font.setPixelSize(qMax(8, static_cast<int>(s.pixelSize * scale)));
+    font.setBold(s.bold);
+    font.setItalic(s.italic);
+    p.setFont(font);
+
+    const int flag = s.align == drift::TextAlign::Left    ? Qt::AlignLeft
+                     : s.align == drift::TextAlign::Right ? Qt::AlignRight
+                                                           : Qt::AlignHCenter;
+    const QRect box(-w / 2, -h / 2, w, h);
+    const QFontMetrics fm(font);
+
+    if (s.boxEnabled) {
+        QRect tb = fm.boundingRect(box, flag | Qt::AlignVCenter, text);
+        tb.adjust(-s.boxPadding, -s.boxPadding, s.boxPadding, s.boxPadding);
+        p.fillRect(tb, s.boxColor);
+    }
+
+    if (s.outlineWidth > 0.0) { // stroke via QPainterPath
+        const QRect textBounds = fm.boundingRect(box, flag | Qt::AlignVCenter, text);
+        QPainterPath path;
+        path.addText(textBounds.left(), textBounds.top() + fm.ascent(), font, text);
+        p.setPen(QPen(s.outlineColor, s.outlineWidth * scale));
+        p.setBrush(s.color);
+        p.drawPath(path);
+    } else {
+        p.setPen(s.color);
+        p.drawText(box, flag | Qt::AlignVCenter, text);
+    }
 }
 
 } // namespace
@@ -154,18 +212,11 @@ QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs) const
 
             painter.save();
             painter.setOpacity(opacityForClip(clip, timelineUs));
+            painter.setCompositionMode(toQtComposition(clip.blendMode));
             painter.translate(posX * width, posY * height);
             painter.rotate(rotation);
-            painter.scale(scale, scale);
 
-            QFont font = painter.font();
-            font.setPixelSize(qMax(24, static_cast<int>(height / 12 * scale)));
-            font.setBold(true);
-            painter.setFont(font);
-            painter.setPen(Qt::white);
-
-            const QRect textRect(-width / 2, -height / 2, width, height);
-            painter.drawText(textRect, Qt::AlignCenter, text);
+            drawStyledText(painter, clip, text, width, height, scale);
             painter.restore();
         }
     }

@@ -4,10 +4,12 @@
 #include "core/Clip.h"
 #include "core/TimelineOps.h"
 #include "core/commands/ProjectCommands.h"
+#include "engine/EffectCatalog.h"
 #include "engine/MediaThumbnail.h"
 #include "engine/MediaWaveform.h"
 #include "engine/TimelineExporter.h"
 
+#include <QColor>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -88,8 +90,128 @@ QVariantList AppController::tracks() const
     return result;
 }
 
+namespace {
+
+QVariantMap textStyleToMap(const drift::TextStyle &s)
+{
+    return {
+        {QStringLiteral("fontFamily"), s.fontFamily},
+        {QStringLiteral("pixelSize"), s.pixelSize},
+        {QStringLiteral("color"), s.color.name(QColor::HexArgb)},
+        {QStringLiteral("bold"), s.bold},
+        {QStringLiteral("italic"), s.italic},
+        {QStringLiteral("align"), drift::textAlignToString(s.align)},
+        {QStringLiteral("outlineWidth"), s.outlineWidth},
+        {QStringLiteral("outlineColor"), s.outlineColor.name(QColor::HexArgb)},
+        {QStringLiteral("boxEnabled"), s.boxEnabled},
+        {QStringLiteral("boxColor"), s.boxColor.name(QColor::HexArgb)},
+        {QStringLiteral("boxPadding"), s.boxPadding},
+    };
+}
+
+drift::KeyframeTrack<double> *trackForProp(drift::Clip &clip, const QString &prop)
+{
+    if (prop == QStringLiteral("opacity"))
+        return &clip.opacity;
+    if (prop == QStringLiteral("posX"))
+        return &clip.posX;
+    if (prop == QStringLiteral("posY"))
+        return &clip.posY;
+    if (prop == QStringLiteral("scale"))
+        return &clip.scale;
+    if (prop == QStringLiteral("rotation"))
+        return &clip.rotation;
+    if (prop == QStringLiteral("volume"))
+        return &clip.volume;
+    return nullptr;
+}
+
+const drift::KeyframeTrack<double> *trackForProp(const drift::Clip &clip, const QString &prop)
+{
+    return trackForProp(const_cast<drift::Clip &>(clip), prop);
+}
+
+drift::TextStyle textStyleForPreset(const QString &presetId)
+{
+    drift::TextStyle s;
+    if (presetId == QStringLiteral("title")) {
+        s.pixelSize = 96;
+        s.bold = true;
+        s.align = drift::TextAlign::Center;
+        s.outlineWidth = 2.0;
+        s.outlineColor = Qt::black;
+    } else if (presetId == QStringLiteral("lower third")) {
+        s.pixelSize = 48;
+        s.bold = true;
+        s.align = drift::TextAlign::Left;
+        s.boxEnabled = true;
+        s.boxColor = QColor(0, 0, 0, 160);
+        s.boxPadding = 12.0;
+    } else if (presetId == QStringLiteral("subtitle")) {
+        s.pixelSize = 40;
+        s.bold = false;
+        s.align = drift::TextAlign::Center;
+        s.boxEnabled = true;
+        s.boxColor = QColor(0, 0, 0, 140);
+        s.boxPadding = 8.0;
+    }
+    return s;
+}
+
+QVariantMap effectToMap(const drift::Effect &effect)
+{
+    const EffectDef *def = effectDefForId(effect.catalogId);
+    QVariantList params;
+    if (def) {
+        for (const EffectParamDef &paramDef : def->params) {
+            params.append(QVariantMap{
+                {QStringLiteral("key"), paramDef.key},
+                {QStringLiteral("label"), paramDef.label},
+                {QStringLiteral("min"), paramDef.min},
+                {QStringLiteral("max"), paramDef.max},
+                {QStringLiteral("value"), effect.parameters.value(paramDef.key, paramDef.def)},
+            });
+        }
+    }
+    return {
+        {QStringLiteral("catalogId"), effect.catalogId},
+        {QStringLiteral("label"), def ? def->label : effect.name},
+        {QStringLiteral("params"), params},
+    };
+}
+
+QVariantList keyframeListToVariant(const drift::KeyframeTrack<double> &track, drift::TimeUs timelineStart)
+{
+    QVariantList out;
+    for (auto it = track.keyframes().constBegin(); it != track.keyframes().constEnd(); ++it) {
+        out.append(QVariantMap{
+            {QStringLiteral("seconds"), drift::usToSeconds(timelineStart + it.key())},
+            {QStringLiteral("value"), it.value()},
+        });
+    }
+    return out;
+}
+
+QVariantMap keyframesToMap(const drift::Clip &clip)
+{
+    return {
+        {QStringLiteral("opacity"), keyframeListToVariant(clip.opacity, clip.timelineStart)},
+        {QStringLiteral("posX"), keyframeListToVariant(clip.posX, clip.timelineStart)},
+        {QStringLiteral("posY"), keyframeListToVariant(clip.posY, clip.timelineStart)},
+        {QStringLiteral("scale"), keyframeListToVariant(clip.scale, clip.timelineStart)},
+        {QStringLiteral("rotation"), keyframeListToVariant(clip.rotation, clip.timelineStart)},
+        {QStringLiteral("volume"), keyframeListToVariant(clip.volume, clip.timelineStart)},
+    };
+}
+
+} // namespace
+
 QVariantMap AppController::clipToMap(const drift::Clip &clip) const
 {
+    QVariantList effects;
+    for (const drift::Effect &effect : clip.effects)
+        effects.append(effectToMap(effect));
+
     return {
         {QStringLiteral("id"), clip.id},
         {QStringLiteral("name"), clip.name},
@@ -98,6 +220,8 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("thumbnailPath"), clip.thumbnailPath},
         {QStringLiteral("filmstripPath"), clip.filmstripPath},
         {QStringLiteral("textContent"), clip.textContent},
+        {QStringLiteral("textStyle"), textStyleToMap(clip.textStyle)},
+        {QStringLiteral("blendMode"), drift::blendModeToString(clip.blendMode)},
         {QStringLiteral("start"), drift::usToSeconds(clip.timelineStart)},
         {QStringLiteral("duration"), drift::usToSeconds(clip.timelineDuration)},
         {QStringLiteral("inPoint"), drift::usToSeconds(clip.srcIn)},
@@ -105,6 +229,8 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("assetId"), clip.assetId},
         {QStringLiteral("assetIndex"), assetIndexForClip(clip)},
         {QStringLiteral("volume"), clip.volume.isEmpty() ? 1.0 : clip.volume.evaluateAt(0)},
+        {QStringLiteral("effects"), effects},
+        {QStringLiteral("keyframes"), keyframesToMap(clip)},
     };
 }
 
@@ -756,6 +882,254 @@ void AppController::setClipTextContent(int trackIndex, int clipIndex, const QStr
     clip.name = clip.textContent.left(32);
     pushProjectEdit(before, QStringLiteral("Text updated"));
     finishEdit(QStringLiteral("Text updated"));
+}
+
+void AppController::setTextStyle(int trackIndex, int clipIndex, const QVariantMap &m)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Text)
+        return;
+
+    const drift::Project before = m_project;
+    drift::TextStyle &s = clip.textStyle;
+    if (m.contains(QStringLiteral("fontFamily")))
+        s.fontFamily = m.value(QStringLiteral("fontFamily")).toString();
+    if (m.contains(QStringLiteral("pixelSize")))
+        s.pixelSize = m.value(QStringLiteral("pixelSize")).toInt();
+    if (m.contains(QStringLiteral("color")))
+        s.color = QColor(m.value(QStringLiteral("color")).toString());
+    if (m.contains(QStringLiteral("bold")))
+        s.bold = m.value(QStringLiteral("bold")).toBool();
+    if (m.contains(QStringLiteral("italic")))
+        s.italic = m.value(QStringLiteral("italic")).toBool();
+    if (m.contains(QStringLiteral("align")))
+        s.align = drift::textAlignFromString(m.value(QStringLiteral("align")).toString());
+    if (m.contains(QStringLiteral("outlineWidth")))
+        s.outlineWidth = m.value(QStringLiteral("outlineWidth")).toDouble();
+    if (m.contains(QStringLiteral("outlineColor")))
+        s.outlineColor = QColor(m.value(QStringLiteral("outlineColor")).toString());
+    if (m.contains(QStringLiteral("boxEnabled")))
+        s.boxEnabled = m.value(QStringLiteral("boxEnabled")).toBool();
+    if (m.contains(QStringLiteral("boxColor")))
+        s.boxColor = QColor(m.value(QStringLiteral("boxColor")).toString());
+    if (m.contains(QStringLiteral("boxPadding")))
+        s.boxPadding = m.value(QStringLiteral("boxPadding")).toDouble();
+    pushProjectEdit(before, QStringLiteral("Edit text style"));
+    finishEdit(QStringLiteral("Text style updated"));
+}
+
+void AppController::applyTextPreset(int trackIndex, int clipIndex, const QString &presetId)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Text)
+        return;
+
+    const drift::Project before = m_project;
+    clip.textStyle = textStyleForPreset(presetId);
+    pushProjectEdit(before, QStringLiteral("Apply text preset"));
+    finishEdit(QStringLiteral("Text preset applied"));
+}
+
+void AppController::setClipBlendMode(int trackIndex, int clipIndex, const QString &mode)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Project before = m_project;
+    track.clips[clipIndex].blendMode = drift::blendModeFromString(mode);
+    pushProjectEdit(before, QStringLiteral("Blend mode changed"));
+    finishEdit(QStringLiteral("Blend mode updated"));
+}
+
+void AppController::setClipKeyframe(int trackIndex, int clipIndex, const QString &prop, double atSeconds,
+                                    double value)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    drift::KeyframeTrack<double> *kt = trackForProp(clip, prop);
+    if (!kt)
+        return;
+
+    const drift::Project before = m_project;
+    const drift::TimeUs rel = qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds) - clip.timelineStart);
+    kt->setKeyframe(rel, value);
+    pushProjectEdit(before, QStringLiteral("Add keyframe"));
+    finishEdit(QStringLiteral("Keyframe set"));
+}
+
+void AppController::removeClipKeyframe(int trackIndex, int clipIndex, const QString &prop, double atSeconds)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    drift::KeyframeTrack<double> *kt = trackForProp(clip, prop);
+    if (!kt)
+        return;
+
+    const drift::Project before = m_project;
+    const drift::TimeUs rel = qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds) - clip.timelineStart);
+    kt->removeKeyframe(rel);
+    pushProjectEdit(before, QStringLiteral("Remove keyframe"));
+    finishEdit(QStringLiteral("Keyframe removed"));
+}
+
+QVariantList AppController::clipKeyframes(int trackIndex, int clipIndex, const QString &prop) const
+{
+    QVariantList out;
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return out;
+
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return out;
+
+    const drift::Clip &clip = track.clips.at(clipIndex);
+    const drift::KeyframeTrack<double> *kt = trackForProp(clip, prop);
+    if (!kt)
+        return out;
+
+    return keyframeListToVariant(*kt, clip.timelineStart);
+}
+
+void AppController::setKeyframeInterpolation(int trackIndex, int clipIndex, const QString &prop,
+                                             const QString &mode)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    drift::KeyframeTrack<double> *kt = trackForProp(clip, prop);
+    if (!kt)
+        return;
+
+    const drift::Project before = m_project;
+    kt->setInterpolation(mode == QStringLiteral("hold") ? drift::Interpolation::Hold
+                                                        : drift::Interpolation::Linear);
+    pushProjectEdit(before, QStringLiteral("Keyframe interpolation changed"));
+    finishEdit(QStringLiteral("Keyframe interpolation updated"));
+}
+
+QVariantList AppController::effectCatalog() const
+{
+    QVariantList out;
+    for (const EffectDef &def : ::effectCatalog()) {
+        QVariantList params;
+        for (const EffectParamDef &p : def.params) {
+            params.append(QVariantMap{
+                {QStringLiteral("key"), p.key},
+                {QStringLiteral("label"), p.label},
+                {QStringLiteral("min"), p.min},
+                {QStringLiteral("max"), p.max},
+                {QStringLiteral("default"), p.def},
+            });
+        }
+        out.append(QVariantMap{
+            {QStringLiteral("id"), def.id},
+            {QStringLiteral("label"), def.label},
+            {QStringLiteral("category"), def.category},
+            {QStringLiteral("params"), params},
+        });
+    }
+    return out;
+}
+
+void AppController::addEffect(int trackIndex, int clipIndex, const QString &effectId)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const EffectDef *def = effectDefForId(effectId);
+    if (!def)
+        return;
+
+    drift::Effect effect;
+    effect.name = def->filterName;
+    effect.catalogId = def->id;
+    for (auto it = def->fixedParams.constBegin(); it != def->fixedParams.constEnd(); ++it)
+        effect.parameters.insert(it.key(), it.value());
+    for (const EffectParamDef &p : def->params)
+        effect.parameters.insert(p.key, p.def);
+
+    const drift::Project before = m_project;
+    track.clips[clipIndex].effects.append(effect);
+    pushProjectEdit(before, QStringLiteral("Add effect"));
+    finishEdit(QStringLiteral("Effect added"));
+}
+
+void AppController::removeEffect(int trackIndex, int clipIndex, int effectIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (effectIndex < 0 || effectIndex >= clip.effects.size())
+        return;
+
+    const drift::Project before = m_project;
+    clip.effects.removeAt(effectIndex);
+    pushProjectEdit(before, QStringLiteral("Remove effect"));
+    finishEdit(QStringLiteral("Effect removed"));
+}
+
+void AppController::setEffectParam(int trackIndex, int clipIndex, int effectIndex, const QString &key,
+                                   double value)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (effectIndex < 0 || effectIndex >= clip.effects.size())
+        return;
+
+    const drift::Project before = m_project;
+    clip.effects[effectIndex].parameters.insert(key, value);
+    pushProjectEdit(before, QStringLiteral("Edit effect"));
+    finishEdit(QStringLiteral("Effect updated"));
 }
 
 void AppController::setTrackMuted(int trackIndex, bool muted)

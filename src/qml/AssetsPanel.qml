@@ -242,13 +242,86 @@ PanelFrame {
             }
 
             Text {
-                visible: ["stickers", "effects", "adjustment", "settings"].indexOf(tabsModel.get(activeTab).tabId) >= 0
+                visible: ["stickers", "settings"].indexOf(tabsModel.get(activeTab).tabId) >= 0
                 anchors.centerIn: parent
                 anchors.verticalCenterOffset: Theme.panelHeaderHeight / 2
                 text: tabsModel.get(activeTab).label + " — coming soon"
                 color: Theme.mutedForeground
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSm
+            }
+
+            // Effects / Adjustment tab panel
+            Column {
+                id: effectsTab
+                visible: tabsModel.get(activeTab).tabId === "effects" || tabsModel.get(activeTab).tabId === "adjustment"
+                width: parent.width
+                height: parent.height - Theme.panelHeaderHeight
+
+                readonly property string category: tabsModel.get(root.activeTab).tabId === "adjustment" ? "adjustment" : "stylize"
+
+                Text {
+                    visible: EditorState.selectedClip < 0
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    topPadding: 24
+                    text: "Select a clip to add effects"
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSm
+                }
+
+                Flickable {
+                    visible: EditorState.selectedClip >= 0
+                    width: parent.width
+                    height: parent.height
+                    contentHeight: effectsGrid.height + 24
+                    clip: true
+                    ScrollBar.vertical: AppScrollBar { }
+
+                    Grid {
+                        id: effectsGrid
+                        x: 12
+                        y: 12
+                        width: parent.width - 24
+                        columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
+                        columnSpacing: Theme.assetCardGap
+                        rowSpacing: Theme.assetCardGap
+
+                        Repeater {
+                            model: EditorState.effectCatalog()
+                            delegate: Rectangle {
+                                id: effectCard
+                                required property var modelData
+                                visible: modelData.category === effectsTab.category
+                                width: visible ? Theme.assetCardWidth : 0
+                                height: visible ? 56 : 0
+                                radius: Theme.radiusSm
+                                color: cardMouse.containsMouse ? Theme.panelSecondaryBg : Theme.panelAccent
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: effectCard.modelData.label
+                                    color: Theme.panelForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeCard
+                                    wrapMode: Text.WordWrap
+                                    width: parent.width - 8
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+
+                                MouseArea {
+                                    id: cardMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: EditorState.addEffect(
+                                                   EditorState.selectedTrack, EditorState.selectedClip,
+                                                   effectCard.modelData.id)
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             Flickable {

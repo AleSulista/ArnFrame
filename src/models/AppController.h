@@ -99,6 +99,20 @@ public:
     Q_INVOKABLE void setClipStart(int trackIndex, int clipIndex, double start);
     Q_INVOKABLE void setClipDuration(int trackIndex, int clipIndex, double duration);
     Q_INVOKABLE void setClipTextContent(int trackIndex, int clipIndex, const QString &text);
+    Q_INVOKABLE void setTextStyle(int trackIndex, int clipIndex, const QVariantMap &style);
+    Q_INVOKABLE void applyTextPreset(int trackIndex, int clipIndex, const QString &presetId);
+    Q_INVOKABLE void setClipBlendMode(int trackIndex, int clipIndex, const QString &mode);
+    Q_INVOKABLE void setClipKeyframe(int trackIndex, int clipIndex, const QString &prop, double atSeconds,
+                                     double value);
+    Q_INVOKABLE void removeClipKeyframe(int trackIndex, int clipIndex, const QString &prop, double atSeconds);
+    Q_INVOKABLE QVariantList clipKeyframes(int trackIndex, int clipIndex, const QString &prop) const;
+    Q_INVOKABLE void setKeyframeInterpolation(int trackIndex, int clipIndex, const QString &prop,
+                                              const QString &mode);
+    Q_INVOKABLE QVariantList effectCatalog() const;
+    Q_INVOKABLE void addEffect(int trackIndex, int clipIndex, const QString &effectId);
+    Q_INVOKABLE void removeEffect(int trackIndex, int clipIndex, int effectIndex);
+    Q_INVOKABLE void setEffectParam(int trackIndex, int clipIndex, int effectIndex, const QString &key,
+                                    double value);
     Q_INVOKABLE void setTrackMuted(int trackIndex, bool muted);
     Q_INVOKABLE void setTrackHidden(int trackIndex, bool hidden);
     Q_INVOKABLE bool trackMuted(int trackIndex) const;

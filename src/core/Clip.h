@@ -3,6 +3,7 @@
 #include "Effect.h"
 #include "Keyframe.h"
 #include "MediaAsset.h"
+#include "TextStyle.h"
 #include "Time.h"
 
 #include <QList>
@@ -14,6 +15,11 @@ enum class ClipType { Video, Audio, Image, Text };
 
 QString clipTypeToString(ClipType type);
 ClipType clipTypeFromString(const QString &type);
+
+enum class BlendMode { Normal, Multiply, Screen, Overlay, Add, Darken, Lighten };
+
+QString blendModeToString(BlendMode mode);
+BlendMode blendModeFromString(const QString &mode);
 
 struct Clip
 {
@@ -28,10 +34,13 @@ struct Clip
 
     QString name;
     QString textContent;
+    TextStyle textStyle; // only meaningful when type == Text
 
     QString path;
     QString thumbnailPath;
     QString filmstripPath;
+
+    BlendMode blendMode = BlendMode::Normal;
 
     KeyframeTrack<double> opacity;
     KeyframeTrack<double> posX;

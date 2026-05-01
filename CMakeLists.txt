@@ -28,6 +28,8 @@ add_library(driftcore STATIC
     src/core/MediaAsset.cpp
     src/core/Clip.h
     src/core/Clip.cpp
+    src/core/TextStyle.h
+    src/core/TextStyle.cpp
     src/core/Track.h
     src/core/Track.cpp
     src/core/Project.h
@@ -58,6 +60,8 @@ add_library(driftengine STATIC
     src/engine/ClipReaderPool.cpp
     src/engine/EffectProcessor.h
     src/engine/EffectProcessor.cpp
+    src/engine/EffectCatalog.h
+    src/engine/EffectCatalog.cpp
     src/engine/FrameCompositor.h
     src/engine/FrameCompositor.cpp
     src/engine/AudioMixer.h
@@ -116,6 +120,7 @@ qt_add_qml_module(drift
         src/qml/components/PanelFrame.qml
         src/qml/components/ClipFilmstrip.qml
         src/qml/components/AppScrollBar.qml
+        src/qml/components/KeyframeDiamond.qml
     RESOURCES
         resources/fonts/Inter.ttf
         resources/fonts/lucide.ttf

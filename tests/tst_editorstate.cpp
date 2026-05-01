@@ -16,6 +16,7 @@ private slots:
     void undoTrackMute();
     void undoBookmarkAdd();
     void projectPersistenceRoundTrip();
+    void textStyleBlendModeKeyframesAndEffects();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -91,6 +92,63 @@ void EditorStateTest::projectPersistenceRoundTrip()
     QVERIFY(state.durationSeconds() > 0.0);
     QVERIFY(state.trackMuted(1));
     QCOMPARE(state.bookmarks().size(), 1);
+}
+
+void EditorStateTest::textStyleBlendModeKeyframesAndEffects()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("Hello"), 0.0);
+
+    const int track = state.selectedTrack();
+    const int clip = state.selectedClip();
+    QVERIFY(track >= 0);
+    QVERIFY(clip >= 0);
+
+    // Text style: partial update only touches the given keys.
+    state.setTextStyle(track, clip,
+                       QVariantMap{{"pixelSize", 120}, {"bold", false}, {"color", QStringLiteral("#ffff0000")}});
+    QVariantMap style = state.selectedClipData().value(QStringLiteral("textStyle")).toMap();
+    QCOMPARE(style.value(QStringLiteral("pixelSize")).toInt(), 120);
+    QCOMPARE(style.value(QStringLiteral("bold")).toBool(), false);
+    QCOMPARE(style.value(QStringLiteral("color")).toString(), QStringLiteral("#ffff0000"));
+
+    // Presets overwrite the whole style.
+    state.applyTextPreset(track, clip, QStringLiteral("title"));
+    style = state.selectedClipData().value(QStringLiteral("textStyle")).toMap();
+    QCOMPARE(style.value(QStringLiteral("pixelSize")).toInt(), 96);
+    QCOMPARE(style.value(QStringLiteral("bold")).toBool(), true);
+
+    // Blend mode.
+    state.setClipBlendMode(track, clip, QStringLiteral("multiply"));
+    QCOMPARE(state.selectedClipData().value(QStringLiteral("blendMode")).toString(), QStringLiteral("multiply"));
+
+    // Keyframes: add, list, remove.
+    state.setClipKeyframe(track, clip, QStringLiteral("opacity"), 0.0, 0.5);
+    QVariantList keyframes = state.clipKeyframes(track, clip, QStringLiteral("opacity"));
+    QCOMPARE(keyframes.size(), 1);
+    QCOMPARE(keyframes.first().toMap().value(QStringLiteral("value")).toDouble(), 0.5);
+
+    state.removeClipKeyframe(track, clip, QStringLiteral("opacity"), 0.0);
+    QCOMPARE(state.clipKeyframes(track, clip, QStringLiteral("opacity")).size(), 0);
+
+    // Effect catalog wiring: add a known effect, tweak its param, remove it.
+    const QVariantList catalog = state.effectCatalog();
+    QVERIFY(!catalog.isEmpty());
+
+    state.addEffect(track, clip, QStringLiteral("adjust.contrast"));
+    QVariantList effects = state.selectedClipData().value(QStringLiteral("effects")).toList();
+    QCOMPARE(effects.size(), 1);
+    QCOMPARE(effects.first().toMap().value(QStringLiteral("catalogId")).toString(),
+             QStringLiteral("adjust.contrast"));
+
+    state.setEffectParam(track, clip, 0, QStringLiteral("contrast"), 2.5);
+    effects = state.selectedClipData().value(QStringLiteral("effects")).toList();
+    const QVariantList params = effects.first().toMap().value(QStringLiteral("params")).toList();
+    QCOMPARE(params.first().toMap().value(QStringLiteral("value")).toDouble(), 2.5);
+
+    state.removeEffect(track, clip, 0);
+    QCOMPARE(state.selectedClipData().value(QStringLiteral("effects")).toList().size(), 0);
 }
 
 QTEST_MAIN(EditorStateTest)

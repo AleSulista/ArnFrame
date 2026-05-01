@@ -5,8 +5,12 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#include "core/Clip.h"
+#include "core/Project.h"
 #include "engine/ClipReader.h"
+#include "engine/EffectCatalog.h"
 #include "engine/EffectProcessor.h"
+#include "engine/FrameCompositor.h"
 
 class EngineTest : public QObject
 {
@@ -16,6 +20,8 @@ private slots:
     void effectProcessorPassthroughWithoutEffects();
     void effectProcessorBrightness();
     void clipReaderSequentialAndSeek();
+    void compositorAppliesMultiplyBlendMode();
+    void adjustmentEffectContrastCatalogEntry();
 
 private:
     static QString makeColorSegmentsVideo(QTemporaryDir &dir);
@@ -108,6 +114,77 @@ void EngineTest::clipReaderSequentialAndSeek()
     // Backward jump forces a keyframe reseek and must not return a stale frame.
     QCOMPARE(dominant(500'000), QChar('R'));
     QCOMPARE(dominant(1'500'000), QChar('G'));
+}
+
+void EngineTest::compositorAppliesMultiplyBlendMode()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    auto writeSolidImage = [&](const QString &name, QColor color) {
+        QImage image(64, 64, QImage::Format_RGBA8888);
+        image.fill(color);
+        const QString path = dir.filePath(name);
+        image.save(path, "PNG");
+        return path;
+    };
+
+    auto compositeOverBackground = [&](QColor background) {
+        drift::Project project;
+        project.setResolution(64, 64);
+        project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+        drift::Clip bottom;
+        bottom.id = QStringLiteral("bottom");
+        bottom.type = drift::ClipType::Image;
+        bottom.path = writeSolidImage(QStringLiteral("bottom.png"), background);
+        bottom.timelineStart = 0;
+        bottom.timelineDuration = drift::secondsToUs(1.0);
+        project.tracks()[0].clips.append(bottom);
+
+        drift::Clip top;
+        top.id = QStringLiteral("top");
+        top.type = drift::ClipType::Image;
+        top.path = writeSolidImage(QStringLiteral("top.png"), Qt::red);
+        top.blendMode = drift::BlendMode::Multiply;
+        top.timelineStart = 0;
+        top.timelineDuration = drift::secondsToUs(1.0);
+        project.tracks()[3].clips.append(top);
+
+        FrameCompositor compositor;
+        compositor.setProject(&project);
+        return compositor.compositeAt(0);
+    };
+
+    const QImage overGreen = compositeOverBackground(Qt::green);
+    QCOMPARE(overGreen.pixelColor(32, 32), QColor(0, 0, 0));
+
+    const QImage overWhite = compositeOverBackground(Qt::white);
+    QCOMPARE(overWhite.pixelColor(32, 32), QColor(255, 0, 0));
+}
+
+void EngineTest::adjustmentEffectContrastCatalogEntry()
+{
+    const EffectDef *def = effectDefForId(QStringLiteral("adjust.contrast"));
+    QVERIFY(def);
+    QCOMPARE(def->filterName, QStringLiteral("eq"));
+    QCOMPARE(def->params.size(), 1);
+    QCOMPARE(def->params[0].key, QStringLiteral("contrast"));
+
+    // eq's contrast scales around the 128 midpoint, so a gray above it gets
+    // pushed brighter (a gray below it would get pushed darker instead).
+    QImage image(64, 64, QImage::Format_RGBA8888);
+    image.fill(QColor(180, 180, 180));
+
+    drift::Effect effect;
+    effect.name = def->filterName;
+    effect.catalogId = def->id;
+    effect.parameters.insert(def->params[0].key, 2.0);
+
+    const QImage out = EffectProcessor::applyEffects(image, {effect});
+    QVERIFY(!out.isNull());
+    const QRgb pixel = out.pixel(32, 32);
+    QVERIFY(qRed(pixel) > 180 || qGreen(pixel) > 180 || qBlue(pixel) > 180);
 }
 
 QTEST_MAIN(EngineTest)

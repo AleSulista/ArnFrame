@@ -52,6 +52,7 @@ QJsonArray effectsToJson(const QList<Effect> &effects)
             params.insert(it.key(), QJsonValue::fromVariant(it.value()));
         array.append(QJsonObject{
             {QStringLiteral("name"), effect.name},
+            {QStringLiteral("catalogId"), effect.catalogId},
             {QStringLiteral("parameters"), params},
         });
     }
@@ -65,12 +66,49 @@ QList<Effect> effectsFromJson(const QJsonArray &array)
         const QJsonObject object = value.toObject();
         Effect effect;
         effect.name = object.value(QStringLiteral("name")).toString();
+        effect.catalogId = object.value(QStringLiteral("catalogId")).toString();
         const QJsonObject params = object.value(QStringLiteral("parameters")).toObject();
         for (auto it = params.constBegin(); it != params.constEnd(); ++it)
             effect.parameters.insert(it.key(), it.value().toVariant());
         effects.append(effect);
     }
     return effects;
+}
+
+QJsonObject textStyleToJson(const TextStyle &s)
+{
+    return QJsonObject{
+        {QStringLiteral("fontFamily"), s.fontFamily},
+        {QStringLiteral("pixelSize"), s.pixelSize},
+        {QStringLiteral("color"), s.color.name(QColor::HexArgb)},
+        {QStringLiteral("bold"), s.bold},
+        {QStringLiteral("italic"), s.italic},
+        {QStringLiteral("align"), textAlignToString(s.align)},
+        {QStringLiteral("outlineWidth"), s.outlineWidth},
+        {QStringLiteral("outlineColor"), s.outlineColor.name(QColor::HexArgb)},
+        {QStringLiteral("boxEnabled"), s.boxEnabled},
+        {QStringLiteral("boxColor"), s.boxColor.name(QColor::HexArgb)},
+        {QStringLiteral("boxPadding"), s.boxPadding},
+    };
+}
+
+TextStyle textStyleFromJson(const QJsonObject &o)
+{
+    TextStyle s;
+    if (o.isEmpty())
+        return s; // old projects: keep defaults
+    s.fontFamily = o.value(QStringLiteral("fontFamily")).toString(s.fontFamily);
+    s.pixelSize = o.value(QStringLiteral("pixelSize")).toInt(s.pixelSize);
+    s.color = QColor(o.value(QStringLiteral("color")).toString(s.color.name(QColor::HexArgb)));
+    s.bold = o.value(QStringLiteral("bold")).toBool(s.bold);
+    s.italic = o.value(QStringLiteral("italic")).toBool(s.italic);
+    s.align = textAlignFromString(o.value(QStringLiteral("align")).toString());
+    s.outlineWidth = o.value(QStringLiteral("outlineWidth")).toDouble(s.outlineWidth);
+    s.outlineColor = QColor(o.value(QStringLiteral("outlineColor")).toString(s.outlineColor.name(QColor::HexArgb)));
+    s.boxEnabled = o.value(QStringLiteral("boxEnabled")).toBool(s.boxEnabled);
+    s.boxColor = QColor(o.value(QStringLiteral("boxColor")).toString(s.boxColor.name(QColor::HexArgb)));
+    s.boxPadding = o.value(QStringLiteral("boxPadding")).toDouble(s.boxPadding);
+    return s;
 }
 
 QJsonObject clipToJson(const Clip &clip)
@@ -81,9 +119,11 @@ QJsonObject clipToJson(const Clip &clip)
         {QStringLiteral("type"), clipTypeToString(clip.type)},
         {QStringLiteral("name"), clip.name},
         {QStringLiteral("textContent"), clip.textContent},
+        {QStringLiteral("textStyle"), textStyleToJson(clip.textStyle)},
         {QStringLiteral("path"), clip.path},
         {QStringLiteral("thumbnailPath"), clip.thumbnailPath},
         {QStringLiteral("filmstripPath"), clip.filmstripPath},
+        {QStringLiteral("blendMode"), blendModeToString(clip.blendMode)},
         {QStringLiteral("timelineStartUs"), static_cast<double>(clip.timelineStart)},
         {QStringLiteral("timelineDurationUs"), static_cast<double>(clip.timelineDuration)},
         {QStringLiteral("srcInUs"), static_cast<double>(clip.srcIn)},
@@ -106,9 +146,11 @@ Clip clipFromJsonV2(const QJsonObject &object)
     clip.type = clipTypeFromString(object.value(QStringLiteral("type")).toString());
     clip.name = object.value(QStringLiteral("name")).toString();
     clip.textContent = object.value(QStringLiteral("textContent")).toString();
+    clip.textStyle = textStyleFromJson(object.value(QStringLiteral("textStyle")).toObject());
     clip.path = object.value(QStringLiteral("path")).toString();
     clip.thumbnailPath = object.value(QStringLiteral("thumbnailPath")).toString();
     clip.filmstripPath = object.value(QStringLiteral("filmstripPath")).toString();
+    clip.blendMode = blendModeFromString(object.value(QStringLiteral("blendMode")).toString());
     clip.timelineStart = static_cast<TimeUs>(object.value(QStringLiteral("timelineStartUs")).toDouble());
     clip.timelineDuration = static_cast<TimeUs>(object.value(QStringLiteral("timelineDurationUs")).toDouble());
     clip.srcIn = static_cast<TimeUs>(object.value(QStringLiteral("srcInUs")).toDouble());
