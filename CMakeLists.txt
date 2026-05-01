@@ -10,7 +10,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 option(WITH_BGREMOVAL "Enable OpenCV-based background removal" OFF)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets)
 find_package(FFmpeg REQUIRED)
 
 if(WITH_BGREMOVAL)
@@ -80,6 +80,8 @@ qt_add_executable(drift
     src/models/AppController.h
     src/models/AppController.cpp
     src/models/EditorState.h
+    src/models/FileDialogs.h
+    src/models/FileDialogs.cpp
     src/models/AssetLibrary.h
     src/models/AssetLibrary.cpp
     src/models/TimelineModel.h
@@ -124,6 +126,7 @@ target_link_libraries(drift PRIVATE
     Qt6::QuickControls2
     Qt6::Multimedia
     Qt6::Gui
+    Qt6::Widgets
     Qt6::Concurrent
     driftcore
     driftengine

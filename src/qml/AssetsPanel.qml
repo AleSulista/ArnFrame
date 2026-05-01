@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls.Basic
-import QtQuick.Dialogs
 import Drift
 import "components"
 
@@ -8,6 +7,14 @@ PanelFrame {
     id: root
 
     Component.onCompleted: AssetLibrary.ensureAllMedia()
+
+    function importMedia() {
+        var urls = FileDialogs.openFiles(qsTr("Import Media"), [
+            qsTr("Media files (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.mp3 *.wav *.aac *.flac *.ogg *.m4a *.png *.jpg *.jpeg *.gif *.webp *.bmp)")
+        ])
+        if (urls.length > 0)
+            AssetLibrary.importUrls(urls)
+    }
 
     function kindsForTab(tabId) {
         if (tabId === "media") return ["video", "image"]
@@ -45,16 +52,6 @@ PanelFrame {
     ]
     property int activeTab: 0
     property bool sortByKind: false
-
-    FileDialog {
-        id: importDialog
-        title: qsTr("Import Media")
-        fileMode: FileDialog.OpenFiles
-        nameFilters: [
-            qsTr("Media files (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.mp3 *.wav *.aac *.flac *.ogg *.m4a *.png *.jpg *.jpeg *.gif *.webp *.bmp)")
-        ]
-        onAccepted: AssetLibrary.importUrls(selectedFiles)
-    }
 
     DropArea {
         anchors.fill: parent
@@ -184,7 +181,7 @@ PanelFrame {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
                             hoverEnabled: true
-                            onClicked: importDialog.open()
+                            onClicked: root.importMedia()
                             onEntered: parent.color = Theme.panelAccent
                             onExited: parent.color = "transparent"
                         }

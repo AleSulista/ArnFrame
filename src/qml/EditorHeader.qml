@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Dialogs
 import Drift
 import "components"
 
@@ -11,30 +10,22 @@ Rectangle {
 
     property string projectName: EditorState.projectName
 
-    FileDialog {
-        id: openProjectDialog
-        title: qsTr("Open Project")
-        fileMode: FileDialog.OpenFile
-        nameFilters: [qsTr("Drift project (*.drift.json)")]
-        onAccepted: EditorState.loadProject(selectedFile)
+    function openProject() {
+        var url = FileDialogs.openFile(qsTr("Open Project"), [qsTr("Drift project (*.drift.json)")])
+        if (url != "")
+            EditorState.loadProject(url)
     }
 
-    FileDialog {
-        id: saveProjectDialog
-        title: qsTr("Save Project")
-        fileMode: FileDialog.SaveFile
-        nameFilters: [qsTr("Drift project (*.drift.json)")]
-        defaultSuffix: "drift.json"
-        onAccepted: EditorState.saveProject(selectedFile)
+    function saveProject() {
+        var url = FileDialogs.saveFile(qsTr("Save Project"), [qsTr("Drift project (*.drift.json)")], "drift.json")
+        if (url != "")
+            EditorState.saveProject(url)
     }
 
-    FileDialog {
-        id: exportDialog
-        title: qsTr("Export Video")
-        fileMode: FileDialog.SaveFile
-        nameFilters: [qsTr("MP4 video (*.mp4)")]
-        defaultSuffix: "mp4"
-        onAccepted: EditorState.exportProject(selectedFile)
+    function exportVideo() {
+        var url = FileDialogs.saveFile(qsTr("Export Video"), [qsTr("MP4 video (*.mp4)")], "mp4")
+        if (url != "")
+            EditorState.exportProject(url)
     }
 
     Connections {
@@ -75,7 +66,7 @@ Rectangle {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: openProjectDialog.open()
+                onClicked: root.openProject()
             }
         }
 
@@ -111,7 +102,7 @@ Rectangle {
         IconButton {
             icon: Theme.icons.copy
             variant: "ghost"
-            onClicked: saveProjectDialog.open()
+            onClicked: root.saveProject()
         }
     }
 
@@ -192,7 +183,7 @@ Rectangle {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 enabled: !EditorState.exportInProgress
-                onClicked: exportDialog.open()
+                onClicked: root.exportVideo()
             }
         }
 
