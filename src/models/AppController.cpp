@@ -187,6 +187,14 @@ void AppController::setRippleEnabled(bool enabled)
     emit rippleEnabledChanged();
 }
 
+void AppController::setDraggingAssetIndex(int index)
+{
+    if (m_draggingAssetIndex == index)
+        return;
+    m_draggingAssetIndex = index;
+    emit draggingAssetIndexChanged();
+}
+
 void AppController::setProjectName(const QString &name)
 {
     if (m_project.name() == name)
@@ -892,7 +900,30 @@ void AppController::redo()
 
 QVariantList AppController::waveformPeaks(const QString &path) const
 {
-    return MediaWaveform::peaks(path);
+    if (path.isEmpty())
+        return {};
+
+    const auto cached = m_waveformCache.constFind(path);
+    if (cached != m_waveformCache.constEnd())
+        return cached.value();
+
+    if (!m_waveformPending.contains(path)) {
+        m_waveformPending.insert(path);
+        AppController *self = const_cast<AppController *>(this);
+        (void)QtConcurrent::run([self, path] {
+            const QVariantList peaks = MediaWaveform::peaks(path);
+            QMetaObject::invokeMethod(
+                self,
+                [self, path, peaks] {
+                    self->m_waveformCache.insert(path, peaks);
+                    self->m_waveformPending.remove(path);
+                    emit self->waveformReady(path);
+                },
+                Qt::QueuedConnection);
+        });
+    }
+
+    return {};
 }
 
 void AppController::restoreFilmstripsAfterLoad()

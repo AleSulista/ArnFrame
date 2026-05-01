@@ -11,16 +11,16 @@ ScrollBar {
     padding: 2
 
     contentItem: Rectangle {
-        implicitWidth: control.interactive ? 6 : 2
-        implicitHeight: control.interactive ? 6 : 2
-        radius: width / 2
+        implicitWidth: control.interactive ? 8 : 2
+        implicitHeight: control.interactive ? 8 : 2
+        radius: Math.min(width, height) / 2
         color: control.pressed ? Theme.mutedForeground : Theme.panelBorder
         opacity: 0.0
 
         states: State {
             name: "active"
             when: control.policy === ScrollBar.AlwaysOn || (control.active && control.size < 1.0)
-            PropertyChanges { control.contentItem.opacity: 0.75 }
+            PropertyChanges { control.contentItem.opacity: 0.85 }
         }
 
         transitions: Transition {
@@ -32,5 +32,11 @@ ScrollBar {
         }
     }
 
-    background: Item {}
+    // Visible track for always-on bars (e.g. the timeline) so the handle reads as
+    // a position indicator; transient bars keep an invisible track.
+    background: Rectangle {
+        radius: Math.min(width, height) / 2
+        color: Theme.panelBorder
+        opacity: control.policy === ScrollBar.AlwaysOn ? 0.2 : 0.0
+    }
 }

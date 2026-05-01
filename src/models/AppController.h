@@ -6,7 +6,9 @@
 #include "TimelineModel.h"
 #include "models/AssetLibrary.h"
 
+#include <QHash>
 #include <QObject>
+#include <QSet>
 #include <QUndoStack>
 #include <QUrl>
 #include <QVariantList>
@@ -38,6 +40,7 @@ class AppController : public QObject
     Q_PROPERTY(QVariantList bookmarks READ bookmarks NOTIFY bookmarksChanged)
     Q_PROPERTY(QString projectName READ projectName WRITE setProjectName NOTIFY projectNameChanged)
     Q_PROPERTY(QString lastMessage READ lastMessage NOTIFY lastMessageChanged)
+    Q_PROPERTY(int draggingAssetIndex READ draggingAssetIndex WRITE setDraggingAssetIndex NOTIFY draggingAssetIndexChanged)
 
 public:
     explicit AppController(AssetLibrary *assetLibrary, QObject *parent = nullptr);
@@ -64,6 +67,8 @@ public:
     QVariantList bookmarks() const;
     QString projectName() const;
     QString lastMessage() const { return m_lastMessage; }
+    int draggingAssetIndex() const { return m_draggingAssetIndex; }
+    void setDraggingAssetIndex(int index);
 
     void setPlayheadSeconds(double seconds);
     void setPlaying(bool playing);
@@ -124,8 +129,10 @@ signals:
     void bookmarksChanged();
     void projectNameChanged();
     void lastMessageChanged();
+    void draggingAssetIndexChanged();
     void exportFinished(bool success);
     void projectMutated();
+    void waveformReady(const QString &path);
 
 protected:
     void pushProjectEdit(const drift::Project &before, const QString &text);
@@ -154,7 +161,13 @@ protected:
     bool m_exportInProgress = false;
     int m_selectedTrack = -1;
     int m_selectedClip = -1;
+    int m_draggingAssetIndex = -1;
     QString m_lastMessage;
+
+    // Waveform peaks are expensive (full-file decode); compute once off-thread
+    // and cache by path so timeline refreshes don't re-decode on the GUI thread.
+    mutable QHash<QString, QVariantList> m_waveformCache;
+    mutable QSet<QString> m_waveformPending;
 
     static constexpr int kMaxUndoSteps = 50;
 };

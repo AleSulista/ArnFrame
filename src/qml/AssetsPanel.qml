@@ -297,7 +297,10 @@ PanelFrame {
                             Drag.mimeData: { "text/plain": assetIndex.toString() }
 
                             TapHandler { onTapped: EditorState.addClipFromAsset(assetIndex) }
-                            DragHandler { id: assetDrag }
+                            DragHandler {
+                                id: assetDrag
+                                onActiveChanged: EditorState.draggingAssetIndex = active ? assetIndex : -1
+                            }
 
                             Rectangle {
                                 width: Theme.assetCardWidth

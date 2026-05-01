@@ -38,6 +38,7 @@ private:
     bool ensureAudioDecoder();
     bool tryOpenHardwareDecoder();
     bool transferHwFrameToImage(const AVFrame *hwFrame, QImage &out, int targetWidth, int targetHeight);
+    bool convertFrame(const AVFrame *frame, QImage &out, int targetWidth, int targetHeight);
     bool seekVideoStream(drift::TimeUs sourceUs);
     bool seekAudioStream(drift::TimeUs sourceUs);
 
@@ -53,4 +54,14 @@ private:
     int m_outputSampleRate = 48000;
     bool m_hwAccelActive = false;
     AVPixelFormat m_hwPixFmt = AV_PIX_FMT_NONE;
+
+    // Sequential-decode state: lets playback decode forward without re-seeking
+    // to a keyframe on every frame. Only seek on a backward jump or a large gap.
+    bool m_videoPositioned = false;
+    drift::TimeUs m_lastVideoPtsUs = 0;
+    QImage m_lastVideoFrame;
+    int m_lastVideoW = 0;
+    int m_lastVideoH = 0;
+    static constexpr drift::TimeUs kForwardSeekThresholdUs = 2 * drift::kUsPerSecond;
+    static constexpr drift::TimeUs kFrameToleranceUs = 40'000; // ~ >1 frame at 25fps
 };

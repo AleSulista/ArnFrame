@@ -7,11 +7,84 @@ PanelFrame {
     id: root
 
     property real zoom: 1.0
+    readonly property real minZoom: 0.05
+    readonly property real maxZoom: 40.0
     readonly property real pxPerSecond: Theme.pixelsPerSecondBase * zoom
+
+    // Ruler tick interval (seconds): the smallest "nice" step whose labels still
+    // have room to breathe at the current zoom, so timestamps never squash.
+    readonly property real tickStepSeconds: {
+        const minLabelPx = 66
+        const needed = minLabelPx / pxPerSecond
+        const steps = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30,
+                       60, 120, 300, 600, 900, 1800, 3600]
+        for (var i = 0; i < steps.length; i++)
+            if (steps[i] >= needed)
+                return steps[i]
+        return steps[steps.length - 1]
+    }
+
+    // HH:MM:SS, plus .CC hundredths once zoomed into sub-second ticks.
+    function formatTick(seconds) {
+        const cc = Math.round(Math.max(0, seconds) * 100)
+        const pad = (n) => (n < 10 ? "0" : "") + n
+        let out = pad(Math.floor(cc / 360000)) + ":"
+                + pad(Math.floor((cc % 360000) / 6000)) + ":"
+                + pad(Math.floor((cc % 6000) / 100))
+        if (tickStepSeconds < 1)
+            out += "." + pad(cc % 100)
+        return out
+    }
     readonly property var tracks: EditorState.tracks
     readonly property real playheadSeconds: EditorState.playheadSeconds
     readonly property int selectedTrack: EditorState.selectedTrack
     readonly property int selectedClip: EditorState.selectedClip
+
+    // Live snap guide (seconds; < 0 when hidden) shown while dragging a clip.
+    property real snapGuideSeconds: -1
+    // Landing preview outline: where a dragged asset (from the library) or an
+    // existing clip being moved would come to rest, snapped.
+    property int dropTrackIndex: -1
+    property real dropStartSeconds: 0
+    property real dropDurationSeconds: 0
+
+    // Shared by library drops and in-timeline clip moves so both snap and show
+    // the same outline the same way.
+    function showLandingPreview(trackIndex, desiredStart, duration) {
+        const snapped = snapClipStart(desiredStart, duration)
+        dropTrackIndex = trackIndex
+        dropStartSeconds = snapped.start
+        dropDurationSeconds = duration
+        snapGuideSeconds = snapped.guide
+    }
+
+    function clearLandingPreview() {
+        dropTrackIndex = -1
+        snapGuideSeconds = -1
+    }
+
+    function assetDurationSeconds(assetIndex) {
+        const asset = AssetLibrary.assetAt(assetIndex)
+        if (!asset)
+            return 5.0
+        if (asset.kind === "image" || !(asset.durationSeconds > 0))
+            return 5.0
+        return asset.durationSeconds
+    }
+
+    // Snap a clip's desired start against timeline targets, testing both edges.
+    // Returns {start, guide}; guide < 0 means no snap occurred.
+    function snapClipStart(desiredStart, duration) {
+        const l = EditorState.snapTime(desiredStart)
+        const rEdge = EditorState.snapTime(desiredStart + duration)
+        const lSnapped = Math.abs(l - desiredStart) > 0.0005
+        const rSnapped = Math.abs(rEdge - (desiredStart + duration)) > 0.0005
+        if (lSnapped && (!rSnapped || Math.abs(l - desiredStart) <= Math.abs(rEdge - duration - desiredStart)))
+            return { "start": l, "guide": l }
+        if (rSnapped)
+            return { "start": rEdge - duration, "guide": rEdge }
+        return { "start": desiredStart, "guide": -1 }
+    }
 
     function trackHeight(type) {
         if (type === "video") return Theme.trackHeightVideo;
@@ -196,16 +269,17 @@ PanelFrame {
                 IconButton {
                     icon: Theme.icons.zoomOut
                     variant: "text"
-                    onClicked: root.zoom = Math.max(0.25, root.zoom - 0.25)
+                    onClicked: root.zoom = Math.max(root.minZoom, root.zoom / 1.5)
                 }
                 Slider {
                     id: zoomSlider
                     width: 112
                     anchors.verticalCenter: parent.verticalCenter
-                    from: 0.25
-                    to: 3.0
-                    value: root.zoom
-                    onMoved: root.zoom = value
+                    // Logarithmic mapping so the wide zoom range stays controllable.
+                    from: 0
+                    to: 1
+                    value: Math.log(root.zoom / root.minZoom) / Math.log(root.maxZoom / root.minZoom)
+                    onMoved: root.zoom = root.minZoom * Math.pow(root.maxZoom / root.minZoom, value)
 
                     background: Rectangle {
                         x: zoomSlider.leftPadding
@@ -237,7 +311,7 @@ PanelFrame {
                 IconButton {
                     icon: Theme.icons.zoomIn
                     variant: "text"
-                    onClicked: root.zoom = Math.min(3.0, root.zoom + 0.25)
+                    onClicked: root.zoom = Math.min(root.maxZoom, root.zoom * 1.5)
                 }
             }
         }
@@ -320,14 +394,39 @@ PanelFrame {
                 id: flick
                 width: parent.width - Theme.trackLabelsWidth
                 height: parent.height
-                contentWidth: Math.max(width, 16 * root.pxPerSecond)
+                contentWidth: Math.max(width, (EditorState.durationSeconds + 5) * root.pxPerSecond)
                 contentHeight: height
+                clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.horizontal: AppScrollBar { }
+                ScrollBar.horizontal: AppScrollBar { policy: ScrollBar.AlwaysOn }
 
                 Item {
+                    id: timelineContent
                     width: flick.contentWidth
                     height: flick.height
+
+                    // Wheel handling: an overlay that only consumes wheel events
+                    // (Qt.NoButton lets clicks/drags fall through to clips below).
+                    // Plain wheel scrolls horizontally; Ctrl+wheel zooms about the cursor.
+                    MouseArea {
+                        anchors.fill: parent
+                        z: 100
+                        acceptedButtons: Qt.NoButton
+                        onWheel: (wheel) => {
+                            const maxX = Math.max(0, flick.contentWidth - flick.width)
+                            if (wheel.modifiers & Qt.ControlModifier) {
+                                const t = wheel.x / root.pxPerSecond
+                                const viewportX = wheel.x - flick.contentX
+                                const factor = wheel.angleDelta.y > 0 ? 1.15 : 1.0 / 1.15
+                                root.zoom = Math.max(root.minZoom, Math.min(root.maxZoom, root.zoom * factor))
+                                const newMaxX = Math.max(0, flick.contentWidth - flick.width)
+                                flick.contentX = Math.max(0, Math.min(newMaxX, t * root.pxPerSecond - viewportX))
+                            } else {
+                                const delta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
+                                flick.contentX = Math.max(0, Math.min(maxX, flick.contentX - delta))
+                            }
+                        }
+                    }
 
                     // ruler ------------------------------------------------------------
                     Item {
@@ -344,10 +443,11 @@ PanelFrame {
                         }
 
                         Repeater {
-                            model: Math.ceil(flick.contentWidth / root.pxPerSecond) + 1
+                            model: Math.ceil(flick.contentWidth / (root.tickStepSeconds * root.pxPerSecond)) + 1
                             delegate: Item {
-                                x: index * root.pxPerSecond
-                                width: root.pxPerSecond
+                                readonly property real tickSeconds: index * root.tickStepSeconds
+                                x: tickSeconds * root.pxPerSecond
+                                width: root.tickStepSeconds * root.pxPerSecond
                                 height: ruler.height
 
                                 Rectangle {
@@ -361,11 +461,7 @@ PanelFrame {
                                 Text {
                                     x: 4
                                     y: 4
-                                    text: {
-                                        var m = Math.floor(index / 60);
-                                        var s = index % 60;
-                                        return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
-                                    }
+                                    text: root.formatTick(parent.tickSeconds)
                                     color: Theme.mutedForeground
                                     font.pixelSize: Theme.fontSizeTick
                                     font.family: Theme.fontFamily
@@ -426,13 +522,41 @@ PanelFrame {
                                 DropArea {
                                     anchors.fill: parent
                                     keys: ["text/plain"]
-                                    onDropped: (drop) => {
-                                        const assetIndex = parseInt(drop.text)
-                                        if (isNaN(assetIndex))
+
+                                    function updatePreview(dropX) {
+                                        const assetIndex = EditorState.draggingAssetIndex
+                                        if (assetIndex < 0)
                                             return
-                                        const atSeconds = drop.x / root.pxPerSecond
+                                        const duration = root.assetDurationSeconds(assetIndex)
+                                        const desired = Math.max(0, dropX / root.pxPerSecond)
+                                        root.showLandingPreview(trackRow.trackIndex, desired, duration)
+                                    }
+
+                                    onEntered: (drop) => updatePreview(drop.x)
+                                    onPositionChanged: (drop) => updatePreview(drop.x)
+                                    onExited: root.clearLandingPreview()
+                                    onDropped: (drop) => {
+                                        root.clearLandingPreview()
+                                        const assetIndex = EditorState.draggingAssetIndex >= 0
+                                                         ? EditorState.draggingAssetIndex : parseInt(drop.text)
+                                        if (isNaN(assetIndex) || assetIndex < 0)
+                                            return
+                                        const atSeconds = Math.max(0, drop.x / root.pxPerSecond)
                                         EditorState.addClipFromAssetAt(assetIndex, trackRow.trackIndex, atSeconds)
                                     }
+                                }
+
+                                // Landing preview outline (library drop or clip move).
+                                Rectangle {
+                                    visible: root.dropTrackIndex === trackRow.trackIndex
+                                    x: root.dropStartSeconds * root.pxPerSecond
+                                    width: root.dropDurationSeconds * root.pxPerSecond
+                                    height: parent.height
+                                    radius: Theme.radiusSm
+                                    color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.12)
+                                    border.width: 2
+                                    border.color: Theme.primary
+                                    z: 5
                                 }
 
                                 Repeater {
@@ -447,6 +571,20 @@ PanelFrame {
                                         y: Theme.clipSelectionRingWidth
                                         width: clipData.duration * root.pxPerSecond - 2 * Theme.clipSelectionRingWidth
                                         height: parent.height - 2 * Theme.clipSelectionRingWidth
+
+                                        // While dragging, show the same snapped landing outline the
+                                        // library drop uses, on whichever track the clip is over.
+                                        function updateMovePreview() {
+                                            if (!clipMouse.drag.active)
+                                                return
+                                            const desired = Math.max(0, (x - Theme.clipSelectionRingWidth) / root.pxPerSecond)
+                                            const pos = mapToItem(trackColumn, width / 2, height / 2)
+                                            const targetTrack = root.trackIndexAtY(pos.y)
+                                            root.showLandingPreview(targetTrack >= 0 ? targetTrack : trackRow.trackIndex,
+                                                                    desired, clipData.duration)
+                                        }
+                                        onXChanged: updateMovePreview()
+                                        onYChanged: updateMovePreview()
 
                                         Binding {
                                             target: clipItem
@@ -591,6 +729,15 @@ PanelFrame {
                                                 anchors.topMargin: 20
                                                 anchors.bottom: parent.bottom
                                                 onPeaksChanged: requestPaint()
+
+                                                Connections {
+                                                    target: EditorState
+                                                    function onWaveformReady(path) {
+                                                        if (path === clipItem.clipData.path)
+                                                            waveformCanvas.peaks = EditorState.waveformPeaks(path)
+                                                    }
+                                                }
+
                                                 onPaint: {
                                                     var ctx = getContext("2d");
                                                     ctx.clearRect(0, 0, width, height);
@@ -631,6 +778,7 @@ PanelFrame {
                                                 EditorState.selectClip(trackRow.trackIndex, modelData)
                                             }
                                             onReleased: {
+                                                root.clearLandingPreview()
                                                 const newStart = (clipItem.x - Theme.clipSelectionRingWidth) / root.pxPerSecond
                                                 const pos = clipItem.mapToItem(trackColumn, clipItem.width / 2, clipItem.height / 2)
                                                 const targetTrack = root.trackIndexAtY(pos.y)
@@ -645,6 +793,17 @@ PanelFrame {
                                 }
                             }
                         }
+                    }
+
+                    // snap guide -------------------------------------------------------------
+                    Rectangle {
+                        visible: root.snapGuideSeconds >= 0
+                        x: root.snapGuideSeconds * root.pxPerSecond
+                        y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
+                        width: 1
+                        height: root.totalTracksHeight()
+                        color: "#f5c542"
+                        z: 6
                     }
 
                     // playhead ---------------------------------------------------------------

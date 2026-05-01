@@ -92,6 +92,11 @@ void ClipReader::close()
     m_audioStream = -1;
     m_hwAccelActive = false;
     m_hwPixFmt = AV_PIX_FMT_NONE;
+    m_videoPositioned = false;
+    m_lastVideoPtsUs = 0;
+    m_lastVideoFrame = {};
+    m_lastVideoW = 0;
+    m_lastVideoH = 0;
     m_path.clear();
 }
 
@@ -219,6 +224,18 @@ bool ClipReader::transferHwFrameToImage(const AVFrame *hwFrame, QImage &out, int
     return true;
 }
 
+bool ClipReader::convertFrame(const AVFrame *frame, QImage &out, int targetWidth, int targetHeight)
+{
+    if (m_hwAccelActive && frame->format == m_hwPixFmt)
+        return transferHwFrameToImage(frame, out, targetWidth, targetHeight);
+
+    const QImage image = frameToRgba(frame, m_sws, targetWidth, targetHeight);
+    if (image.isNull())
+        return false;
+    out = image;
+    return true;
+}
+
 bool ClipReader::ensureAudioDecoder()
 {
     if (!m_fmt || m_audioStream < 0)
@@ -249,6 +266,7 @@ bool ClipReader::seekVideoStream(drift::TimeUs sourceUs)
         av_seek_frame(m_fmt, m_videoStream, 0, AVSEEK_FLAG_BACKWARD);
     }
     avcodec_flush_buffers(m_videoCtx);
+    m_videoPositioned = true;
     return true;
 }
 
@@ -269,20 +287,43 @@ bool ClipReader::seekAudioStream(drift::TimeUs sourceUs)
 
 bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int targetWidth, int targetHeight)
 {
-    if (!seekVideoStream(sourceUs))
+    if (!ensureVideoDecoder())
+        return false;
+
+    const bool dimsMatch = m_lastVideoW == targetWidth && m_lastVideoH == targetHeight;
+
+    // Serve a re-request of (or tiny overshoot past) the frame we already hold.
+    // Playback and scrubbing both re-ask for the current frame constantly.
+    if (m_videoPositioned && dimsMatch && !m_lastVideoFrame.isNull()
+        && qAbs(sourceUs - m_lastVideoPtsUs) <= kFrameToleranceUs) {
+        out = m_lastVideoFrame;
+        return true;
+    }
+
+    // Fast path: for a forward request within reach of the current decode
+    // position, keep decoding forward instead of seeking to a keyframe. Only
+    // seek on a backward jump or a large forward gap (a real scrub/jump).
+    const bool needSeek = !m_videoPositioned || !dimsMatch
+                          || sourceUs < m_lastVideoPtsUs - kFrameToleranceUs
+                          || sourceUs - m_lastVideoPtsUs > kForwardSeekThresholdUs;
+    if (needSeek && !seekVideoStream(sourceUs))
         return false;
 
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
-    if (!packet || !frame)
+    if (!packet || !frame) {
+        av_frame_free(&frame);
+        av_packet_free(&packet);
         return false;
+    }
 
     const AVRational timeBase = m_fmt->streams[m_videoStream]->time_base;
     QImage best;
     drift::TimeUs bestDelta = INT64_MAX;
     bool found = false;
+    bool done = false;
 
-    while (av_read_frame(m_fmt, packet) >= 0) {
+    while (!done && av_read_frame(m_fmt, packet) >= 0) {
         if (packet->stream_index != m_videoStream) {
             av_packet_unref(packet);
             continue;
@@ -298,34 +339,43 @@ bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int targe
             const int rc = avcodec_receive_frame(m_videoCtx, frame);
             if (rc == AVERROR(EAGAIN) || rc == AVERROR_EOF)
                 break;
-            if (rc < 0)
+            if (rc < 0) {
+                done = true;
                 break;
-
-            const drift::TimeUs ptsUs = ptsToUs(frame, timeBase);
-            const drift::TimeUs delta = qAbs(ptsUs - sourceUs);
-            if (delta < bestDelta) {
-                bestDelta = delta;
-                if (m_hwAccelActive && frame->format == m_hwPixFmt) {
-                    QImage hwImage;
-                    if (transferHwFrameToImage(frame, hwImage, targetWidth, targetHeight))
-                        best = hwImage;
-                } else {
-                    best = frameToRgba(frame, m_sws, targetWidth, targetHeight);
-                }
-                found = !best.isNull();
             }
 
-            if (ptsUs > sourceUs + drift::kUsPerSecond / 10)
-                goto done;
+            const drift::TimeUs ptsUs = ptsToUs(frame, timeBase);
+            m_lastVideoPtsUs = ptsUs;
+            const drift::TimeUs delta = qAbs(ptsUs - sourceUs);
+            if (delta < bestDelta) {
+                QImage image;
+                if (convertFrame(frame, image, targetWidth, targetHeight)) {
+                    bestDelta = delta;
+                    best = image;
+                    found = true;
+                }
+            }
+
+            if (ptsUs >= sourceUs) {
+                done = true;
+                break;
+            }
         }
     }
 
-done:
     av_frame_free(&frame);
     av_packet_free(&packet);
 
-    if (found)
+    if (found) {
         out = best;
+        m_lastVideoFrame = best;
+        m_lastVideoW = targetWidth;
+        m_lastVideoH = targetHeight;
+        m_videoPositioned = true;
+    } else {
+        // Hit EOF or a decode error; force a reseek on the next request.
+        m_videoPositioned = false;
+    }
     return found;
 }
 
