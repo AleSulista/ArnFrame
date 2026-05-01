@@ -156,6 +156,7 @@ QtObject {
         layers: "",
         magnet: "",
         linkTwo: "",
+        foldHorizontal: "",
         zoomOut: "",
         zoomIn: "",
         play: "",

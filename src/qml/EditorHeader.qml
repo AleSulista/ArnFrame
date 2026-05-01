@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import Drift
 import "components"
 
@@ -61,6 +62,11 @@ Rectangle {
                 iconColor: Theme.primary
             }
 
+            ToolTip {
+                visible: logoArea.containsMouse
+                text: qsTr("Open project")
+            }
+
             MouseArea {
                 id: logoArea
                 anchors.fill: parent
@@ -102,6 +108,7 @@ Rectangle {
         IconButton {
             icon: Theme.icons.copy
             variant: "ghost"
+            tooltip: qsTr("Save project")
             onClicked: root.saveProject()
         }
     }
@@ -126,6 +133,7 @@ Rectangle {
         IconButton {
             icon: Theme.icons.messageSquare
             variant: "ghost"
+            tooltip: qsTr("Messages")
             anchors.verticalCenter: parent.verticalCenter
             onClicked: EditorState.lastMessage = EditorState.lastMessage.length > 0
                         ? EditorState.lastMessage
@@ -179,8 +187,15 @@ Rectangle {
                 }
             }
 
+            ToolTip {
+                visible: exportMouse.containsMouse
+                text: qsTr("Export video")
+            }
+
             MouseArea {
+                id: exportMouse
                 anchors.fill: parent
+                hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 enabled: !EditorState.exportInProgress
                 onClicked: root.exportVideo()
@@ -190,6 +205,7 @@ Rectangle {
         IconButton {
             icon: Theme.darkMode ? Theme.icons.sun : Theme.icons.moon
             variant: "ghost"
+            tooltip: Theme.darkMode ? qsTr("Switch to light mode") : qsTr("Switch to dark mode")
             anchors.verticalCenter: parent.verticalCenter
             onClicked: Theme.toggleDarkMode()
         }

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import Drift
 
 // Icon-only button, variants "text" / "ghost" / "secondary".
@@ -6,6 +7,7 @@ Rectangle {
     id: root
 
     property string icon: ""
+    property string tooltip: ""
     property real buttonSize: 28
     property real iconSize: 16
     property bool active: false
@@ -20,7 +22,7 @@ Rectangle {
     height: buttonSize
     radius: Theme.radiusSm
     color: active ? Theme.panelSecondaryBg
-                  : (variant === "ghost" && mouseArea.containsMouse ? Theme.panelAccent : "transparent")
+                  : (variant === "ghost" && buttonEnabled && mouseArea.containsMouse ? Theme.panelAccent : "transparent")
     border.width: active ? 1 : 0
     border.color: Theme.panelSecondaryBorder
     opacity: !buttonEnabled ? 0.5 : (variant === "text" && !active && mouseArea.containsMouse ? 0.75 : 1)
@@ -32,12 +34,16 @@ Rectangle {
         iconColor: root.active ? Theme.panelSecondaryForeground : Theme.mutedForeground
     }
 
+    ToolTip {
+        visible: root.tooltip.length > 0 && mouseArea.containsMouse
+        text: root.tooltip
+    }
+
     MouseArea {
         id: mouseArea
         anchors.fill: parent
         hoverEnabled: true
-        enabled: root.buttonEnabled
         cursorShape: root.buttonEnabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-        onClicked: root.clicked()
+        onClicked: if (root.buttonEnabled) root.clicked()
     }
 }

@@ -111,6 +111,7 @@ PanelFrame {
                 anchors.centerIn: parent
                 icon: root.playing ? Theme.icons.pause : Theme.icons.play
                 variant: "text"
+                tooltip: root.playing ? qsTr("Pause") : qsTr("Play")
                 onClicked: EditorState.playing = !EditorState.playing
             }
 
@@ -144,6 +145,7 @@ PanelFrame {
                 IconButton {
                     icon: Theme.icons.maximize
                     variant: "text"
+                    tooltip: qsTr("Toggle fullscreen")
                     anchors.verticalCenter: parent.verticalCenter
                     onClicked: {
                         const win = root.Window.window

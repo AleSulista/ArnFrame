@@ -98,6 +98,7 @@ PanelFrame {
                         anchors.horizontalCenter: parent.horizontalCenter
                         icon: root.tabIcons[model.icon]
                         variant: "ghost"
+                        tooltip: model.label
                         active: root.activeTab === index
                         onClicked: root.activeTab = index
                     }
@@ -423,8 +424,14 @@ PanelFrame {
                                             font.pixelSize: Theme.fontSizeXs
                                             color: Theme.panelForeground
                                         }
+                                        ToolTip {
+                                            visible: alignMouse.containsMouse
+                                            text: qsTr("Align %1").arg(modelData)
+                                        }
                                         MouseArea {
+                                            id: alignMouse
                                             anchors.fill: parent
+                                            hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: EditorState.setTextStyle(
                                                            EditorState.selectedTrack, EditorState.selectedClip,
@@ -793,6 +800,7 @@ PanelFrame {
                                         variant: "ghost"
                                         buttonSize: 22
                                         iconSize: 12
+                                        tooltip: qsTr("Remove effect")
                                         onClicked: EditorState.removeEffect(
                                                        EditorState.selectedTrack, EditorState.selectedClip,
                                                        effectCard.index)

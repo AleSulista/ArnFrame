@@ -176,6 +176,7 @@ PanelFrame {
                 IconButton {
                     icon: EditorState.playing ? Theme.icons.pause : Theme.icons.play
                     variant: "text"
+                    tooltip: EditorState.playing ? qsTr("Pause") : qsTr("Play")
                     onClicked: EditorState.playing = !EditorState.playing
                 }
 
@@ -194,13 +195,13 @@ PanelFrame {
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
-                IconButton { icon: Theme.icons.scissors; variant: "text"; onClicked: EditorState.splitAtPlayhead() }
-                IconButton { icon: Theme.icons.alignLeft; variant: "text"; onClicked: EditorState.alignSelectedClipLeft() }
-                IconButton { icon: Theme.icons.alignRight; variant: "text"; onClicked: EditorState.alignSelectedClipRight() }
-                IconButton { icon: Theme.icons.linkTwo; variant: "text"; onClicked: EditorState.rippleEnabled = !EditorState.rippleEnabled }
-                IconButton { icon: Theme.icons.copy; variant: "text"; onClicked: EditorState.duplicateSelectedClip() }
-                IconButton { icon: Theme.icons.snowflake; variant: "text"; onClicked: EditorState.freezeFrameAtPlayhead() }
-                IconButton { icon: Theme.icons.trash; variant: "text"; onClicked: EditorState.deleteSelectedClip() }
+                IconButton { icon: Theme.icons.scissors; variant: "text"; tooltip: qsTr("Split at playhead"); onClicked: EditorState.splitAtPlayhead() }
+                IconButton { icon: Theme.icons.alignLeft; variant: "text"; tooltip: qsTr("Split left"); onClicked: EditorState.alignSelectedClipLeft() }
+                IconButton { icon: Theme.icons.alignRight; variant: "text"; tooltip: qsTr("Split right"); onClicked: EditorState.alignSelectedClipRight() }
+                IconButton { icon: Theme.icons.linkTwo; variant: "text"; tooltip: qsTr("Unlink audio"); buttonEnabled: false }
+                IconButton { icon: Theme.icons.copy; variant: "text"; tooltip: qsTr("Duplicate clip"); onClicked: EditorState.duplicateSelectedClip() }
+                IconButton { icon: Theme.icons.snowflake; variant: "text"; tooltip: qsTr("Freeze frame at playhead"); onClicked: EditorState.freezeFrameAtPlayhead() }
+                IconButton { icon: Theme.icons.trash; variant: "text"; tooltip: qsTr("Delete clip"); onClicked: EditorState.deleteSelectedClip() }
 
                 Rectangle {
                     width: 1
@@ -212,11 +213,13 @@ PanelFrame {
                 IconButton {
                     icon: Theme.icons.bookmark
                     variant: "text"
+                    tooltip: qsTr("Add bookmark at playhead")
                     onClicked: EditorState.addBookmark(EditorState.playheadSeconds, "Mark " + Math.round(EditorState.playheadSeconds))
                 }
                 IconButton {
                     icon: Theme.icons.layers
                     variant: "text"
+                    tooltip: qsTr("Undo")
                     onClicked: EditorState.undo()
                     buttonEnabled: EditorState.undoAvailable
                 }
@@ -262,13 +265,15 @@ PanelFrame {
                     id: magnetButton
                     icon: Theme.icons.magnet
                     variant: "text"
+                    tooltip: qsTr("Toggle snapping")
                     active: EditorState.snapEnabled
                     onClicked: EditorState.snapEnabled = !EditorState.snapEnabled
                 }
                 IconButton {
                     id: rippleButton
-                    icon: Theme.icons.linkTwo
+                    icon: Theme.icons.foldHorizontal
                     variant: "text"
+                    tooltip: qsTr("Toggle ripple editing")
                     active: EditorState.rippleEnabled
                     onClicked: EditorState.rippleEnabled = !EditorState.rippleEnabled
                 }
@@ -283,6 +288,7 @@ PanelFrame {
                 IconButton {
                     icon: Theme.icons.zoomOut
                     variant: "text"
+                    tooltip: qsTr("Zoom out")
                     onClicked: root.zoom = Math.max(root.minZoom, root.zoom / 1.5)
                 }
                 Slider {
@@ -325,6 +331,7 @@ PanelFrame {
                 IconButton {
                     icon: Theme.icons.zoomIn
                     variant: "text"
+                    tooltip: qsTr("Zoom in")
                     onClicked: root.zoom = Math.min(root.maxZoom, root.zoom * 1.5)
                 }
             }
@@ -368,9 +375,16 @@ PanelFrame {
                                 iconColor: EditorState.trackMuted(index) ? Theme.destructive : Theme.mutedForeground
                                 anchors.verticalCenter: parent.verticalCenter
 
+                                ToolTip {
+                                    visible: muteMouse.containsMouse
+                                    text: EditorState.trackMuted(index) ? qsTr("Unmute track") : qsTr("Mute track")
+                                }
+
                                 MouseArea {
+                                    id: muteMouse
                                     anchors.fill: parent
                                     anchors.margins: -4
+                                    hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: EditorState.setTrackMuted(index, !EditorState.trackMuted(index))
                                 }
@@ -382,9 +396,16 @@ PanelFrame {
                                 iconColor: EditorState.trackHidden(index) ? Theme.destructive : Theme.mutedForeground
                                 anchors.verticalCenter: parent.verticalCenter
 
+                                ToolTip {
+                                    visible: hideMouse.containsMouse
+                                    text: EditorState.trackHidden(index) ? qsTr("Show track") : qsTr("Hide track")
+                                }
+
                                 MouseArea {
+                                    id: hideMouse
                                     anchors.fill: parent
                                     anchors.margins: -4
+                                    hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: EditorState.setTrackHidden(index, !EditorState.trackHidden(index))
                                 }

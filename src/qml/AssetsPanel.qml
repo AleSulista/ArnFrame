@@ -78,6 +78,7 @@ PanelFrame {
                     anchors.horizontalCenter: parent.horizontalCenter
                     icon: root.tabIcons[model.icon]
                     variant: "ghost"
+                    tooltip: model.label
                     active: root.activeTab === index
                     onClicked: root.activeTab = index
                 }
@@ -127,18 +128,21 @@ PanelFrame {
                     IconButton {
                         icon: Theme.icons.grid
                         variant: "ghost"
+                        tooltip: qsTr("Grid view")
                         active: assetsContent.gridMode
                         onClicked: assetsContent.gridMode = true
                     }
                     IconButton {
                         icon: Theme.icons.list
                         variant: "ghost"
+                        tooltip: qsTr("List view")
                         active: !assetsContent.gridMode
                         onClicked: assetsContent.gridMode = false
                     }
                     IconButton {
                         icon: Theme.icons.sort
                         variant: "ghost"
+                        tooltip: qsTr("Sort assets")
                         onClicked: {
                             if (root.sortByKind)
                                 AssetLibrary.sortByName()
@@ -327,6 +331,7 @@ PanelFrame {
                                     variant: "ghost"
                                     buttonSize: 18
                                     iconSize: 12
+                                    tooltip: qsTr("Add to selected clip")
                                     buttonEnabled: EditorState.selectedClip >= 0
                                     onClicked: EditorState.addEffect(
                                                    EditorState.selectedTrack, EditorState.selectedClip,
