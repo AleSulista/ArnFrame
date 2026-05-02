@@ -5,6 +5,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#include <cmath>
+
 #include "core/Clip.h"
 #include "core/Project.h"
 #include "engine/ClipReader.h"
@@ -20,12 +22,14 @@ private slots:
     void effectProcessorPassthroughWithoutEffects();
     void effectProcessorBrightness();
     void clipReaderSequentialAndSeek();
+    void clipReaderAudioSequential();
     void compositorAppliesMultiplyBlendMode();
     void compositorRendersShapeClip();
     void adjustmentEffectContrastCatalogEntry();
 
 private:
     static QString makeColorSegmentsVideo(QTemporaryDir &dir);
+    static QString makeToneAudio(QTemporaryDir &dir);
 };
 
 void EngineTest::effectProcessorPassthroughWithoutEffects()
@@ -115,6 +119,79 @@ void EngineTest::clipReaderSequentialAndSeek()
     // Backward jump forces a keyframe reseek and must not return a stale frame.
     QCOMPARE(dominant(500'000), QChar('R'));
     QCOMPARE(dominant(1'500'000), QChar('G'));
+}
+
+QString EngineTest::makeToneAudio(QTemporaryDir &dir)
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        return {};
+
+    const QString out = dir.filePath(QStringLiteral("tone.wav"));
+    QStringList args{
+        QStringLiteral("-y"),
+        QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+        QStringLiteral("sine=frequency=440:sample_rate=48000:duration=2"),
+        QStringLiteral("-c:a"), QStringLiteral("pcm_s16le"),
+        out,
+    };
+
+    QProcess proc;
+    proc.start(ffmpeg, args);
+    if (!proc.waitForFinished(30000) || proc.exitCode() != 0)
+        return {};
+    return QFileInfo::exists(out) ? out : QString{};
+}
+
+// Sequential small buffers must reconstruct the same signal as one contiguous
+// read. The old path re-seeked on every buffer, repeating/overlapping audio.
+void EngineTest::clipReaderAudioSequential()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeToneAudio(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    constexpr int kRate = 48000;
+    constexpr int kChunk = 1024;
+    constexpr int kChunks = 20;
+    constexpr int kTotal = kChunk * kChunks;
+    constexpr drift::TimeUs kStartUs = 200'000;
+
+    ClipReader ref;
+    QVERIFY(ref.open(path));
+    QVERIFY(ref.hasAudio());
+    QVector<float> refBuf(kTotal * 2, 0.0f);
+    QCOMPARE(ref.readAudioInterleaved(kStartUs, kTotal, kRate, refBuf.data()), kTotal);
+
+    double sumSq = 0.0;
+    for (float s : refBuf)
+        sumSq += static_cast<double>(s) * s;
+    QVERIFY(std::sqrt(sumSq / refBuf.size()) > 0.05); // audibly non-silent
+
+    ClipReader seq;
+    QVERIFY(seq.open(path));
+    QVector<float> seqBuf;
+    seqBuf.reserve(kTotal * 2);
+    QVector<float> chunkBuf(kChunk * 2);
+    drift::TimeUs t = kStartUs;
+    for (int c = 0; c < kChunks; ++c) {
+        const int n = seq.readAudioInterleaved(t, kChunk, kRate, chunkBuf.data());
+        QVERIFY(n > 0);
+        for (int i = 0; i < n * 2; ++i)
+            seqBuf.append(chunkBuf[i]);
+        t += static_cast<drift::TimeUs>(n) * drift::kUsPerSecond / kRate;
+    }
+
+    const int cmp = qMin(refBuf.size(), seqBuf.size());
+    QVERIFY(cmp >= kTotal * 2 - kChunk * 2);
+    double err = 0.0;
+    for (int i = 0; i < cmp; ++i) {
+        const double d = static_cast<double>(refBuf[i]) - seqBuf[i];
+        err += d * d;
+    }
+    QVERIFY(std::sqrt(err / cmp) < 0.02);
 }
 
 void EngineTest::compositorAppliesMultiplyBlendMode()

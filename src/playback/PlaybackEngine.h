@@ -12,7 +12,10 @@
 #include <QImage>
 #include <QMutex>
 #include <QObject>
+#include <QThread>
 #include <QTimer>
+
+#include <atomic>
 
 class PlaybackEngine;
 
@@ -24,6 +27,9 @@ public:
 
     qint64 readData(char *data, qint64 maxlen) override;
     qint64 writeData(const char *data, qint64 len) override;
+    // Endless generated source: always advertise data so the sink keeps pulling.
+    qint64 bytesAvailable() const override;
+    bool isSequential() const override { return true; }
 
 private:
     PlaybackEngine *m_engine = nullptr;
@@ -74,6 +80,9 @@ private:
     CompositorService m_compositor;
     AudioMixer m_mixer;
     QAudioFormat m_format;
+    // The sink and its pull device live on m_audioThread so that ring-buffer
+    // refills (which synchronously decode audio) never block the GUI thread.
+    QThread m_audioThread;
     QAudioSink *m_sink = nullptr;
     AudioPlaybackIODevice *m_device = nullptr;
     QTimer m_playheadTimer;
@@ -81,6 +90,6 @@ private:
     QImage m_currentFrame;
     mutable QMutex m_frameMutex;
     drift::TimeUs m_playheadUs = 0;
-    bool m_playing = false;
+    std::atomic<bool> m_playing = false;
     int m_sampleRate = 48000;
 };

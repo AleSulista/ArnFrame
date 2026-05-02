@@ -4,6 +4,7 @@
 
 #include <QImage>
 #include <QString>
+#include <QVector>
 
 extern "C" {
 #include <libavutil/pixfmt.h>
@@ -64,4 +65,13 @@ private:
     int m_lastVideoH = 0;
     static constexpr drift::TimeUs kForwardSeekThresholdUs = 2 * drift::kUsPerSecond;
     static constexpr drift::TimeUs kFrameToleranceUs = 40'000; // ~ >1 frame at 25fps
+
+    // Sequential audio decode state (mirrors the video fast-path): keep the
+    // resampler and demux position across buffers so contiguous playback decodes
+    // straight through instead of re-seeking on every ~10 ms buffer.
+    bool m_audioPositioned = false;
+    drift::TimeUs m_audioNextPtsUs = 0; // source position of m_audioLeftover front
+    QVector<float> m_audioLeftover;     // decoded-but-unreturned interleaved stereo
+    static constexpr drift::TimeUs kAudioSeekToleranceUs = 50'000;
+    static constexpr drift::TimeUs kAudioForwardSeekThresholdUs = 2 * drift::kUsPerSecond;
 };

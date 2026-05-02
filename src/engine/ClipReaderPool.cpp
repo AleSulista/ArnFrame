@@ -67,8 +67,14 @@ QImage ClipReaderPool::readVideoFrame(const QString &path, drift::TimeUs sourceU
     if (path.isEmpty())
         return {};
 
-    QMutexLocker lock(&m_mutex);
-    ClipReaderWorker *worker = ensureWorker(m_videoWorkers, path);
+    ClipReaderWorker *worker = nullptr;
+    {
+        // Hold the pool mutex only to resolve the worker; releasing it before the
+        // blocking decode lets audio and video (different workers) decode in
+        // parallel instead of serializing on this lock.
+        QMutexLocker lock(&m_mutex);
+        worker = ensureWorker(m_videoWorkers, path);
+    }
 
     QImage frame;
     QMetaObject::invokeMethod(worker, "decodeVideo", Qt::BlockingQueuedConnection, Q_RETURN_ARG(QImage, frame),
@@ -87,8 +93,11 @@ int ClipReaderPool::readAudioInterleaved(const QString &path, drift::TimeUs sour
     if (path.isEmpty() || !interleavedStereoOut || sampleCount <= 0)
         return 0;
 
-    QMutexLocker lock(&m_mutex);
-    ClipReaderWorker *worker = ensureWorker(m_audioWorkers, path);
+    ClipReaderWorker *worker = nullptr;
+    {
+        QMutexLocker lock(&m_mutex);
+        worker = ensureWorker(m_audioWorkers, path);
+    }
 
     int written = 0;
     QMetaObject::invokeMethod(worker, "decodeAudio", Qt::BlockingQueuedConnection, Q_RETURN_ARG(int, written),
@@ -102,8 +111,11 @@ void ClipReaderPool::prefetchVideo(const QString &path, drift::TimeUs sourceUs, 
     if (path.isEmpty())
         return;
 
-    QMutexLocker lock(&m_mutex);
-    ClipReaderWorker *worker = ensureWorker(m_videoWorkers, path);
+    ClipReaderWorker *worker = nullptr;
+    {
+        QMutexLocker lock(&m_mutex);
+        worker = ensureWorker(m_videoWorkers, path);
+    }
     QMetaObject::invokeMethod(worker, "prefetchVideo", Qt::QueuedConnection, Q_ARG(drift::TimeUs, sourceUs),
                               Q_ARG(int, targetWidth), Q_ARG(int, targetHeight));
 }
