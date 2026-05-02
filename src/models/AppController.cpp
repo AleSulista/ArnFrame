@@ -13,11 +13,17 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSettings>
 #include <QUrl>
 #include <QUuid>
 #include <QtConcurrent>
 #include <QtMath>
+#include <climits>
 #include <algorithm>
+
+namespace {
+QHash<QString, QString> defaultShortcuts();
+}
 
 AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     : QObject(parent)
@@ -65,6 +71,18 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     connect(this, &AppController::selectionChanged, this, [this] {
         m_clipListModel.setTrackIndex(m_selectedTrack >= 0 ? m_selectedTrack : 0);
     });
+
+    m_shortcuts = defaultShortcuts();
+    QSettings settings;
+    settings.beginGroup(QStringLiteral("shortcuts"));
+    for (auto it = m_shortcuts.begin(); it != m_shortcuts.end(); ++it) {
+        const QString stored = settings.value(it.key(), it.value()).toString();
+        if (!stored.isEmpty())
+            it.value() = stored;
+    }
+    settings.endGroup();
+    m_guidesEnabled = settings.value(QStringLiteral("preview/guidesEnabled"), false).toBool();
+    m_guideType = settings.value(QStringLiteral("preview/guideType"), QStringLiteral("thirds")).toString();
 }
 
 QVariantList AppController::tracks() const
@@ -192,15 +210,44 @@ QVariantList keyframeListToVariant(const drift::KeyframeTrack<double> &track, dr
     return out;
 }
 
+QVariantMap keyframeTrackToMap(const drift::KeyframeTrack<double> &track, drift::TimeUs timelineStart)
+{
+    return {
+        {QStringLiteral("interpolation"),
+         track.interpolation() == drift::Interpolation::Hold ? QStringLiteral("hold")
+                                                            : QStringLiteral("linear")},
+        {QStringLiteral("points"), keyframeListToVariant(track, timelineStart)},
+    };
+}
+
 QVariantMap keyframesToMap(const drift::Clip &clip)
 {
     return {
-        {QStringLiteral("opacity"), keyframeListToVariant(clip.opacity, clip.timelineStart)},
-        {QStringLiteral("posX"), keyframeListToVariant(clip.posX, clip.timelineStart)},
-        {QStringLiteral("posY"), keyframeListToVariant(clip.posY, clip.timelineStart)},
-        {QStringLiteral("scale"), keyframeListToVariant(clip.scale, clip.timelineStart)},
-        {QStringLiteral("rotation"), keyframeListToVariant(clip.rotation, clip.timelineStart)},
-        {QStringLiteral("volume"), keyframeListToVariant(clip.volume, clip.timelineStart)},
+        {QStringLiteral("opacity"), keyframeTrackToMap(clip.opacity, clip.timelineStart)},
+        {QStringLiteral("posX"), keyframeTrackToMap(clip.posX, clip.timelineStart)},
+        {QStringLiteral("posY"), keyframeTrackToMap(clip.posY, clip.timelineStart)},
+        {QStringLiteral("scale"), keyframeTrackToMap(clip.scale, clip.timelineStart)},
+        {QStringLiteral("rotation"), keyframeTrackToMap(clip.rotation, clip.timelineStart)},
+        {QStringLiteral("volume"), keyframeTrackToMap(clip.volume, clip.timelineStart)},
+    };
+}
+
+QHash<QString, QString> defaultShortcuts()
+{
+    return {
+        {QStringLiteral("playPause"), QStringLiteral("Space")},
+        {QStringLiteral("delete"), QStringLiteral("Delete")},
+        {QStringLiteral("undo"), QStringLiteral("Ctrl+Z")},
+        {QStringLiteral("redo"), QStringLiteral("Ctrl+Shift+Z")},
+        {QStringLiteral("clearSelection"), QStringLiteral("Escape")},
+        {QStringLiteral("duplicate"), QStringLiteral("Ctrl+D")},
+        {QStringLiteral("split"), QStringLiteral("S")},
+        {QStringLiteral("copy"), QStringLiteral("Ctrl+C")},
+        {QStringLiteral("cut"), QStringLiteral("Ctrl+X")},
+        {QStringLiteral("paste"), QStringLiteral("Ctrl+V")},
+        {QStringLiteral("nudgeLeft"), QStringLiteral("Alt+Left")},
+        {QStringLiteral("nudgeRight"), QStringLiteral("Alt+Right")},
+        {QStringLiteral("toggleGuides"), QStringLiteral("G")},
     };
 }
 
@@ -261,6 +308,37 @@ QVariantMap AppController::selectedClipData() const
     if (m_selectedTrack < 0 || m_selectedClip < 0)
         return {};
     return clipAt(m_selectedTrack, m_selectedClip);
+}
+
+QVariantList AppController::selection() const
+{
+    QVariantList out;
+    for (const QPair<int, int> &pair : m_selection) {
+        out.append(QVariantMap{
+            {QStringLiteral("track"), pair.first},
+            {QStringLiteral("clip"), pair.second},
+        });
+    }
+    return out;
+}
+
+QVariantList AppController::actions() const
+{
+    return {
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("playPause")}, {QStringLiteral("label"), QStringLiteral("Play/Pause")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("delete")}, {QStringLiteral("label"), QStringLiteral("Delete selection")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("undo")}, {QStringLiteral("label"), QStringLiteral("Undo")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("redo")}, {QStringLiteral("label"), QStringLiteral("Redo")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("copy")}, {QStringLiteral("label"), QStringLiteral("Copy selection")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("cut")}, {QStringLiteral("label"), QStringLiteral("Cut selection")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("paste")}, {QStringLiteral("label"), QStringLiteral("Paste at playhead")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("duplicate")}, {QStringLiteral("label"), QStringLiteral("Duplicate selected clip")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("split")}, {QStringLiteral("label"), QStringLiteral("Split at playhead")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("clearSelection")}, {QStringLiteral("label"), QStringLiteral("Clear selection")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("nudgeLeft")}, {QStringLiteral("label"), QStringLiteral("Nudge selection left")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("nudgeRight")}, {QStringLiteral("label"), QStringLiteral("Nudge selection right")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("toggleGuides")}, {QStringLiteral("label"), QStringLiteral("Toggle guides")}},
+    };
 }
 
 void AppController::setPlayheadUs(drift::TimeUs us)
@@ -328,6 +406,27 @@ void AppController::setProjectName(const QString &name)
 
     m_project.setName(name);
     emit projectNameChanged();
+}
+
+void AppController::setGuidesEnabled(bool enabled)
+{
+    if (m_guidesEnabled == enabled)
+        return;
+    m_guidesEnabled = enabled;
+    QSettings settings;
+    settings.setValue(QStringLiteral("preview/guidesEnabled"), m_guidesEnabled);
+    emit guidesChanged();
+}
+
+void AppController::setGuideType(const QString &type)
+{
+    const QString normalized = type.trimmed().isEmpty() ? QStringLiteral("thirds") : type.trimmed();
+    if (m_guideType == normalized)
+        return;
+    m_guideType = normalized;
+    QSettings settings;
+    settings.setValue(QStringLiteral("preview/guideType"), m_guideType);
+    emit guidesChanged();
 }
 
 void AppController::setLastMessage(const QString &message)
@@ -434,8 +533,10 @@ void AppController::pushProjectEdit(const drift::Project &before, const QString 
 
 void AppController::finishEdit(const QString &message)
 {
+    normalizeSelection();
     m_playback.setPlayheadUs(m_playheadUs);
     emit tracksChanged();
+    emit selectionChanged();
     setLastMessage(message);
 }
 
@@ -508,13 +609,48 @@ void AppController::addClipFromAssetAt(int assetIndex, int trackIndex, double at
 
 void AppController::selectClip(int trackIndex, int clipIndex)
 {
-    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
-        return;
-    if (clipIndex < 0 || clipIndex >= m_project.tracks()[trackIndex].clips.size())
+    if (!isValidClipIndex(trackIndex, clipIndex))
         return;
 
     m_selectedTrack = trackIndex;
     m_selectedClip = clipIndex;
+    m_selection = {qMakePair(trackIndex, clipIndex)};
+    emit selectionChanged();
+}
+
+void AppController::addToSelection(int trackIndex, int clipIndex)
+{
+    if (!isValidClipIndex(trackIndex, clipIndex))
+        return;
+    const QPair<int, int> pair(trackIndex, clipIndex);
+    if (!m_selection.contains(pair))
+        m_selection.append(pair);
+    m_selectedTrack = trackIndex;
+    m_selectedClip = clipIndex;
+    emit selectionChanged();
+}
+
+void AppController::setSelection(const QVariantList &pairs)
+{
+    QList<QPair<int, int>> next;
+    for (const QVariant &value : pairs) {
+        const QVariantMap map = value.toMap();
+        const int trackIndex = map.value(QStringLiteral("track")).toInt();
+        const int clipIndex = map.value(QStringLiteral("clip")).toInt();
+        if (!isValidClipIndex(trackIndex, clipIndex))
+            continue;
+        const QPair<int, int> pair(trackIndex, clipIndex);
+        if (!next.contains(pair))
+            next.append(pair);
+    }
+    m_selection = next;
+    if (m_selection.isEmpty()) {
+        m_selectedTrack = -1;
+        m_selectedClip = -1;
+    } else {
+        m_selectedTrack = m_selection.constLast().first;
+        m_selectedClip = m_selection.constLast().second;
+    }
     emit selectionChanged();
 }
 
@@ -525,22 +661,29 @@ void AppController::clearSelection()
 
     m_selectedTrack = -1;
     m_selectedClip = -1;
+    m_selection.clear();
     emit selectionChanged();
 }
 
 void AppController::deleteSelectedClip()
 {
-    if (m_selectedTrack < 0 || m_selectedClip < 0)
-        return;
-    if (m_selectedTrack >= m_project.tracks().size())
-        return;
-
-    drift::Track &track = m_project.tracks()[m_selectedTrack];
-    if (m_selectedClip < 0 || m_selectedClip >= track.clips.size())
+    if (m_selection.isEmpty() && m_selectedTrack >= 0 && m_selectedClip >= 0)
+        m_selection = {qMakePair(m_selectedTrack, m_selectedClip)};
+    if (m_selection.isEmpty())
         return;
 
     const drift::Project before = m_project;
-    track.clips.removeAt(m_selectedClip);
+    QList<QPair<int, int>> pairs = m_selection;
+    std::sort(pairs.begin(), pairs.end(), [](const QPair<int, int> &a, const QPair<int, int> &b) {
+        if (a.first != b.first)
+            return a.first > b.first;
+        return a.second > b.second;
+    });
+    for (const QPair<int, int> &pair : pairs) {
+        if (!isValidClipIndex(pair.first, pair.second))
+            continue;
+        m_project.tracks()[pair.first].clips.removeAt(pair.second);
+    }
     pushProjectEdit(before, QStringLiteral("Clip deleted"));
     clearSelection();
     finishEdit(QStringLiteral("Clip deleted"));
@@ -555,12 +698,19 @@ void AppController::moveClip(int trackIndex, int clipIndex, double newStart)
     if (clipIndex < 0 || clipIndex >= track.clips.size())
         return;
 
+    const QPair<int, int> requested(trackIndex, clipIndex);
+    QList<QPair<int, int>> targets = m_selection.contains(requested) ? m_selection
+                                                                      : QList<QPair<int, int>>{requested};
     const drift::Project before = m_project;
-    drift::Clip &clip = track.clips[clipIndex];
-    const drift::TimeUs oldStart = clip.timelineStart;
-    clip.timelineStart = drift::resolveClipStart(m_project, track, clipIndex, drift::secondsToUs(newStart),
-                                                 clip.timelineDuration, m_snapEnabled, m_playheadUs);
-    applyRippleShift(track, clipIndex, clip.timelineStart - oldStart);
+    const drift::TimeUs desiredUs = drift::secondsToUs(newStart);
+    const drift::TimeUs baseUs = m_project.tracks().at(trackIndex).clips.at(clipIndex).timelineStart;
+    const drift::TimeUs delta = desiredUs - baseUs;
+    for (const QPair<int, int> &pair : targets) {
+        if (!isValidClipIndex(pair.first, pair.second))
+            continue;
+        drift::Clip &clip = m_project.tracks()[pair.first].clips[pair.second];
+        clip.timelineStart = qMax<drift::TimeUs>(0, clip.timelineStart + delta);
+    }
     pushProjectEdit(before, QStringLiteral("Clip moved"));
     finishEdit(QStringLiteral("Clip moved"));
 }
@@ -1256,6 +1406,143 @@ void AppController::freezeFrameAtPlayhead()
     finishEdit(QStringLiteral("Freeze frame added"));
 }
 
+void AppController::copySelection()
+{
+    m_clipboard.clear();
+    QList<QPair<int, int>> pairs = m_selection;
+    if (pairs.isEmpty() && m_selectedTrack >= 0 && m_selectedClip >= 0)
+        pairs.append(qMakePair(m_selectedTrack, m_selectedClip));
+    for (const QPair<int, int> &pair : pairs) {
+        if (!isValidClipIndex(pair.first, pair.second))
+            continue;
+        ClipboardItem item;
+        item.clip = m_project.tracks().at(pair.first).clips.at(pair.second);
+        item.trackType = m_project.tracks().at(pair.first).type;
+        m_clipboard.append(item);
+    }
+    setLastMessage(QStringLiteral("Copied %1 clip(s)").arg(m_clipboard.size()));
+}
+
+void AppController::cutSelection()
+{
+    copySelection();
+    deleteSelectedClip();
+}
+
+void AppController::pasteAtPlayhead()
+{
+    if (m_clipboard.isEmpty())
+        return;
+    const drift::Project before = m_project;
+    drift::TimeUs anchor = LLONG_MAX;
+    for (const ClipboardItem &item : m_clipboard)
+        anchor = qMin(anchor, item.clip.timelineStart);
+    const drift::TimeUs shift = m_playheadUs - anchor;
+    QList<QPair<int, int>> inserted;
+
+    for (const ClipboardItem &item : m_clipboard) {
+        drift::Clip clip = item.clip;
+        clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        clip.timelineStart = qMax<drift::TimeUs>(0, clip.timelineStart + shift);
+
+        int targetTrack = -1;
+        for (int i = 0; i < m_project.tracks().size(); ++i) {
+            if (m_project.tracks().at(i).type == item.trackType && m_project.tracks().at(i).allowsClipType(clip.type)) {
+                targetTrack = i;
+                break;
+            }
+        }
+        if (targetTrack < 0)
+            targetTrack = drift::defaultTrackForClipType(m_project, clip.type);
+        if (targetTrack < 0 || !m_project.tracks()[targetTrack].allowsClipType(clip.type))
+            continue;
+        drift::Track &track = m_project.tracks()[targetTrack];
+        track.clips.append(clip);
+        inserted.append(qMakePair(targetTrack, track.clips.size() - 1));
+    }
+
+    if (inserted.isEmpty())
+        return;
+    pushProjectEdit(before, QStringLiteral("Paste"));
+    m_selection = inserted;
+    m_selectedTrack = inserted.constLast().first;
+    m_selectedClip = inserted.constLast().second;
+    finishEdit(QStringLiteral("Pasted %1 clip(s)").arg(inserted.size()));
+}
+
+void AppController::nudgeSelection(double deltaSeconds)
+{
+    if (qFuzzyIsNull(deltaSeconds))
+        return;
+    QList<QPair<int, int>> pairs = m_selection;
+    if (pairs.isEmpty() && m_selectedTrack >= 0 && m_selectedClip >= 0)
+        pairs.append(qMakePair(m_selectedTrack, m_selectedClip));
+    if (pairs.isEmpty())
+        return;
+    const drift::Project before = m_project;
+    const drift::TimeUs deltaUs = drift::secondsToUs(deltaSeconds);
+    for (const QPair<int, int> &pair : pairs) {
+        if (!isValidClipIndex(pair.first, pair.second))
+            continue;
+        drift::Clip &clip = m_project.tracks()[pair.first].clips[pair.second];
+        clip.timelineStart = qMax<drift::TimeUs>(0, clip.timelineStart + deltaUs);
+    }
+    pushProjectEdit(before, QStringLiteral("Nudge selection"));
+    finishEdit(QStringLiteral("Selection nudged"));
+}
+
+bool AppController::selectionContains(int trackIndex, int clipIndex) const
+{
+    return m_selection.contains(qMakePair(trackIndex, clipIndex));
+}
+
+QString AppController::shortcutFor(const QString &actionId) const
+{
+    return m_shortcuts.value(actionId);
+}
+
+void AppController::setShortcut(const QString &actionId, const QString &keys)
+{
+    if (!m_shortcuts.contains(actionId))
+        return;
+    m_shortcuts[actionId] = keys;
+    QSettings settings;
+    settings.beginGroup(QStringLiteral("shortcuts"));
+    settings.setValue(actionId, keys);
+    settings.endGroup();
+    emit shortcutsChanged();
+}
+
+void AppController::triggerAction(const QString &actionId)
+{
+    if (actionId == QStringLiteral("playPause"))
+        setPlaying(!playing());
+    else if (actionId == QStringLiteral("delete"))
+        deleteSelectedClip();
+    else if (actionId == QStringLiteral("undo"))
+        undo();
+    else if (actionId == QStringLiteral("redo"))
+        redo();
+    else if (actionId == QStringLiteral("clearSelection"))
+        clearSelection();
+    else if (actionId == QStringLiteral("duplicate"))
+        duplicateSelectedClip();
+    else if (actionId == QStringLiteral("split"))
+        splitAtPlayhead();
+    else if (actionId == QStringLiteral("copy"))
+        copySelection();
+    else if (actionId == QStringLiteral("cut"))
+        cutSelection();
+    else if (actionId == QStringLiteral("paste"))
+        pasteAtPlayhead();
+    else if (actionId == QStringLiteral("nudgeLeft"))
+        nudgeSelection(-0.1);
+    else if (actionId == QStringLiteral("nudgeRight"))
+        nudgeSelection(0.1);
+    else if (actionId == QStringLiteral("toggleGuides"))
+        setGuidesEnabled(!guidesEnabled());
+}
+
 void AppController::undo()
 {
     if (!m_undoStack.canUndo())
@@ -1317,6 +1604,32 @@ void AppController::restoreFilmstripsAfterLoad()
             if (clip.filmstripPath.isEmpty())
                 clip.filmstripPath = clip.thumbnailPath;
         }
+    }
+}
+
+bool AppController::isValidClipIndex(int trackIndex, int clipIndex) const
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return false;
+    return clipIndex >= 0 && clipIndex < m_project.tracks().at(trackIndex).clips.size();
+}
+
+void AppController::normalizeSelection()
+{
+    QList<QPair<int, int>> kept;
+    for (const QPair<int, int> &pair : m_selection) {
+        if (isValidClipIndex(pair.first, pair.second) && !kept.contains(pair))
+            kept.append(pair);
+    }
+    m_selection = kept;
+    if (m_selection.isEmpty()) {
+        m_selectedTrack = -1;
+        m_selectedClip = -1;
+        return;
+    }
+    if (!isValidClipIndex(m_selectedTrack, m_selectedClip)) {
+        m_selectedTrack = m_selection.constLast().first;
+        m_selectedClip = m_selection.constLast().second;
     }
 }
 

@@ -199,6 +199,8 @@ PanelFrame {
                 IconButton { icon: Theme.icons.alignLeft; variant: "text"; tooltip: qsTr("Split left"); onClicked: EditorState.alignSelectedClipLeft() }
                 IconButton { icon: Theme.icons.alignRight; variant: "text"; tooltip: qsTr("Split right"); onClicked: EditorState.alignSelectedClipRight() }
                 IconButton { icon: Theme.icons.linkTwo; variant: "text"; tooltip: qsTr("Unlink audio"); buttonEnabled: false }
+                IconButton { icon: Theme.icons.copy; variant: "text"; tooltip: qsTr("Copy selection"); onClicked: EditorState.copySelection() }
+                IconButton { icon: Theme.icons.plus; variant: "text"; tooltip: qsTr("Paste at playhead"); onClicked: EditorState.pasteAtPlayhead() }
                 IconButton { icon: Theme.icons.copy; variant: "text"; tooltip: qsTr("Duplicate clip"); onClicked: EditorState.duplicateSelectedClip() }
                 IconButton { icon: Theme.icons.snowflake; variant: "text"; tooltip: qsTr("Freeze frame at playhead"); onClicked: EditorState.freezeFrameAtPlayhead() }
                 IconButton { icon: Theme.icons.trash; variant: "text"; tooltip: qsTr("Delete clip"); onClicked: EditorState.deleteSelectedClip() }
@@ -614,8 +616,7 @@ PanelFrame {
                                     delegate: Item {
                                         id: clipItem
                                         property var clipData: root.tracks[trackRow.trackIndex].clips[modelData]
-                                        property bool selected: root.selectedTrack === trackRow.trackIndex
-                                                                  && root.selectedClip === modelData
+                                        property bool selected: EditorState.selectionContains(trackRow.trackIndex, modelData)
                                         property string trackType: root.tracks[trackRow.trackIndex].type
 
                                         y: Theme.clipSelectionRingWidth
@@ -825,7 +826,10 @@ PanelFrame {
 
                                             onPressed: {
                                                 originTrack = trackRow.trackIndex
-                                                EditorState.selectClip(trackRow.trackIndex, modelData)
+                                                if ((mouse.modifiers & Qt.ShiftModifier) !== 0)
+                                                    EditorState.addToSelection(trackRow.trackIndex, modelData)
+                                                else
+                                                    EditorState.selectClip(trackRow.trackIndex, modelData)
                                             }
                                             onReleased: {
                                                 root.clearLandingPreview()

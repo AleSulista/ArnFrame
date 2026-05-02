@@ -12,33 +12,13 @@ ApplicationWindow {
     title: "CutWire Drift"
     color: Theme.appBackground
 
-    Shortcut {
-        sequence: "Space"
-        onActivated: EditorState.playing = !EditorState.playing
-    }
-    Shortcut {
-        sequence: "Delete"
-        onActivated: EditorState.deleteSelectedClip()
-    }
-    Shortcut {
-        sequences: [StandardKey.Undo]
-        onActivated: EditorState.undo()
-    }
-    Shortcut {
-        sequences: [StandardKey.Redo]
-        onActivated: EditorState.redo()
-    }
-    Shortcut {
-        sequence: "Escape"
-        onActivated: EditorState.clearSelection()
-    }
-    Shortcut {
-        sequence: "Ctrl+D"
-        onActivated: EditorState.duplicateSelectedClip()
-    }
-    Shortcut {
-        sequence: "S"
-        onActivated: EditorState.splitAtPlayhead()
+    Repeater {
+        model: EditorState.actions
+        delegate: Shortcut {
+            required property var modelData
+            sequence: EditorState.shortcutFor(modelData.id)
+            onActivated: EditorState.triggerAction(modelData.id)
+        }
     }
 
     Column {

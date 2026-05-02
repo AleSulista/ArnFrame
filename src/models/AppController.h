@@ -8,6 +8,7 @@
 
 #include <QHash>
 #include <QObject>
+#include <QPair>
 #include <QSet>
 #include <QUndoStack>
 #include <QUrl>
@@ -36,7 +37,11 @@ class AppController : public QObject
     Q_PROPERTY(bool exportInProgress READ exportInProgress NOTIFY exportInProgressChanged)
     Q_PROPERTY(int selectedTrack READ selectedTrack NOTIFY selectionChanged)
     Q_PROPERTY(int selectedClip READ selectedClip NOTIFY selectionChanged)
+    Q_PROPERTY(QVariantList selection READ selection NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selectedClipData READ selectedClipData NOTIFY selectionChanged)
+    Q_PROPERTY(bool guidesEnabled READ guidesEnabled WRITE setGuidesEnabled NOTIFY guidesChanged)
+    Q_PROPERTY(QString guideType READ guideType WRITE setGuideType NOTIFY guidesChanged)
+    Q_PROPERTY(QVariantList actions READ actions NOTIFY shortcutsChanged)
     Q_PROPERTY(QVariantList bookmarks READ bookmarks NOTIFY bookmarksChanged)
     Q_PROPERTY(QString projectName READ projectName WRITE setProjectName NOTIFY projectNameChanged)
     Q_PROPERTY(QString lastMessage READ lastMessage NOTIFY lastMessageChanged)
@@ -63,7 +68,11 @@ public:
     bool exportInProgress() const { return m_exportInProgress; }
     int selectedTrack() const { return m_selectedTrack; }
     int selectedClip() const { return m_selectedClip; }
+    QVariantList selection() const;
     QVariantMap selectedClipData() const;
+    bool guidesEnabled() const { return m_guidesEnabled; }
+    QString guideType() const { return m_guideType; }
+    QVariantList actions() const;
     QVariantList bookmarks() const;
     QString projectName() const;
     QString lastMessage() const { return m_lastMessage; }
@@ -75,11 +84,15 @@ public:
     void setSnapEnabled(bool enabled);
     void setRippleEnabled(bool enabled);
     void setProjectName(const QString &name);
+    void setGuidesEnabled(bool enabled);
+    void setGuideType(const QString &type);
 
     Q_INVOKABLE void addClipFromAsset(int assetIndex);
     Q_INVOKABLE void addClipFromAssetAt(int assetIndex, int trackIndex, double atSeconds);
     Q_INVOKABLE void addTextClip(const QString &text, double atSeconds);
     Q_INVOKABLE void selectClip(int trackIndex, int clipIndex);
+    Q_INVOKABLE void addToSelection(int trackIndex, int clipIndex);
+    Q_INVOKABLE void setSelection(const QVariantList &pairs);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE QVariantMap clipAt(int trackIndex, int clipIndex) const;
     Q_INVOKABLE QVariantMap activeVideoClipAtPlayhead() const;
@@ -121,6 +134,14 @@ public:
     Q_INVOKABLE void removeBookmark(int index);
     Q_INVOKABLE void goToBookmark(int index);
     Q_INVOKABLE void freezeFrameAtPlayhead();
+    Q_INVOKABLE void copySelection();
+    Q_INVOKABLE void cutSelection();
+    Q_INVOKABLE void pasteAtPlayhead();
+    Q_INVOKABLE void nudgeSelection(double deltaSeconds);
+    Q_INVOKABLE bool selectionContains(int trackIndex, int clipIndex) const;
+    Q_INVOKABLE QString shortcutFor(const QString &actionId) const;
+    Q_INVOKABLE void setShortcut(const QString &actionId, const QString &keys);
+    Q_INVOKABLE void triggerAction(const QString &actionId);
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE double snapTime(double seconds) const;
@@ -147,6 +168,8 @@ signals:
     void exportFinished(bool success);
     void projectMutated();
     void waveformReady(const QString &path);
+    void guidesChanged();
+    void shortcutsChanged();
 
 protected:
     void pushProjectEdit(const drift::Project &before, const QString &text);
@@ -161,6 +184,8 @@ protected:
     drift::TimeUs sourceDurationForClip(const drift::Clip &clip) const;
     void applyRippleShift(drift::Track &track, int fromClipIndex, drift::TimeUs delta);
     void restoreFilmstripsAfterLoad();
+    void normalizeSelection();
+    bool isValidClipIndex(int trackIndex, int clipIndex) const;
 
     AssetLibrary *m_assetLibrary = nullptr;
     TimelineModel m_timelineModel;
@@ -175,8 +200,18 @@ protected:
     bool m_exportInProgress = false;
     int m_selectedTrack = -1;
     int m_selectedClip = -1;
+    QList<QPair<int, int>> m_selection;
+    bool m_guidesEnabled = false;
+    QString m_guideType = QStringLiteral("thirds");
+    QHash<QString, QString> m_shortcuts;
     int m_draggingAssetIndex = -1;
     QString m_lastMessage;
+    struct ClipboardItem
+    {
+        drift::Clip clip;
+        drift::TrackType trackType = drift::TrackType::Video;
+    };
+    QList<ClipboardItem> m_clipboard;
 
     // Waveform peaks are expensive (full-file decode); compute once off-thread
     // and cache by path so timeline refreshes don't re-decode on the GUI thread.

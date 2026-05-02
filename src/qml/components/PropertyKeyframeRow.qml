@@ -10,6 +10,7 @@ Column {
 
     required property var propDef       // {key, label, def, decimals}
     required property var keyframeList  // [{seconds, value}, ...] for this property
+    property string interpolationMode: "linear"
     spacing: 4
 
     readonly property var activeKey: keyframeAtPlayhead()
@@ -84,6 +85,58 @@ Column {
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeXs
             anchors.verticalCenter: parent.verticalCenter
+        }
+
+        Rectangle {
+            width: 30
+            height: 18
+            radius: Theme.radiusSm
+            color: root.interpolationMode === "linear" ? Theme.panelSecondaryBg : "transparent"
+            border.width: 1
+            border.color: Theme.panelBorder
+            anchors.verticalCenter: parent.verticalCenter
+            Text {
+                anchors.centerIn: parent
+                text: "Lin"
+                color: Theme.panelForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    root.interpolationMode = "linear"
+                    EditorState.setKeyframeInterpolation(
+                        EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key, "linear")
+                }
+            }
+        }
+
+        Rectangle {
+            width: 34
+            height: 18
+            radius: Theme.radiusSm
+            color: root.interpolationMode === "hold" ? Theme.panelSecondaryBg : "transparent"
+            border.width: 1
+            border.color: Theme.panelBorder
+            anchors.verticalCenter: parent.verticalCenter
+            Text {
+                anchors.centerIn: parent
+                text: "Hold"
+                color: Theme.panelForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    root.interpolationMode = "hold"
+                    EditorState.setKeyframeInterpolation(
+                        EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key, "hold")
+                }
+            }
         }
     }
 

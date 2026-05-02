@@ -552,6 +552,33 @@ PanelFrame {
                                                            { boxColor: text })
                                 }
                             }
+
+                            Row {
+                                width: parent.width
+                                spacing: 8
+                                visible: clip.textStyle.boxEnabled
+
+                                Text {
+                                    text: "Box padding"
+                                    color: Theme.mutedForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                TextField {
+                                    width: 72
+                                    text: clip.textStyle.boxPadding.toFixed(1)
+                                    color: Theme.panelForeground
+                                    font.family: Theme.monoFontFamily
+                                    font.pixelSize: Theme.fontSizeSm
+                                    onEditingFinished: {
+                                        const v = parseFloat(text)
+                                        if (!isNaN(v))
+                                            EditorState.setTextStyle(
+                                                EditorState.selectedTrack, EditorState.selectedClip, { boxPadding: v })
+                                    }
+                                }
+                            }
                         }
 
                         Column {
@@ -658,12 +685,14 @@ PanelFrame {
                                 PropertyKeyframeRow {
                                     width: (parent.width - parent.spacing) / 2
                                     propDef: root.propOpacity
-                                    keyframeList: (clip.keyframes && clip.keyframes.opacity) || []
+                                    keyframeList: (clip.keyframes && clip.keyframes.opacity && clip.keyframes.opacity.points) || []
+                                    interpolationMode: (clip.keyframes && clip.keyframes.opacity && clip.keyframes.opacity.interpolation) || "linear"
                                 }
                                 PropertyKeyframeRow {
                                     width: (parent.width - parent.spacing) / 2
                                     propDef: root.propScale
-                                    keyframeList: (clip.keyframes && clip.keyframes.scale) || []
+                                    keyframeList: (clip.keyframes && clip.keyframes.scale && clip.keyframes.scale.points) || []
+                                    interpolationMode: (clip.keyframes && clip.keyframes.scale && clip.keyframes.scale.interpolation) || "linear"
                                 }
                             }
                             Row {
@@ -672,18 +701,21 @@ PanelFrame {
                                 PropertyKeyframeRow {
                                     width: (parent.width - parent.spacing) / 2
                                     propDef: root.propPosX
-                                    keyframeList: (clip.keyframes && clip.keyframes.posX) || []
+                                    keyframeList: (clip.keyframes && clip.keyframes.posX && clip.keyframes.posX.points) || []
+                                    interpolationMode: (clip.keyframes && clip.keyframes.posX && clip.keyframes.posX.interpolation) || "linear"
                                 }
                                 PropertyKeyframeRow {
                                     width: (parent.width - parent.spacing) / 2
                                     propDef: root.propPosY
-                                    keyframeList: (clip.keyframes && clip.keyframes.posY) || []
+                                    keyframeList: (clip.keyframes && clip.keyframes.posY && clip.keyframes.posY.points) || []
+                                    interpolationMode: (clip.keyframes && clip.keyframes.posY && clip.keyframes.posY.interpolation) || "linear"
                                 }
                             }
                             PropertyKeyframeRow {
                                 width: parent.width
                                 propDef: root.propRotation
-                                keyframeList: (clip.keyframes && clip.keyframes.rotation) || []
+                                keyframeList: (clip.keyframes && clip.keyframes.rotation && clip.keyframes.rotation.points) || []
+                                interpolationMode: (clip.keyframes && clip.keyframes.rotation && clip.keyframes.rotation.interpolation) || "linear"
                             }
                         }
                     }
@@ -706,7 +738,8 @@ PanelFrame {
                             width: tabColumn.width
                             visible: clip.kind === "audio" || clip.kind === "video"
                             propDef: root.propVolume
-                            keyframeList: (clip.keyframes && clip.keyframes.volume) || []
+                            keyframeList: (clip.keyframes && clip.keyframes.volume && clip.keyframes.volume.points) || []
+                            interpolationMode: (clip.keyframes && clip.keyframes.volume && clip.keyframes.volume.interpolation) || "linear"
                         }
                     }
 

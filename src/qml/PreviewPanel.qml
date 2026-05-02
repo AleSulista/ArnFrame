@@ -54,6 +54,55 @@ PanelFrame {
                         anchors.fill: parent
                     }
 
+                    Item {
+                        anchors.fill: parent
+                        visible: EditorState.guidesEnabled
+
+                        Repeater {
+                            model: EditorState.guideType === "crosshair" ? 1 : 2
+                            Rectangle {
+                                width: 1
+                                height: parent.height
+                                x: EditorState.guideType === "crosshair"
+                                   ? parent.width / 2
+                                   : parent.width * (index + 1) / 3
+                                color: "#80ffffff"
+                            }
+                        }
+                        Repeater {
+                            model: EditorState.guideType === "crosshair" ? 1 : 2
+                            Rectangle {
+                                height: 1
+                                width: parent.width
+                                y: EditorState.guideType === "crosshair"
+                                   ? parent.height / 2
+                                   : parent.height * (index + 1) / 3
+                                color: "#80ffffff"
+                            }
+                        }
+
+                        Rectangle {
+                            visible: EditorState.guideType === "safe"
+                            x: parent.width * 0.05
+                            y: parent.height * 0.05
+                            width: parent.width * 0.90
+                            height: parent.height * 0.90
+                            color: "transparent"
+                            border.width: 1
+                            border.color: "#80ffffff"
+                        }
+                        Rectangle {
+                            visible: EditorState.guideType === "safe"
+                            x: parent.width * 0.025
+                            y: parent.height * 0.025
+                            width: parent.width * 0.95
+                            height: parent.height * 0.95
+                            color: "transparent"
+                            border.width: 1
+                            border.color: "#66ffffff"
+                        }
+                    }
+
                     Connections {
                         target: EditorState.playback
                         function onCurrentFrameChanged() {
@@ -140,6 +189,15 @@ PanelFrame {
                     height: 16
                     color: Theme.panelBorder
                     anchors.verticalCenter: parent.verticalCenter
+                }
+
+                IconButton {
+                    icon: Theme.icons.grid
+                    variant: "text"
+                    tooltip: qsTr("Toggle guides")
+                    anchors.verticalCenter: parent.verticalCenter
+                    active: EditorState.guidesEnabled
+                    onClicked: EditorState.guidesEnabled = !EditorState.guidesEnabled
                 }
 
                 IconButton {

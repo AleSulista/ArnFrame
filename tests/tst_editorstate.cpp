@@ -17,6 +17,7 @@ private slots:
     void undoBookmarkAdd();
     void projectPersistenceRoundTrip();
     void textStyleBlendModeKeyframesAndEffects();
+    void multiSelectClipboardGuidesAndShortcuts();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -149,6 +150,49 @@ void EditorStateTest::textStyleBlendModeKeyframesAndEffects()
 
     state.removeEffect(track, clip, 0);
     QCOMPARE(state.selectedClipData().value(QStringLiteral("effects")).toList().size(), 0);
+}
+
+void EditorStateTest::multiSelectClipboardGuidesAndShortcuts()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    state.addTextClip(QStringLiteral("A"), 0.0);
+    state.addTextClip(QStringLiteral("B"), 2.0);
+
+    const int track = state.selectedTrack();
+    QVERIFY(track >= 0);
+
+    // Build a two-clip selection.
+    state.selectClip(track, 0);
+    state.addToSelection(track, 1);
+    QCOMPARE(state.selection().size(), 2);
+    QVERIFY(state.selectionContains(track, 0));
+    QVERIFY(state.selectionContains(track, 1));
+
+    // Copy/paste at playhead keeps both clips.
+    state.setPlayheadSeconds(10.0);
+    state.copySelection();
+    state.pasteAtPlayhead();
+    QCOMPARE(state.tracks().at(track).toMap().value(QStringLiteral("clips")).toList().size(), 4);
+
+    // Nudge and cut do not crash and remain undoable.
+    state.nudgeSelection(0.25);
+    QVERIFY(state.undoAvailable());
+    state.cutSelection();
+    QVERIFY(state.tracks().at(track).toMap().value(QStringLiteral("clips")).toList().size() <= 2);
+
+    // Guides state is writable.
+    state.setGuidesEnabled(true);
+    QCOMPARE(state.guidesEnabled(), true);
+    state.setGuideType(QStringLiteral("safe"));
+    QCOMPARE(state.guideType(), QStringLiteral("safe"));
+
+    // Shortcut/action layer wiring.
+    state.setShortcut(QStringLiteral("nudgeRight"), QStringLiteral("Ctrl+Alt+Right"));
+    QCOMPARE(state.shortcutFor(QStringLiteral("nudgeRight")), QStringLiteral("Ctrl+Alt+Right"));
+    state.triggerAction(QStringLiteral("toggleGuides"));
+    QCOMPARE(state.guidesEnabled(), false);
 }
 
 QTEST_MAIN(EditorStateTest)

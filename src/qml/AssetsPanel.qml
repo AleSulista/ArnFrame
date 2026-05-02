@@ -246,13 +246,91 @@ PanelFrame {
             }
 
             Text {
-                visible: ["stickers", "settings"].indexOf(tabsModel.get(activeTab).tabId) >= 0
+                visible: tabsModel.get(activeTab).tabId === "stickers"
                 anchors.centerIn: parent
                 anchors.verticalCenterOffset: Theme.panelHeaderHeight / 2
                 text: tabsModel.get(activeTab).label + " — coming soon"
                 color: Theme.mutedForeground
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSm
+            }
+
+            Column {
+                visible: tabsModel.get(activeTab).tabId === "settings"
+                width: parent.width
+                height: parent.height - Theme.panelHeaderHeight
+                spacing: 8
+                padding: 12
+
+                Text {
+                    text: "Preview guides"
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                }
+
+                Row {
+                    spacing: 8
+                    CheckBox {
+                        checked: EditorState.guidesEnabled
+                        text: "Enabled"
+                        onToggled: EditorState.guidesEnabled = checked
+                    }
+                    ComboBox {
+                        model: ["thirds", "crosshair", "safe"]
+                        currentIndex: Math.max(0, model.indexOf(EditorState.guideType))
+                        onActivated: EditorState.guideType = model[currentIndex]
+                    }
+                }
+
+                Text {
+                    text: "Keybindings"
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                    topPadding: 6
+                }
+
+                Flickable {
+                    width: parent.width - 24
+                    height: parent.height - 120
+                    contentHeight: shortcutColumn.height
+                    clip: true
+                    ScrollBar.vertical: AppScrollBar { }
+
+                    Column {
+                        id: shortcutColumn
+                        width: parent.width
+                        spacing: 6
+
+                        Repeater {
+                            model: EditorState.actions
+                            delegate: Row {
+                                required property var modelData
+                                width: shortcutColumn.width
+                                spacing: 8
+
+                                Text {
+                                    width: 130
+                                    text: modelData.label
+                                    color: Theme.panelForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    wrapMode: Text.WordWrap
+                                }
+                                TextField {
+                                    width: shortcutColumn.width - 138
+                                    text: EditorState.shortcutFor(modelData.id)
+                                    color: Theme.panelForeground
+                                    font.family: Theme.monoFontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    placeholderText: "e.g. Ctrl+Shift+K"
+                                    onEditingFinished: EditorState.setShortcut(modelData.id, text)
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Effects / Adjustment tab panel
