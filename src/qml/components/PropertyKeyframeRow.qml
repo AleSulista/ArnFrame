@@ -147,6 +147,7 @@ Column {
         color: Theme.panelAccent
 
         TextField {
+            id: valueField
             anchors.fill: parent
             anchors.margins: 1
             verticalAlignment: TextInput.AlignVCenter
@@ -161,6 +162,18 @@ Column {
                     EditorState.setClipKeyframe(
                         EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
                         EditorState.playheadSeconds, v)
+            }
+
+            // TextField drops its text binding after edit; keep it in sync with playhead/selection.
+            Connections {
+                target: EditorState
+                function onPlayheadSecondsChanged() { valueField.syncFromModel() }
+                function onSelectionChanged() { valueField.syncFromModel() }
+                function onTracksChanged() { valueField.syncFromModel() }
+            }
+            function syncFromModel() {
+                if (!activeFocus)
+                    text = root.currentValue.toFixed(root.propDef.decimals)
             }
         }
     }

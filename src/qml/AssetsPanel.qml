@@ -124,6 +124,7 @@ PanelFrame {
                     anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 6
+                    visible: kindsForTab(tabsModel.get(root.activeTab).tabId).length > 0
 
                     IconButton {
                         icon: Theme.icons.grid
@@ -245,87 +246,103 @@ PanelFrame {
                 }
             }
 
-            Text {
+            Item {
                 visible: tabsModel.get(activeTab).tabId === "stickers"
-                anchors.centerIn: parent
-                anchors.verticalCenterOffset: Theme.panelHeaderHeight / 2
-                text: tabsModel.get(activeTab).label + " — coming soon"
-                color: Theme.mutedForeground
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSm
+                width: parent.width
+                height: parent.height - Theme.panelHeaderHeight
+
+                Text {
+                    anchors.centerIn: parent
+                    text: tabsModel.get(activeTab).label + " — coming soon"
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSm
+                }
             }
 
-            Column {
+            Item {
                 visible: tabsModel.get(activeTab).tabId === "settings"
                 width: parent.width
                 height: parent.height - Theme.panelHeaderHeight
-                spacing: 8
-                padding: 12
 
-                Text {
-                    text: "Preview guides"
-                    color: Theme.mutedForeground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeXs
-                }
-
-                Row {
+                Column {
+                    id: settingsColumn
+                    anchors.fill: parent
+                    anchors.margins: 12
                     spacing: 8
-                    CheckBox {
-                        checked: EditorState.guidesEnabled
-                        text: "Enabled"
-                        onToggled: EditorState.guidesEnabled = checked
+
+                    Text {
+                        text: "Preview guides"
+                        color: Theme.mutedForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeXs
                     }
-                    ComboBox {
-                        model: ["thirds", "crosshair", "safe"]
-                        currentIndex: Math.max(0, model.indexOf(EditorState.guideType))
-                        onActivated: EditorState.guideType = model[currentIndex]
+
+                    Row {
+                        spacing: 8
+                        CheckBox {
+                            checked: EditorState.guidesEnabled
+                            text: "Enabled"
+                            onToggled: EditorState.guidesEnabled = checked
+                        }
+                        ComboBox {
+                            model: ["thirds", "crosshair", "safe"]
+                            currentIndex: Math.max(0, model.indexOf(EditorState.guideType))
+                            onActivated: EditorState.guideType = model[currentIndex]
+                        }
                     }
-                }
 
-                Text {
-                    text: "Keybindings"
-                    color: Theme.mutedForeground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeXs
-                    topPadding: 6
-                }
+                    Text {
+                        text: "Keybindings"
+                        color: Theme.mutedForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeXs
+                        topPadding: 6
+                    }
 
-                Flickable {
-                    width: parent.width - 24
-                    height: parent.height - 120
-                    contentHeight: shortcutColumn.height
-                    clip: true
-                    ScrollBar.vertical: AppScrollBar { }
-
-                    Column {
-                        id: shortcutColumn
+                    Flickable {
                         width: parent.width
-                        spacing: 6
+                        height: Math.max(80, settingsColumn.height - y)
+                        contentHeight: shortcutColumn.height
+                        clip: true
+                        ScrollBar.vertical: AppScrollBar { }
 
-                        Repeater {
-                            model: EditorState.actions
-                            delegate: Row {
-                                required property var modelData
-                                width: shortcutColumn.width
-                                spacing: 8
+                        Column {
+                            id: shortcutColumn
+                            width: parent.width
+                            spacing: 6
 
-                                Text {
-                                    width: 130
-                                    text: modelData.label
-                                    color: Theme.panelForeground
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeXs
-                                    wrapMode: Text.WordWrap
-                                }
-                                TextField {
-                                    width: shortcutColumn.width - 138
-                                    text: EditorState.shortcutFor(modelData.id)
-                                    color: Theme.panelForeground
-                                    font.family: Theme.monoFontFamily
-                                    font.pixelSize: Theme.fontSizeXs
-                                    placeholderText: "e.g. Ctrl+Shift+K"
-                                    onEditingFinished: EditorState.setShortcut(modelData.id, text)
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                text: "Click a shortcut, then press the keys. Esc cancels, Backspace clears."
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                                bottomPadding: 4
+                            }
+
+                            Repeater {
+                                model: EditorState.actions
+                                delegate: Row {
+                                    required property var modelData
+                                    width: shortcutColumn.width
+                                    spacing: 8
+
+                                    Text {
+                                        width: Math.max(90, shortcutColumn.width - 128)
+                                        text: modelData.label
+                                        color: Theme.panelForeground
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeXs
+                                        wrapMode: Text.WordWrap
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    ShortcutCaptureField {
+                                        width: 120
+                                        actionId: modelData.id
+                                        shortcut: modelData.shortcut
+                                    }
                                 }
                             }
                         }
@@ -343,9 +360,14 @@ PanelFrame {
                 readonly property string category: tabsModel.get(root.activeTab).tabId === "adjustment" ? "adjustment" : "stylize"
 
                 Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
+                    id: effectsTip
+                    width: parent.width - 24
+                    leftPadding: 12
+                    rightPadding: 12
                     topPadding: 8
-                    bottomPadding: 4
+                    bottomPadding: 8
+                    wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignHCenter
                     text: EditorState.selectedClip >= 0
                           ? "Click + or drag an effect onto a clip"
                           : "Select a clip to use +, or drag an effect onto any clip"
@@ -356,7 +378,7 @@ PanelFrame {
 
                 Flickable {
                     width: parent.width
-                    height: parent.height
+                    height: Math.max(0, parent.height - effectsTip.height)
                     contentHeight: effectsGrid.height + 24
                     clip: true
                     ScrollBar.vertical: AppScrollBar { }

@@ -7,9 +7,70 @@ PanelFrame {
     id: root
 
     readonly property var clip: EditorState.selectedClipData
-    readonly property bool hasSelection: Object.keys(clip).length > 0
+    readonly property bool hasSelection: !!clip && Object.keys(clip).length > 0
+    readonly property string clipKind: hasSelection ? (clip.kind || "") : ""
+    readonly property bool hasTextStyle: hasSelection && clipKind === "text" && !!clip.textStyle
+    readonly property var textStyle: hasTextStyle ? clip.textStyle : ({
+                                                                       "fontFamily": "Sans Serif",
+                                                                       "pixelSize": 64,
+                                                                       "color": "#ffffffff",
+                                                                       "bold": true,
+                                                                       "italic": false,
+                                                                       "align": "center",
+                                                                       "outlineWidth": 0,
+                                                                       "outlineColor": "#ff000000",
+                                                                       "boxEnabled": false,
+                                                                       "boxColor": "#80000000",
+                                                                       "boxPadding": 8
+                                                                   })
     property int activeTab: 0
     readonly property string currentTabId: tabsModel.get(activeTab).tabId
+
+    // Keep inspector fields synced when selection/project changes without fighting active edits.
+    function formatSeconds(value) {
+        return Number(value || 0).toFixed(2)
+    }
+
+    function refreshInspectorFields() {
+        if (!root.hasSelection)
+            return
+        if (startField && !startField.activeFocus)
+            startField.text = root.formatSeconds(root.clip.start)
+        if (durationField && !durationField.activeFocus)
+            durationField.text = root.formatSeconds(root.clip.duration)
+        if (inPointField && !inPointField.activeFocus)
+            inPointField.text = root.formatSeconds(root.clip.inPoint)
+        if (outPointField && !outPointField.activeFocus)
+            outPointField.text = root.formatSeconds(root.clip.outPoint)
+        if (textContentField && !textContentField.activeFocus)
+            textContentField.text = root.clip.textContent || ""
+        if (blendModeBox)
+            blendModeBox.currentIndex = Math.max(0, blendModeBox.model.indexOf(root.clip.blendMode || "normal"))
+        if (root.hasTextStyle) {
+            if (fontFamilyBox)
+                fontFamilyBox.currentIndex = Math.max(0, fontFamilyBox.model.indexOf(root.textStyle.fontFamily))
+            if (pixelSizeField && !pixelSizeField.activeFocus)
+                pixelSizeField.text = Number(root.textStyle.pixelSize).toString()
+            if (textColorField && !textColorField.activeFocus)
+                textColorField.text = root.textStyle.color
+            if (outlineWidthField && !outlineWidthField.activeFocus)
+                outlineWidthField.text = Number(root.textStyle.outlineWidth).toFixed(1)
+            if (outlineColorField && !outlineColorField.activeFocus)
+                outlineColorField.text = root.textStyle.outlineColor
+            if (boxColorField && !boxColorField.activeFocus)
+                boxColorField.text = root.textStyle.boxColor
+            if (boxPaddingField && !boxPaddingField.activeFocus)
+                boxPaddingField.text = Number(root.textStyle.boxPadding).toFixed(1)
+        }
+    }
+
+    Connections {
+        target: EditorState
+        function onSelectionChanged() { root.refreshInspectorFields() }
+        function onTracksChanged() { root.refreshInspectorFields() }
+    }
+
+    Component.onCompleted: root.refreshInspectorFields()
 
     ListModel {
         id: tabsModel
@@ -142,7 +203,7 @@ PanelFrame {
                         visible: root.currentTabId === "general"
 
                         Text {
-                            text: clip.name || ""
+                            text: clip.name || "Untitled clip"
                             color: Theme.panelForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeBase
@@ -161,7 +222,7 @@ PanelFrame {
                                 font.pixelSize: Theme.fontSizeXs
                             }
                             Text {
-                                text: clip.kind || "—"
+                                text: root.clipKind.length > 0 ? root.clipKind : "—"
                                 color: Theme.panelForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSm
@@ -182,8 +243,9 @@ PanelFrame {
                                     font.family: Theme.fontFamily
                                 }
                                 TextField {
+                                    id: startField
                                     width: parent.width
-                                    text: (clip.start || 0).toFixed(2)
+                                    text: root.formatSeconds(clip.start)
                                     color: Theme.panelForeground
                                     font.family: Theme.monoFontFamily
                                     font.pixelSize: Theme.fontSizeSm
@@ -205,8 +267,9 @@ PanelFrame {
                                     font.family: Theme.fontFamily
                                 }
                                 TextField {
+                                    id: durationField
                                     width: parent.width
-                                    text: (clip.duration || 0).toFixed(2)
+                                    text: root.formatSeconds(clip.duration)
                                     color: Theme.panelForeground
                                     font.family: Theme.monoFontFamily
                                     font.pixelSize: Theme.fontSizeSm
@@ -222,7 +285,7 @@ PanelFrame {
                         Column {
                             width: tabColumn.width
                             spacing: 4
-                            visible: clip.kind === "text"
+                            visible: root.clipKind === "text"
                             Text {
                                 text: "Text content"
                                 color: Theme.mutedForeground
@@ -230,6 +293,7 @@ PanelFrame {
                                 font.pixelSize: Theme.fontSizeXs
                             }
                             TextArea {
+                                id: textContentField
                                 width: parent.width
                                 height: 80
                                 text: clip.textContent || ""
@@ -245,7 +309,7 @@ PanelFrame {
                         Column {
                             width: tabColumn.width
                             spacing: 8
-                            visible: clip.kind === "text" && clip.textStyle !== undefined
+                            visible: root.hasTextStyle
 
                             Text {
                                 text: "Text style"
@@ -287,9 +351,10 @@ PanelFrame {
                             }
 
                             ComboBox {
+                                id: fontFamilyBox
                                 width: parent.width
                                 model: Qt.fontFamilies()
-                                currentIndex: Math.max(0, model.indexOf(clip.textStyle.fontFamily))
+                                currentIndex: Math.max(0, model.indexOf(root.textStyle.fontFamily))
                                 onActivated: EditorState.setTextStyle(
                                                  EditorState.selectedTrack, EditorState.selectedClip,
                                                  { fontFamily: currentText })
@@ -309,8 +374,9 @@ PanelFrame {
                                         font.family: Theme.fontFamily
                                     }
                                     TextField {
+                                        id: pixelSizeField
                                         width: parent.width
-                                        text: clip.textStyle.pixelSize.toString()
+                                        text: Number(root.textStyle.pixelSize).toString()
                                         color: Theme.panelForeground
                                         font.family: Theme.monoFontFamily
                                         font.pixelSize: Theme.fontSizeSm
@@ -339,13 +405,14 @@ PanelFrame {
                                             height: 24
                                             radius: 4
                                             anchors.verticalCenter: parent.verticalCenter
-                                            color: clip.textStyle.color
+                                            color: root.textStyle.color
                                             border.width: 1
                                             border.color: Theme.panelBorder
                                         }
                                         TextField {
+                                            id: textColorField
                                             width: 92
-                                            text: clip.textStyle.color
+                                            text: root.textStyle.color
                                             color: Theme.panelForeground
                                             font.family: Theme.monoFontFamily
                                             font.pixelSize: Theme.fontSizeSm
@@ -365,7 +432,7 @@ PanelFrame {
                                     width: 44
                                     height: 26
                                     radius: Theme.radiusSm
-                                    color: clip.textStyle.bold ? Theme.panelSecondaryBg : "transparent"
+                                    color: root.textStyle.bold ? Theme.panelSecondaryBg : "transparent"
                                     border.width: 1
                                     border.color: Theme.panelBorder
                                     Text {
@@ -380,7 +447,7 @@ PanelFrame {
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: EditorState.setTextStyle(
                                                        EditorState.selectedTrack, EditorState.selectedClip,
-                                                       { bold: !clip.textStyle.bold })
+                                                       { bold: !root.textStyle.bold })
                                     }
                                 }
 
@@ -388,7 +455,7 @@ PanelFrame {
                                     width: 44
                                     height: 26
                                     radius: Theme.radiusSm
-                                    color: clip.textStyle.italic ? Theme.panelSecondaryBg : "transparent"
+                                    color: root.textStyle.italic ? Theme.panelSecondaryBg : "transparent"
                                     border.width: 1
                                     border.color: Theme.panelBorder
                                     Text {
@@ -403,7 +470,7 @@ PanelFrame {
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: EditorState.setTextStyle(
                                                        EditorState.selectedTrack, EditorState.selectedClip,
-                                                       { italic: !clip.textStyle.italic })
+                                                       { italic: !root.textStyle.italic })
                                     }
                                 }
 
@@ -414,7 +481,7 @@ PanelFrame {
                                         width: 44
                                         height: 26
                                         radius: Theme.radiusSm
-                                        color: clip.textStyle.align === modelData ? Theme.panelSecondaryBg : "transparent"
+                                        color: root.textStyle.align === modelData ? Theme.panelSecondaryBg : "transparent"
                                         border.width: 1
                                         border.color: Theme.panelBorder
                                         Text {
@@ -455,8 +522,9 @@ PanelFrame {
                                         font.family: Theme.fontFamily
                                     }
                                     TextField {
+                                        id: outlineWidthField
                                         width: parent.width
-                                        text: clip.textStyle.outlineWidth.toFixed(1)
+                                        text: Number(root.textStyle.outlineWidth).toFixed(1)
                                         color: Theme.panelForeground
                                         font.family: Theme.monoFontFamily
                                         font.pixelSize: Theme.fontSizeSm
@@ -485,13 +553,14 @@ PanelFrame {
                                             height: 24
                                             radius: 4
                                             anchors.verticalCenter: parent.verticalCenter
-                                            color: clip.textStyle.outlineColor
+                                            color: root.textStyle.outlineColor
                                             border.width: 1
                                             border.color: Theme.panelBorder
                                         }
                                         TextField {
+                                            id: outlineColorField
                                             width: 92
-                                            text: clip.textStyle.outlineColor
+                                            text: root.textStyle.outlineColor
                                             color: Theme.panelForeground
                                             font.family: Theme.monoFontFamily
                                             font.pixelSize: Theme.fontSizeSm
@@ -511,7 +580,7 @@ PanelFrame {
                                     width: 96
                                     height: 26
                                     radius: Theme.radiusSm
-                                    color: clip.textStyle.boxEnabled ? Theme.panelSecondaryBg : "transparent"
+                                    color: root.textStyle.boxEnabled ? Theme.panelSecondaryBg : "transparent"
                                     border.width: 1
                                     border.color: Theme.panelBorder
                                     Text {
@@ -526,24 +595,25 @@ PanelFrame {
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: EditorState.setTextStyle(
                                                        EditorState.selectedTrack, EditorState.selectedClip,
-                                                       { boxEnabled: !clip.textStyle.boxEnabled })
+                                                       { boxEnabled: !root.textStyle.boxEnabled })
                                     }
                                 }
 
                                 Rectangle {
-                                    visible: clip.textStyle.boxEnabled
+                                    visible: root.textStyle.boxEnabled
                                     width: 24
                                     height: 24
                                     radius: 4
                                     anchors.verticalCenter: parent.verticalCenter
-                                    color: clip.textStyle.boxColor
+                                    color: root.textStyle.boxColor
                                     border.width: 1
                                     border.color: Theme.panelBorder
                                 }
                                 TextField {
-                                    visible: clip.textStyle.boxEnabled
+                                    id: boxColorField
+                                    visible: root.textStyle.boxEnabled
                                     width: 92
-                                    text: clip.textStyle.boxColor
+                                    text: root.textStyle.boxColor
                                     color: Theme.panelForeground
                                     font.family: Theme.monoFontFamily
                                     font.pixelSize: Theme.fontSizeSm
@@ -556,7 +626,7 @@ PanelFrame {
                             Row {
                                 width: parent.width
                                 spacing: 8
-                                visible: clip.textStyle.boxEnabled
+                                visible: root.textStyle.boxEnabled
 
                                 Text {
                                     text: "Box padding"
@@ -566,8 +636,9 @@ PanelFrame {
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
                                 TextField {
+                                    id: boxPaddingField
                                     width: 72
-                                    text: clip.textStyle.boxPadding.toFixed(1)
+                                    text: Number(root.textStyle.boxPadding).toFixed(1)
                                     color: Theme.panelForeground
                                     font.family: Theme.monoFontFamily
                                     font.pixelSize: Theme.fontSizeSm
@@ -584,7 +655,7 @@ PanelFrame {
                         Column {
                             width: tabColumn.width
                             spacing: 8
-                            visible: clip.kind !== "text"
+                            visible: root.clipKind !== "text"
 
                             Text {
                                 text: "Trim"
@@ -607,8 +678,9 @@ PanelFrame {
                                         font.family: Theme.fontFamily
                                     }
                                     TextField {
+                                        id: inPointField
                                         width: parent.width
-                                        text: (clip.inPoint || 0).toFixed(2)
+                                        text: root.formatSeconds(clip.inPoint)
                                         color: Theme.panelForeground
                                         font.family: Theme.monoFontFamily
                                         font.pixelSize: Theme.fontSizeSm
@@ -626,8 +698,9 @@ PanelFrame {
                                         font.family: Theme.fontFamily
                                     }
                                     TextField {
+                                        id: outPointField
                                         width: parent.width
-                                        text: (clip.outPoint || 0).toFixed(2)
+                                        text: root.formatSeconds(clip.outPoint)
                                         color: Theme.panelForeground
                                         font.family: Theme.monoFontFamily
                                         font.pixelSize: Theme.fontSizeSm
@@ -667,7 +740,7 @@ PanelFrame {
                         visible: root.currentTabId === "transform"
 
                         Text {
-                            visible: clip.kind === "audio"
+                            visible: root.clipKind === "audio"
                             text: "Not applicable to audio clips"
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
@@ -677,7 +750,7 @@ PanelFrame {
                         Column {
                             width: tabColumn.width
                             spacing: 8
-                            visible: clip.kind !== "audio"
+                            visible: root.clipKind !== "audio"
 
                             Row {
                                 width: parent.width
@@ -727,7 +800,7 @@ PanelFrame {
                         visible: root.currentTabId === "audio"
 
                         Text {
-                            visible: clip.kind !== "audio" && clip.kind !== "video"
+                            visible: root.clipKind !== "audio" && root.clipKind !== "video"
                             text: "No audio on this clip"
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
@@ -736,7 +809,7 @@ PanelFrame {
 
                         PropertyKeyframeRow {
                             width: tabColumn.width
-                            visible: clip.kind === "audio" || clip.kind === "video"
+                            visible: root.clipKind === "audio" || root.clipKind === "video"
                             propDef: root.propVolume
                             keyframeList: (clip.keyframes && clip.keyframes.volume && clip.keyframes.volume.points) || []
                             interpolationMode: (clip.keyframes && clip.keyframes.volume && clip.keyframes.volume.interpolation) || "linear"
@@ -760,7 +833,7 @@ PanelFrame {
                         visible: root.currentTabId === "blending"
 
                         Text {
-                            visible: clip.kind === "audio"
+                            visible: root.clipKind === "audio"
                             text: "Not applicable to audio clips"
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
@@ -768,17 +841,18 @@ PanelFrame {
                         }
 
                         Text {
-                            visible: clip.kind !== "audio"
+                            visible: root.clipKind !== "audio"
                             text: "Blend mode"
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeXs
                         }
                         ComboBox {
-                            visible: clip.kind !== "audio"
+                            id: blendModeBox
+                            visible: root.clipKind !== "audio"
                             width: parent.width
                             model: ["normal", "multiply", "screen", "overlay", "add", "darken", "lighten"]
-                            currentIndex: Math.max(0, model.indexOf(clip.blendMode))
+                            currentIndex: Math.max(0, model.indexOf(clip.blendMode || "normal"))
                             onActivated: EditorState.setClipBlendMode(
                                              EditorState.selectedTrack, EditorState.selectedClip, model[currentIndex])
                         }

@@ -824,7 +824,7 @@ PanelFrame {
                                             drag.maximumY: trackRow.height * 2
                                             property int originTrack: trackRow.trackIndex
 
-                                            onPressed: {
+                                            onPressed: function(mouse) {
                                                 originTrack = trackRow.trackIndex
                                                 if ((mouse.modifiers & Qt.ShiftModifier) !== 0)
                                                     EditorState.addToSelection(trackRow.trackIndex, modelData)

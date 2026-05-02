@@ -324,20 +324,28 @@ QVariantList AppController::selection() const
 
 QVariantList AppController::actions() const
 {
+    auto action = [this](const QString &id, const QString &label) {
+        return QVariantMap{
+            {QStringLiteral("id"), id},
+            {QStringLiteral("label"), label},
+            {QStringLiteral("shortcut"), m_shortcuts.value(id)},
+        };
+    };
+
     return {
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("playPause")}, {QStringLiteral("label"), QStringLiteral("Play/Pause")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("delete")}, {QStringLiteral("label"), QStringLiteral("Delete selection")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("undo")}, {QStringLiteral("label"), QStringLiteral("Undo")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("redo")}, {QStringLiteral("label"), QStringLiteral("Redo")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("copy")}, {QStringLiteral("label"), QStringLiteral("Copy selection")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("cut")}, {QStringLiteral("label"), QStringLiteral("Cut selection")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("paste")}, {QStringLiteral("label"), QStringLiteral("Paste at playhead")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("duplicate")}, {QStringLiteral("label"), QStringLiteral("Duplicate selected clip")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("split")}, {QStringLiteral("label"), QStringLiteral("Split at playhead")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("clearSelection")}, {QStringLiteral("label"), QStringLiteral("Clear selection")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("nudgeLeft")}, {QStringLiteral("label"), QStringLiteral("Nudge selection left")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("nudgeRight")}, {QStringLiteral("label"), QStringLiteral("Nudge selection right")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("toggleGuides")}, {QStringLiteral("label"), QStringLiteral("Toggle guides")}},
+        action(QStringLiteral("playPause"), QStringLiteral("Play/Pause")),
+        action(QStringLiteral("delete"), QStringLiteral("Delete selection")),
+        action(QStringLiteral("undo"), QStringLiteral("Undo")),
+        action(QStringLiteral("redo"), QStringLiteral("Redo")),
+        action(QStringLiteral("copy"), QStringLiteral("Copy selection")),
+        action(QStringLiteral("cut"), QStringLiteral("Cut selection")),
+        action(QStringLiteral("paste"), QStringLiteral("Paste at playhead")),
+        action(QStringLiteral("duplicate"), QStringLiteral("Duplicate selected clip")),
+        action(QStringLiteral("split"), QStringLiteral("Split at playhead")),
+        action(QStringLiteral("clearSelection"), QStringLiteral("Clear selection")),
+        action(QStringLiteral("nudgeLeft"), QStringLiteral("Nudge selection left")),
+        action(QStringLiteral("nudgeRight"), QStringLiteral("Nudge selection right")),
+        action(QStringLiteral("toggleGuides"), QStringLiteral("Toggle guides")),
     };
 }
 
@@ -656,7 +664,7 @@ void AppController::setSelection(const QVariantList &pairs)
 
 void AppController::clearSelection()
 {
-    if (m_selectedTrack < 0 && m_selectedClip < 0)
+    if (m_selectedTrack < 0 && m_selectedClip < 0 && m_selection.isEmpty())
         return;
 
     m_selectedTrack = -1;

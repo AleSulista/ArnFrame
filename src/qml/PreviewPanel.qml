@@ -59,26 +59,37 @@ PanelFrame {
                         visible: EditorState.guidesEnabled
 
                         Repeater {
-                            model: EditorState.guideType === "crosshair" ? 1 : 2
+                            model: EditorState.guideType === "thirds" ? 2 : 0
                             Rectangle {
                                 width: 1
                                 height: parent.height
-                                x: EditorState.guideType === "crosshair"
-                                   ? parent.width / 2
-                                   : parent.width * (index + 1) / 3
+                                x: parent.width * (index + 1) / 3
                                 color: "#80ffffff"
                             }
                         }
                         Repeater {
-                            model: EditorState.guideType === "crosshair" ? 1 : 2
+                            model: EditorState.guideType === "thirds" ? 2 : 0
                             Rectangle {
                                 height: 1
                                 width: parent.width
-                                y: EditorState.guideType === "crosshair"
-                                   ? parent.height / 2
-                                   : parent.height * (index + 1) / 3
+                                y: parent.height * (index + 1) / 3
                                 color: "#80ffffff"
                             }
+                        }
+
+                        Rectangle {
+                            visible: EditorState.guideType === "crosshair"
+                            width: 1
+                            height: parent.height
+                            x: parent.width / 2
+                            color: "#80ffffff"
+                        }
+                        Rectangle {
+                            visible: EditorState.guideType === "crosshair"
+                            height: 1
+                            width: parent.width
+                            y: parent.height / 2
+                            color: "#80ffffff"
                         }
 
                         Rectangle {

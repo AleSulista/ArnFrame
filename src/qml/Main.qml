@@ -12,12 +12,18 @@ ApplicationWindow {
     title: "CutWire Drift"
     color: Theme.appBackground
 
+    // Shortcut is not an Item, so wrap each binding in a zero-size host.
     Repeater {
         model: EditorState.actions
-        delegate: Shortcut {
+        Item {
             required property var modelData
-            sequence: EditorState.shortcutFor(modelData.id)
-            onActivated: EditorState.triggerAction(modelData.id)
+            width: 0
+            height: 0
+            Shortcut {
+                sequence: modelData.shortcut
+                context: Qt.ApplicationShortcut
+                onActivated: EditorState.triggerAction(modelData.id)
+            }
         }
     }
 
