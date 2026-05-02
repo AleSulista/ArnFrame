@@ -21,6 +21,7 @@ private slots:
     void volumeKeyframeSerialization();
     void projectLoadsLegacyV1Format();
     void trackAllowsClipTypes();
+    void insertTrackAtTopAllowsDuplicateTypes();
     void textStyleAndBlendModeSerialization();
     void effectCatalogIdSerialization();
 };
@@ -86,7 +87,7 @@ void CoreTest::projectSerializationRoundTrip()
     QCOMPARE(loaded.name(), project.name());
     QCOMPARE(loaded.fps(), 24);
     QCOMPARE(loaded.width(), 1280);
-    QCOMPARE(loaded.tracks().size(), 3);
+    QCOMPARE(loaded.tracks().size(), 1);
     QCOMPARE(loaded.tracks()[0].clips.size(), 1);
     QCOMPARE(loaded.tracks()[0].clips[0].timelineStart, clip.timelineStart);
     QCOMPARE(loaded.bookmarks().size(), 1);
@@ -96,6 +97,9 @@ void CoreTest::projectSerializationRoundTrip()
 void CoreTest::clipTransformSerialization()
 {
     drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Text});
+
     drift::Clip clip;
     clip.id = QStringLiteral("clip-transform");
     clip.type = drift::ClipType::Text;
@@ -107,14 +111,14 @@ void CoreTest::clipTransformSerialization()
     clip.posY.setKeyframe(0, 0.75);
     clip.scale.setKeyframe(0, 1.5);
     clip.rotation.setKeyframe(0, 45.0);
-    project.tracks()[2].clips.append(clip);
+    project.tracks()[0].clips.append(clip);
 
     const QJsonObject json = project.toJson();
     QString error;
     const drift::Project loaded = drift::Project::fromJson(json, &error);
 
     QVERIFY(error.isEmpty());
-    const drift::Clip &loadedClip = loaded.tracks()[2].clips[0];
+    const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
     QCOMPARE(loadedClip.posX.evaluateAt(0), 0.25);
     QCOMPARE(loadedClip.posY.evaluateAt(0), 0.75);
     QCOMPARE(loadedClip.scale.evaluateAt(0), 1.5);
@@ -124,6 +128,9 @@ void CoreTest::clipTransformSerialization()
 void CoreTest::volumeKeyframeSerialization()
 {
     drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Audio});
+
     drift::Clip clip;
     clip.id = QStringLiteral("clip-volume");
     clip.type = drift::ClipType::Audio;
@@ -132,14 +139,14 @@ void CoreTest::volumeKeyframeSerialization()
     clip.timelineDuration = drift::secondsToUs(4.0);
     clip.volume.setKeyframe(0, 1.0);
     clip.volume.setKeyframe(drift::secondsToUs(2.0), 0.5);
-    project.tracks()[1].clips.append(clip);
+    project.tracks()[0].clips.append(clip);
 
     const QJsonObject json = project.toJson();
     QString error;
     const drift::Project loaded = drift::Project::fromJson(json, &error);
 
     QVERIFY(error.isEmpty());
-    const drift::Clip &loadedClip = loaded.tracks()[1].clips[0];
+    const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
     QCOMPARE(loadedClip.volume.evaluateAt(0), 1.0);
     QCOMPARE(loadedClip.volume.evaluateAt(drift::secondsToUs(2.0)), 0.5);
     QCOMPARE(loadedClip.volume.evaluateAt(drift::secondsToUs(1.0)), 0.75);
@@ -196,17 +203,42 @@ void CoreTest::trackAllowsClipTypes()
 {
     drift::Track videoTrack{.type = drift::TrackType::Video};
     QVERIFY(videoTrack.allowsClipType(drift::ClipType::Video));
-    QVERIFY(videoTrack.allowsClipType(drift::ClipType::Image));
+    QVERIFY(!videoTrack.allowsClipType(drift::ClipType::Image));
     QVERIFY(!videoTrack.allowsClipType(drift::ClipType::Audio));
 
     drift::Track audioTrack{.type = drift::TrackType::Audio};
     QVERIFY(audioTrack.allowsClipType(drift::ClipType::Audio));
     QVERIFY(!audioTrack.allowsClipType(drift::ClipType::Video));
+
+    drift::Track shapeTrack{.type = drift::TrackType::Shape};
+    QVERIFY(shapeTrack.allowsClipType(drift::ClipType::Image));
+    QVERIFY(!shapeTrack.allowsClipType(drift::ClipType::Video));
+}
+
+void CoreTest::insertTrackAtTopAllowsDuplicateTypes()
+{
+    drift::Project project;
+    QCOMPARE(project.tracks().size(), 1);
+    QCOMPARE(project.tracks()[0].type, drift::TrackType::Video);
+
+    const int first = drift::insertTrackAtTopForClipType(project, drift::ClipType::Video);
+    QCOMPARE(first, 0);
+    QCOMPARE(project.tracks().size(), 2);
+    QCOMPARE(project.tracks()[0].type, drift::TrackType::Video);
+    QCOMPARE(project.tracks()[1].type, drift::TrackType::Video);
+
+    const int second = drift::insertTrackAtTopForClipType(project, drift::ClipType::Audio);
+    QCOMPARE(second, 0);
+    QCOMPARE(project.tracks().size(), 3);
+    QCOMPARE(project.tracks()[0].type, drift::TrackType::Audio);
 }
 
 void CoreTest::textStyleAndBlendModeSerialization()
 {
     drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Text});
+
     drift::Clip clip;
     clip.id = QStringLiteral("clip-textstyle");
     clip.type = drift::ClipType::Text;
@@ -226,14 +258,14 @@ void CoreTest::textStyleAndBlendModeSerialization()
     clip.textStyle.boxEnabled = true;
     clip.textStyle.boxColor = QColor(0, 0, 0, 100);
     clip.textStyle.boxPadding = 12.0;
-    project.tracks()[2].clips.append(clip);
+    project.tracks()[0].clips.append(clip);
 
     const QJsonObject json = project.toJson();
     QString error;
     const drift::Project loaded = drift::Project::fromJson(json, &error);
 
     QVERIFY(error.isEmpty());
-    const drift::Clip &loadedClip = loaded.tracks()[2].clips[0];
+    const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
     QCOMPARE(loadedClip.blendMode, drift::BlendMode::Multiply);
     QCOMPARE(loadedClip.textStyle.fontFamily, QStringLiteral("Courier New"));
     QCOMPARE(loadedClip.textStyle.pixelSize, 88);

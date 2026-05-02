@@ -136,7 +136,10 @@ QtObject {
     readonly property real trackHeightVideo: 65
     readonly property real trackHeightAudio: 50
     readonly property real trackHeightText: 25
+    readonly property real trackHeightShape: 50
     readonly property real trackGap: 6
+    // Invisible hit area above tracks (no visible UI) for new-track drops when timeline has clips.
+    readonly property real newTrackHitSlop: 24
     readonly property real trackLabelsWidth: 112
     readonly property real pixelsPerSecondBase: 50
     readonly property real playheadLineWidth: 2
@@ -178,6 +181,7 @@ QtObject {
         film: "",
         music: "",
         image: "",
+        shapes: "",
         chevronDown: "",
         x: "",
         search: "",

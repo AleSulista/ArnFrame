@@ -565,11 +565,107 @@ void AppController::addClipFromAsset(int assetIndex)
 
     const QString kind = asset.value(QStringLiteral("kind")).toString();
     const drift::ClipType clipType = drift::clipTypeFromString(kind);
-    const int trackIndex = drift::defaultTrackForClipType(m_project, clipType);
+    const drift::Project before = m_project;
+    int trackIndex = drift::defaultTrackForClipType(m_project, clipType);
     if (trackIndex < 0)
+        trackIndex = drift::ensureTrackForClipType(m_project, clipType, false);
+
+    m_assetLibrary->ensureMedia(assetIndex);
+    const QString thumbnailPath = m_assetLibrary->thumbnailAt(assetIndex);
+    const QString filmstripPath = m_assetLibrary->filmstripAt(assetIndex);
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (!track.allowsClipType(clipType))
         return;
 
-    addClipFromAssetAt(assetIndex, trackIndex, playheadSeconds());
+    const drift::TimeUs duration = clipDurationForAssetIndex(assetIndex);
+    const drift::TimeUs start = drift::resolveClipStart(m_project, track, -1, m_playheadUs, duration, m_snapEnabled,
+                                                        m_playheadUs);
+
+    drift::Clip clip;
+    clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    clip.assetId = m_assetLibrary->assetIdAt(assetIndex);
+    clip.type = clipType;
+    clip.name = asset.value(QStringLiteral("name")).toString();
+    clip.path = asset.value(QStringLiteral("path")).toString();
+    clip.thumbnailPath = thumbnailPath;
+    clip.filmstripPath = filmstripPath;
+    clip.timelineStart = start;
+    clip.timelineDuration = duration;
+    clip.srcIn = 0;
+    clip.srcOut = duration;
+
+    track.clips.append(clip);
+    pushProjectEdit(before, QStringLiteral("Clip added"));
+    finishEdit(QStringLiteral("Clip added"));
+    selectClip(trackIndex, track.clips.size() - 1);
+}
+
+bool AppController::trackAcceptsAsset(int trackIndex, int assetIndex) const
+{
+    if (!m_assetLibrary || trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return false;
+
+    const QVariantMap asset = m_assetLibrary->assetAt(assetIndex);
+    if (asset.isEmpty())
+        return false;
+
+    const drift::ClipType clipType = drift::clipTypeFromString(asset.value(QStringLiteral("kind")).toString());
+    return m_project.tracks().at(trackIndex).allowsClipType(clipType);
+}
+
+QString AppController::trackTypeForAsset(int assetIndex) const
+{
+    if (!m_assetLibrary)
+        return QStringLiteral("video");
+
+    const QVariantMap asset = m_assetLibrary->assetAt(assetIndex);
+    if (asset.isEmpty())
+        return QStringLiteral("video");
+
+    const drift::ClipType clipType = drift::clipTypeFromString(asset.value(QStringLiteral("kind")).toString());
+    return drift::trackTypeToString(drift::trackTypeForClipType(clipType));
+}
+
+void AppController::addClipFromAssetOnNewTrack(int assetIndex, double atSeconds)
+{
+    if (!m_assetLibrary)
+        return;
+
+    const QVariantMap asset = m_assetLibrary->assetAt(assetIndex);
+    if (asset.isEmpty())
+        return;
+
+    const drift::ClipType clipType = drift::clipTypeFromString(asset.value(QStringLiteral("kind")).toString());
+    const drift::Project before = m_project;
+    const int trackIndex = drift::insertTrackAtTopForClipType(m_project, clipType);
+
+    m_assetLibrary->ensureMedia(assetIndex);
+    const QString thumbnailPath = m_assetLibrary->thumbnailAt(assetIndex);
+    const QString filmstripPath = m_assetLibrary->filmstripAt(assetIndex);
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    const drift::TimeUs duration = clipDurationForAssetIndex(assetIndex);
+    const drift::TimeUs start = drift::resolveClipStart(m_project, track, -1, drift::secondsToUs(atSeconds),
+                                                        duration, m_snapEnabled, m_playheadUs);
+
+    drift::Clip clip;
+    clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    clip.assetId = m_assetLibrary->assetIdAt(assetIndex);
+    clip.type = clipType;
+    clip.name = asset.value(QStringLiteral("name")).toString();
+    clip.path = asset.value(QStringLiteral("path")).toString();
+    clip.thumbnailPath = thumbnailPath;
+    clip.filmstripPath = filmstripPath;
+    clip.timelineStart = start;
+    clip.timelineDuration = duration;
+    clip.srcIn = 0;
+    clip.srcOut = duration;
+
+    track.clips.append(clip);
+    pushProjectEdit(before, QStringLiteral("Clip added on new track"));
+    finishEdit(QStringLiteral("Clip added on new track"));
+    selectClip(trackIndex, track.clips.size() - 1);
 }
 
 void AppController::addClipFromAssetAt(int assetIndex, int trackIndex, double atSeconds)
@@ -874,30 +970,15 @@ void AppController::duplicateSelectedClip()
 
 void AppController::alignSelectedClipLeft()
 {
-    if (m_selectedTrack < 0 || m_selectedClip < 0)
-        return;
-
-    drift::Track &track = m_project.tracks()[m_selectedTrack];
-    if (m_selectedClip >= track.clips.size())
-        return;
-
-    const drift::Project before = m_project;
-    drift::Clip &clip = track.clips[m_selectedClip];
-    drift::TimeUs target = 0;
-    for (int i = 0; i < track.clips.size(); ++i) {
-        if (i == m_selectedClip)
-            continue;
-        const drift::Clip &other = track.clips.at(i);
-        if (other.timelineEnd() <= clip.timelineStart)
-            target = qMax(target, other.timelineEnd());
-    }
-    clip.timelineStart = drift::resolveClipStart(m_project, track, m_selectedClip, target, clip.timelineDuration,
-                                                 m_snapEnabled, m_playheadUs);
-    pushProjectEdit(before, QStringLiteral("Aligned left"));
-    finishEdit(QStringLiteral("Aligned left"));
+    splitSelectedClipLeft();
 }
 
 void AppController::alignSelectedClipRight()
+{
+    splitSelectedClipRight();
+}
+
+void AppController::splitSelectedClipLeft()
 {
     if (m_selectedTrack < 0 || m_selectedClip < 0)
         return;
@@ -906,21 +987,54 @@ void AppController::alignSelectedClipRight()
     if (m_selectedClip >= track.clips.size())
         return;
 
-    const drift::Project before = m_project;
     drift::Clip &clip = track.clips[m_selectedClip];
-    drift::TimeUs nextStart = m_project.durationUs();
-    for (int i = 0; i < track.clips.size(); ++i) {
-        if (i == m_selectedClip)
-            continue;
-        const drift::Clip &other = track.clips.at(i);
-        if (other.timelineStart >= clip.timelineEnd())
-            nextStart = qMin(nextStart, other.timelineStart);
-    }
-    const drift::TimeUs newStart = qMax<drift::TimeUs>(0, nextStart - clip.timelineDuration);
-    clip.timelineStart = drift::resolveClipStart(m_project, track, m_selectedClip, newStart, clip.timelineDuration,
-                                                 m_snapEnabled, m_playheadUs);
-    pushProjectEdit(before, QStringLiteral("Aligned right"));
-    finishEdit(QStringLiteral("Aligned right"));
+    if (!clip.containsTime(m_playheadUs) || m_playheadUs == clip.timelineStart)
+        return;
+
+    const drift::TimeUs offset = m_playheadUs - clip.timelineStart;
+    if (offset < drift::kMinClipDurationUs || clip.timelineDuration - offset < drift::kMinClipDurationUs)
+        return;
+
+    const drift::Project before = m_project;
+
+    drift::Clip right = clip;
+    right.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    right.timelineStart = m_playheadUs;
+    right.srcIn = clip.srcIn + offset;
+    right.timelineDuration = clip.timelineDuration - offset;
+
+    track.clips[m_selectedClip] = right;
+
+    pushProjectEdit(before, QStringLiteral("Split left"));
+    finishEdit(QStringLiteral("Split left"));
+    selectClip(m_selectedTrack, m_selectedClip);
+}
+
+void AppController::splitSelectedClipRight()
+{
+    if (m_selectedTrack < 0 || m_selectedClip < 0)
+        return;
+
+    drift::Track &track = m_project.tracks()[m_selectedTrack];
+    if (m_selectedClip >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[m_selectedClip];
+    if (!clip.containsTime(m_playheadUs) || m_playheadUs == clip.timelineEnd())
+        return;
+
+    const drift::TimeUs offset = m_playheadUs - clip.timelineStart;
+    if (offset < drift::kMinClipDurationUs || clip.timelineDuration - offset < drift::kMinClipDurationUs)
+        return;
+
+    const drift::Project before = m_project;
+
+    clip.timelineDuration = offset;
+    clip.srcOut = clip.srcIn + offset;
+
+    pushProjectEdit(before, QStringLiteral("Split right"));
+    finishEdit(QStringLiteral("Split right"));
+    selectClip(m_selectedTrack, m_selectedClip);
 }
 
 void AppController::moveClipToTrack(int trackIndex, int clipIndex, int newTrackIndex, double newStart)
@@ -953,15 +1067,15 @@ void AppController::moveClipToTrack(int trackIndex, int clipIndex, int newTrackI
 
 void AppController::addTextClip(const QString &text, double atSeconds)
 {
-    const int trackIndex = drift::defaultTrackForClipType(m_project, drift::ClipType::Text);
-    if (trackIndex < 0)
-        return;
-
     const QString trimmed = text.trimmed();
     if (trimmed.isEmpty())
         return;
 
     const drift::Project before = m_project;
+    const int trackIndex = drift::ensureTrackForClipType(m_project, drift::ClipType::Text, true);
+    if (trackIndex < 0)
+        return;
+
     drift::Track &track = m_project.tracks()[trackIndex];
     const drift::TimeUs startSeconds = atSeconds < 0.0 ? m_playheadUs : drift::secondsToUs(atSeconds);
     const drift::TimeUs start = drift::resolveClipStart(m_project, track, -1, startSeconds,
@@ -1387,11 +1501,9 @@ void AppController::freezeFrameAtPlayhead()
         return;
     }
 
-    const int trackIndex = drift::defaultTrackForClipType(m_project, drift::ClipType::Image);
-    if (trackIndex < 0)
-        return;
-
     const drift::Project before = m_project;
+    const int trackIndex = drift::ensureTrackForClipType(m_project, drift::ClipType::Image, false);
+
     drift::Track &track = m_project.tracks()[trackIndex];
     const drift::TimeUs sourceTimeUs = drift::secondsToUs(sourceTime);
     const drift::TimeUs start = drift::resolveClipStart(m_project, track, -1, m_playheadUs,
@@ -1461,7 +1573,7 @@ void AppController::pasteAtPlayhead()
             }
         }
         if (targetTrack < 0)
-            targetTrack = drift::defaultTrackForClipType(m_project, clip.type);
+            targetTrack = drift::ensureTrackForClipType(m_project, clip.type, true);
         if (targetTrack < 0 || !m_project.tracks()[targetTrack].allowsClipType(clip.type))
             continue;
         drift::Track &track = m_project.tracks()[targetTrack];
@@ -1734,7 +1846,7 @@ void AppController::exportProject(const QUrl &outputUrl)
         if (track.muted || track.hidden)
             continue;
 
-        if (track.type == drift::TrackType::Video) {
+        if (track.type == drift::TrackType::Video || track.type == drift::TrackType::Shape) {
             for (const drift::Clip &clip : track.clips) {
                 if (clip.type != drift::ClipType::Video && clip.type != drift::ClipType::Image)
                     continue;

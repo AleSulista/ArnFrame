@@ -11,6 +11,8 @@ QString trackTypeToString(TrackType type)
         return QStringLiteral("audio");
     case TrackType::Text:
         return QStringLiteral("text");
+    case TrackType::Shape:
+        return QStringLiteral("shape");
     }
     return QStringLiteral("video");
 }
@@ -21,6 +23,8 @@ TrackType trackTypeFromString(const QString &type)
         return TrackType::Audio;
     if (type == QStringLiteral("text"))
         return TrackType::Text;
+    if (type == QStringLiteral("shape"))
+        return TrackType::Shape;
     return TrackType::Video;
 }
 
@@ -31,8 +35,10 @@ bool Track::allowsClipType(ClipType clipType) const
         return clipType == ClipType::Audio;
     case TrackType::Text:
         return clipType == ClipType::Text;
+    case TrackType::Shape:
+        return clipType == ClipType::Image;
     case TrackType::Video:
-        return clipType == ClipType::Video || clipType == ClipType::Image;
+        return clipType == ClipType::Video;
     }
     return false;
 }

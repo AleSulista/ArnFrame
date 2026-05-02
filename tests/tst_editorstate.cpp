@@ -55,12 +55,12 @@ void EditorStateTest::undoTrackMute()
 {
     AssetLibrary library;
     AppController state(&library);
-    QVERIFY(!state.trackMuted(1));
-    state.setTrackMuted(1, true);
-    QVERIFY(state.trackMuted(1));
+    QVERIFY(!state.trackMuted(0));
+    state.setTrackMuted(0, true);
+    QVERIFY(state.trackMuted(0));
     QVERIFY(state.undoAvailable());
     state.undo();
-    QVERIFY(!state.trackMuted(1));
+    QVERIFY(!state.trackMuted(0));
 }
 
 void EditorStateTest::undoBookmarkAdd()
@@ -80,7 +80,7 @@ void EditorStateTest::projectPersistenceRoundTrip()
     AssetLibrary library;
     AppController state(&library);
     state.addTextClip(QStringLiteral("Persist"), 0.0);
-    state.setTrackMuted(1, true);
+    state.setTrackMuted(0, true);
     state.addBookmark(2.0, QStringLiteral("Mark"));
 
     QTemporaryFile tempFile;
@@ -91,7 +91,7 @@ void EditorStateTest::projectPersistenceRoundTrip()
     state.loadProject(QUrl::fromLocalFile(tempFile.fileName()));
 
     QVERIFY(state.durationSeconds() > 0.0);
-    QVERIFY(state.trackMuted(1));
+    QVERIFY(state.trackMuted(0));
     QCOMPARE(state.bookmarks().size(), 1);
 }
 

@@ -15,7 +15,14 @@ TimeUs snapTime(const Project &project, TimeUs time, bool snapEnabled, TimeUs pl
 TimeUs resolveClipStart(const Project &project, const Track &track, int excludeClipIndex,
                         TimeUs desiredStart, TimeUs duration, bool snapEnabled, TimeUs playheadUs);
 
+TrackType trackTypeForClipType(ClipType type);
+
 int defaultTrackForClipType(const Project &project, ClipType type);
+
+int ensureTrackForClipType(Project &project, ClipType type, bool insertAtTop = false);
+
+// Always prepends a fresh track (multiple tracks of the same type are allowed).
+int insertTrackAtTopForClipType(Project &project, ClipType type);
 
 TimeUs clipDurationForAsset(const MediaAsset *asset);
 

@@ -253,8 +253,6 @@ void Project::resetToDefaultTimeline()
 {
     m_tracks = {
         {.type = TrackType::Video},
-        {.type = TrackType::Text},
-        {.type = TrackType::Audio},
     };
 }
 

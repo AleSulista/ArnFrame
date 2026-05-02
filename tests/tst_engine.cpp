@@ -132,7 +132,9 @@ void EngineTest::compositorAppliesMultiplyBlendMode()
     auto compositeOverBackground = [&](QColor background) {
         drift::Project project;
         project.setResolution(64, 64);
-        project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+        project.tracks().clear();
+        project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
+        project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
 
         drift::Clip bottom;
         bottom.id = QStringLiteral("bottom");
@@ -149,7 +151,7 @@ void EngineTest::compositorAppliesMultiplyBlendMode()
         top.blendMode = drift::BlendMode::Multiply;
         top.timelineStart = 0;
         top.timelineDuration = drift::secondsToUs(1.0);
-        project.tracks()[3].clips.append(top);
+        project.tracks()[1].clips.append(top);
 
         FrameCompositor compositor;
         compositor.setProject(&project);

@@ -66,20 +66,50 @@ TimeUs resolveClipStart(const Project &project, const Track &track, int excludeC
     return qMax<TimeUs>(0, start);
 }
 
+TrackType trackTypeForClipType(ClipType type)
+{
+    switch (type) {
+    case ClipType::Audio:
+        return TrackType::Audio;
+    case ClipType::Text:
+        return TrackType::Text;
+    case ClipType::Image:
+        return TrackType::Shape;
+    case ClipType::Video:
+        break;
+    }
+    return TrackType::Video;
+}
+
 int defaultTrackForClipType(const Project &project, ClipType type)
 {
-    TrackType trackType = TrackType::Video;
-    if (type == ClipType::Audio)
-        trackType = TrackType::Audio;
-    else if (type == ClipType::Text)
-        trackType = TrackType::Text;
-
+    const TrackType trackType = trackTypeForClipType(type);
     const QList<Track> &tracks = project.tracks();
     for (int i = 0; i < tracks.size(); ++i) {
-        if (tracks[i].type == trackType)
+        if (tracks[i].type == trackType && tracks[i].allowsClipType(type))
             return i;
     }
     return -1;
+}
+
+int ensureTrackForClipType(Project &project, ClipType type, bool insertAtTop)
+{
+    const int existing = defaultTrackForClipType(project, type);
+    if (existing >= 0)
+        return existing;
+
+    const Track track{.type = trackTypeForClipType(type)};
+    if (insertAtTop)
+        project.tracks().prepend(track);
+    else
+        project.tracks().append(track);
+    return insertAtTop ? 0 : project.tracks().size() - 1;
+}
+
+int insertTrackAtTopForClipType(Project &project, ClipType type)
+{
+    project.tracks().prepend(Track{.type = trackTypeForClipType(type)});
+    return 0;
 }
 
 TimeUs clipDurationForAsset(const MediaAsset *asset)

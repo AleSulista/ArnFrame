@@ -89,6 +89,9 @@ public:
 
     Q_INVOKABLE void addClipFromAsset(int assetIndex);
     Q_INVOKABLE void addClipFromAssetAt(int assetIndex, int trackIndex, double atSeconds);
+    Q_INVOKABLE void addClipFromAssetOnNewTrack(int assetIndex, double atSeconds);
+    Q_INVOKABLE bool trackAcceptsAsset(int trackIndex, int assetIndex) const;
+    Q_INVOKABLE QString trackTypeForAsset(int assetIndex) const;
     Q_INVOKABLE void addTextClip(const QString &text, double atSeconds);
     Q_INVOKABLE void selectClip(int trackIndex, int clipIndex);
     Q_INVOKABLE void addToSelection(int trackIndex, int clipIndex);
@@ -105,6 +108,8 @@ public:
     Q_INVOKABLE void moveClipToTrack(int trackIndex, int clipIndex, int newTrackIndex, double newStart);
     Q_INVOKABLE void alignSelectedClipLeft();
     Q_INVOKABLE void alignSelectedClipRight();
+    Q_INVOKABLE void splitSelectedClipLeft();
+    Q_INVOKABLE void splitSelectedClipRight();
     Q_INVOKABLE void splitAtPlayhead();
     Q_INVOKABLE void trimClipLeft(int trackIndex, int clipIndex, double newStart);
     Q_INVOKABLE void trimClipRight(int trackIndex, int clipIndex, double newEnd);

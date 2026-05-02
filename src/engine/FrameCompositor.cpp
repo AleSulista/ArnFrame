@@ -49,7 +49,8 @@ void collectActivePaths(const drift::Project *project, drift::TimeUs timelineUs,
             if (!clip.containsTime(timelineUs) || clip.path.isEmpty())
                 continue;
 
-            if (track.type == drift::TrackType::Video && clip.type != drift::ClipType::Text)
+            if ((track.type == drift::TrackType::Video || track.type == drift::TrackType::Shape)
+                && clip.type != drift::ClipType::Text)
                 videoPaths.insert(clip.path);
             if (track.type == drift::TrackType::Audio
                 || (track.type == drift::TrackType::Video && clip.type == drift::ClipType::Video)) {
@@ -177,7 +178,8 @@ QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs) const
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
 
     for (const drift::Track &track : m_project->tracks()) {
-        if (track.hidden || track.type != drift::TrackType::Video)
+        if (track.hidden
+            || (track.type != drift::TrackType::Video && track.type != drift::TrackType::Shape))
             continue;
 
         for (const drift::Clip &clip : track.clips) {

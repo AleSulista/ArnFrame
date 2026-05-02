@@ -40,6 +40,10 @@ PanelFrame {
     readonly property int selectedTrack: EditorState.selectedTrack
     readonly property int selectedClip: EditorState.selectedClip
 
+    // Invisible extension above track rows while dragging (only when timeline already has clips).
+    readonly property real assetDropTopSlop: EditorState.draggingAssetIndex >= 0 && timelineHasClips()
+        ? Theme.newTrackHitSlop : 0
+
     // Live snap guide (seconds; < 0 when hidden) shown while dragging a clip.
     property real snapGuideSeconds: -1
     // Landing preview outline: where a dragged asset (from the library) or an
@@ -47,6 +51,8 @@ PanelFrame {
     property int dropTrackIndex: -1
     property real dropStartSeconds: 0
     property real dropDurationSeconds: 0
+    // True while dragging a library asset outside any compatible track row.
+    property bool dropCreatesNewTrack: false
 
     // Shared by library drops and in-timeline clip moves so both snap and show
     // the same outline the same way.
@@ -61,6 +67,7 @@ PanelFrame {
     function clearLandingPreview() {
         dropTrackIndex = -1
         snapGuideSeconds = -1
+        dropCreatesNewTrack = false
     }
 
     function assetDurationSeconds(assetIndex) {
@@ -89,7 +96,15 @@ PanelFrame {
     function trackHeight(type) {
         if (type === "video") return Theme.trackHeightVideo;
         if (type === "audio") return Theme.trackHeightAudio;
+        if (type === "shape") return Theme.trackHeightShape;
         return Theme.trackHeightText;
+    }
+
+    function trackTypeIcon(type) {
+        if (type === "audio") return Theme.icons.music;
+        if (type === "text") return Theme.icons.type;
+        if (type === "shape") return Theme.icons.shapes;
+        return Theme.icons.film;
     }
 
     function clipColor(type) {
@@ -123,6 +138,22 @@ PanelFrame {
         return -1
     }
 
+    function timelineHasClips() {
+        for (var i = 0; i < tracks.length; i++) {
+            if (tracks[i].clips.length > 0)
+                return true
+        }
+        return false
+    }
+
+    function firstCompatibleTrackIndex(assetIndex) {
+        for (var i = 0; i < tracks.length; i++) {
+            if (EditorState.trackAcceptsAsset(i, assetIndex))
+                return i
+        }
+        return -1
+    }
+
     function trackIndexAtY(y) {
         var cursor = 0;
         for (var i = 0; i < tracks.length; i++) {
@@ -132,6 +163,84 @@ PanelFrame {
             cursor += th + Theme.trackGap;
         }
         return -1;
+    }
+
+    function updateAssetDropPreview(assetIndex, dropX, dropY) {
+        const duration = assetDurationSeconds(assetIndex)
+        const desired = Math.max(0, dropX / pxPerSecond)
+
+        if (!timelineHasClips()) {
+            const trackIdx = firstCompatibleTrackIndex(assetIndex)
+            if (trackIdx >= 0) {
+                dropCreatesNewTrack = false
+                showLandingPreview(trackIdx, desired, duration)
+            } else {
+                clearLandingPreview()
+            }
+            return
+        }
+
+        if (assetDropTopSlop > 0 && dropY < assetDropTopSlop) {
+            const snapped = snapClipStart(desired, duration)
+            dropCreatesNewTrack = true
+            dropTrackIndex = -1
+            dropStartSeconds = snapped.start
+            dropDurationSeconds = duration
+            snapGuideSeconds = snapped.guide
+            return
+        }
+
+        const trackIdx = trackIndexAtY(dropY - assetDropTopSlop)
+        if (trackIdx >= 0 && EditorState.trackAcceptsAsset(trackIdx, assetIndex)) {
+            dropCreatesNewTrack = false
+            showLandingPreview(trackIdx, desired, duration)
+        } else {
+            const snapped = snapClipStart(desired, duration)
+            dropCreatesNewTrack = true
+            dropTrackIndex = -1
+            dropStartSeconds = snapped.start
+            dropDurationSeconds = duration
+            snapGuideSeconds = snapped.guide
+        }
+    }
+
+    function performAssetDrop(assetIndex, dropX, dropY) {
+        const atSeconds = Math.max(0, dropX / pxPerSecond)
+        if (assetIndex < 0)
+            return
+
+        if (!timelineHasClips()) {
+            const trackIdx = firstCompatibleTrackIndex(assetIndex)
+            if (trackIdx >= 0)
+                EditorState.addClipFromAssetAt(assetIndex, trackIdx, atSeconds)
+            return
+        }
+
+        if (assetDropTopSlop > 0 && dropY < assetDropTopSlop) {
+            EditorState.addClipFromAssetOnNewTrack(assetIndex, atSeconds)
+            return
+        }
+
+        const trackIdx = trackIndexAtY(dropY - assetDropTopSlop)
+        if (trackIdx >= 0 && EditorState.trackAcceptsAsset(trackIdx, assetIndex))
+            EditorState.addClipFromAssetAt(assetIndex, trackIdx, atSeconds)
+        else
+            EditorState.addClipFromAssetOnNewTrack(assetIndex, atSeconds)
+    }
+
+    function handleTimelineWheel(wheel) {
+        const maxX = Math.max(0, flick.contentWidth - flick.width)
+        if (wheel.modifiers & Qt.ControlModifier) {
+            const t = wheel.x / pxPerSecond
+            const viewportX = wheel.x - flick.contentX
+            const factor = wheel.angleDelta.y > 0 ? 1.15 : 1.0 / 1.15
+            zoom = Math.max(minZoom, Math.min(maxZoom, zoom * factor))
+            const newMaxX = Math.max(0, flick.contentWidth - flick.width)
+            flick.contentX = Math.max(0, Math.min(newMaxX, t * pxPerSecond - viewportX))
+        } else {
+            const delta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
+            flick.contentX = Math.max(0, Math.min(maxX, flick.contentX - delta))
+        }
     }
 
     function formatTime(seconds) {
@@ -196,8 +305,8 @@ PanelFrame {
                 }
 
                 IconButton { icon: Theme.icons.scissors; variant: "text"; tooltip: qsTr("Split at playhead"); onClicked: EditorState.splitAtPlayhead() }
-                IconButton { icon: Theme.icons.alignLeft; variant: "text"; tooltip: qsTr("Split left"); onClicked: EditorState.alignSelectedClipLeft() }
-                IconButton { icon: Theme.icons.alignRight; variant: "text"; tooltip: qsTr("Split right"); onClicked: EditorState.alignSelectedClipRight() }
+                IconButton { icon: Theme.icons.alignLeft; variant: "text"; tooltip: qsTr("Split left"); onClicked: EditorState.splitSelectedClipLeft() }
+                IconButton { icon: Theme.icons.alignRight; variant: "text"; tooltip: qsTr("Split right"); onClicked: EditorState.splitSelectedClipRight() }
                 IconButton { icon: Theme.icons.linkTwo; variant: "text"; tooltip: qsTr("Unlink audio"); buttonEnabled: false }
                 IconButton { icon: Theme.icons.copy; variant: "text"; tooltip: qsTr("Copy selection"); onClicked: EditorState.copySelection() }
                 IconButton { icon: Theme.icons.plus; variant: "text"; tooltip: qsTr("Paste at playhead"); onClicked: EditorState.pasteAtPlayhead() }
@@ -356,11 +465,12 @@ PanelFrame {
                     delegate: Item {
                         width: Theme.trackLabelsWidth
                         height: root.trackHeight(root.tracks[index].type)
+                                + (index < root.tracks.length - 1 ? Theme.trackGap : 0)
 
                         Rectangle {
                             anchors.right: parent.right
                             width: 1
-                            height: parent.height
+                            height: root.trackHeight(root.tracks[index].type)
                             color: Theme.panelBorder
                         }
 
@@ -368,10 +478,12 @@ PanelFrame {
                             anchors.right: parent.right
                             anchors.rightMargin: 12
                             anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: index < root.tracks.length - 1 ? -Theme.trackGap / 2 : 0
                             spacing: 8
 
                             IconGlyph {
-                                visible: root.tracks[index].type !== "text"
+                                visible: root.tracks[index].type === "video"
+                                         || root.tracks[index].type === "audio"
                                 glyph: EditorState.trackMuted(index) ? Theme.icons.volumeOff : Theme.icons.volumeHigh
                                 iconSize: 16
                                 iconColor: EditorState.trackMuted(index) ? Theme.destructive : Theme.mutedForeground
@@ -393,6 +505,9 @@ PanelFrame {
                             }
 
                             IconGlyph {
+                                visible: root.tracks[index].type === "video"
+                                         || root.tracks[index].type === "text"
+                                         || root.tracks[index].type === "shape"
                                 glyph: EditorState.trackHidden(index) ? Theme.icons.eyeOff : Theme.icons.eye
                                 iconSize: 16
                                 iconColor: EditorState.trackHidden(index) ? Theme.destructive : Theme.mutedForeground
@@ -414,9 +529,7 @@ PanelFrame {
                             }
 
                             IconGlyph {
-                                glyph: root.tracks[index].type === "video" ? Theme.icons.film
-                                     : root.tracks[index].type === "audio" ? Theme.icons.music
-                                     : Theme.icons.type
+                                glyph: root.trackTypeIcon(root.tracks[index].type)
                                 iconSize: 16
                                 iconColor: Theme.mutedForeground
                                 anchors.verticalCenter: parent.verticalCenter
@@ -442,27 +555,67 @@ PanelFrame {
                     width: flick.contentWidth
                     height: flick.height
 
-                    // Wheel handling: an overlay that only consumes wheel events
-                    // (Qt.NoButton lets clicks/drags fall through to clips below).
-                    // Plain wheel scrolls horizontally; Ctrl+wheel zooms about the cursor.
+                    // Wheel handling: scoped to the ruler so it does not block timeline drops.
                     MouseArea {
-                        anchors.fill: parent
-                        z: 100
+                        id: rulerWheelArea
+                        width: parent.width
+                        height: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
+                        z: 1
                         acceptedButtons: Qt.NoButton
-                        onWheel: (wheel) => {
-                            const maxX = Math.max(0, flick.contentWidth - flick.width)
-                            if (wheel.modifiers & Qt.ControlModifier) {
-                                const t = wheel.x / root.pxPerSecond
-                                const viewportX = wheel.x - flick.contentX
-                                const factor = wheel.angleDelta.y > 0 ? 1.15 : 1.0 / 1.15
-                                root.zoom = Math.max(root.minZoom, Math.min(root.maxZoom, root.zoom * factor))
-                                const newMaxX = Math.max(0, flick.contentWidth - flick.width)
-                                flick.contentX = Math.max(0, Math.min(newMaxX, t * root.pxPerSecond - viewportX))
-                            } else {
-                                const delta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
-                                flick.contentX = Math.max(0, Math.min(maxX, flick.contentX - delta))
-                            }
+                        onWheel: (wheel) => root.handleTimelineWheel(wheel)
+                    }
+
+                    // Library asset drops
+                    DropArea {
+                        id: timelineAssetDrop
+                        enabled: EditorState.draggingAssetIndex >= 0
+                        opacity: 0
+                        x: 0
+                        y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight - root.assetDropTopSlop
+                        width: parent.width
+                        height: Math.max(root.totalTracksHeight() + root.assetDropTopSlop,
+                                         Theme.trackHeightVideo)
+                        z: 250
+                        keys: ["text/plain"]
+
+                        function assetIndexFromDrop(drop) {
+                            if (EditorState.draggingAssetIndex >= 0)
+                                return EditorState.draggingAssetIndex
+                            const text = drop.hasText ? drop.text : drop.getDataAsString("text/plain")
+                            const idx = parseInt(text)
+                            return isNaN(idx) ? -1 : idx
                         }
+
+                        function updateAssetDrag(drop) {
+                            const assetIndex = assetIndexFromDrop(drop)
+                            if (assetIndex < 0) {
+                                root.clearLandingPreview()
+                                return
+                            }
+                            root.updateAssetDropPreview(assetIndex, drop.x, drop.y)
+                        }
+
+                        onEntered: (drop) => updateAssetDrag(drop)
+                        onPositionChanged: (drop) => updateAssetDrag(drop)
+                        onExited: root.clearLandingPreview()
+                        onDropped: (drop) => {
+                            drop.accept(Qt.CopyAction)
+                            const assetIndex = assetIndexFromDrop(drop)
+                            root.clearLandingPreview()
+                            root.performAssetDrop(assetIndex, drop.x, drop.y)
+                        }
+                    }
+
+                    // Horizontal scroll / zoom wheel over track rows (below the drop overlay).
+                    MouseArea {
+                        x: 0
+                        y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight - root.assetDropTopSlop
+                        width: parent.width
+                        height: Math.max(root.totalTracksHeight() + root.assetDropTopSlop,
+                                         Theme.trackHeightVideo)
+                        z: 150
+                        acceptedButtons: Qt.NoButton
+                        onWheel: (wheel) => root.handleTimelineWheel(wheel)
                     }
 
                     // ruler ------------------------------------------------------------
@@ -547,6 +700,19 @@ PanelFrame {
                         width: parent.width
                         spacing: Theme.trackGap
 
+                        // Landing preview when creating a new track above existing rows.
+                        Rectangle {
+                            visible: root.dropCreatesNewTrack
+                            x: root.dropStartSeconds * root.pxPerSecond
+                            width: root.dropDurationSeconds * root.pxPerSecond
+                            height: root.trackHeight(EditorState.trackTypeForAsset(EditorState.draggingAssetIndex))
+                            radius: Theme.radiusSm
+                            color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.12)
+                            border.width: 2
+                            border.color: Theme.primary
+                            z: 5
+                        }
+
                         Repeater {
                             model: root.tracks.length
                             delegate: Rectangle {
@@ -564,22 +730,42 @@ PanelFrame {
                                         return drop.keys.indexOf("application/x-drift-effect") !== -1
                                     }
 
-                                    function updatePreview(drop) {
+                                    function assetIndexFromDrop(drop) {
+                                        if (EditorState.draggingAssetIndex >= 0)
+                                            return EditorState.draggingAssetIndex
+                                        const text = drop.hasText ? drop.text : drop.getDataAsString("text/plain")
+                                        const idx = parseInt(text)
+                                        return isNaN(idx) ? -1 : idx
+                                    }
+
+                                    function updateAssetPreview(drop) {
                                         if (isEffectDrag(drop))
                                             return
-                                        const assetIndex = EditorState.draggingAssetIndex
+                                        const assetIndex = assetIndexFromDrop(drop)
                                         if (assetIndex < 0)
+                                            return
+                                        const columnPos = trackRow.mapFromItem(timelineAssetDrop, drop.x, drop.y)
+                                        if (!EditorState.trackAcceptsAsset(trackRow.trackIndex, assetIndex))
+                                            return
+                                        if (!root.timelineHasClips())
+                                            return
+                                        if (root.assetDropTopSlop > 0 && columnPos.y < root.assetDropTopSlop)
+                                            return
+                                        if (root.trackIndexAtY(columnPos.y - root.assetDropTopSlop) !== trackRow.trackIndex)
                                             return
                                         const duration = root.assetDurationSeconds(assetIndex)
                                         const desired = Math.max(0, drop.x / root.pxPerSecond)
                                         root.showLandingPreview(trackRow.trackIndex, desired, duration)
                                     }
 
-                                    onEntered: (drop) => updatePreview(drop)
-                                    onPositionChanged: (drop) => updatePreview(drop)
-                                    onExited: root.clearLandingPreview()
+                                    onEntered: (drop) => updateAssetPreview(drop)
+                                    onPositionChanged: (drop) => updateAssetPreview(drop)
+                                    onExited: {
+                                        if (!isEffectDrag(drop))
+                                            root.clearLandingPreview()
+                                    }
                                     onDropped: (drop) => {
-                                        root.clearLandingPreview()
+                                        drop.accept(Qt.CopyAction)
                                         if (isEffectDrag(drop)) {
                                             const effectId = drop.getDataAsString("application/x-drift-effect")
                                             const clipIndex = root.clipIndexAtPosition(trackRow.trackIndex, drop.x)
@@ -589,13 +775,22 @@ PanelFrame {
                                             }
                                             return
                                         }
-                                        const assetIndex = EditorState.draggingAssetIndex >= 0
-                                                         ? EditorState.draggingAssetIndex : parseInt(drop.text)
-                                        if (isNaN(assetIndex) || assetIndex < 0)
+                                        const assetIndex = assetIndexFromDrop(drop)
+                                        if (assetIndex < 0)
                                             return
-                                        const atSeconds = Math.max(0, drop.x / root.pxPerSecond)
-                                        EditorState.addClipFromAssetAt(assetIndex, trackRow.trackIndex, atSeconds)
+                                        const columnPos = trackRow.mapFromItem(timelineAssetDrop, drop.x, drop.y)
+                                        root.clearLandingPreview()
+                                        root.performAssetDrop(assetIndex, drop.x, columnPos.y)
                                     }
+                                }
+
+                                Rectangle {
+                                    visible: root.dropCreatesNewTrack && trackRow.trackIndex === 0
+                                    anchors.top: parent.top
+                                    width: parent.width
+                                    height: 3
+                                    color: Theme.primary
+                                    z: 6
                                 }
 
                                 // Landing preview outline (library drop or clip move).
@@ -654,7 +849,7 @@ PanelFrame {
                                         Rectangle {
                                             anchors.fill: parent
                                             radius: Theme.radiusSm
-                                            color: root.clipColor(clipItem.trackType)
+                                            color: root.clipColor(clipItem.trackType === "shape" ? "graphic" : clipItem.trackType)
                                             border.width: clipItem.selected ? Theme.clipSelectionRingWidth : 0
                                             border.color: Theme.primary
                                             clip: true
@@ -727,17 +922,21 @@ PanelFrame {
                                                 anchors.top: parent.top
                                                 anchors.bottom: parent.bottom
                                                 anchors.bottomMargin: (clipItem.trackType === "video"
-                                                                       || clipItem.trackType === "audio") ? 20 : 0
+                                                                       || clipItem.trackType === "audio"
+                                                                       || clipItem.trackType === "shape") ? 20 : 0
                                                 visible: clipItem.clipData.filmstripPath
                                                          && clipItem.clipData.filmstripPath.length > 0
                                                          && (clipItem.trackType === "video"
+                                                             || clipItem.trackType === "shape"
                                                              || clipItem.clipData.kind === "image")
                                                 filmstripPath: clipItem.clipData.filmstripPath
                                                 z: 0
                                             }
 
                                             Rectangle {
-                                                visible: clipItem.trackType === "video" || clipItem.trackType === "audio"
+                                                visible: clipItem.trackType === "video"
+                                                         || clipItem.trackType === "audio"
+                                                         || clipItem.trackType === "shape"
                                                 width: parent.width
                                                 height: 20
                                                 color: "#00000066"
@@ -812,6 +1011,7 @@ PanelFrame {
 
                                         MouseArea {
                                             id: clipMouse
+                                            z: 2
                                             anchors.fill: parent
                                             anchors.leftMargin: clipItem.selected ? 14 : 0
                                             anchors.rightMargin: clipItem.selected ? 14 : 0
@@ -819,13 +1019,20 @@ PanelFrame {
                                             cursorShape: Qt.PointingHandCursor
                                             drag.target: clipItem
                                             drag.axis: Drag.XAndYAxis
+                                            drag.threshold: 8
                                             drag.minimumX: Theme.clipSelectionRingWidth
                                             drag.minimumY: -trackRow.height
                                             drag.maximumY: trackRow.height * 2
                                             property int originTrack: trackRow.trackIndex
 
-                                            onPressed: function(mouse) {
+                                            onPressed: {
                                                 originTrack = trackRow.trackIndex
+                                                if ((mouse.modifiers & Qt.ShiftModifier) !== 0)
+                                                    EditorState.addToSelection(trackRow.trackIndex, modelData)
+                                                else
+                                                    EditorState.selectClip(trackRow.trackIndex, modelData)
+                                            }
+                                            onClicked: (mouse) => {
                                                 if ((mouse.modifiers & Qt.ShiftModifier) !== 0)
                                                     EditorState.addToSelection(trackRow.trackIndex, modelData)
                                                 else
@@ -833,6 +1040,8 @@ PanelFrame {
                                             }
                                             onReleased: {
                                                 root.clearLandingPreview()
+                                                if (!drag.active)
+                                                    return
                                                 const newStart = (clipItem.x - Theme.clipSelectionRingWidth) / root.pxPerSecond
                                                 const pos = clipItem.mapToItem(trackColumn, clipItem.width / 2, clipItem.height / 2)
                                                 const targetTrack = root.trackIndexAtY(pos.y)
