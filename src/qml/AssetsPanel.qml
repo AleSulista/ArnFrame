@@ -17,15 +17,14 @@ PanelFrame {
     }
 
     function kindsForTab(tabId) {
-        if (tabId === "media") return ["video", "image"]
-        if (tabId === "sounds") return ["audio"]
+        if (tabId === "media") return ["video", "image", "audio"]
         return []
     }
 
     function assetVisible(kind) {
         const tabId = tabsModel.get(activeTab).tabId
         if (tabId === "text" || tabId === "stickers" || tabId === "effects"
-                || tabId === "adjustment" || tabId === "settings")
+                || tabId === "adjustment" || tabId === "settings" || tabId === "sounds")
             return false
         const kinds = kindsForTab(tabId)
         return kinds.length === 0 || kinds.indexOf(kind) >= 0
@@ -243,6 +242,24 @@ PanelFrame {
                             textClipInput.clear()
                         }
                     }
+                }
+            }
+
+            // Sounds tab panel
+            Item {
+                visible: tabsModel.get(activeTab).tabId === "sounds"
+                width: parent.width
+                height: parent.height - Theme.panelHeaderHeight
+
+                Text {
+                    anchors.centerIn: parent
+                    width: parent.width - 48
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    text: qsTr("This tab is for royalty free sound effects")
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSm
                 }
             }
 

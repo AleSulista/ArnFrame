@@ -18,6 +18,11 @@ struct StreamInfo {
     double fps = 0.0;
     int rotationDegrees = 0;
 
+    // True for cover-art / thumbnail streams (e.g. embedded album art in
+    // MP3/FLAC). These are exposed as video streams by libav but must not be
+    // treated as real video.
+    bool attachedPicture = false;
+
     // Audio-only fields.
     int sampleRate = 0;
     int channels = 0;

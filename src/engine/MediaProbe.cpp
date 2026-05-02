@@ -53,6 +53,7 @@ StreamInfo describeStream(const AVFormatContext *fmt, const AVStream *stream)
         if (stream->avg_frame_rate.den != 0)
             info.fps = av_q2d(stream->avg_frame_rate);
         info.rotationDegrees = rotationOf(stream);
+        info.attachedPicture = (stream->disposition & AV_DISPOSITION_ATTACHED_PIC) != 0;
         break;
     case AVMEDIA_TYPE_AUDIO:
         info.type = StreamInfo::Type::Audio;

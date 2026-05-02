@@ -29,7 +29,7 @@ drift::MediaKind kindFrom(const MediaInfo &info, const QString &path)
         return drift::MediaKind::Image;
 
     for (const StreamInfo &stream : info.streams) {
-        if (stream.type == StreamInfo::Type::Video)
+        if (stream.type == StreamInfo::Type::Video && !stream.attachedPicture)
             return drift::MediaKind::Video;
     }
     for (const StreamInfo &stream : info.streams) {
@@ -443,7 +443,7 @@ void AssetLibrary::importFiles(const QStringList &paths)
         asset.filmstripPath = strip;
 
         for (const StreamInfo &stream : info.streams) {
-            if (stream.type == StreamInfo::Type::Video) {
+            if (stream.type == StreamInfo::Type::Video && !stream.attachedPicture) {
                 asset.width = stream.width;
                 asset.height = stream.height;
                 asset.fps = stream.fps;
