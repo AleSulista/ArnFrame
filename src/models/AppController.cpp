@@ -36,6 +36,13 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     m_timelineModel.setProject(&m_project);
     m_clipListModel.setProject(&m_project);
 
+    // selectedClipData reflects the current clip's live values, so it must
+    // refresh on both selection changes and any edit to the timeline (e.g. a
+    // WYSIWYG preview drag emits only tracksChanged). This keeps the Clip
+    // Properties panel in sync with the preview in both directions.
+    connect(this, &AppController::selectionChanged, this, &AppController::selectedClipDataChanged);
+    connect(this, &AppController::tracksChanged, this, &AppController::selectedClipDataChanged);
+
     m_undoStack.setUndoLimit(kMaxUndoSteps);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, &AppController::undoStackChanged);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, [this] {

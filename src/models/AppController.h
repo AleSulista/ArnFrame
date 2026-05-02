@@ -38,7 +38,7 @@ class AppController : public QObject
     Q_PROPERTY(int selectedTrack READ selectedTrack NOTIFY selectionChanged)
     Q_PROPERTY(int selectedClip READ selectedClip NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList selection READ selection NOTIFY selectionChanged)
-    Q_PROPERTY(QVariantMap selectedClipData READ selectedClipData NOTIFY selectionChanged)
+    Q_PROPERTY(QVariantMap selectedClipData READ selectedClipData NOTIFY selectedClipDataChanged)
     Q_PROPERTY(bool guidesEnabled READ guidesEnabled WRITE setGuidesEnabled NOTIFY guidesChanged)
     Q_PROPERTY(QString guideType READ guideType WRITE setGuideType NOTIFY guidesChanged)
     Q_PROPERTY(QVariantList actions READ actions NOTIFY shortcutsChanged)
@@ -179,6 +179,7 @@ signals:
     void undoStackChanged();
     void exportInProgressChanged();
     void selectionChanged();
+    void selectedClipDataChanged();
     void bookmarksChanged();
     void projectNameChanged();
     void lastMessageChanged();

@@ -115,6 +115,9 @@ PanelFrame {
                                 y: centerY - boxH / 2
                                 width: boxW
                                 height: boxH
+                                // Front-most track (lowest index) sits on top so it
+                                // wins click hit-testing over boxes behind it.
+                                z: -modelData.track
                                 transformOrigin: Item.Center
                                 rotation: liveRotation < 1e8 ? liveRotation : modelData.rotation
 
