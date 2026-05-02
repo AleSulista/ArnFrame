@@ -11,6 +11,15 @@ Column {
     required property var propDef       // {key, label, def, decimals}
     required property var keyframeList  // [{seconds, value}, ...] for this property
     property string interpolationMode: "linear"
+
+    // When true, the value is edited through a slider + readout instead of a
+    // numeric text field (used for volume). Drags are coalesced into a single
+    // undo entry via begin/commit preview drag.
+    property bool useSlider: false
+    property real sliderFrom: 0
+    property real sliderTo: 1
+    property bool percent: false
+
     spacing: 4
 
     readonly property var activeKey: keyframeAtPlayhead()
@@ -140,7 +149,9 @@ Column {
         }
     }
 
+    // --- Numeric field (default) ---------------------------------------------
     Rectangle {
+        visible: !root.useSlider
         width: root.width
         height: 30
         radius: Theme.radiusSm
@@ -164,17 +175,53 @@ Column {
                         EditorState.playheadSeconds, v)
             }
 
-            // TextField drops its text binding after edit; keep it in sync with playhead/selection.
-            Connections {
-                target: EditorState
-                function onPlayheadSecondsChanged() { valueField.syncFromModel() }
-                function onSelectionChanged() { valueField.syncFromModel() }
-                function onTracksChanged() { valueField.syncFromModel() }
-            }
-            function syncFromModel() {
+            // Typing drops the text binding; restore it on defocus so the field
+            // keeps tracking the playhead/selection/keyframe value.
+            onActiveFocusChanged: {
                 if (!activeFocus)
-                    text = root.currentValue.toFixed(root.propDef.decimals)
+                    text = Qt.binding(() => root.currentValue.toFixed(root.propDef.decimals))
             }
+        }
+    }
+
+    // --- Slider (opt-in, e.g. volume) ----------------------------------------
+    Row {
+        visible: root.useSlider
+        width: root.width
+        spacing: 8
+
+        Slider {
+            id: valueSlider
+            width: root.width - readout.width - parent.spacing
+            anchors.verticalCenter: parent.verticalCenter
+            from: root.sliderFrom
+            to: root.sliderTo
+            value: root.currentValue
+            onMoved: EditorState.previewSetClipKeyframe(
+                         EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
+                         EditorState.playheadSeconds, value)
+            onPressedChanged: {
+                if (pressed) {
+                    EditorState.beginPreviewDrag()
+                } else {
+                    EditorState.commitPreviewDrag()
+                    // Dragging drops the value binding; restore it so the handle
+                    // keeps tracking keyframe/playhead changes.
+                    value = Qt.binding(() => root.currentValue)
+                }
+            }
+        }
+
+        Text {
+            id: readout
+            width: 44
+            anchors.verticalCenter: parent.verticalCenter
+            horizontalAlignment: Text.AlignRight
+            text: root.percent ? Math.round(root.currentValue * 100) + "%"
+                               : root.currentValue.toFixed(root.propDef.decimals)
+            color: Theme.panelForeground
+            font.family: Theme.monoFontFamily
+            font.pixelSize: Theme.fontSizeSm
         }
     }
 }

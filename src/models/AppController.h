@@ -103,6 +103,8 @@ public:
     Q_INVOKABLE void previewSetClipPosition(int trackIndex, int clipIndex, double posX, double posY);
     Q_INVOKABLE void previewSetClipScale(int trackIndex, int clipIndex, double scale);
     Q_INVOKABLE void previewSetClipRotation(int trackIndex, int clipIndex, double degrees);
+    Q_INVOKABLE void previewSetClipKeyframe(int trackIndex, int clipIndex, const QString &prop,
+                                            double atSeconds, double value);
     Q_INVOKABLE void commitPreviewDrag();
     Q_INVOKABLE int projectWidth() const;
     Q_INVOKABLE int projectHeight() const;

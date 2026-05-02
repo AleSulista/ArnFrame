@@ -1439,6 +1439,32 @@ void AppController::previewSetClipRotation(int trackIndex, int clipIndex, double
     m_playback.refreshFrame();
 }
 
+void AppController::previewSetClipKeyframe(int trackIndex, int clipIndex, const QString &prop,
+                                           double atSeconds, double value)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    drift::KeyframeTrack<double> *kt = trackForProp(clip, prop);
+    if (!kt)
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag();
+
+    const drift::TimeUs rel = qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds) - clip.timelineStart);
+    kt->setKeyframe(rel, value);
+
+    m_playback.setPlayheadUs(m_playheadUs);
+    emit tracksChanged();
+    m_playback.refreshFrame();
+}
+
 void AppController::commitPreviewDrag()
 {
     if (!m_previewDragActive)

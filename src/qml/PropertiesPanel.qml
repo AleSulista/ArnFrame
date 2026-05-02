@@ -813,6 +813,10 @@ PanelFrame {
                             propDef: root.propVolume
                             keyframeList: (clip.keyframes && clip.keyframes.volume && clip.keyframes.volume.points) || []
                             interpolationMode: (clip.keyframes && clip.keyframes.volume && clip.keyframes.volume.interpolation) || "linear"
+                            useSlider: true
+                            sliderFrom: 0
+                            sliderTo: 2
+                            percent: true
                         }
                     }
 
