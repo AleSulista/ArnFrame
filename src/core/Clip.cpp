@@ -13,6 +13,8 @@ QString clipTypeToString(ClipType type)
         return QStringLiteral("image");
     case ClipType::Text:
         return QStringLiteral("text");
+    case ClipType::Shape:
+        return QStringLiteral("shape");
     }
     return QStringLiteral("video");
 }
@@ -25,6 +27,8 @@ ClipType clipTypeFromString(const QString &type)
         return ClipType::Image;
     if (type == QStringLiteral("text"))
         return ClipType::Text;
+    if (type == QStringLiteral("shape"))
+        return ClipType::Shape;
     return ClipType::Video;
 }
 

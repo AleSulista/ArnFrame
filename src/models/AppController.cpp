@@ -127,6 +127,92 @@ QVariantMap textStyleToMap(const drift::TextStyle &s)
     };
 }
 
+QVariantMap shapeStyleToMap(const drift::ShapeStyle &s)
+{
+    return {
+        {QStringLiteral("kind"), drift::shapeKindToString(s.kind)},
+        {QStringLiteral("fill"), s.fill.name(QColor::HexArgb)},
+        {QStringLiteral("stroke"), s.stroke.name(QColor::HexArgb)},
+        {QStringLiteral("strokeWidth"), s.strokeWidth},
+    };
+}
+
+QString stickerResourcePath(const QString &id)
+{
+    return QStringLiteral("qrc:/qt/qml/Drift/resources/stickers/%1.png").arg(id);
+}
+
+bool clipAcceptsPreviewTransform(const drift::Clip &clip)
+{
+    return clip.type == drift::ClipType::Shape || clip.type == drift::ClipType::Image
+           || clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Video;
+}
+
+void previewHalfExtents(const drift::Clip &clip, int canvasWidth, int canvasHeight, double scale,
+                        double &halfW, double &halfH)
+{
+    const int base = qMin(canvasWidth, canvasHeight);
+    if (clip.type == drift::ClipType::Shape) {
+        switch (clip.shapeStyle.kind) {
+        case drift::ShapeKind::Rectangle:
+            halfW = 0.15 * scale;
+            halfH = 0.10 * scale;
+            return;
+        case drift::ShapeKind::Square:
+            halfW = halfH = 0.125 * scale;
+            return;
+        case drift::ShapeKind::Triangle:
+        case drift::ShapeKind::Pentagon:
+        case drift::ShapeKind::Hexagon:
+            halfW = halfH = 0.15 * scale;
+            return;
+        }
+    }
+
+    if (clip.type == drift::ClipType::Text) {
+        halfW = 0.22 * scale;
+        halfH = 0.08 * scale;
+        return;
+    }
+
+    Q_UNUSED(base)
+    // Video and image clips are scaled to fill the canvas (keeping aspect), so
+    // the transform box spans the full frame at scale 1.
+    halfW = 0.5 * scale;
+    halfH = 0.5 * scale;
+}
+
+double clipTransformValue(const drift::KeyframeTrack<double> &track, drift::TimeUs relative, double defaultValue)
+{
+    if (track.isEmpty())
+        return defaultValue;
+    return track.evaluateAt(relative);
+}
+
+drift::ShapeStyle shapeStyleForKind(const QString &shapeKind)
+{
+    drift::ShapeStyle style;
+    style.kind = drift::shapeKindFromString(shapeKind);
+    switch (style.kind) {
+    case drift::ShapeKind::Rectangle:
+        style.fill = QColor(0, 180, 255);
+        break;
+    case drift::ShapeKind::Square:
+        style.fill = QColor(255, 120, 64);
+        break;
+    case drift::ShapeKind::Triangle:
+        style.fill = QColor(255, 214, 10);
+        break;
+    case drift::ShapeKind::Pentagon:
+        style.fill = QColor(160, 96, 255);
+        break;
+    case drift::ShapeKind::Hexagon:
+        style.fill = QColor(80, 220, 140);
+        break;
+    }
+    return style;
+}
+
 drift::KeyframeTrack<double> *trackForProp(drift::Clip &clip, const QString &prop)
 {
     if (prop == QStringLiteral("opacity"))
@@ -268,6 +354,7 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("filmstripPath"), clip.filmstripPath},
         {QStringLiteral("textContent"), clip.textContent},
         {QStringLiteral("textStyle"), textStyleToMap(clip.textStyle)},
+        {QStringLiteral("shapeStyle"), shapeStyleToMap(clip.shapeStyle)},
         {QStringLiteral("blendMode"), drift::blendModeToString(clip.blendMode)},
         {QStringLiteral("start"), drift::usToSeconds(clip.timelineStart)},
         {QStringLiteral("duration"), drift::usToSeconds(clip.timelineDuration)},
@@ -1097,6 +1184,265 @@ void AppController::addTextClip(const QString &text, double atSeconds)
     selectClip(trackIndex, track.clips.size() - 1);
 }
 
+QVariantList AppController::builtinStickers() const
+{
+    return {
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("star")},
+                    {QStringLiteral("label"), QStringLiteral("Star")},
+                    {QStringLiteral("path"), stickerResourcePath(QStringLiteral("star"))}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("heart")},
+                    {QStringLiteral("label"), QStringLiteral("Heart")},
+                    {QStringLiteral("path"), stickerResourcePath(QStringLiteral("heart"))}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("arrow")},
+                    {QStringLiteral("label"), QStringLiteral("Arrow")},
+                    {QStringLiteral("path"), stickerResourcePath(QStringLiteral("arrow"))}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("circle")},
+                    {QStringLiteral("label"), QStringLiteral("Circle")},
+                    {QStringLiteral("path"), stickerResourcePath(QStringLiteral("circle"))}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("check")},
+                    {QStringLiteral("label"), QStringLiteral("Check")},
+                    {QStringLiteral("path"), stickerResourcePath(QStringLiteral("check"))}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("fire")},
+                    {QStringLiteral("label"), QStringLiteral("Fire")},
+                    {QStringLiteral("path"), stickerResourcePath(QStringLiteral("fire"))}},
+    };
+}
+
+QVariantList AppController::builtinShapes() const
+{
+    return {
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("rectangle")},
+                    {QStringLiteral("label"), QStringLiteral("Rectangle")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("square")}, {QStringLiteral("label"), QStringLiteral("Square")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("triangle")},
+                    {QStringLiteral("label"), QStringLiteral("Triangle")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("pentagon")},
+                    {QStringLiteral("label"), QStringLiteral("Pentagon")}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("hexagon")}, {QStringLiteral("label"), QStringLiteral("Hexagon")}},
+    };
+}
+
+void AppController::addShapeClip(const QString &shapeKind, double atSeconds)
+{
+    addShapeClipAt(shapeKind, -1, atSeconds);
+}
+
+void AppController::addShapeClipAt(const QString &shapeKind, int trackIndex, double atSeconds)
+{
+    const drift::ShapeStyle style = shapeStyleForKind(shapeKind);
+    const drift::Project before = m_project;
+
+    int target = trackIndex;
+    if (target < 0 || target >= m_project.tracks().size()
+        || !m_project.tracks().at(target).allowsClipType(drift::ClipType::Shape)) {
+        target = drift::ensureTrackForClipType(m_project, drift::ClipType::Shape, true);
+    }
+    if (target < 0)
+        return;
+
+    drift::Track &track = m_project.tracks()[target];
+    const drift::TimeUs startSeconds = atSeconds < 0.0 ? m_playheadUs : drift::secondsToUs(atSeconds);
+    const drift::TimeUs start = drift::resolveClipStart(m_project, track, -1, startSeconds,
+                                                        drift::kImageClipDurationUs, m_snapEnabled, m_playheadUs);
+
+    drift::Clip clip;
+    clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    clip.type = drift::ClipType::Shape;
+    clip.name = drift::shapeKindToString(style.kind);
+    clip.shapeStyle = style;
+    clip.timelineStart = start;
+    clip.timelineDuration = drift::kImageClipDurationUs;
+    clip.srcIn = 0;
+    clip.srcOut = drift::kImageClipDurationUs;
+
+    track.clips.append(clip);
+    pushProjectEdit(before, QStringLiteral("Shape added"));
+    finishEdit(QStringLiteral("Shape added"));
+    selectClip(target, track.clips.size() - 1);
+}
+
+void AppController::addStickerClip(const QString &stickerId, double atSeconds)
+{
+    QString path;
+    QString label;
+    for (const QVariant &item : builtinStickers()) {
+        const QVariantMap sticker = item.toMap();
+        if (sticker.value(QStringLiteral("id")).toString() == stickerId) {
+            path = sticker.value(QStringLiteral("path")).toString();
+            label = sticker.value(QStringLiteral("label")).toString();
+            break;
+        }
+    }
+    if (path.isEmpty())
+        return;
+
+    const drift::Project before = m_project;
+    const int trackIndex = drift::ensureTrackForClipType(m_project, drift::ClipType::Image, true);
+    if (trackIndex < 0)
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    const drift::TimeUs startSeconds = atSeconds < 0.0 ? m_playheadUs : drift::secondsToUs(atSeconds);
+    const drift::TimeUs start = drift::resolveClipStart(m_project, track, -1, startSeconds,
+                                                        drift::kImageClipDurationUs, m_snapEnabled, m_playheadUs);
+
+    drift::Clip clip;
+    clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    clip.type = drift::ClipType::Image;
+    clip.name = label.isEmpty() ? stickerId : label;
+    clip.path = path;
+    clip.thumbnailPath = path;
+    clip.filmstripPath = path;
+    clip.timelineStart = start;
+    clip.timelineDuration = drift::kImageClipDurationUs;
+    clip.srcIn = 0;
+    clip.srcOut = drift::kImageClipDurationUs;
+
+    track.clips.append(clip);
+    pushProjectEdit(before, QStringLiteral("Sticker added"));
+    finishEdit(QStringLiteral("Sticker added"));
+    selectClip(trackIndex, track.clips.size() - 1);
+}
+
+QVariantList AppController::previewClipsAtPlayhead() const
+{
+    QVariantList out;
+    const int canvasWidth = m_project.width();
+    const int canvasHeight = m_project.height();
+    if (canvasWidth <= 0 || canvasHeight <= 0)
+        return out;
+
+    const QList<drift::Track> &tracks = m_project.tracks();
+    for (int trackIndex = 0; trackIndex < tracks.size(); ++trackIndex) {
+        const drift::Track &track = tracks.at(trackIndex);
+        if (track.hidden)
+            continue;
+        if (track.type != drift::TrackType::Video && track.type != drift::TrackType::Shape
+            && track.type != drift::TrackType::Text)
+            continue;
+
+        for (int clipIndex = 0; clipIndex < track.clips.size(); ++clipIndex) {
+            const drift::Clip &clip = track.clips.at(clipIndex);
+            if (!clip.containsTime(m_playheadUs) || !clipAcceptsPreviewTransform(clip))
+                continue;
+
+            const drift::TimeUs relative = m_playheadUs - clip.timelineStart;
+            const double posX = clipTransformValue(clip.posX, relative, 0.5);
+            const double posY = clipTransformValue(clip.posY, relative, 0.5);
+            const double scale = clipTransformValue(clip.scale, relative, 1.0);
+            const double rotation = clipTransformValue(clip.rotation, relative, 0.0);
+            double halfW = 0.0;
+            double halfH = 0.0;
+            previewHalfExtents(clip, canvasWidth, canvasHeight, scale, halfW, halfH);
+
+            out.append(QVariantMap{
+                {QStringLiteral("track"), trackIndex},
+                {QStringLiteral("clip"), clipIndex},
+                {QStringLiteral("kind"), drift::clipTypeToString(clip.type)},
+                {QStringLiteral("name"), clip.name},
+                {QStringLiteral("posX"), posX},
+                {QStringLiteral("posY"), posY},
+                {QStringLiteral("scale"), scale},
+                {QStringLiteral("rotation"), rotation},
+                {QStringLiteral("halfW"), halfW},
+                {QStringLiteral("halfH"), halfH},
+            });
+        }
+    }
+    return out;
+}
+
+int AppController::projectWidth() const
+{
+    return m_project.width();
+}
+
+int AppController::projectHeight() const
+{
+    return m_project.height();
+}
+
+void AppController::beginPreviewDrag()
+{
+    m_previewDragBefore = m_project;
+    m_previewDragActive = true;
+}
+
+void AppController::previewSetClipPosition(int trackIndex, int clipIndex, double posX, double posY)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag();
+
+    drift::Clip &clip = track.clips[clipIndex];
+    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
+    clip.posX.setKeyframe(relative, qBound(0.0, posX, 1.0));
+    clip.posY.setKeyframe(relative, qBound(0.0, posY, 1.0));
+
+    m_playback.setPlayheadUs(m_playheadUs);
+    emit tracksChanged();
+    m_playback.refreshFrame();
+}
+
+void AppController::previewSetClipScale(int trackIndex, int clipIndex, double scale)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag();
+
+    drift::Clip &clip = track.clips[clipIndex];
+    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
+    clip.scale.setKeyframe(relative, qBound(0.05, scale, 10.0));
+
+    m_playback.setPlayheadUs(m_playheadUs);
+    emit tracksChanged();
+    m_playback.refreshFrame();
+}
+
+void AppController::previewSetClipRotation(int trackIndex, int clipIndex, double degrees)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag();
+
+    drift::Clip &clip = track.clips[clipIndex];
+    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
+    clip.rotation.setKeyframe(relative, degrees);
+
+    m_playback.setPlayheadUs(m_playheadUs);
+    emit tracksChanged();
+    m_playback.refreshFrame();
+}
+
+void AppController::commitPreviewDrag()
+{
+    if (!m_previewDragActive)
+        return;
+
+    m_undoStack.push(new drift::ProjectSnapshotCommand(&m_project, m_previewDragBefore, m_project,
+                                                       QStringLiteral("Move clip")));
+    m_previewDragActive = false;
+    finishEdit(QStringLiteral("Clip moved"));
+}
+
 void AppController::setClipStart(int trackIndex, int clipIndex, double start)
 {
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
@@ -1127,7 +1473,7 @@ void AppController::setClipDuration(int trackIndex, int clipIndex, double durati
 
     const drift::Project before = m_project;
     drift::Clip &clip = track.clips[clipIndex];
-    const drift::TimeUs maxDuration = clip.type == drift::ClipType::Text
+    const drift::TimeUs maxDuration = clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Shape
                                           ? drift::secondsToUs(300.0)
                                           : sourceDurationForClip(clip) - clip.srcIn;
     clip.timelineDuration = qBound(drift::kMinClipDurationUs, drift::secondsToUs(duration), maxDuration);
@@ -1848,7 +2194,11 @@ void AppController::exportProject(const QUrl &outputUrl)
 
         if (track.type == drift::TrackType::Video || track.type == drift::TrackType::Shape) {
             for (const drift::Clip &clip : track.clips) {
-                if (clip.type != drift::ClipType::Video && clip.type != drift::ClipType::Image)
+                if (clip.type != drift::ClipType::Video && clip.type != drift::ClipType::Image
+                    && clip.type != drift::ClipType::Shape)
+                    continue;
+
+                if (clip.type == drift::ClipType::Shape)
                     continue;
 
                 videoSegments.append({

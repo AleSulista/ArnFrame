@@ -724,10 +724,14 @@ PanelFrame {
 
                                 DropArea {
                                     anchors.fill: parent
-                                    keys: ["text/plain", "application/x-drift-effect"]
+                                    keys: ["text/plain", "application/x-drift-effect", "application/x-drift-shape"]
 
                                     function isEffectDrag(drop) {
                                         return drop.keys.indexOf("application/x-drift-effect") !== -1
+                                    }
+
+                                    function isShapeDrag(drop) {
+                                        return drop.keys.indexOf("application/x-drift-shape") !== -1
                                     }
 
                                     function assetIndexFromDrop(drop) {
@@ -741,6 +745,15 @@ PanelFrame {
                                     function updateAssetPreview(drop) {
                                         if (isEffectDrag(drop))
                                             return
+                                        if (isShapeDrag(drop)) {
+                                            if (root.tracks[trackRow.trackIndex].type === "shape") {
+                                                const desired = Math.max(0, drop.x / root.pxPerSecond)
+                                                root.showLandingPreview(trackRow.trackIndex, desired, 5.0)
+                                            } else {
+                                                root.clearLandingPreview()
+                                            }
+                                            return
+                                        }
                                         const assetIndex = assetIndexFromDrop(drop)
                                         if (assetIndex < 0)
                                             return
@@ -773,6 +786,13 @@ PanelFrame {
                                                 EditorState.addEffect(trackRow.trackIndex, clipIndex, effectId)
                                                 EditorState.selectClip(trackRow.trackIndex, clipIndex)
                                             }
+                                            return
+                                        }
+                                        if (isShapeDrag(drop)) {
+                                            const shapeId = drop.getDataAsString("application/x-drift-shape")
+                                            const atSeconds = Math.max(0, drop.x / root.pxPerSecond)
+                                            root.clearLandingPreview()
+                                            EditorState.addShapeClipAt(shapeId, trackRow.trackIndex, atSeconds)
                                             return
                                         }
                                         const assetIndex = assetIndexFromDrop(drop)
@@ -811,7 +831,8 @@ PanelFrame {
                                     delegate: Item {
                                         id: clipItem
                                         property var clipData: root.tracks[trackRow.trackIndex].clips[modelData]
-                                        property bool selected: EditorState.selectionContains(trackRow.trackIndex, modelData)
+                                        property bool selected: (EditorState.selection,
+                                                                 EditorState.selectionContains(trackRow.trackIndex, modelData))
                                         property string trackType: root.tracks[trackRow.trackIndex].type
 
                                         y: Theme.clipSelectionRingWidth

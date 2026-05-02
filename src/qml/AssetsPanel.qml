@@ -251,12 +251,133 @@ PanelFrame {
                 width: parent.width
                 height: parent.height - Theme.panelHeaderHeight
 
-                Text {
-                    anchors.centerIn: parent
-                    text: tabsModel.get(activeTab).label + " — coming soon"
-                    color: Theme.mutedForeground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSm
+                Flickable {
+                    anchors.fill: parent
+                    contentHeight: stickersContent.height + 24
+                    clip: true
+                    ScrollBar.vertical: AppScrollBar { }
+
+                    Column {
+                        id: stickersContent
+                        x: 12
+                        y: 12
+                        width: parent.width - 24
+                        spacing: 16
+
+                        Text {
+                            text: "Stickers"
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                        }
+
+                        Grid {
+                            width: parent.width
+                            columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
+                            columnSpacing: Theme.assetCardGap
+                            rowSpacing: Theme.assetCardGap
+
+                            Repeater {
+                                model: EditorState.builtinStickers()
+                                delegate: Column {
+                                    required property var modelData
+                                    width: Theme.assetCardWidth
+                                    spacing: 4
+
+                                    Rectangle {
+                                        width: Theme.assetCardWidth
+                                        height: Theme.assetCardWidth
+                                        radius: Theme.radiusSm
+                                        color: Theme.panelAccent
+                                        clip: true
+
+                                        Image {
+                                            anchors.fill: parent
+                                            anchors.margins: 12
+                                            source: EditorState.imageUrl(modelData.path)
+                                            fillMode: Image.PreserveAspectFit
+                                            asynchronous: true
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: EditorState.addStickerClip(modelData.id, -1)
+                                        }
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        text: modelData.label
+                                        color: Theme.mutedForeground
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeCard
+                                        horizontalAlignment: Text.AlignHCenter
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: "Shapes"
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                            topPadding: 4
+                        }
+
+                        Grid {
+                            width: parent.width
+                            columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
+                            columnSpacing: Theme.assetCardGap
+                            rowSpacing: Theme.assetCardGap
+
+                            Repeater {
+                                model: EditorState.builtinShapes()
+                                delegate: Column {
+                                    id: shapeCard
+                                    required property var modelData
+                                    width: Theme.assetCardWidth
+                                    spacing: 4
+
+                                    Drag.active: shapeDrag.active
+                                    Drag.dragType: Drag.Automatic
+                                    Drag.supportedActions: Qt.CopyAction
+                                    Drag.keys: ["application/x-drift-shape"]
+                                    Drag.mimeData: { "application/x-drift-shape": shapeCard.modelData.id }
+
+                                    Rectangle {
+                                        width: Theme.assetCardWidth
+                                        height: Theme.assetCardWidth
+                                        radius: Theme.radiusSm
+                                        color: Theme.panelAccent
+
+                                        ShapePreview {
+                                            anchors.fill: parent
+                                            anchors.margins: 16
+                                            shapeKind: shapeCard.modelData.id
+                                        }
+
+                                        TapHandler {
+                                            onTapped: EditorState.addShapeClip(shapeCard.modelData.id, -1)
+                                        }
+                                        DragHandler { id: shapeDrag }
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        text: modelData.label
+                                        color: Theme.mutedForeground
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeCard
+                                        horizontalAlignment: Text.AlignHCenter
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 

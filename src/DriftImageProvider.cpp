@@ -11,7 +11,14 @@ DriftImageProvider::DriftImageProvider()
 QImage DriftImageProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize)
 {
     const QString path = QUrl::fromPercentEncoding(id.toUtf8());
-    if (path.isEmpty() || !QFileInfo::exists(path)) {
+    if (path.isEmpty()) {
+        if (size)
+            *size = QSize();
+        return {};
+    }
+
+    const bool isResource = path.startsWith(QStringLiteral("qrc:")) || path.startsWith(QStringLiteral(":/"));
+    if (!isResource && !QFileInfo::exists(path)) {
         if (size)
             *size = QSize();
         return {};

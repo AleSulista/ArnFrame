@@ -74,6 +74,7 @@ TrackType trackTypeForClipType(ClipType type)
     case ClipType::Text:
         return TrackType::Text;
     case ClipType::Image:
+    case ClipType::Shape:
         return TrackType::Shape;
     case ClipType::Video:
         break;
@@ -135,7 +136,7 @@ TimeUs sourceDurationForClip(const Project &project, const Clip &clip)
         }
     }
 
-    if (clip.type == ClipType::Image)
+    if (clip.type == ClipType::Image || clip.type == ClipType::Shape)
         return kImageClipDurationUs;
 
     return qMax(clip.srcOut, clip.timelineDuration);

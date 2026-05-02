@@ -36,7 +36,7 @@ bool Track::allowsClipType(ClipType clipType) const
     case TrackType::Text:
         return clipType == ClipType::Text;
     case TrackType::Shape:
-        return clipType == ClipType::Image;
+        return clipType == ClipType::Image || clipType == ClipType::Shape;
     case TrackType::Video:
         return clipType == ClipType::Video;
     }

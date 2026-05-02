@@ -55,6 +55,232 @@ PanelFrame {
                     }
 
                     Item {
+                        id: transformOverlay
+                        anchors.fill: parent
+                        visible: !root.playing && EditorState.projectWidth() > 0
+
+                        property var overlayClips: []
+                        // True while a handle is being dragged. Rebuilding the model
+                        // mid-drag would destroy the delegate that owns the active
+                        // grab, so refreshes are suppressed until the drag ends.
+                        property bool interacting: false
+
+                        function refreshOverlay() {
+                            if (interacting)
+                                return
+                            overlayClips = EditorState.previewClipsAtPlayhead()
+                        }
+
+                        function endInteraction() {
+                            EditorState.commitPreviewDrag()
+                            interacting = false
+                            Qt.callLater(refreshOverlay)
+                        }
+
+                        Component.onCompleted: refreshOverlay()
+
+                        Connections {
+                            target: EditorState
+                            function onTracksChanged() { transformOverlay.refreshOverlay() }
+                            function onSelectionChanged() { transformOverlay.refreshOverlay() }
+                            function onPlayheadSecondsChanged() { transformOverlay.refreshOverlay() }
+                        }
+
+                        Repeater {
+                            model: transformOverlay.overlayClips
+
+                            delegate: Item {
+                                id: handle
+                                required property var modelData
+
+                                readonly property bool selected: EditorState.selectedTrack === modelData.track
+                                                                        && EditorState.selectedClip === modelData.clip
+
+                                // Live overrides applied during a drag so the box tracks
+                                // the cursor without rebuilding the (stale) model.
+                                property real liveDX: 0
+                                property real liveDY: 0
+                                property real liveScale: -1
+                                property real liveRotation: 1e9
+
+                                readonly property real baseHalfW: modelData.halfW / Math.max(0.0001, modelData.scale)
+                                readonly property real baseHalfH: modelData.halfH / Math.max(0.0001, modelData.scale)
+                                readonly property real effScale: liveScale >= 0 ? liveScale : modelData.scale
+                                readonly property real centerX: modelData.posX * parent.width + liveDX
+                                readonly property real centerY: modelData.posY * parent.height + liveDY
+                                readonly property real boxW: Math.max(24, baseHalfW * effScale * 2 * parent.width)
+                                readonly property real boxH: Math.max(24, baseHalfH * effScale * 2 * parent.height)
+
+                                x: centerX - boxW / 2
+                                y: centerY - boxH / 2
+                                width: boxW
+                                height: boxH
+                                transformOrigin: Item.Center
+                                rotation: liveRotation < 1e8 ? liveRotation : modelData.rotation
+
+                                property real dragStartX: 0
+                                property real dragStartY: 0
+                                property real dragStartScale: 1
+                                property real dragStartDist: 1
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: "transparent"
+                                    border.width: handle.selected ? 2 : 1
+                                    border.color: handle.selected ? Theme.primary : "#99ffffff"
+                                    radius: 2
+                                }
+
+                                TapHandler {
+                                    onTapped: EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
+                                }
+
+                                DragHandler {
+                                    target: null
+                                    cursorShape: Qt.SizeAllCursor
+                                    onActiveChanged: {
+                                        if (active) {
+                                            transformOverlay.interacting = true
+                                            handle.dragStartX = handle.modelData.posX
+                                            handle.dragStartY = handle.modelData.posY
+                                            EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
+                                            EditorState.beginPreviewDrag()
+                                        } else {
+                                            handle.liveDX = 0
+                                            handle.liveDY = 0
+                                            transformOverlay.endInteraction()
+                                        }
+                                    }
+                                    onTranslationChanged: {
+                                        // translation is in the rotated box frame; rotate it back to canvas axes
+                                        const a = handle.rotation * Math.PI / 180
+                                        const dx = translation.x * Math.cos(a) - translation.y * Math.sin(a)
+                                        const dy = translation.x * Math.sin(a) + translation.y * Math.cos(a)
+                                        handle.liveDX = dx
+                                        handle.liveDY = dy
+                                        EditorState.previewSetClipPosition(
+                                            handle.modelData.track,
+                                            handle.modelData.clip,
+                                            handle.dragStartX + dx / handle.parent.width,
+                                            handle.dragStartY + dy / handle.parent.height)
+                                    }
+                                }
+
+                                // Corner resize handles (uniform scale)
+                                Repeater {
+                                    model: handle.selected ? 4 : 0
+
+                                    delegate: Rectangle {
+                                        id: corner
+                                        required property int index
+                                        readonly property real sx: (index === 0 || index === 2) ? -1 : 1
+                                        readonly property real sy: (index < 2) ? -1 : 1
+
+                                        width: 12
+                                        height: 12
+                                        radius: 2
+                                        color: Theme.primary
+                                        border.width: 1
+                                        border.color: "#ffffff"
+                                        x: (sx < 0 ? 0 : handle.width) - width / 2
+                                        y: (sy < 0 ? 0 : handle.height) - height / 2
+
+                                        DragHandler {
+                                            id: cornerDrag
+                                            target: null
+                                            cursorShape: (corner.sx * corner.sy < 0) ? Qt.SizeBDiagCursor : Qt.SizeFDiagCursor
+                                            onActiveChanged: {
+                                                if (active) {
+                                                    const p0 = transformOverlay.mapFromItem(null, cornerDrag.centroid.scenePosition.x,
+                                                                                             cornerDrag.centroid.scenePosition.y)
+                                                    handle.dragStartScale = handle.modelData.scale
+                                                    handle.dragStartDist = Math.max(1, Math.hypot(p0.x - handle.centerX,
+                                                                                                   p0.y - handle.centerY))
+                                                    transformOverlay.interacting = true
+                                                    handle.liveScale = handle.dragStartScale
+                                                    EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
+                                                    EditorState.beginPreviewDrag()
+                                                } else {
+                                                    handle.liveScale = -1
+                                                    transformOverlay.endInteraction()
+                                                }
+                                            }
+                                            onCentroidChanged: {
+                                                if (!active)
+                                                    return
+                                                const p = transformOverlay.mapFromItem(null, cornerDrag.centroid.scenePosition.x,
+                                                                                        cornerDrag.centroid.scenePosition.y)
+                                                const dist = Math.hypot(p.x - handle.centerX, p.y - handle.centerY)
+                                                const newScale = Math.max(0.05, handle.dragStartScale * dist / handle.dragStartDist)
+                                                handle.liveScale = newScale
+                                                EditorState.previewSetClipScale(
+                                                    handle.modelData.track,
+                                                    handle.modelData.clip,
+                                                    newScale)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Rotation handle above the box
+                                Item {
+                                    visible: handle.selected
+                                    width: 14
+                                    height: 14
+                                    x: handle.width / 2 - width / 2
+                                    y: -28
+
+                                    Rectangle {
+                                        anchors.top: parent.bottom
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        width: 1
+                                        height: 16
+                                        color: Theme.primary
+                                    }
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: width / 2
+                                        color: Theme.primary
+                                        border.width: 1
+                                        border.color: "#ffffff"
+                                    }
+
+                                    DragHandler {
+                                        id: rotateDrag
+                                        target: null
+                                        cursorShape: Qt.CrossCursor
+                                        onActiveChanged: {
+                                            if (active) {
+                                                transformOverlay.interacting = true
+                                                handle.liveRotation = handle.modelData.rotation
+                                                EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
+                                                EditorState.beginPreviewDrag()
+                                            } else {
+                                                handle.liveRotation = 1e9
+                                                transformOverlay.endInteraction()
+                                            }
+                                        }
+                                        onCentroidChanged: {
+                                            if (!active)
+                                                return
+                                            const p = transformOverlay.mapFromItem(null, rotateDrag.centroid.scenePosition.x,
+                                                                                     rotateDrag.centroid.scenePosition.y)
+                                            const ang = Math.atan2(p.y - handle.centerY, p.x - handle.centerX)
+                                            const deg = ang * 180 / Math.PI + 90
+                                            handle.liveRotation = deg
+                                            EditorState.previewSetClipRotation(
+                                                handle.modelData.track,
+                                                handle.modelData.clip,
+                                                deg)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Item {
                         anchors.fill: parent
                         visible: EditorState.guidesEnabled
 

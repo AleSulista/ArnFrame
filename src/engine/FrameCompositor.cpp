@@ -48,6 +48,8 @@ void collectActivePaths(const drift::Project *project, drift::TimeUs timelineUs,
         for (const drift::Clip &clip : track.clips) {
             if (!clip.containsTime(timelineUs) || clip.path.isEmpty())
                 continue;
+            if (clip.type == drift::ClipType::Shape)
+                continue;
 
             if ((track.type == drift::TrackType::Video || track.type == drift::TrackType::Shape)
                 && clip.type != drift::ClipType::Text)
@@ -84,6 +86,80 @@ QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int width
         return image;
 
     return EffectProcessor::applyEffects(image, clip.effects);
+}
+
+QImage shapeImageForClip(const drift::Clip &clip, int canvasWidth, int canvasHeight)
+{
+    if (clip.type != drift::ClipType::Shape)
+        return {};
+
+    const int base = qMin(canvasWidth, canvasHeight);
+    int w = 0;
+    int h = 0;
+    switch (clip.shapeStyle.kind) {
+    case drift::ShapeKind::Rectangle:
+        w = qMax(16, static_cast<int>(canvasWidth * 0.30));
+        h = qMax(16, static_cast<int>(canvasHeight * 0.20));
+        break;
+    case drift::ShapeKind::Square:
+        w = h = qMax(16, static_cast<int>(base * 0.25));
+        break;
+    case drift::ShapeKind::Triangle:
+    case drift::ShapeKind::Pentagon:
+    case drift::ShapeKind::Hexagon:
+        w = h = qMax(16, static_cast<int>(base * 0.30));
+        break;
+    }
+
+    QImage image(w, h, QImage::Format_RGBA8888);
+    image.fill(Qt::transparent);
+
+    QPainter p(&image);
+    p.setRenderHint(QPainter::Antialiasing);
+
+    const drift::ShapeStyle &style = clip.shapeStyle;
+    QPen pen(style.stroke, style.strokeWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    p.setPen(pen);
+    p.setBrush(style.fill);
+
+    const QPointF center(w / 2.0, h / 2.0);
+    if (clip.shapeStyle.kind == drift::ShapeKind::Rectangle) {
+        const double inset = style.strokeWidth / 2.0;
+        p.drawRect(QRectF(inset, inset, w - style.strokeWidth, h - style.strokeWidth));
+    } else if (clip.shapeStyle.kind == drift::ShapeKind::Square) {
+        const double side = qMin(w, h) - style.strokeWidth;
+        p.drawRect(QRectF((w - side) / 2.0, (h - side) / 2.0, side, side));
+    } else {
+        int sides = 3;
+        switch (clip.shapeStyle.kind) {
+        case drift::ShapeKind::Triangle:
+            sides = 3;
+            break;
+        case drift::ShapeKind::Pentagon:
+            sides = 5;
+            break;
+        case drift::ShapeKind::Hexagon:
+            sides = 6;
+            break;
+        default:
+            break;
+        }
+        const double radius = qMin(w, h) / 2.0 - style.strokeWidth;
+        QPainterPath path;
+        for (int i = 0; i < sides; ++i) {
+            const double angle = -M_PI_2 + i * 2.0 * M_PI / sides;
+            const QPointF pt(center.x() + radius * qCos(angle), center.y() + radius * qSin(angle));
+            if (i == 0)
+                path.moveTo(pt);
+            else
+                path.lineTo(pt);
+        }
+        path.closeSubpath();
+        p.drawPath(path);
+    }
+
+    p.end();
+    return image;
 }
 
 double opacityForClip(const drift::Clip &clip, drift::TimeUs timelineUs)
@@ -154,6 +230,27 @@ void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, i
     }
 }
 
+void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs timelineUs, int width, int height)
+{
+    const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
+    if (text.isEmpty())
+        return;
+
+    const drift::TimeUs relative = timelineUs - clip.timelineStart;
+    const double posX = transformValue(clip.posX, relative, 0.5);
+    const double posY = transformValue(clip.posY, relative, 0.5);
+    const double scale = transformValue(clip.scale, relative, 1.0);
+    const double rotation = transformValue(clip.rotation, relative, 0.0);
+
+    painter.save();
+    painter.setOpacity(opacityForClip(clip, timelineUs));
+    painter.setCompositionMode(toQtComposition(clip.blendMode));
+    painter.translate(posX * width, posY * height);
+    painter.rotate(rotation);
+    drawStyledText(painter, clip, text, width, height, scale);
+    painter.restore();
+}
+
 } // namespace
 
 QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs) const
@@ -177,49 +274,33 @@ QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs) const
     QPainter painter(&canvas);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
 
-    for (const drift::Track &track : m_project->tracks()) {
-        if (track.hidden
-            || (track.type != drift::TrackType::Video && track.type != drift::TrackType::Shape))
+    // Tracks are ordered top-to-bottom in the timeline (index 0 is the topmost
+    // track), and the topmost track composites in front. Draw from the last
+    // track up to index 0 so index 0 lands on top.
+    const QList<drift::Track> &tracks = m_project->tracks();
+    for (int ti = tracks.size() - 1; ti >= 0; --ti) {
+        const drift::Track &track = tracks.at(ti);
+        if (track.hidden || track.type == drift::TrackType::Audio)
             continue;
 
         for (const drift::Clip &clip : track.clips) {
             if (!clip.containsTime(timelineUs))
                 continue;
 
-            const QImage frame = imageForClip(clip, timelineUs, width, height);
+            if (clip.type == drift::ClipType::Text) {
+                drawTextClip(painter, clip, timelineUs, width, height);
+                continue;
+            }
+
+            QImage frame;
+            if (clip.type == drift::ClipType::Shape)
+                frame = shapeImageForClip(clip, width, height);
+            else
+                frame = imageForClip(clip, timelineUs, width, height);
             if (frame.isNull())
                 continue;
 
             drawClipFrame(painter, frame, clip, timelineUs, width, height);
-        }
-    }
-
-    for (const drift::Track &track : m_project->tracks()) {
-        if (track.hidden || track.type != drift::TrackType::Text)
-            continue;
-
-        for (const drift::Clip &clip : track.clips) {
-            if (!clip.containsTime(timelineUs))
-                continue;
-
-            const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
-            if (text.isEmpty())
-                continue;
-
-            const drift::TimeUs relative = timelineUs - clip.timelineStart;
-            const double posX = transformValue(clip.posX, relative, 0.5);
-            const double posY = transformValue(clip.posY, relative, 0.5);
-            const double scale = transformValue(clip.scale, relative, 1.0);
-            const double rotation = transformValue(clip.rotation, relative, 0.0);
-
-            painter.save();
-            painter.setOpacity(opacityForClip(clip, timelineUs));
-            painter.setCompositionMode(toQtComposition(clip.blendMode));
-            painter.translate(posX * width, posY * height);
-            painter.rotate(rotation);
-
-            drawStyledText(painter, clip, text, width, height, scale);
-            painter.restore();
         }
     }
 

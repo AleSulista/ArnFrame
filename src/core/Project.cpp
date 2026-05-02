@@ -111,6 +111,28 @@ TextStyle textStyleFromJson(const QJsonObject &o)
     return s;
 }
 
+QJsonObject shapeStyleToJson(const ShapeStyle &s)
+{
+    return QJsonObject{
+        {QStringLiteral("kind"), shapeKindToString(s.kind)},
+        {QStringLiteral("fill"), s.fill.name(QColor::HexArgb)},
+        {QStringLiteral("stroke"), s.stroke.name(QColor::HexArgb)},
+        {QStringLiteral("strokeWidth"), s.strokeWidth},
+    };
+}
+
+ShapeStyle shapeStyleFromJson(const QJsonObject &o)
+{
+    ShapeStyle s;
+    if (o.isEmpty())
+        return s;
+    s.kind = shapeKindFromString(o.value(QStringLiteral("kind")).toString());
+    s.fill = QColor(o.value(QStringLiteral("fill")).toString(s.fill.name(QColor::HexArgb)));
+    s.stroke = QColor(o.value(QStringLiteral("stroke")).toString(s.stroke.name(QColor::HexArgb)));
+    s.strokeWidth = o.value(QStringLiteral("strokeWidth")).toDouble(s.strokeWidth);
+    return s;
+}
+
 QJsonObject clipToJson(const Clip &clip)
 {
     return QJsonObject{
@@ -120,6 +142,7 @@ QJsonObject clipToJson(const Clip &clip)
         {QStringLiteral("name"), clip.name},
         {QStringLiteral("textContent"), clip.textContent},
         {QStringLiteral("textStyle"), textStyleToJson(clip.textStyle)},
+        {QStringLiteral("shapeStyle"), shapeStyleToJson(clip.shapeStyle)},
         {QStringLiteral("path"), clip.path},
         {QStringLiteral("thumbnailPath"), clip.thumbnailPath},
         {QStringLiteral("filmstripPath"), clip.filmstripPath},
@@ -147,6 +170,7 @@ Clip clipFromJsonV2(const QJsonObject &object)
     clip.name = object.value(QStringLiteral("name")).toString();
     clip.textContent = object.value(QStringLiteral("textContent")).toString();
     clip.textStyle = textStyleFromJson(object.value(QStringLiteral("textStyle")).toObject());
+    clip.shapeStyle = shapeStyleFromJson(object.value(QStringLiteral("shapeStyle")).toObject());
     clip.path = object.value(QStringLiteral("path")).toString();
     clip.thumbnailPath = object.value(QStringLiteral("thumbnailPath")).toString();
     clip.filmstripPath = object.value(QStringLiteral("filmstripPath")).toString();

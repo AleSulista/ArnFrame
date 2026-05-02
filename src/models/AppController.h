@@ -93,6 +93,19 @@ public:
     Q_INVOKABLE bool trackAcceptsAsset(int trackIndex, int assetIndex) const;
     Q_INVOKABLE QString trackTypeForAsset(int assetIndex) const;
     Q_INVOKABLE void addTextClip(const QString &text, double atSeconds);
+    Q_INVOKABLE void addShapeClip(const QString &shapeKind, double atSeconds);
+    Q_INVOKABLE void addShapeClipAt(const QString &shapeKind, int trackIndex, double atSeconds);
+    Q_INVOKABLE void addStickerClip(const QString &stickerId, double atSeconds);
+    Q_INVOKABLE QVariantList builtinStickers() const;
+    Q_INVOKABLE QVariantList builtinShapes() const;
+    Q_INVOKABLE QVariantList previewClipsAtPlayhead() const;
+    Q_INVOKABLE void beginPreviewDrag();
+    Q_INVOKABLE void previewSetClipPosition(int trackIndex, int clipIndex, double posX, double posY);
+    Q_INVOKABLE void previewSetClipScale(int trackIndex, int clipIndex, double scale);
+    Q_INVOKABLE void previewSetClipRotation(int trackIndex, int clipIndex, double degrees);
+    Q_INVOKABLE void commitPreviewDrag();
+    Q_INVOKABLE int projectWidth() const;
+    Q_INVOKABLE int projectHeight() const;
     Q_INVOKABLE void selectClip(int trackIndex, int clipIndex);
     Q_INVOKABLE void addToSelection(int trackIndex, int clipIndex);
     Q_INVOKABLE void setSelection(const QVariantList &pairs);
@@ -211,6 +224,8 @@ protected:
     QHash<QString, QString> m_shortcuts;
     int m_draggingAssetIndex = -1;
     QString m_lastMessage;
+    bool m_previewDragActive = false;
+    drift::Project m_previewDragBefore;
     struct ClipboardItem
     {
         drift::Clip clip;

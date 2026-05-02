@@ -23,6 +23,7 @@ private slots:
     void trackAllowsClipTypes();
     void insertTrackAtTopAllowsDuplicateTypes();
     void textStyleAndBlendModeSerialization();
+    void shapeStyleSerialization();
     void effectCatalogIdSerialization();
 };
 
@@ -212,6 +213,7 @@ void CoreTest::trackAllowsClipTypes()
 
     drift::Track shapeTrack{.type = drift::TrackType::Shape};
     QVERIFY(shapeTrack.allowsClipType(drift::ClipType::Image));
+    QVERIFY(shapeTrack.allowsClipType(drift::ClipType::Shape));
     QVERIFY(!shapeTrack.allowsClipType(drift::ClipType::Video));
 }
 
@@ -278,6 +280,41 @@ void CoreTest::textStyleAndBlendModeSerialization()
     QCOMPARE(loadedClip.textStyle.boxEnabled, true);
     QCOMPARE(loadedClip.textStyle.boxColor, QColor(0, 0, 0, 100));
     QCOMPARE(loadedClip.textStyle.boxPadding, 12.0);
+}
+
+void CoreTest::shapeStyleSerialization()
+{
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-shape");
+    clip.type = drift::ClipType::Shape;
+    clip.name = QStringLiteral("Hexagon");
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::kImageClipDurationUs;
+    clip.shapeStyle.kind = drift::ShapeKind::Hexagon;
+    clip.shapeStyle.fill = QColor(10, 20, 30, 200);
+    clip.shapeStyle.stroke = QColor(255, 255, 255);
+    clip.shapeStyle.strokeWidth = 6.0;
+    clip.posX.setKeyframe(0, 0.25);
+    clip.posY.setKeyframe(0, 0.75);
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
+    QCOMPARE(loadedClip.type, drift::ClipType::Shape);
+    QCOMPARE(loadedClip.shapeStyle.kind, drift::ShapeKind::Hexagon);
+    QCOMPARE(loadedClip.shapeStyle.fill, QColor(10, 20, 30, 200));
+    QCOMPARE(loadedClip.shapeStyle.stroke, QColor(255, 255, 255));
+    QCOMPARE(loadedClip.shapeStyle.strokeWidth, 6.0);
+    QCOMPARE(loadedClip.posX.evaluateAt(0), 0.25);
+    QCOMPARE(loadedClip.posY.evaluateAt(0), 0.75);
 }
 
 void CoreTest::effectCatalogIdSerialization()

@@ -21,6 +21,7 @@ private slots:
     void effectProcessorBrightness();
     void clipReaderSequentialAndSeek();
     void compositorAppliesMultiplyBlendMode();
+    void compositorRendersShapeClip();
     void adjustmentEffectContrastCatalogEntry();
 
 private:
@@ -136,14 +137,8 @@ void EngineTest::compositorAppliesMultiplyBlendMode()
         project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
         project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
 
-        drift::Clip bottom;
-        bottom.id = QStringLiteral("bottom");
-        bottom.type = drift::ClipType::Image;
-        bottom.path = writeSolidImage(QStringLiteral("bottom.png"), background);
-        bottom.timelineStart = 0;
-        bottom.timelineDuration = drift::secondsToUs(1.0);
-        project.tracks()[0].clips.append(bottom);
-
+        // Index 0 is the topmost track and composites in front, so the
+        // multiplied foreground goes on track 0 and the background on track 1.
         drift::Clip top;
         top.id = QStringLiteral("top");
         top.type = drift::ClipType::Image;
@@ -151,7 +146,15 @@ void EngineTest::compositorAppliesMultiplyBlendMode()
         top.blendMode = drift::BlendMode::Multiply;
         top.timelineStart = 0;
         top.timelineDuration = drift::secondsToUs(1.0);
-        project.tracks()[1].clips.append(top);
+        project.tracks()[0].clips.append(top);
+
+        drift::Clip bottom;
+        bottom.id = QStringLiteral("bottom");
+        bottom.type = drift::ClipType::Image;
+        bottom.path = writeSolidImage(QStringLiteral("bottom.png"), background);
+        bottom.timelineStart = 0;
+        bottom.timelineDuration = drift::secondsToUs(1.0);
+        project.tracks()[1].clips.append(bottom);
 
         FrameCompositor compositor;
         compositor.setProject(&project);
@@ -163,6 +166,35 @@ void EngineTest::compositorAppliesMultiplyBlendMode()
 
     const QImage overWhite = compositeOverBackground(Qt::white);
     QCOMPARE(overWhite.pixelColor(32, 32), QColor(255, 0, 0));
+}
+
+void EngineTest::compositorRendersShapeClip()
+{
+    drift::Project project;
+    project.setResolution(128, 128);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("shape");
+    clip.type = drift::ClipType::Shape;
+    clip.name = QStringLiteral("triangle");
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(1.0);
+    clip.shapeStyle.kind = drift::ShapeKind::Triangle;
+    clip.shapeStyle.fill = QColor(255, 0, 0);
+    clip.shapeStyle.stroke = Qt::white;
+    clip.shapeStyle.strokeWidth = 2.0;
+    clip.posX.setKeyframe(0, 0.5);
+    clip.posY.setKeyframe(0, 0.5);
+    project.tracks()[0].clips.append(clip);
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+    const QImage frame = compositor.compositeAt(0);
+    QVERIFY(!frame.isNull());
+    QVERIFY(frame.pixelColor(64, 64).red() > 200);
+    QVERIFY(frame.pixelColor(0, 0) == QColor(0, 0, 0));
 }
 
 void EngineTest::adjustmentEffectContrastCatalogEntry()

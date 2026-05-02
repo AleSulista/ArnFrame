@@ -30,6 +30,8 @@ add_library(driftcore STATIC
     src/core/Clip.cpp
     src/core/TextStyle.h
     src/core/TextStyle.cpp
+    src/core/ShapeStyle.h
+    src/core/ShapeStyle.cpp
     src/core/Track.h
     src/core/Track.cpp
     src/core/Project.h
@@ -123,9 +125,16 @@ qt_add_qml_module(drift
         src/qml/components/KeyframeDiamond.qml
         src/qml/components/PropertyKeyframeRow.qml
         src/qml/components/ShortcutCaptureField.qml
+        src/qml/components/ShapePreview.qml
     RESOURCES
         resources/fonts/Inter.ttf
         resources/fonts/lucide.ttf
+        resources/stickers/star.png
+        resources/stickers/heart.png
+        resources/stickers/arrow.png
+        resources/stickers/circle.png
+        resources/stickers/check.png
+        resources/stickers/fire.png
 )
 
 target_link_libraries(drift PRIVATE

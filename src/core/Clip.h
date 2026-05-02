@@ -3,6 +3,7 @@
 #include "Effect.h"
 #include "Keyframe.h"
 #include "MediaAsset.h"
+#include "ShapeStyle.h"
 #include "TextStyle.h"
 #include "Time.h"
 
@@ -11,7 +12,7 @@
 
 namespace drift {
 
-enum class ClipType { Video, Audio, Image, Text };
+enum class ClipType { Video, Audio, Image, Text, Shape };
 
 QString clipTypeToString(ClipType type);
 ClipType clipTypeFromString(const QString &type);
@@ -35,6 +36,7 @@ struct Clip
     QString name;
     QString textContent;
     TextStyle textStyle; // only meaningful when type == Text
+    ShapeStyle shapeStyle; // only meaningful when type == Shape
 
     QString path;
     QString thumbnailPath;
