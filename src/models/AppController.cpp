@@ -500,6 +500,11 @@ void AppController::setPlaying(bool playing)
     emit playingChanged();
 }
 
+void AppController::togglePlayback()
+{
+    setPlaying(!m_playback.isPlaying());
+}
+
 void AppController::setSnapEnabled(bool enabled)
 {
     if (m_snapEnabled == enabled)
@@ -2063,7 +2068,7 @@ void AppController::setShortcut(const QString &actionId, const QString &keys)
 void AppController::triggerAction(const QString &actionId)
 {
     if (actionId == QStringLiteral("playPause"))
-        setPlaying(!playing());
+        togglePlayback();
     else if (actionId == QStringLiteral("delete"))
         deleteSelectedClip();
     else if (actionId == QStringLiteral("undo"))

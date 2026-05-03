@@ -3,6 +3,10 @@
 #include <QMetaType>
 #include <cmath>
 
+namespace {
+constexpr drift::TimeUs kMaxPreviewFrameStalenessUs = 100'000;
+}
+
 void CompositorWorker::TripleBuffer::publish(QImage frame)
 {
     QMutexLocker lock(&mutex);
@@ -35,7 +39,7 @@ void CompositorWorker::composite(drift::TimeUs timeUs, FrameCompositor::RenderOp
 {
     const QImage frame = m_compositor.compositeAt(timeUs, options);
     m_buffer.publish(frame);
-    emit frameReady(frame);
+    emit frameReady(frame, timeUs);
 }
 
 QImage CompositorWorker::takeLatestFrame() const
@@ -86,16 +90,19 @@ void CompositorService::requestComposite(drift::TimeUs timeUs, FrameCompositor::
                               Q_ARG(FrameCompositor::RenderOptions, options));
 }
 
-void CompositorService::onWorkerFrameReady(const QImage &frame)
+void CompositorService::onWorkerFrameReady(const QImage &frame, drift::TimeUs timeUs)
 {
-    emit frameReady(frame);
-    m_requestPending.store(false, std::memory_order_release);
-
     const drift::TimeUs latest = m_pendingTimeUs.load(std::memory_order_acquire);
     FrameCompositor::RenderOptions latestOptions;
     latestOptions.previewScale =
         static_cast<double>(m_pendingPreviewScalePercent.load(std::memory_order_acquire)) / 100.0;
     latestOptions.maxTimeEchoHistoryFrames = m_pendingMaxTimeEchoHistoryFrames.load(std::memory_order_acquire);
+
+    const bool stale = latest > timeUs && latest - timeUs > kMaxPreviewFrameStalenessUs;
+    if (!stale)
+        emit frameReady(frame);
+
+    m_requestPending.store(false, std::memory_order_release);
 
     if (latest == m_lastDispatchedTimeUs
         && latestOptions.previewScale == m_lastDispatchedOptions.previewScale

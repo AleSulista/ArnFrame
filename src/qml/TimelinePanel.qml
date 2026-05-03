@@ -286,7 +286,7 @@ PanelFrame {
                     icon: EditorState.playing ? Theme.icons.pause : Theme.icons.play
                     variant: "text"
                     tooltip: EditorState.playing ? qsTr("Pause") : qsTr("Play")
-                    onClicked: EditorState.playing = !EditorState.playing
+                    onClicked: EditorState.togglePlayback()
                 }
 
                 Text {

@@ -147,6 +147,19 @@ void PlaybackEngine::setPreviewQuality(const QString &quality)
     refreshFrame();
 }
 
+void PlaybackEngine::setPreviewRenderSize(int width, int height)
+{
+    width = qMax(0, width);
+    height = qMax(0, height);
+    if (m_previewRenderWidth == width && m_previewRenderHeight == height)
+        return;
+
+    m_previewRenderWidth = width;
+    m_previewRenderHeight = height;
+    if (m_playing)
+        onCompositeTick();
+}
+
 bool PlaybackEngine::hasFrame() const
 {
     QMutexLocker lock(&m_frameMutex);
@@ -162,6 +175,15 @@ void PlaybackEngine::play()
     m_clock.reset(m_playheadUs, m_sampleRate);
     m_clock.start();
     m_playing = true;
+
+    QMetaObject::invokeMethod(
+        m_device,
+        [this] {
+            if (m_sink)
+                m_sink->start(m_device);
+        },
+        Qt::BlockingQueuedConnection);
+
     emit playingChanged();
 
     m_playheadTimer.start(kPlayheadUpdateMs);
@@ -169,11 +191,6 @@ void PlaybackEngine::play()
     const int fps = m_project ? qMax(1, m_project->fps()) : 30;
     const int tickMs = qMax(1, static_cast<int>(drift::usToSeconds(drift::frameDurationUs(fps)) * 1000.0));
     m_compositeTimer.start(tickMs);
-
-    QMetaObject::invokeMethod(m_device, [this] {
-        if (m_sink)
-            m_sink->start(m_device);
-    });
 
     onPlayheadTick();
     onCompositeTick();
@@ -264,7 +281,14 @@ FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
         options.maxTimeEchoHistoryFrames = 1;
     } else {
         options.previewScale = 1.0;
-        options.maxTimeEchoHistoryFrames = 2;
+        options.maxTimeEchoHistoryFrames = -1;
+    }
+
+    if (m_project && m_previewRenderWidth > 0 && m_previewRenderHeight > 0
+        && m_previewQuality == QStringLiteral("full")) {
+        const double widthScale = static_cast<double>(m_previewRenderWidth) / qMax(1, m_project->width());
+        const double heightScale = static_cast<double>(m_previewRenderHeight) / qMax(1, m_project->height());
+        options.previewScale = qBound(0.1, qMin(widthScale, heightScale), 1.0);
     }
     return options;
 }

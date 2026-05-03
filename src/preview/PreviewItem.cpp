@@ -11,7 +11,7 @@ PreviewItem::PreviewItem(QQuickItem *parent)
 
 void PreviewItem::setFrame(const QImage &frame)
 {
-    if (m_frame.size() == frame.size() && m_frame == frame)
+    if (m_frame.cacheKey() == frame.cacheKey())
         return;
 
     m_frame = frame;

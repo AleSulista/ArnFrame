@@ -165,6 +165,7 @@ public:
     Q_INVOKABLE QString shortcutFor(const QString &actionId) const;
     Q_INVOKABLE void setShortcut(const QString &actionId, const QString &keys);
     Q_INVOKABLE void triggerAction(const QString &actionId);
+    Q_INVOKABLE void togglePlayback();
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE double snapTime(double seconds) const;

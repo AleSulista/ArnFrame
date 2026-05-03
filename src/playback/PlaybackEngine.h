@@ -62,6 +62,7 @@ public:
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
     Q_INVOKABLE void refreshFrame();
+    Q_INVOKABLE void setPreviewRenderSize(int width, int height);
 
 signals:
     void currentFrameChanged();
@@ -96,6 +97,8 @@ private:
     mutable QMutex m_frameMutex;
     drift::TimeUs m_playheadUs = 0;
     std::atomic<bool> m_playing = false;
-    QString m_previewQuality = QStringLiteral("half");
+    QString m_previewQuality = QStringLiteral("full");
+    int m_previewRenderWidth = 0;
+    int m_previewRenderHeight = 0;
     int m_sampleRate = 48000;
 };

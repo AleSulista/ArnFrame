@@ -21,7 +21,7 @@ public slots:
     QImage takeLatestFrame() const;
 
 signals:
-    void frameReady(const QImage &frame);
+    void frameReady(const QImage &frame, drift::TimeUs timeUs);
 
 private:
     struct TripleBuffer
@@ -57,7 +57,7 @@ signals:
     void frameReady(const QImage &frame);
 
 private slots:
-    void onWorkerFrameReady(const QImage &frame);
+    void onWorkerFrameReady(const QImage &frame, drift::TimeUs timeUs);
 
 private:
     std::atomic<bool> m_requestPending{false};

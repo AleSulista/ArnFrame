@@ -52,6 +52,14 @@ PanelFrame {
                     PreviewItem {
                         id: preview
                         anchors.fill: parent
+
+                        function updateRenderSize() {
+                            EditorState.playback.setPreviewRenderSize(Math.round(width), Math.round(height))
+                        }
+
+                        Component.onCompleted: updateRenderSize()
+                        onWidthChanged: updateRenderSize()
+                        onHeightChanged: updateRenderSize()
                     }
 
                     Item {
@@ -401,7 +409,7 @@ PanelFrame {
                 icon: root.playing ? Theme.icons.pause : Theme.icons.play
                 variant: "text"
                 tooltip: root.playing ? qsTr("Pause") : qsTr("Play")
-                onClicked: EditorState.playing = !EditorState.playing
+                onClicked: EditorState.togglePlayback()
             }
 
             Row {
