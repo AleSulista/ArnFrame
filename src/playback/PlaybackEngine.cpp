@@ -127,6 +127,26 @@ QImage PlaybackEngine::currentFrame() const
     return m_currentFrame;
 }
 
+QString PlaybackEngine::previewQuality() const
+{
+    return m_previewQuality;
+}
+
+void PlaybackEngine::setPreviewQuality(const QString &quality)
+{
+    QString normalized = quality.toLower();
+    if (normalized != QStringLiteral("full") && normalized != QStringLiteral("half")
+        && normalized != QStringLiteral("quarter")) {
+        normalized = QStringLiteral("half");
+    }
+    if (m_previewQuality == normalized)
+        return;
+
+    m_previewQuality = normalized;
+    emit previewQualityChanged();
+    refreshFrame();
+}
+
 bool PlaybackEngine::hasFrame() const
 {
     QMutexLocker lock(&m_frameMutex);
@@ -218,7 +238,7 @@ void PlaybackEngine::onCompositeTick()
     if (!m_playing || !m_project)
         return;
 
-    m_compositor.requestComposite(m_clock.currentTimeUs());
+    m_compositor.requestComposite(m_clock.currentTimeUs(), playbackRenderOptions());
 }
 
 void PlaybackEngine::onFrameReady(const QImage &frame)
@@ -231,6 +251,22 @@ void PlaybackEngine::onFrameReady(const QImage &frame)
         m_currentFrame = frame;
     }
     emit currentFrameChanged();
+}
+
+FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
+{
+    FrameCompositor::RenderOptions options;
+    if (m_previewQuality == QStringLiteral("quarter")) {
+        options.previewScale = 0.25;
+        options.maxTimeEchoHistoryFrames = 0;
+    } else if (m_previewQuality == QStringLiteral("half")) {
+        options.previewScale = 0.5;
+        options.maxTimeEchoHistoryFrames = 1;
+    } else {
+        options.previewScale = 1.0;
+        options.maxTimeEchoHistoryFrames = 2;
+    }
+    return options;
 }
 
 int PlaybackEngine::fillAudio(float *buffer, int sampleCount)

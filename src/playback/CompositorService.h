@@ -17,7 +17,7 @@ public:
 
 public slots:
     void setProject(const drift::Project *project);
-    void composite(drift::TimeUs timeUs);
+    void composite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options);
     QImage takeLatestFrame() const;
 
 signals:
@@ -49,7 +49,8 @@ public:
     ~CompositorService() override;
 
     void setProject(const drift::Project *project);
-    void requestComposite(drift::TimeUs timeUs);
+    void requestComposite(drift::TimeUs timeUs,
+                          FrameCompositor::RenderOptions options = FrameCompositor::RenderOptions{});
     QImage latestFrame() const;
 
 signals:
@@ -61,7 +62,10 @@ private slots:
 private:
     std::atomic<bool> m_requestPending{false};
     std::atomic<drift::TimeUs> m_pendingTimeUs{0};
+    std::atomic<int> m_pendingPreviewScalePercent{100};
+    std::atomic<int> m_pendingMaxTimeEchoHistoryFrames{-1};
     drift::TimeUs m_lastDispatchedTimeUs = -1;
+    FrameCompositor::RenderOptions m_lastDispatchedOptions;
     QThread m_thread;
     CompositorWorker *m_worker = nullptr;
 };

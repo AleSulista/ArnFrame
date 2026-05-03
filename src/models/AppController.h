@@ -39,6 +39,7 @@ class AppController : public QObject
     Q_PROPERTY(int selectedClip READ selectedClip NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList selection READ selection NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selectedClipData READ selectedClipData NOTIFY selectedClipDataChanged)
+    Q_PROPERTY(QVariantList selectedClipEffects READ selectedClipEffects NOTIFY selectedClipDataChanged)
     Q_PROPERTY(bool guidesEnabled READ guidesEnabled WRITE setGuidesEnabled NOTIFY guidesChanged)
     Q_PROPERTY(QString guideType READ guideType WRITE setGuideType NOTIFY guidesChanged)
     Q_PROPERTY(QVariantList actions READ actions NOTIFY shortcutsChanged)
@@ -70,6 +71,7 @@ public:
     int selectedClip() const { return m_selectedClip; }
     QVariantList selection() const;
     QVariantMap selectedClipData() const;
+    QVariantList selectedClipEffects() const;
     bool guidesEnabled() const { return m_guidesEnabled; }
     QString guideType() const { return m_guideType; }
     QVariantList actions() const;
@@ -142,6 +144,7 @@ public:
     Q_INVOKABLE void setKeyframeInterpolation(int trackIndex, int clipIndex, const QString &prop,
                                               const QString &mode);
     Q_INVOKABLE QVariantList effectCatalog() const;
+    Q_INVOKABLE QVariantList effectCategories() const;
     Q_INVOKABLE void addEffect(int trackIndex, int clipIndex, const QString &effectId);
     Q_INVOKABLE void removeEffect(int trackIndex, int clipIndex, int effectIndex);
     Q_INVOKABLE void setEffectParam(int trackIndex, int clipIndex, int effectIndex, const QString &key,

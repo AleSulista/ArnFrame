@@ -1,8 +1,11 @@
 #include "FrameCompositor.h"
 
 #include "ClipReaderPool.h"
+#include "CompositorFrameHistory.h"
+#include "EffectCatalog.h"
 #include "EffectProcessor.h"
 #include "core/Clip.h"
+#include "core/Time.h"
 
 #include <QFont>
 #include <QFontMetrics>
@@ -10,6 +13,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QSet>
+#include <cmath>
 #include <QtMath>
 
 namespace {
@@ -62,30 +66,100 @@ void collectActivePaths(const drift::Project *project, drift::TimeUs timelineUs,
     }
 }
 
-QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int width, int height)
+const drift::Effect *findTimeEchoEffect(const QList<drift::Effect> &effects)
+{
+    for (const drift::Effect &effect : effects) {
+        if (effect.catalogId == QStringLiteral("time_echo"))
+            return &effect;
+    }
+    return nullptr;
+}
+
+QList<drift::Effect> effectsExcludingTimeEcho(const QList<drift::Effect> &effects)
+{
+    QList<drift::Effect> filtered;
+    filtered.reserve(effects.size());
+    for (const drift::Effect &effect : effects) {
+        if (effect.catalogId != QStringLiteral("time_echo"))
+            filtered.append(effect);
+    }
+    return filtered;
+}
+
+QImage decodeClipMediaFrame(const drift::Clip &clip, drift::TimeUs timelineUs, int width, int height)
 {
     if (clip.path.isEmpty())
         return {};
 
-    QImage image;
     if (clip.type == drift::ClipType::Image) {
         QImageReader reader(clip.path);
-        image = reader.read();
+        QImage image = reader.read();
         if (image.isNull())
             return {};
-        image = image.convertToFormat(QImage::Format_RGBA8888)
-                    .scaled(width, height, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    } else if (clip.type == drift::ClipType::Video) {
-        const drift::TimeUs sourceUs = clip.srcIn + (timelineUs - clip.timelineStart);
-        image = ClipReaderPool::instance().readVideoFrame(clip.path, sourceUs, width, height);
-    } else {
-        return {};
+        return image.convertToFormat(QImage::Format_RGBA8888)
+            .scaled(width, height, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
 
-    if (image.isNull() || clip.effects.isEmpty())
+    if (clip.type == drift::ClipType::Video) {
+        const drift::TimeUs sourceUs = clip.srcIn + (timelineUs - clip.timelineStart);
+        return ClipReaderPool::instance().readVideoFrame(clip.path, sourceUs, width, height);
+    }
+
+    return {};
+}
+
+QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int width, int height, int projectFps,
+                    int maxTimeEchoHistoryFrames)
+{
+    if (clip.path.isEmpty())
+        return {};
+
+    const drift::TimeUs clipTimeUs = timelineUs - clip.timelineStart;
+    const drift::Effect *timeEcho = findTimeEchoEffect(clip.effects);
+    const QList<drift::Effect> otherEffects = effectsExcludingTimeEcho(clip.effects);
+
+    QImage image;
+    if (timeEcho) {
+        const EffectPresetEntry *def = effectDefForId(timeEcho->catalogId);
+        if (!def)
+            return {};
+
+        const QMap<QString, QVariant> params = resolvedEffectParameters(*timeEcho, *def);
+        int frameCount = qBound(1, params.value(QStringLiteral("frames"), 4).toInt(), 10);
+        if (maxTimeEchoHistoryFrames >= 0)
+            frameCount = qMin(frameCount, maxTimeEchoHistoryFrames);
+        const double decay = qBound(0.0, params.value(QStringLiteral("decay"), 0.55).toDouble(), 1.0);
+        const auto blendMode =
+            CompositorFrameHistory::parseEchoBlendMode(params.value(QStringLiteral("blendMode")).toString());
+
+        const drift::TimeUs frameStepUs = drift::frameDurationUs(projectFps);
+        QList<QImage> samples;
+        samples.reserve(frameCount + 1);
+
+        const QImage current = decodeClipMediaFrame(clip, timelineUs, width, height);
+        if (current.isNull())
+            return {};
+        samples.append(current);
+
+        for (int i = 1; i <= frameCount; ++i) {
+            const drift::TimeUs pastClipUs = clipTimeUs - static_cast<drift::TimeUs>(i) * frameStepUs;
+            if (pastClipUs < 0)
+                break;
+            const drift::TimeUs pastTimelineUs = clip.timelineStart + pastClipUs;
+            const QImage past = decodeClipMediaFrame(clip, pastTimelineUs, width, height);
+            if (!past.isNull())
+                samples.append(past);
+        }
+
+        image = CompositorFrameHistory::applyTimeEcho(samples, decay, blendMode);
+    } else {
+        image = decodeClipMediaFrame(clip, timelineUs, width, height);
+    }
+
+    if (image.isNull() || otherEffects.isEmpty())
         return image;
 
-    return EffectProcessor::applyEffects(image, clip.effects);
+    return EffectProcessor::applyEffects(image, otherEffects, clipTimeUs);
 }
 
 QImage shapeImageForClip(const drift::Clip &clip, int canvasWidth, int canvasHeight)
@@ -196,11 +270,12 @@ void drawClipFrame(QPainter &painter, const QImage &frame, const drift::Clip &cl
     painter.restore();
 }
 
-void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, int w, int h, double scale)
+void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, int w, int h, double scale,
+                    double renderScale)
 {
     const drift::TextStyle &s = clip.textStyle;
     QFont font(s.fontFamily);
-    font.setPixelSize(qMax(8, static_cast<int>(s.pixelSize * scale)));
+    font.setPixelSize(qMax(8, static_cast<int>(s.pixelSize * scale * renderScale)));
     font.setBold(s.bold);
     font.setItalic(s.italic);
     p.setFont(font);
@@ -213,7 +288,8 @@ void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, i
 
     if (s.boxEnabled) {
         QRect tb = fm.boundingRect(box, flag | Qt::AlignVCenter, text);
-        tb.adjust(-s.boxPadding, -s.boxPadding, s.boxPadding, s.boxPadding);
+        const int padding = qMax(0, static_cast<int>(s.boxPadding * renderScale));
+        tb.adjust(-padding, -padding, padding, padding);
         p.fillRect(tb, s.boxColor);
     }
 
@@ -221,7 +297,7 @@ void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, i
         const QRect textBounds = fm.boundingRect(box, flag | Qt::AlignVCenter, text);
         QPainterPath path;
         path.addText(textBounds.left(), textBounds.top() + fm.ascent(), font, text);
-        p.setPen(QPen(s.outlineColor, s.outlineWidth * scale));
+        p.setPen(QPen(s.outlineColor, s.outlineWidth * scale * renderScale));
         p.setBrush(s.color);
         p.drawPath(path);
     } else {
@@ -230,7 +306,8 @@ void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, i
     }
 }
 
-void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs timelineUs, int width, int height)
+void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs timelineUs, int width, int height,
+                  double renderScale)
 {
     const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
     if (text.isEmpty())
@@ -247,7 +324,7 @@ void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs time
     painter.setCompositionMode(toQtComposition(clip.blendMode));
     painter.translate(posX * width, posY * height);
     painter.rotate(rotation);
-    drawStyledText(painter, clip, text, width, height, scale);
+    drawStyledText(painter, clip, text, width, height, scale, renderScale);
     painter.restore();
 }
 
@@ -255,11 +332,19 @@ void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs time
 
 QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs) const
 {
+    return compositeAt(timelineUs, RenderOptions{});
+}
+
+QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs, const RenderOptions &options) const
+{
     if (!m_project)
         return {};
 
-    const int width = m_project->width();
-    const int height = m_project->height();
+    const int projectWidth = m_project->width();
+    const int projectHeight = m_project->height();
+    const double renderScale = qBound(0.1, options.previewScale, 1.0);
+    const int width = qMax(1, static_cast<int>(std::lround(projectWidth * renderScale)));
+    const int height = qMax(1, static_cast<int>(std::lround(projectHeight * renderScale)));
     if (width <= 0 || height <= 0)
         return {};
 
@@ -288,7 +373,7 @@ QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs) const
                 continue;
 
             if (clip.type == drift::ClipType::Text) {
-                drawTextClip(painter, clip, timelineUs, width, height);
+                drawTextClip(painter, clip, timelineUs, width, height, renderScale);
                 continue;
             }
 
@@ -296,7 +381,8 @@ QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs) const
             if (clip.type == drift::ClipType::Shape)
                 frame = shapeImageForClip(clip, width, height);
             else
-                frame = imageForClip(clip, timelineUs, width, height);
+                frame = imageForClip(clip, timelineUs, width, height, m_project->fps(),
+                                     options.maxTimeEchoHistoryFrames);
             if (frame.isNull())
                 continue;
 

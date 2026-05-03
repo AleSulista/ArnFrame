@@ -1,5 +1,8 @@
 #include "EffectProcessor.h"
 
+#include "CompositorEffects.h"
+#include "EffectCatalog.h"
+
 #include <cstring>
 
 extern "C" {
@@ -55,7 +58,7 @@ QString buildFilterGraph(const QList<drift::Effect> &effects)
 {
     QStringList parts;
     for (const drift::Effect &effect : effects) {
-        const QString graph = effect.filterGraphString();
+        const QString graph = buildFilterGraphForEffect(effect);
         if (!graph.isEmpty())
             parts.append(graph);
     }
@@ -65,15 +68,9 @@ QString buildFilterGraph(const QList<drift::Effect> &effects)
     return QStringLiteral("[in] %1,format=rgba [out]").arg(parts.join(QLatin1Char(',')));
 }
 
-} // namespace
-
-QImage EffectProcessor::applyEffects(const QImage &input, const QList<drift::Effect> &effects)
+QImage applyLibavFilterGraph(const QImage &input, const QString &filters)
 {
-    if (input.isNull() || effects.isEmpty())
-        return input;
-
-    const QString filters = buildFilterGraph(effects);
-    if (filters.isEmpty())
+    if (input.isNull() || filters.isEmpty())
         return input;
 
     AVFilterGraph *graph = avfilter_graph_alloc();
@@ -143,5 +140,44 @@ QImage EffectProcessor::applyEffects(const QImage &input, const QList<drift::Eff
     av_frame_free(&outFrame);
     av_frame_free(&srcFrame);
     avfilter_graph_free(&graph);
+    return result;
+}
+
+} // namespace
+
+QImage EffectProcessor::applyEffects(const QImage &input, const QList<drift::Effect> &effects,
+                                     drift::TimeUs timeUs)
+{
+    if (input.isNull() || effects.isEmpty())
+        return input;
+
+    QImage result = input;
+    QList<drift::Effect> libavBatch;
+
+    auto flushLibavBatch = [&]() {
+        if (libavBatch.isEmpty())
+            return;
+        const QString filters = buildFilterGraph(libavBatch);
+        if (!filters.isEmpty())
+            result = applyLibavFilterGraph(result, filters);
+        libavBatch.clear();
+    };
+
+    for (const drift::Effect &effect : effects) {
+        const EffectPresetEntry *def = effect.catalogId.isEmpty() ? nullptr : effectDefForId(effect.catalogId);
+        if (def && def->meta.compositorOnly) {
+            // time_echo needs multi-frame clip history; handled in FrameCompositor::imageForClip.
+            if (def->meta.id == QStringLiteral("time_echo"))
+                continue;
+            flushLibavBatch();
+            result = CompositorEffects::apply(def->meta.id, result, resolvedEffectParameters(effect, *def),
+                                              timeUs);
+            continue;
+        }
+
+        libavBatch.append(effect);
+    }
+
+    flushLibavBatch();
     return result;
 }

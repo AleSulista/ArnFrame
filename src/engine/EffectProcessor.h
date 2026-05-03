@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Effect.h"
+#include "core/Time.h"
 
 #include <QImage>
 #include <QList>
@@ -9,5 +10,6 @@
 class EffectProcessor
 {
 public:
-    static QImage applyEffects(const QImage &input, const QList<drift::Effect> &effects);
+    static QImage applyEffects(const QImage &input, const QList<drift::Effect> &effects,
+                               drift::TimeUs timeUs = 0);
 };

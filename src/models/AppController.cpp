@@ -41,13 +41,13 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     // WYSIWYG preview drag emits only tracksChanged). This keeps the Clip
     // Properties panel in sync with the preview in both directions.
     connect(this, &AppController::selectionChanged, this, &AppController::selectedClipDataChanged);
-    connect(this, &AppController::tracksChanged, this, &AppController::selectedClipDataChanged);
 
     m_undoStack.setUndoLimit(kMaxUndoSteps);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, &AppController::undoStackChanged);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, [this] {
         m_timelineModel.refresh();
         m_clipListModel.refresh();
+        normalizeSelection();
         emit tracksChanged();
         emit bookmarksChanged();
         emit projectNameChanged();
@@ -271,23 +271,30 @@ drift::TextStyle textStyleForPreset(const QString &presetId)
 
 QVariantMap effectToMap(const drift::Effect &effect)
 {
-    const EffectDef *def = effectDefForId(effect.catalogId);
+    const EffectPresetEntry *def = effectDefForId(effect.catalogId);
     QVariantList params;
     if (def) {
-        for (const EffectParamDef &paramDef : def->params) {
+        for (const drift::EffectParamSpec &paramDef : def->meta.parameters) {
+            QVariant value = effect.parameters.value(paramDef.key);
+            if (!value.isValid()) {
+                value = paramDef.isBoolean ? QVariant(paramDef.defaultValue > 0.5)
+                                           : QVariant(paramDef.defaultValue);
+            }
             params.append(QVariantMap{
                 {QStringLiteral("key"), paramDef.key},
                 {QStringLiteral("label"), paramDef.label},
                 {QStringLiteral("min"), paramDef.min},
                 {QStringLiteral("max"), paramDef.max},
-                {QStringLiteral("value"), effect.parameters.value(paramDef.key, paramDef.def)},
+                {QStringLiteral("isBoolean"), paramDef.isBoolean},
+                {QStringLiteral("value"), value},
             });
         }
     }
     return {
         {QStringLiteral("catalogId"), effect.catalogId},
-        {QStringLiteral("label"), def ? def->label : effect.name},
+        {QStringLiteral("label"), def ? def->meta.displayName : effect.name},
         {QStringLiteral("params"), params},
+        {QStringLiteral("compositorOnly"), def ? def->meta.compositorOnly : false},
     };
 }
 
@@ -401,7 +408,24 @@ QVariantMap AppController::selectedClipData() const
 {
     if (m_selectedTrack < 0 || m_selectedClip < 0)
         return {};
-    return clipAt(m_selectedTrack, m_selectedClip);
+
+    QVariantMap data = clipAt(m_selectedTrack, m_selectedClip);
+    if (!data.isEmpty())
+        return data;
+
+    // Primary indices can lag m_selection after structural edits; fall back.
+    for (const QPair<int, int> &pair : m_selection) {
+        data = clipAt(pair.first, pair.second);
+        if (!data.isEmpty())
+            return data;
+    }
+    return {};
+}
+
+QVariantList AppController::selectedClipEffects() const
+{
+    const QVariantMap clip = selectedClipData();
+    return clip.value(QStringLiteral("effects")).toList();
 }
 
 QVariantList AppController::selection() const
@@ -639,6 +663,7 @@ void AppController::finishEdit(const QString &message)
     m_playback.setPlayheadUs(m_playheadUs);
     emit tracksChanged();
     emit selectionChanged();
+    emit selectedClipDataChanged();
     setLastMessage(message);
 }
 
@@ -1696,22 +1721,38 @@ void AppController::setKeyframeInterpolation(int trackIndex, int clipIndex, cons
 QVariantList AppController::effectCatalog() const
 {
     QVariantList out;
-    for (const EffectDef &def : ::effectCatalog()) {
+    for (const EffectPresetEntry &def : ::effectCatalog()) {
         QVariantList params;
-        for (const EffectParamDef &p : def.params) {
+        for (const drift::EffectParamSpec &p : def.meta.parameters) {
             params.append(QVariantMap{
                 {QStringLiteral("key"), p.key},
                 {QStringLiteral("label"), p.label},
                 {QStringLiteral("min"), p.min},
                 {QStringLiteral("max"), p.max},
-                {QStringLiteral("default"), p.def},
+                {QStringLiteral("default"), p.defaultValue},
+                {QStringLiteral("isBoolean"), p.isBoolean},
             });
         }
         out.append(QVariantMap{
-            {QStringLiteral("id"), def.id},
-            {QStringLiteral("label"), def.label},
-            {QStringLiteral("category"), def.category},
+            {QStringLiteral("id"), def.meta.id},
+            {QStringLiteral("label"), def.meta.displayName},
+            {QStringLiteral("displayName"), def.meta.displayName},
+            {QStringLiteral("category"), def.meta.category},
+            {QStringLiteral("categoryLabel"), effectCategoryLabel(def.meta.category)},
+            {QStringLiteral("compositorOnly"), def.meta.compositorOnly},
             {QStringLiteral("params"), params},
+        });
+    }
+    return out;
+}
+
+QVariantList AppController::effectCategories() const
+{
+    QVariantList out;
+    for (const auto &entry : ::effectCategories()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), entry.first},
+            {QStringLiteral("label"), entry.second},
         });
     }
     return out;
@@ -1726,20 +1767,27 @@ void AppController::addEffect(int trackIndex, int clipIndex, const QString &effe
     if (clipIndex < 0 || clipIndex >= track.clips.size())
         return;
 
-    const EffectDef *def = effectDefForId(effectId);
+    const EffectPresetEntry *def = effectDefForId(effectId);
     if (!def)
         return;
 
     drift::Effect effect;
     effect.name = def->filterName;
-    effect.catalogId = def->id;
+    effect.catalogId = def->meta.id;
     for (auto it = def->fixedParams.constBegin(); it != def->fixedParams.constEnd(); ++it)
         effect.parameters.insert(it.key(), it.value());
-    for (const EffectParamDef &p : def->params)
-        effect.parameters.insert(p.key, p.def);
+    for (const drift::EffectParamSpec &p : def->meta.parameters) {
+        if (p.isBoolean)
+            effect.parameters.insert(p.key, p.defaultValue > 0.5);
+        else
+            effect.parameters.insert(p.key, p.defaultValue);
+    }
 
     const drift::Project before = m_project;
     track.clips[clipIndex].effects.append(effect);
+    m_selectedTrack = trackIndex;
+    m_selectedClip = clipIndex;
+    m_selection = {qMakePair(trackIndex, clipIndex)};
     pushProjectEdit(before, QStringLiteral("Add effect"));
     finishEdit(QStringLiteral("Effect added"));
 }
@@ -2115,8 +2163,10 @@ bool AppController::isValidClipIndex(int trackIndex, int clipIndex) const
 
 void AppController::normalizeSelection()
 {
+    const QList<QPair<int, int>> selection = m_selection;
     QList<QPair<int, int>> kept;
-    for (const QPair<int, int> &pair : m_selection) {
+    kept.reserve(selection.size());
+    for (const QPair<int, int> &pair : selection) {
         if (isValidClipIndex(pair.first, pair.second) && !kept.contains(pair))
             kept.append(pair);
     }

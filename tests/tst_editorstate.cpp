@@ -1,5 +1,6 @@
 #include <QtTest>
 
+#include <QSet>
 #include <QTemporaryFile>
 
 #include "models/AppController.h"
@@ -17,6 +18,7 @@ private slots:
     void undoBookmarkAdd();
     void projectPersistenceRoundTrip();
     void textStyleBlendModeKeyframesAndEffects();
+    void effectBrowserCategoriesAndApply();
     void multiSelectClipboardGuidesAndShortcuts();
 };
 
@@ -140,6 +142,7 @@ void EditorStateTest::textStyleBlendModeKeyframesAndEffects()
     state.addEffect(track, clip, QStringLiteral("adjust.contrast"));
     QVariantList effects = state.selectedClipData().value(QStringLiteral("effects")).toList();
     QCOMPARE(effects.size(), 1);
+    QCOMPARE(state.selectedClipEffects().size(), 1);
     QCOMPARE(effects.first().toMap().value(QStringLiteral("catalogId")).toString(),
              QStringLiteral("adjust.contrast"));
 
@@ -150,6 +153,52 @@ void EditorStateTest::textStyleBlendModeKeyframesAndEffects()
 
     state.removeEffect(track, clip, 0);
     QCOMPARE(state.selectedClipData().value(QStringLiteral("effects")).toList().size(), 0);
+    QCOMPARE(state.selectedClipEffects().size(), 0);
+}
+
+void EditorStateTest::effectBrowserCategoriesAndApply()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    const QVariantList categories = state.effectCategories();
+    QCOMPARE(categories.size(), 4);
+    QCOMPARE(categories.first().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("glitch"));
+    QCOMPARE(categories.first().toMap().value(QStringLiteral("label")).toString(),
+             QStringLiteral("Glitch & Distortion"));
+
+    const QVariantList catalog = state.effectCatalog();
+    QVERIFY(catalog.size() >= 16);
+
+    QSet<QString> categoryIds;
+    for (const QVariant &category : categories)
+        categoryIds.insert(category.toMap().value(QStringLiteral("id")).toString());
+
+    for (const QVariant &entry : catalog) {
+        const QVariantMap preset = entry.toMap();
+        QVERIFY(categoryIds.contains(preset.value(QStringLiteral("category")).toString()));
+        QVERIFY(!preset.value(QStringLiteral("categoryLabel")).toString().isEmpty());
+    }
+
+    state.addTextClip(QStringLiteral("FX"), 0.0);
+    const int track = state.selectedTrack();
+    const int clip = state.selectedClip();
+    QVERIFY(track >= 0);
+    QVERIFY(clip >= 0);
+
+    state.addEffect(track, clip, QStringLiteral("rgb_split"));
+    QVariantList effects = state.selectedClipData().value(QStringLiteral("effects")).toList();
+    QCOMPARE(effects.size(), 1);
+    QCOMPARE(state.selectedClipEffects().size(), 1);
+    QCOMPARE(effects.first().toMap().value(QStringLiteral("catalogId")).toString(),
+             QStringLiteral("rgb_split"));
+    QCOMPARE(effects.first().toMap().value(QStringLiteral("label")).toString(), QStringLiteral("RGB Split"));
+    QCOMPARE(state.project()->tracks()[track].clips[clip].effects.size(), 1);
+
+    state.removeEffect(track, clip, 0);
+    QCOMPARE(state.selectedClipData().value(QStringLiteral("effects")).toList().size(), 0);
+    QCOMPARE(state.selectedClipEffects().size(), 0);
+    QCOMPARE(state.project()->tracks()[track].clips[clip].effects.size(), 0);
 }
 
 void EditorStateTest::multiSelectClipboardGuidesAndShortcuts()

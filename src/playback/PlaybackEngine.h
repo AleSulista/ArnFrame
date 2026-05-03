@@ -43,6 +43,7 @@ class PlaybackEngine : public QObject
     Q_PROPERTY(QImage currentFrame READ currentFrame NOTIFY currentFrameChanged)
     Q_PROPERTY(bool hasFrame READ hasFrame NOTIFY currentFrameChanged)
     Q_PROPERTY(bool playing READ isPlaying NOTIFY playingChanged)
+    Q_PROPERTY(QString previewQuality READ previewQuality WRITE setPreviewQuality NOTIFY previewQualityChanged)
 
 public:
     explicit PlaybackEngine(QObject *parent = nullptr);
@@ -55,6 +56,8 @@ public:
     QImage currentFrame() const;
     bool hasFrame() const;
     bool isPlaying() const { return m_playing; }
+    QString previewQuality() const;
+    void setPreviewQuality(const QString &quality);
 
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
@@ -63,6 +66,7 @@ public:
 signals:
     void currentFrameChanged();
     void playingChanged();
+    void previewQualityChanged();
     void playheadUsChanged(quint64 us);
 
 private:
@@ -74,6 +78,7 @@ private:
     void onCompositeTick();
     void onFrameReady(const QImage &frame);
     void checkEndOfTimeline(drift::TimeUs timeUs);
+    FrameCompositor::RenderOptions playbackRenderOptions() const;
 
     drift::Project *m_project = nullptr;
     PlaybackClock m_clock;
@@ -91,5 +96,6 @@ private:
     mutable QMutex m_frameMutex;
     drift::TimeUs m_playheadUs = 0;
     std::atomic<bool> m_playing = false;
+    QString m_previewQuality = QStringLiteral("half");
     int m_sampleRate = 48000;
 };

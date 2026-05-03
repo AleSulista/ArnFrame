@@ -25,6 +25,8 @@ private slots:
     void textStyleAndBlendModeSerialization();
     void shapeStyleSerialization();
     void effectCatalogIdSerialization();
+    void rgbSplitEffectParametersSerialization();
+    void blockGlitchEffectParametersSerialization();
 };
 
 void CoreTest::timeConversion()
@@ -343,6 +345,78 @@ void CoreTest::effectCatalogIdSerialization()
     QCOMPARE(loadedClip.effects.size(), 1);
     QCOMPARE(loadedClip.effects[0].catalogId, QStringLiteral("adjust.contrast"));
     QCOMPARE(loadedClip.effects[0].parameters.value(QStringLiteral("contrast")).toDouble(), 1.4);
+}
+
+void CoreTest::rgbSplitEffectParametersSerialization()
+{
+    drift::Project project;
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-rgb-split");
+    clip.type = drift::ClipType::Video;
+    clip.name = QStringLiteral("Video");
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(2.0);
+
+    drift::Effect effect;
+    effect.name = QStringLiteral("rgb_split");
+    effect.catalogId = QStringLiteral("rgb_split");
+    effect.parameters.insert(QStringLiteral("amount"), 12.0);
+    effect.parameters.insert(QStringLiteral("angle"), 45.0);
+    effect.parameters.insert(QStringLiteral("animated"), true);
+    effect.parameters.insert(QStringLiteral("speed"), 2.5);
+    clip.effects.append(effect);
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
+    QCOMPARE(loadedClip.effects.size(), 1);
+    QCOMPARE(loadedClip.effects[0].catalogId, QStringLiteral("rgb_split"));
+    const QMap<QString, QVariant> &params = loadedClip.effects[0].parameters;
+    QCOMPARE(params.value(QStringLiteral("amount")).toDouble(), 12.0);
+    QCOMPARE(params.value(QStringLiteral("angle")).toDouble(), 45.0);
+    QCOMPARE(params.value(QStringLiteral("animated")).toBool(), true);
+    QCOMPARE(params.value(QStringLiteral("speed")).toDouble(), 2.5);
+}
+
+void CoreTest::blockGlitchEffectParametersSerialization()
+{
+    drift::Project project;
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-block-glitch");
+    clip.type = drift::ClipType::Video;
+    clip.name = QStringLiteral("Video");
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(2.0);
+
+    drift::Effect effect;
+    effect.name = QStringLiteral("block_glitch");
+    effect.catalogId = QStringLiteral("block_glitch");
+    effect.parameters.insert(QStringLiteral("intensity"), 0.5);
+    effect.parameters.insert(QStringLiteral("blockSize"), 48.0);
+    effect.parameters.insert(QStringLiteral("shiftAmount"), 36.0);
+    effect.parameters.insert(QStringLiteral("frequency"), 0.4);
+    effect.parameters.insert(QStringLiteral("seed"), 7.0);
+    clip.effects.append(effect);
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
+    QCOMPARE(loadedClip.effects.size(), 1);
+    QCOMPARE(loadedClip.effects[0].catalogId, QStringLiteral("block_glitch"));
+    const QMap<QString, QVariant> &params = loadedClip.effects[0].parameters;
+    QCOMPARE(params.value(QStringLiteral("intensity")).toDouble(), 0.5);
+    QCOMPARE(params.value(QStringLiteral("blockSize")).toDouble(), 48.0);
+    QCOMPARE(params.value(QStringLiteral("shiftAmount")).toDouble(), 36.0);
+    QCOMPARE(params.value(QStringLiteral("frequency")).toDouble(), 0.4);
+    QCOMPARE(params.value(QStringLiteral("seed")).toDouble(), 7.0);
 }
 
 QTEST_MAIN(CoreTest)

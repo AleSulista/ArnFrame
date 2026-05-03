@@ -1,6 +1,7 @@
 #include "CompositorService.h"
 
 #include <QMetaType>
+#include <cmath>
 
 void CompositorWorker::TripleBuffer::publish(QImage frame)
 {
@@ -30,9 +31,9 @@ void CompositorWorker::setProject(const drift::Project *project)
     m_compositor.setProject(project);
 }
 
-void CompositorWorker::composite(drift::TimeUs timeUs)
+void CompositorWorker::composite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options)
 {
-    const QImage frame = m_compositor.compositeAt(timeUs);
+    const QImage frame = m_compositor.compositeAt(timeUs, options);
     m_buffer.publish(frame);
     emit frameReady(frame);
 }
@@ -48,6 +49,7 @@ CompositorService::CompositorService(QObject *parent)
 {
     qRegisterMetaType<drift::TimeUs>("drift::TimeUs");
     qRegisterMetaType<const drift::Project *>("const drift::Project*");
+    qRegisterMetaType<FrameCompositor::RenderOptions>("FrameCompositor::RenderOptions");
     m_worker->moveToThread(&m_thread);
     connect(m_worker, &CompositorWorker::frameReady, this, &CompositorService::onWorkerFrameReady,
             Qt::QueuedConnection);
@@ -68,14 +70,20 @@ void CompositorService::setProject(const drift::Project *project)
                               Q_ARG(const drift::Project *, project));
 }
 
-void CompositorService::requestComposite(drift::TimeUs timeUs)
+void CompositorService::requestComposite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options)
 {
+    options.previewScale = qBound(0.1, options.previewScale, 1.0);
     m_pendingTimeUs.store(timeUs, std::memory_order_release);
+    m_pendingPreviewScalePercent.store(qBound(10, static_cast<int>(std::lround(options.previewScale * 100.0)), 100),
+                                       std::memory_order_release);
+    m_pendingMaxTimeEchoHistoryFrames.store(options.maxTimeEchoHistoryFrames, std::memory_order_release);
     if (m_requestPending.exchange(true, std::memory_order_acq_rel))
         return;
 
     m_lastDispatchedTimeUs = timeUs;
-    QMetaObject::invokeMethod(m_worker, "composite", Qt::QueuedConnection, Q_ARG(drift::TimeUs, timeUs));
+    m_lastDispatchedOptions = options;
+    QMetaObject::invokeMethod(m_worker, "composite", Qt::QueuedConnection, Q_ARG(drift::TimeUs, timeUs),
+                              Q_ARG(FrameCompositor::RenderOptions, options));
 }
 
 void CompositorService::onWorkerFrameReady(const QImage &frame)
@@ -84,14 +92,23 @@ void CompositorService::onWorkerFrameReady(const QImage &frame)
     m_requestPending.store(false, std::memory_order_release);
 
     const drift::TimeUs latest = m_pendingTimeUs.load(std::memory_order_acquire);
-    if (latest == m_lastDispatchedTimeUs)
+    FrameCompositor::RenderOptions latestOptions;
+    latestOptions.previewScale =
+        static_cast<double>(m_pendingPreviewScalePercent.load(std::memory_order_acquire)) / 100.0;
+    latestOptions.maxTimeEchoHistoryFrames = m_pendingMaxTimeEchoHistoryFrames.load(std::memory_order_acquire);
+
+    if (latest == m_lastDispatchedTimeUs
+        && latestOptions.previewScale == m_lastDispatchedOptions.previewScale
+        && latestOptions.maxTimeEchoHistoryFrames == m_lastDispatchedOptions.maxTimeEchoHistoryFrames)
         return;
 
     m_lastDispatchedTimeUs = latest;
+    m_lastDispatchedOptions = latestOptions;
     if (m_requestPending.exchange(true, std::memory_order_acq_rel))
         return;
 
-    QMetaObject::invokeMethod(m_worker, "composite", Qt::QueuedConnection, Q_ARG(drift::TimeUs, latest));
+    QMetaObject::invokeMethod(m_worker, "composite", Qt::QueuedConnection, Q_ARG(drift::TimeUs, latest),
+                              Q_ARG(FrameCompositor::RenderOptions, latestOptions));
 }
 
 QImage CompositorService::latestFrame() const

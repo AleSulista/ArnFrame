@@ -6,8 +6,15 @@ import "components"
 PanelFrame {
     id: root
 
-    readonly property var clip: EditorState.selectedClipData
+    // selectedClipData is a QVariantMap; key the binding on an explicit revision
+    // so nested fields such as effects refresh after project edits.
+    property int clipDataRevision: 0
+    readonly property var clip: {
+        void clipDataRevision
+        return EditorState.selectedClipData
+    }
     readonly property bool hasSelection: !!clip && Object.keys(clip).length > 0
+    readonly property var selectedEffects: EditorState.selectedClipEffects
     readonly property string clipKind: hasSelection ? (clip.kind || "") : ""
     readonly property bool hasTextStyle: hasSelection && clipKind === "text" && !!clip.textStyle
     readonly property var textStyle: hasTextStyle ? clip.textStyle : ({
@@ -66,8 +73,18 @@ PanelFrame {
 
     Connections {
         target: EditorState
-        function onSelectionChanged() { root.refreshInspectorFields() }
-        function onTracksChanged() { root.refreshInspectorFields() }
+        function onSelectionChanged() {
+            root.clipDataRevision++
+            root.refreshInspectorFields()
+        }
+        function onSelectedClipDataChanged() {
+            root.clipDataRevision++
+            root.refreshInspectorFields()
+        }
+        function onTracksChanged() {
+            root.clipDataRevision++
+            root.refreshInspectorFields()
+        }
     }
 
     Component.onCompleted: root.refreshInspectorFields()
@@ -880,7 +897,7 @@ PanelFrame {
 
                         Text {
                             width: parent.width
-                            visible: (clip.effects || []).length === 0
+                            visible: root.selectedEffects.length === 0
                             text: "No effects yet. Use the + on an effect card, or drag one onto this clip."
                             wrapMode: Text.WordWrap
                             color: Theme.mutedForeground
@@ -889,7 +906,7 @@ PanelFrame {
                         }
 
                         Repeater {
-                            model: clip.effects || []
+                            model: root.selectedEffects
                             delegate: Column {
                                 id: effectCard
                                 required property var modelData

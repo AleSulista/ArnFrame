@@ -1,30 +1,38 @@
 #pragma once
 
+#include "core/Effect.h"
+#include "core/EffectPreset.h"
+
 #include <QList>
 #include <QMap>
 #include <QString>
 #include <QVariant>
 
-// Declarative registry of one-click libavfilter effects, shared by the
-// effects browser (grid of cards) and the per-clip effect stack (sliders).
-struct EffectParamDef
+// Engine-side preset entry: core metadata plus libavfilter / compositor wiring.
+struct EffectPresetEntry
 {
-    QString key;   // libavfilter option name, e.g. "contrast"
-    QString label; // "Contrast"
-    double min = 0.0;
-    double max = 1.0;
-    double def = 0.0;
+    drift::EffectPresetMeta meta;
+    QString filterName;                    // single-filter name, e.g. "eq"
+    QString graphTemplate;                 // optional multi-filter template with {{key}} placeholders
+    QMap<QString, QVariant> fixedParams;   // always applied, not exposed as sliders
 };
 
-struct EffectDef
-{
-    QString id;                       // "adjust.contrast"
-    QString label;                    // "Contrast"
-    QString category;                 // "adjustment" or "stylize"
-    QString filterName;               // libavfilter name, e.g. "eq"
-    QList<EffectParamDef> params;     // user-adjustable sliders
-    QMap<QString, QVariant> fixedParams; // always applied, not exposed as sliders
-};
+// Backward-compatible alias used across the codebase.
+using EffectParamDef = drift::EffectParamSpec;
+using EffectDef = EffectPresetEntry;
 
-const QList<EffectDef> &effectCatalog();
-const EffectDef *effectDefForId(const QString &id);
+const QList<EffectPresetEntry> &effectCatalog();
+const EffectPresetEntry *effectDefForId(const QString &id);
+
+// Merge fixed + instance parameters for a clip effect.
+QMap<QString, QVariant> resolvedEffectParameters(const drift::Effect &effect, const EffectPresetEntry &def);
+
+// Build a libavfilter graph fragment for one catalog effect instance (empty when compositor-only).
+QString buildFilterGraphForEffect(const drift::Effect &effect, const EffectPresetEntry *def = nullptr);
+
+// All stable preset ids (for tests and validation).
+QStringList effectPresetIds();
+
+// Browser categories in display order (stable id + user-facing label).
+QList<QPair<QString, QString>> effectCategories();
+QString effectCategoryLabel(const QString &categoryId);

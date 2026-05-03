@@ -23,7 +23,8 @@ The UI layer is in place. Backend work follows a phased plan: a unified composit
 | Qt | 6.5+ (Quick, QuickControls2, Multimedia, Test, Concurrent) |
 | FFmpeg | 8.x (libavformat, libavcodec, libavutil, libswscale, libswresample, libavfilter) |
 
-Optional: OpenCV (build with `-DWITH_BGREMOVAL=ON` for future background-removal work).
+Optional: OpenCV for future background-removal work (`-DWITH_BGREMOVAL=ON`).
+Only `core`, `imgproc`, and `imgcodecs` are linked — not the full OpenCV stack.
 
 ## Build
 

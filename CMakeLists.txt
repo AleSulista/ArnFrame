@@ -14,7 +14,9 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Co
 find_package(FFmpeg REQUIRED)
 
 if(WITH_BGREMOVAL)
-    find_package(OpenCV REQUIRED)
+    # Link only modules needed for background removal — not the full OpenCV
+    # distribution (opencv_viz pulls in VTK and breaks linking on many systems).
+    find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 endif()
 
 qt_standard_project_setup(REQUIRES 6.5)
@@ -24,6 +26,7 @@ qt_policy(SET QTP0004 NEW)
 add_library(driftcore STATIC
     src/core/Effect.h
     src/core/Effect.cpp
+    src/core/EffectPreset.h
     src/core/MediaAsset.h
     src/core/MediaAsset.cpp
     src/core/Clip.h
@@ -64,6 +67,10 @@ add_library(driftengine STATIC
     src/engine/EffectProcessor.cpp
     src/engine/EffectCatalog.h
     src/engine/EffectCatalog.cpp
+    src/engine/CompositorEffects.h
+    src/engine/CompositorEffects.cpp
+    src/engine/CompositorFrameHistory.h
+    src/engine/CompositorFrameHistory.cpp
     src/engine/FrameCompositor.h
     src/engine/FrameCompositor.cpp
     src/engine/AudioMixer.h
@@ -126,6 +133,7 @@ qt_add_qml_module(drift
         src/qml/components/PropertyKeyframeRow.qml
         src/qml/components/ShortcutCaptureField.qml
         src/qml/components/ShapePreview.qml
+        src/qml/components/EffectBrowser.qml
     RESOURCES
         resources/fonts/Inter.ttf
         resources/fonts/lucide.ttf

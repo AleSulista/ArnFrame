@@ -37,8 +37,7 @@ PanelFrame {
         ListElement { tabId: "text"; icon: 2; label: "Text" }
         ListElement { tabId: "stickers"; icon: 3; label: "Stickers" }
         ListElement { tabId: "effects"; icon: 4; label: "Effects" }
-        ListElement { tabId: "adjustment"; icon: 5; label: "Adjustment" }
-        ListElement { tabId: "settings"; icon: 6; label: "Settings" }
+        ListElement { tabId: "settings"; icon: 5; label: "Settings" }
     }
     property var tabIcons: [
         Theme.icons.folder,
@@ -46,7 +45,6 @@ PanelFrame {
         Theme.icons.type,
         Theme.icons.smile,
         Theme.icons.wand,
-        Theme.icons.sliders,
         Theme.icons.settings
     ]
     property int activeTab: 0
@@ -488,97 +486,11 @@ PanelFrame {
                 }
             }
 
-            // Effects / Adjustment tab panel
-            Column {
-                id: effectsTab
-                visible: tabsModel.get(activeTab).tabId === "effects" || tabsModel.get(activeTab).tabId === "adjustment"
+            // Effects browser
+            EffectBrowser {
+                visible: tabsModel.get(activeTab).tabId === "effects"
                 width: parent.width
                 height: parent.height - Theme.panelHeaderHeight
-
-                readonly property string category: tabsModel.get(root.activeTab).tabId === "adjustment" ? "adjustment" : "stylize"
-
-                Text {
-                    id: effectsTip
-                    width: parent.width - 24
-                    leftPadding: 12
-                    rightPadding: 12
-                    topPadding: 8
-                    bottomPadding: 8
-                    wrapMode: Text.WordWrap
-                    horizontalAlignment: Text.AlignHCenter
-                    text: EditorState.selectedClip >= 0
-                          ? "Click + or drag an effect onto a clip"
-                          : "Select a clip to use +, or drag an effect onto any clip"
-                    color: Theme.mutedForeground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeXs
-                }
-
-                Flickable {
-                    width: parent.width
-                    height: Math.max(0, parent.height - effectsTip.height)
-                    contentHeight: effectsGrid.height + 24
-                    clip: true
-                    ScrollBar.vertical: AppScrollBar { }
-
-                    Grid {
-                        id: effectsGrid
-                        x: 12
-                        y: 12
-                        width: parent.width - 24
-                        columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
-                        columnSpacing: Theme.assetCardGap
-                        rowSpacing: Theme.assetCardGap
-
-                        Repeater {
-                            model: EditorState.effectCatalog()
-                            delegate: Rectangle {
-                                id: effectCard
-                                required property var modelData
-                                visible: modelData.category === effectsTab.category
-                                width: visible ? Theme.assetCardWidth : 0
-                                height: visible ? 56 : 0
-                                radius: Theme.radiusSm
-                                color: cardHover.hovered ? Theme.panelSecondaryBg : Theme.panelAccent
-
-                                Drag.active: effectDrag.active
-                                Drag.dragType: Drag.Automatic
-                                Drag.supportedActions: Qt.CopyAction
-                                Drag.mimeData: { "application/x-drift-effect": effectCard.modelData.id }
-
-                                HoverHandler { id: cardHover }
-                                DragHandler { id: effectDrag }
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    anchors.margins: 4
-                                    text: effectCard.modelData.label
-                                    color: Theme.panelForeground
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeCard
-                                    wrapMode: Text.WordWrap
-                                    width: parent.width - 28
-                                    horizontalAlignment: Text.AlignHCenter
-                                }
-
-                                IconButton {
-                                    anchors.right: parent.right
-                                    anchors.top: parent.top
-                                    anchors.margins: 3
-                                    icon: Theme.icons.plus
-                                    variant: "ghost"
-                                    buttonSize: 18
-                                    iconSize: 12
-                                    tooltip: qsTr("Add to selected clip")
-                                    buttonEnabled: EditorState.selectedClip >= 0
-                                    onClicked: EditorState.addEffect(
-                                                   EditorState.selectedTrack, EditorState.selectedClip,
-                                                   effectCard.modelData.id)
-                                }
-                            }
-                        }
-                    }
-                }
             }
 
             Flickable {
