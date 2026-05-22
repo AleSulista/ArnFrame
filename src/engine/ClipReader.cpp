@@ -15,20 +15,38 @@ extern "C" {
 
 namespace {
 
-thread_local AVPixelFormat g_hwPixFmt = AV_PIX_FMT_NONE;
-
-AVPixelFormat hwGetFormat(AVCodecContext *, const AVPixelFormat *pixFmts)
+bool isHardwarePixelFormat(AVPixelFormat fmt)
 {
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(fmt);
+    return desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL);
+}
+
+// Prefer the VAAPI surface format when the decoder offers it; otherwise pick the
+// first software format so get_format never hard-fails with AV_PIX_FMT_NONE
+// (that path leaves the hwaccel decoder in a half-initialized state).
+AVPixelFormat hwGetFormat(AVCodecContext *ctx, const AVPixelFormat *pixFmts)
+{
+    const AVPixelFormat prefer =
+        ctx && ctx->opaque ? *static_cast<const AVPixelFormat *>(ctx->opaque) : AV_PIX_FMT_NONE;
+
     for (const AVPixelFormat *p = pixFmts; *p != AV_PIX_FMT_NONE; ++p) {
-        if (*p == g_hwPixFmt)
+        if (*p == prefer)
             return *p;
     }
-    return AV_PIX_FMT_NONE;
+
+    for (const AVPixelFormat *p = pixFmts; *p != AV_PIX_FMT_NONE; ++p) {
+        if (!isHardwarePixelFormat(*p))
+            return *p;
+    }
+
+    return pixFmts ? pixFmts[0] : AV_PIX_FMT_NONE;
 }
 
 QImage frameToRgba(const AVFrame *frame, SwsContext *&sws, int targetWidth, int targetHeight)
 {
     if (!frame || targetWidth <= 0 || targetHeight <= 0)
+        return {};
+    if (isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format)))
         return {};
 
     sws = sws_getCachedContext(sws, frame->width, frame->height,
@@ -73,25 +91,16 @@ ClipReader::~ClipReader()
     close();
 }
 
-void ClipReader::close()
+void ClipReader::teardownVideoDecoder()
 {
-    if (m_swr)
-        swr_free(&m_swr);
-    if (m_sws)
+    if (m_sws) {
         sws_freeContext(m_sws);
-    m_sws = nullptr;
-
+        m_sws = nullptr;
+    }
     if (m_videoCtx)
         avcodec_free_context(&m_videoCtx);
-    if (m_audioCtx)
-        avcodec_free_context(&m_audioCtx);
     if (m_hwDeviceCtx)
         av_buffer_unref(&m_hwDeviceCtx);
-    if (m_fmt)
-        avformat_close_input(&m_fmt);
-
-    m_videoStream = -1;
-    m_audioStream = -1;
     m_hwAccelActive = false;
     m_hwPixFmt = AV_PIX_FMT_NONE;
     m_videoPositioned = false;
@@ -99,6 +108,23 @@ void ClipReader::close()
     m_lastVideoFrame = {};
     m_lastVideoW = 0;
     m_lastVideoH = 0;
+}
+
+void ClipReader::close()
+{
+    if (m_swr)
+        swr_free(&m_swr);
+
+    teardownVideoDecoder();
+
+    if (m_audioCtx)
+        avcodec_free_context(&m_audioCtx);
+    if (m_fmt)
+        avformat_close_input(&m_fmt);
+
+    m_videoStream = -1;
+    m_audioStream = -1;
+    m_hwAccelDisabled = false;
     m_audioPositioned = false;
     m_audioNextPtsUs = 0;
     m_audioLeftover.clear();
@@ -135,10 +161,45 @@ bool ClipReader::open(const QString &path)
     return hasVideo() || hasAudio();
 }
 
+bool ClipReader::openSoftwareVideoDecoder()
+{
+    if (!m_fmt || m_videoStream < 0)
+        return false;
+
+    const AVCodecParameters *par = m_fmt->streams[m_videoStream]->codecpar;
+    const AVCodec *codec = avcodec_find_decoder(par->codec_id);
+    if (!codec)
+        return false;
+
+    m_videoCtx = avcodec_alloc_context3(codec);
+    if (!m_videoCtx)
+        return false;
+
+    if (avcodec_parameters_to_context(m_videoCtx, par) < 0) {
+        avcodec_free_context(&m_videoCtx);
+        return false;
+    }
+
+    if (avcodec_open2(m_videoCtx, codec, nullptr) < 0) {
+        avcodec_free_context(&m_videoCtx);
+        return false;
+    }
+
+    m_hwAccelActive = false;
+    m_hwPixFmt = AV_PIX_FMT_NONE;
+    return true;
+}
+
 bool ClipReader::tryOpenHardwareDecoder()
 {
-    if (!m_fmt || m_videoStream < 0 || m_hwAccelActive)
+    if (!m_fmt || m_videoStream < 0 || m_hwAccelActive || m_hwAccelDisabled)
         return m_hwAccelActive;
+
+    // Allow forcing software decode on broken VAAPI stacks.
+    if (qEnvironmentVariableIsSet("DRIFT_NO_VAAPI")) {
+        m_hwAccelDisabled = true;
+        return false;
+    }
 
     const AVCodecParameters *par = m_fmt->streams[m_videoStream]->codecpar;
     const AVCodec *codec = avcodec_find_decoder(par->codec_id);
@@ -163,6 +224,7 @@ bool ClipReader::tryOpenHardwareDecoder()
         m_hwPixFmt = AV_PIX_FMT_NONE;
         if (m_hwDeviceCtx)
             av_buffer_unref(&m_hwDeviceCtx);
+        m_hwAccelDisabled = true;
         return false;
     }
 
@@ -173,20 +235,37 @@ bool ClipReader::tryOpenHardwareDecoder()
         return false;
     }
 
-    avcodec_parameters_to_context(m_videoCtx, par);
-    m_videoCtx->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
-    g_hwPixFmt = m_hwPixFmt;
-    m_videoCtx->get_format = hwGetFormat;
-
-    if (avcodec_open2(m_videoCtx, codec, nullptr) < 0) {
+    if (avcodec_parameters_to_context(m_videoCtx, par) < 0) {
         avcodec_free_context(&m_videoCtx);
         av_buffer_unref(&m_hwDeviceCtx);
         m_hwPixFmt = AV_PIX_FMT_NONE;
         return false;
     }
 
+    m_videoCtx->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
+    m_videoCtx->opaque = &m_hwPixFmt;
+    m_videoCtx->get_format = hwGetFormat;
+
+    if (avcodec_open2(m_videoCtx, codec, nullptr) < 0) {
+        avcodec_free_context(&m_videoCtx);
+        av_buffer_unref(&m_hwDeviceCtx);
+        m_hwPixFmt = AV_PIX_FMT_NONE;
+        m_hwAccelDisabled = true;
+        return false;
+    }
+
     m_hwAccelActive = true;
     return true;
+}
+
+bool ClipReader::fallbackFromHardwareDecoder()
+{
+    if (!m_hwAccelActive && !m_hwDeviceCtx)
+        return openSoftwareVideoDecoder();
+
+    teardownVideoDecoder();
+    m_hwAccelDisabled = true;
+    return openSoftwareVideoDecoder();
 }
 
 bool ClipReader::ensureVideoDecoder()
@@ -199,14 +278,7 @@ bool ClipReader::ensureVideoDecoder()
     if (tryOpenHardwareDecoder())
         return true;
 
-    const AVCodecParameters *par = m_fmt->streams[m_videoStream]->codecpar;
-    const AVCodec *codec = avcodec_find_decoder(par->codec_id);
-    if (!codec)
-        return false;
-
-    m_videoCtx = avcodec_alloc_context3(codec);
-    avcodec_parameters_to_context(m_videoCtx, par);
-    return avcodec_open2(m_videoCtx, codec, nullptr) >= 0;
+    return openSoftwareVideoDecoder();
 }
 
 bool ClipReader::transferHwFrameToImage(const AVFrame *hwFrame, QImage &out, int targetWidth, int targetHeight)
@@ -215,6 +287,8 @@ bool ClipReader::transferHwFrameToImage(const AVFrame *hwFrame, QImage &out, int
     if (!swFrame)
         return false;
 
+    // Transfer into a fresh software frame. On failure the destination may be
+    // partially populated — always free it before returning.
     if (av_hwframe_transfer_data(swFrame, hwFrame, 0) < 0) {
         av_frame_free(&swFrame);
         return false;
@@ -231,7 +305,15 @@ bool ClipReader::transferHwFrameToImage(const AVFrame *hwFrame, QImage &out, int
 
 bool ClipReader::convertFrame(const AVFrame *frame, QImage &out, int targetWidth, int targetHeight)
 {
+    if (!frame)
+        return false;
+
     if (m_hwAccelActive && frame->format == m_hwPixFmt)
+        return transferHwFrameToImage(frame, out, targetWidth, targetHeight);
+
+    // If get_format fell back to software while hw_device_ctx is still set,
+    // treat the frame as a normal software frame.
+    if (isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format)))
         return transferHwFrameToImage(frame, out, targetWidth, targetHeight);
 
     const QImage image = frameToRgba(frame, m_sws, targetWidth, targetHeight);
@@ -254,8 +336,17 @@ bool ClipReader::ensureAudioDecoder()
         return false;
 
     m_audioCtx = avcodec_alloc_context3(codec);
-    avcodec_parameters_to_context(m_audioCtx, par);
-    return avcodec_open2(m_audioCtx, codec, nullptr) >= 0;
+    if (!m_audioCtx)
+        return false;
+    if (avcodec_parameters_to_context(m_audioCtx, par) < 0) {
+        avcodec_free_context(&m_audioCtx);
+        return false;
+    }
+    if (avcodec_open2(m_audioCtx, codec, nullptr) < 0) {
+        avcodec_free_context(&m_audioCtx);
+        return false;
+    }
+    return true;
 }
 
 bool ClipReader::seekVideoStream(drift::TimeUs sourceUs)
@@ -290,24 +381,22 @@ bool ClipReader::seekAudioStream(drift::TimeUs sourceUs)
     return true;
 }
 
-bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int targetWidth, int targetHeight)
+bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int targetWidth, int targetHeight,
+                                        bool *hwFailure)
 {
+    if (hwFailure)
+        *hwFailure = false;
     if (!ensureVideoDecoder())
         return false;
 
     const bool dimsMatch = m_lastVideoW == targetWidth && m_lastVideoH == targetHeight;
 
-    // Serve a re-request of (or tiny overshoot past) the frame we already hold.
-    // Playback and scrubbing both re-ask for the current frame constantly.
     if (m_videoPositioned && dimsMatch && !m_lastVideoFrame.isNull()
         && qAbs(sourceUs - m_lastVideoPtsUs) <= kFrameToleranceUs) {
         out = m_lastVideoFrame;
         return true;
     }
 
-    // Fast path: for a forward request within reach of the current decode
-    // position, keep decoding forward instead of seeking to a keyframe. Only
-    // seek on a backward jump or a large forward gap (a real scrub/jump).
     const bool needSeek = !m_videoPositioned || !dimsMatch
                           || sourceUs < m_lastVideoPtsUs - kFrameToleranceUs
                           || sourceUs - m_lastVideoPtsUs > kForwardSeekThresholdUs;
@@ -327,6 +416,14 @@ bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int targe
     drift::TimeUs bestDelta = INT64_MAX;
     bool found = false;
     bool done = false;
+    bool sawHwFailure = false;
+
+    auto markHwFailure = [&]() {
+        if (m_hwAccelActive) {
+            sawHwFailure = true;
+            done = true;
+        }
+    };
 
     while (!done && av_read_frame(m_fmt, packet) >= 0) {
         if (packet->stream_index != m_videoStream) {
@@ -334,18 +431,26 @@ bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int targe
             continue;
         }
 
-        if (avcodec_send_packet(m_videoCtx, packet) < 0) {
-            av_packet_unref(packet);
+        int sendRc = avcodec_send_packet(m_videoCtx, packet);
+        av_packet_unref(packet);
+        if (sendRc == AVERROR(EAGAIN)) {
+            // Decoder is full; drain below then retry is handled by the next read.
+            // Fall through to receive.
+        } else if (sendRc < 0) {
+            markHwFailure();
             continue;
         }
-        av_packet_unref(packet);
 
-        while (true) {
+        while (!done) {
             const int rc = avcodec_receive_frame(m_videoCtx, frame);
             if (rc == AVERROR(EAGAIN) || rc == AVERROR_EOF)
                 break;
             if (rc < 0) {
-                done = true;
+                // VAAPI often fails here with "hardware accelerator failed to
+                // decode picture". The frame may be partially initialized —
+                // unref before any further use or free.
+                av_frame_unref(frame);
+                markHwFailure();
                 break;
             }
 
@@ -358,6 +463,13 @@ bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int targe
                     bestDelta = delta;
                     best = image;
                     found = true;
+                } else if (m_hwAccelActive
+                           && (frame->format == m_hwPixFmt
+                               || isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format)))) {
+                    // Transfer from the VAAPI surface failed — abandon hwaccel.
+                    av_frame_unref(frame);
+                    markHwFailure();
+                    break;
                 }
             }
 
@@ -368,8 +480,16 @@ bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int targe
         }
     }
 
+    av_frame_unref(frame);
     av_frame_free(&frame);
     av_packet_free(&packet);
+
+    if (sawHwFailure) {
+        if (hwFailure)
+            *hwFailure = true;
+        m_videoPositioned = false;
+        return false;
+    }
 
     if (found) {
         out = best;
@@ -377,11 +497,28 @@ bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int targe
         m_lastVideoW = targetWidth;
         m_lastVideoH = targetHeight;
         m_videoPositioned = true;
-    } else {
-        // Hit EOF or a decode error; force a reseek on the next request.
-        m_videoPositioned = false;
+        return true;
     }
-    return found;
+
+    m_videoPositioned = false;
+    return false;
+}
+
+bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int targetWidth, int targetHeight)
+{
+    bool hwFailure = false;
+    if (decodeVideoFrameAtOnce(sourceUs, out, targetWidth, targetHeight, &hwFailure))
+        return true;
+
+    if (!hwFailure)
+        return false;
+
+    // Sticky software fallback for this reader — continuing with a broken VAAPI
+    // context is what triggers free(): invalid size on subsequent frames.
+    if (!fallbackFromHardwareDecoder())
+        return false;
+
+    return decodeVideoFrameAtOnce(sourceUs, out, targetWidth, targetHeight, nullptr);
 }
 
 int ClipReader::readAudioInterleaved(drift::TimeUs sourceStartUs, int sampleCount, int outputSampleRate,
@@ -454,8 +591,10 @@ int ClipReader::readAudioInterleaved(drift::TimeUs sourceStartUs, int sampleCoun
             av_packet_unref(packet);
             continue;
         }
-        if (rc < 0) // AVERROR_EOF or a decode error
+        if (rc < 0) { // AVERROR_EOF or a decode error
+            av_frame_unref(frame);
             break;
+        }
 
         if (alignToStart) {
             const drift::TimeUs framePtsUs = ptsToUs(frame, timeBase);
@@ -485,6 +624,7 @@ int ClipReader::readAudioInterleaved(drift::TimeUs sourceStartUs, int sampleCoun
             m_audioLeftover.append(scratch[i]);
     }
 
+    av_frame_unref(frame);
     av_frame_free(&frame);
     av_packet_free(&packet);
 

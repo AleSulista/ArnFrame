@@ -37,9 +37,14 @@ public:
 private:
     bool ensureVideoDecoder();
     bool ensureAudioDecoder();
+    bool openSoftwareVideoDecoder();
     bool tryOpenHardwareDecoder();
+    void teardownVideoDecoder();
+    bool fallbackFromHardwareDecoder();
     bool transferHwFrameToImage(const AVFrame *hwFrame, QImage &out, int targetWidth, int targetHeight);
     bool convertFrame(const AVFrame *frame, QImage &out, int targetWidth, int targetHeight);
+    bool decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int targetWidth, int targetHeight,
+                                bool *hwFailure);
     bool seekVideoStream(drift::TimeUs sourceUs);
     bool seekAudioStream(drift::TimeUs sourceUs);
 
@@ -54,6 +59,7 @@ private:
     int m_audioStream = -1;
     int m_outputSampleRate = 48000;
     bool m_hwAccelActive = false;
+    bool m_hwAccelDisabled = false; // sticky after a failed VAAPI decode
     AVPixelFormat m_hwPixFmt = AV_PIX_FMT_NONE;
 
     // Sequential-decode state: lets playback decode forward without re-seeking
