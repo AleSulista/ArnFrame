@@ -738,7 +738,11 @@ void AppController::pushProjectEdit(const drift::Project &before, const QString 
 void AppController::finishEdit(const QString &message)
 {
     normalizeSelection();
-    m_playback.setPlayheadUs(m_playheadUs);
+    // During playback the engine clock owns the playhead. Seeking here would
+    // PlaybackClock::reset() and (historically) stop the clock while audio kept
+    // pulling — freezing A/V at one spot after drops like adding an effect.
+    if (!m_playback.isPlaying())
+        m_playback.setPlayheadUs(m_playheadUs);
     emit tracksChanged();
     emit selectionChanged();
     emit selectedClipDataChanged();
@@ -1498,10 +1502,20 @@ int AppController::projectHeight() const
     return m_project.height();
 }
 
-void AppController::beginPreviewDrag()
+void AppController::beginPreviewDrag(const QString &undoText)
 {
     m_previewDragBefore = m_project;
     m_previewDragActive = true;
+    m_previewDragText = undoText.isEmpty() ? QStringLiteral("Edit clip") : undoText;
+}
+
+void AppController::emitPreviewFrame()
+{
+    // Same rule as finishEdit: never seek the live clock for a preview refresh.
+    if (!m_playback.isPlaying())
+        m_playback.setPlayheadUs(m_playheadUs);
+    emit tracksChanged();
+    m_playback.refreshFrame();
 }
 
 void AppController::previewSetClipPosition(int trackIndex, int clipIndex, double posX, double posY)
@@ -1514,16 +1528,13 @@ void AppController::previewSetClipPosition(int trackIndex, int clipIndex, double
         return;
 
     if (!m_previewDragActive)
-        beginPreviewDrag();
+        beginPreviewDrag(QStringLiteral("Move clip"));
 
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
     clip.posX.setKeyframe(relative, qBound(0.0, posX, 1.0));
     clip.posY.setKeyframe(relative, qBound(0.0, posY, 1.0));
-
-    m_playback.setPlayheadUs(m_playheadUs);
-    emit tracksChanged();
-    m_playback.refreshFrame();
+    emitPreviewFrame();
 }
 
 void AppController::previewSetClipScale(int trackIndex, int clipIndex, double scale)
@@ -1536,15 +1547,12 @@ void AppController::previewSetClipScale(int trackIndex, int clipIndex, double sc
         return;
 
     if (!m_previewDragActive)
-        beginPreviewDrag();
+        beginPreviewDrag(QStringLiteral("Scale clip"));
 
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
     clip.scale.setKeyframe(relative, qBound(0.05, scale, 10.0));
-
-    m_playback.setPlayheadUs(m_playheadUs);
-    emit tracksChanged();
-    m_playback.refreshFrame();
+    emitPreviewFrame();
 }
 
 void AppController::previewSetClipRotation(int trackIndex, int clipIndex, double degrees)
@@ -1557,15 +1565,12 @@ void AppController::previewSetClipRotation(int trackIndex, int clipIndex, double
         return;
 
     if (!m_previewDragActive)
-        beginPreviewDrag();
+        beginPreviewDrag(QStringLiteral("Rotate clip"));
 
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
     clip.rotation.setKeyframe(relative, degrees);
-
-    m_playback.setPlayheadUs(m_playheadUs);
-    emit tracksChanged();
-    m_playback.refreshFrame();
+    emitPreviewFrame();
 }
 
 void AppController::previewSetClipKeyframe(int trackIndex, int clipIndex, const QString &prop,
@@ -1584,14 +1589,84 @@ void AppController::previewSetClipKeyframe(int trackIndex, int clipIndex, const 
         return;
 
     if (!m_previewDragActive)
-        beginPreviewDrag();
+        beginPreviewDrag(QStringLiteral("Edit keyframe"));
 
     const drift::TimeUs rel = qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds) - clip.timelineStart);
     kt->setKeyframe(rel, value);
+    emitPreviewFrame();
+}
 
-    m_playback.setPlayheadUs(m_playheadUs);
-    emit tracksChanged();
-    m_playback.refreshFrame();
+void AppController::previewSetEffectParam(int trackIndex, int clipIndex, int effectIndex,
+                                          const QString &key, double value)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (effectIndex < 0 || effectIndex >= clip.effects.size())
+        return;
+    if (key.isEmpty())
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag(QStringLiteral("Edit effect"));
+
+    const EffectPresetEntry *def = effectDefForId(clip.effects[effectIndex].catalogId);
+    bool asBoolean = false;
+    if (def) {
+        for (const drift::EffectParamSpec &param : def->meta.parameters) {
+            if (param.key == key) {
+                asBoolean = param.isBoolean;
+                break;
+            }
+        }
+    }
+    if (asBoolean)
+        clip.effects[effectIndex].parameters.insert(key, value > 0.5);
+    else
+        clip.effects[effectIndex].parameters.insert(key, value);
+    emitPreviewFrame();
+}
+
+void AppController::previewSetClipSpeed(int trackIndex, int clipIndex, double speed)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Video && clip.type != drift::ClipType::Audio)
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag(QStringLiteral("Speed changed"));
+
+    clip.speed = qBound(0.25, speed, 4.0);
+    clip.syncSrcOutFromSpeed(sourceDurationForClip(clip));
+    emitPreviewFrame();
+}
+
+void AppController::previewSetClipMask(int trackIndex, int clipIndex, const QVariantMap &maskMap)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag(QStringLiteral("Mask changed"));
+
+    track.clips[clipIndex].mask = maskFromMap(maskMap);
+    emitPreviewFrame();
 }
 
 void AppController::commitPreviewDrag()
@@ -1599,10 +1674,10 @@ void AppController::commitPreviewDrag()
     if (!m_previewDragActive)
         return;
 
-    m_undoStack.push(new drift::ProjectSnapshotCommand(&m_project, m_previewDragBefore, m_project,
-                                                       QStringLiteral("Move clip")));
+    const QString text = m_previewDragText.isEmpty() ? QStringLiteral("Edit clip") : m_previewDragText;
+    m_undoStack.push(new drift::ProjectSnapshotCommand(&m_project, m_previewDragBefore, m_project, text));
     m_previewDragActive = false;
-    finishEdit(QStringLiteral("Clip moved"));
+    finishEdit(text);
 }
 
 void AppController::setClipStart(int trackIndex, int clipIndex, double start)
@@ -2132,7 +2207,20 @@ void AppController::setEffectParam(int trackIndex, int clipIndex, int effectInde
         return;
 
     const drift::Project before = m_project;
-    clip.effects[effectIndex].parameters.insert(key, value);
+    const EffectPresetEntry *def = effectDefForId(clip.effects[effectIndex].catalogId);
+    bool asBoolean = false;
+    if (def) {
+        for (const drift::EffectParamSpec &param : def->meta.parameters) {
+            if (param.key == key) {
+                asBoolean = param.isBoolean;
+                break;
+            }
+        }
+    }
+    if (asBoolean)
+        clip.effects[effectIndex].parameters.insert(key, value > 0.5);
+    else
+        clip.effects[effectIndex].parameters.insert(key, value);
     pushProjectEdit(before, QStringLiteral("Edit effect"));
     finishEdit(QStringLiteral("Effect updated"));
 }

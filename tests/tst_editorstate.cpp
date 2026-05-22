@@ -157,6 +157,20 @@ void EditorStateTest::textStyleBlendModeKeyframesAndEffects()
     const QVariantList params = effects.first().toMap().value(QStringLiteral("params")).toList();
     QCOMPARE(params.first().toMap().value(QStringLiteral("value")).toDouble(), 2.5);
 
+    // Preview drag coalesces many slider moves into a single undo step.
+    state.beginPreviewDrag(QStringLiteral("Edit effect"));
+    state.previewSetEffectParam(track, clip, 0, QStringLiteral("contrast"), 1.2);
+    state.previewSetEffectParam(track, clip, 0, QStringLiteral("contrast"), 1.8);
+    state.commitPreviewDrag();
+    effects = state.selectedClipData().value(QStringLiteral("effects")).toList();
+    const QVariantList previewParams = effects.first().toMap().value(QStringLiteral("params")).toList();
+    QCOMPARE(previewParams.first().toMap().value(QStringLiteral("value")).toDouble(), 1.8);
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    effects = state.selectedClipData().value(QStringLiteral("effects")).toList();
+    const QVariantList undoneParams = effects.first().toMap().value(QStringLiteral("params")).toList();
+    QCOMPARE(undoneParams.first().toMap().value(QStringLiteral("value")).toDouble(), 2.5);
+
     state.removeEffect(track, clip, 0);
     QCOMPARE(state.selectedClipData().value(QStringLiteral("effects")).toList().size(), 0);
     QCOMPARE(state.selectedClipEffects().size(), 0);

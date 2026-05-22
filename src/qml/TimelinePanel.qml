@@ -53,6 +53,9 @@ PanelFrame {
     property real dropDurationSeconds: 0
     // True while dragging a library asset outside any compatible track row.
     property bool dropCreatesNewTrack: false
+    // Clip under an in-progress effect drag (for drop highlight).
+    property int effectDropTrackIndex: -1
+    property int effectDropClipIndex: -1
 
     // Shared by library drops and in-timeline clip moves so both snap and show
     // the same outline the same way.
@@ -68,6 +71,17 @@ PanelFrame {
         dropTrackIndex = -1
         snapGuideSeconds = -1
         dropCreatesNewTrack = false
+    }
+
+    function clearEffectDropHighlight() {
+        effectDropTrackIndex = -1
+        effectDropClipIndex = -1
+    }
+
+    function updateEffectDropHighlight(trackIndex, xPixels) {
+        const clipIndex = clipIndexAtPosition(trackIndex, xPixels)
+        effectDropTrackIndex = clipIndex >= 0 ? trackIndex : -1
+        effectDropClipIndex = clipIndex
     }
 
     function assetDurationSeconds(assetIndex) {
@@ -743,8 +757,11 @@ PanelFrame {
                                     }
 
                                     function updateAssetPreview(drop) {
-                                        if (isEffectDrag(drop))
+                                        if (isEffectDrag(drop)) {
+                                            root.updateEffectDropHighlight(trackRow.trackIndex, drop.x)
                                             return
+                                        }
+                                        root.clearEffectDropHighlight()
                                         if (isShapeDrag(drop)) {
                                             if (root.tracks[trackRow.trackIndex].type === "shape") {
                                                 const desired = Math.max(0, drop.x / root.pxPerSecond)
@@ -774,15 +791,16 @@ PanelFrame {
                                     onEntered: (drop) => updateAssetPreview(drop)
                                     onPositionChanged: (drop) => updateAssetPreview(drop)
                                     onExited: {
-                                        if (!isEffectDrag(drop))
-                                            root.clearLandingPreview()
+                                        root.clearLandingPreview()
+                                        root.clearEffectDropHighlight()
                                     }
                                     onDropped: (drop) => {
                                         drop.accept(Qt.CopyAction)
                                         if (isEffectDrag(drop)) {
                                             const effectId = drop.getDataAsString("application/x-drift-effect")
                                             const clipIndex = root.clipIndexAtPosition(trackRow.trackIndex, drop.x)
-                                            if (clipIndex >= 0) {
+                                            root.clearEffectDropHighlight()
+                                            if (clipIndex >= 0 && effectId.length > 0) {
                                                 EditorState.addEffect(trackRow.trackIndex, clipIndex, effectId)
                                                 EditorState.selectClip(trackRow.trackIndex, clipIndex)
                                             }
@@ -834,6 +852,9 @@ PanelFrame {
                                         property bool selected: (EditorState.selection,
                                                                  EditorState.selectionContains(trackRow.trackIndex, modelData))
                                         property string trackType: root.tracks[trackRow.trackIndex].type
+                                        property var clipEffects: clipData.effects || []
+                                        property bool effectDropTarget: root.effectDropTrackIndex === trackRow.trackIndex
+                                                                        && root.effectDropClipIndex === modelData
 
                                         y: Theme.clipSelectionRingWidth
                                         width: clipData.duration * root.pxPerSecond - 2 * Theme.clipSelectionRingWidth
@@ -871,9 +892,18 @@ PanelFrame {
                                             anchors.fill: parent
                                             radius: Theme.radiusSm
                                             color: root.clipColor(clipItem.trackType === "shape" ? "graphic" : clipItem.trackType)
-                                            border.width: clipItem.selected ? Theme.clipSelectionRingWidth : 0
-                                            border.color: Theme.primary
+                                            border.width: clipItem.effectDropTarget
+                                                          ? 2
+                                                          : (clipItem.selected ? Theme.clipSelectionRingWidth : 0)
+                                            border.color: clipItem.effectDropTarget ? Theme.clipEffect : Theme.primary
                                             clip: true
+
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                visible: clipItem.effectDropTarget
+                                                color: Qt.rgba(Theme.clipEffect.r, Theme.clipEffect.g, Theme.clipEffect.b, 0.28)
+                                                z: 4
+                                            }
 
                                             Rectangle {
                                                 id: leftTrimHandle
@@ -942,9 +972,11 @@ PanelFrame {
                                                 anchors.right: parent.right
                                                 anchors.top: parent.top
                                                 anchors.bottom: parent.bottom
-                                                anchors.bottomMargin: (clipItem.trackType === "video"
-                                                                       || clipItem.trackType === "audio"
-                                                                       || clipItem.trackType === "shape") ? 20 : 0
+                                                anchors.topMargin: (clipItem.trackType === "video"
+                                                                    || clipItem.trackType === "audio"
+                                                                    || clipItem.trackType === "shape")
+                                                                   ? (clipItem.clipEffects.length > 0 ? 32 : 20)
+                                                                   : 0
                                                 visible: clipItem.clipData.filmstripPath
                                                          && clipItem.clipData.filmstripPath.length > 0
                                                          && (clipItem.trackType === "video"
@@ -959,33 +991,76 @@ PanelFrame {
                                                          || clipItem.trackType === "audio"
                                                          || clipItem.trackType === "shape"
                                                 width: parent.width
-                                                height: 20
+                                                height: clipItem.clipEffects.length > 0 ? 32 : 20
                                                 color: "#00000066"
+                                                z: 1
 
-                                                Text {
+                                                Column {
                                                     anchors.left: parent.left
-                                                    anchors.leftMargin: 6
+                                                    anchors.right: parent.right
                                                     anchors.verticalCenter: parent.verticalCenter
-                                                    text: clipItem.clipData.name
-                                                    color: "#ffffffbf"
-                                                    font.pixelSize: Theme.fontSizeTiny
-                                                    font.family: Theme.fontFamily
-                                                    elide: Text.ElideRight
-                                                    width: parent.width - 12
+                                                    anchors.leftMargin: 6
+                                                    anchors.rightMargin: 6
+                                                    spacing: 1
+
+                                                    Text {
+                                                        width: parent.width
+                                                        text: clipItem.clipData.name
+                                                        color: "#ffffffbf"
+                                                        font.pixelSize: Theme.fontSizeTiny
+                                                        font.family: Theme.fontFamily
+                                                        elide: Text.ElideRight
+                                                    }
+
+                                                    Text {
+                                                        width: parent.width
+                                                        visible: clipItem.clipEffects.length > 0
+                                                        text: {
+                                                            const names = []
+                                                            for (var i = 0; i < clipItem.clipEffects.length; i++)
+                                                                names.push(clipItem.clipEffects[i].label || qsTr("Effect"))
+                                                            return names.join(" · ")
+                                                        }
+                                                        color: "#a8d8ff"
+                                                        font.pixelSize: Theme.fontSizeTiny
+                                                        font.family: Theme.fontFamily
+                                                        elide: Text.ElideRight
+                                                    }
                                                 }
                                             }
 
-                                            Text {
+                                            Column {
                                                 visible: clipItem.trackType === "text"
                                                 anchors.left: parent.left
-                                                anchors.leftMargin: 8
+                                                anchors.right: parent.right
                                                 anchors.verticalCenter: parent.verticalCenter
-                                                text: clipItem.clipData.textContent || clipItem.clipData.name
-                                                color: "white"
-                                                font.pixelSize: Theme.fontSizeXs
-                                                font.family: Theme.fontFamily
-                                                width: parent.width - 16
-                                                elide: Text.ElideRight
+                                                anchors.leftMargin: 8
+                                                anchors.rightMargin: 8
+                                                spacing: 1
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: clipItem.clipData.textContent || clipItem.clipData.name
+                                                    color: "white"
+                                                    font.pixelSize: Theme.fontSizeXs
+                                                    font.family: Theme.fontFamily
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    visible: clipItem.clipEffects.length > 0
+                                                    text: {
+                                                        const names = []
+                                                        for (var i = 0; i < clipItem.clipEffects.length; i++)
+                                                            names.push(clipItem.clipEffects[i].label || qsTr("Effect"))
+                                                        return names.join(" · ")
+                                                    }
+                                                    color: "#a8d8ff"
+                                                    font.pixelSize: Theme.fontSizeTiny
+                                                    font.family: Theme.fontFamily
+                                                    elide: Text.ElideRight
+                                                }
                                             }
 
                                             Canvas {
@@ -997,7 +1072,7 @@ PanelFrame {
                                                 anchors.left: parent.left
                                                 anchors.right: parent.right
                                                 anchors.top: parent.top
-                                                anchors.topMargin: 20
+                                                anchors.topMargin: clipItem.clipEffects.length > 0 ? 32 : 20
                                                 anchors.bottom: parent.bottom
                                                 onPeaksChanged: requestPaint()
 

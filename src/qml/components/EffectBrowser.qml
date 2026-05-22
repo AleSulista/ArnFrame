@@ -3,6 +3,7 @@ import QtQuick.Controls.Basic
 import Drift
 
 // Browsable effect preset picker: category chips + card grid.
+// Drag a card onto a timeline clip, or click / tap + to apply to the selection.
 Column {
     id: root
     spacing: 0
@@ -26,8 +27,8 @@ Column {
         wrapMode: Text.WordWrap
         horizontalAlignment: Text.AlignHCenter
         text: EditorState.selectedClip >= 0
-              ? qsTr("Click a preset or + to apply to the selected clip")
-              : qsTr("Select a clip, or drag a preset onto a clip in the timeline")
+              ? qsTr("Drag a preset onto a clip, or click to apply to the selection")
+              : qsTr("Drag a preset onto a clip in the timeline")
         color: Theme.mutedForeground
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontSizeXs
@@ -71,9 +72,9 @@ Column {
 
                     width: chipLabel.implicitWidth + 16
 
-                    HoverHandler { id: chipHover }
                     MouseArea {
                         anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
                         onClicked: root.activeCategory = categoryChip.modelData.id
                     }
                 }
@@ -107,20 +108,29 @@ Column {
                     height: visible ? 64 : 0
                     radius: Theme.radiusSm
                     color: cardHover.hovered ? Theme.panelSecondaryBg : Theme.panelAccent
+                    border.width: presetDrag.active ? 1 : 0
+                    border.color: Theme.primary
+                    opacity: presetDrag.active ? 0.85 : 1
 
+                    Drag.active: presetDrag.active
                     Drag.dragType: Drag.Automatic
                     Drag.supportedActions: Qt.CopyAction
+                    Drag.keys: ["application/x-drift-effect"]
                     Drag.mimeData: ({ "application/x-drift-effect": presetCard.modelData.id })
+                    Drag.hotSpot.x: width / 2
+                    Drag.hotSpot.y: height / 2
 
                     HoverHandler { id: cardHover }
 
                     TapHandler {
+                        enabled: !presetDrag.active
                         onTapped: root.applyPreset(presetCard.modelData.id)
                     }
 
                     DragHandler {
                         id: presetDrag
                         target: null
+                        acceptedButtons: Qt.LeftButton
                     }
 
                     Column {

@@ -11,6 +11,7 @@ private slots:
     void clockWallFallbackWhileRunning();
     void produceAdvancesWithRenderedSamples();
     void playbackTracksSinkPosition();
+    void seekWhileRunningKeepsClockAlive();
     void avSyncWithinTolerance();
 };
 
@@ -63,6 +64,26 @@ void PlaybackTest::playbackTracksSinkPosition()
     QVERIFY(played >= drift::secondsToUs(0.1));
     QVERIFY(played < drift::secondsToUs(0.2)); // nowhere near the 1.0s produced
     QVERIFY(clock.produceTimeUs() >= drift::secondsToUs(1.0));
+}
+
+void PlaybackTest::seekWhileRunningKeepsClockAlive()
+{
+    // Mimic PlaybackEngine::setPlayheadUs during play: reset then start again.
+    // Without the restart, produceTimeUs freezes and audio would loop one spot.
+    PlaybackClock clock;
+    clock.reset(drift::secondsToUs(1.0), 48000);
+    clock.start();
+    clock.onAudioSamplesRendered(4800);
+    QCOMPARE(clock.produceTimeUs(), drift::secondsToUs(1.1));
+
+    clock.reset(drift::secondsToUs(2.0), 48000);
+    QVERIFY(!clock.isRunning());
+    QCOMPARE(clock.produceTimeUs(), drift::secondsToUs(2.0));
+
+    clock.start();
+    QVERIFY(clock.isRunning());
+    clock.onAudioSamplesRendered(4800);
+    QCOMPARE(clock.produceTimeUs(), drift::secondsToUs(2.1));
 }
 
 void PlaybackTest::avSyncWithinTolerance()

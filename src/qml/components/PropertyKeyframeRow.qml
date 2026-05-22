@@ -190,7 +190,7 @@ Column {
         width: root.width
         spacing: 8
 
-        Slider {
+        ThemedSlider {
             id: valueSlider
             width: root.width - readout.width - parent.spacing
             anchors.verticalCenter: parent.verticalCenter
@@ -202,7 +202,7 @@ Column {
                          EditorState.playheadSeconds, value)
             onPressedChanged: {
                 if (pressed) {
-                    EditorState.beginPreviewDrag()
+                    EditorState.beginPreviewDrag(qsTr("Edit %1").arg(root.propDef.label))
                 } else {
                     EditorState.commitPreviewDrag()
                     // Dragging drops the value binding; restore it so the handle

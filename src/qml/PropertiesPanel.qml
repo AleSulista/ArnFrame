@@ -364,7 +364,7 @@ PanelFrame {
                                     font.pixelSize: Theme.fontSizeXs
                                     font.family: Theme.fontFamily
                                 }
-                                TextField {
+                                ThemedTextField {
                                     id: startField
                                     width: parent.width
                                     text: root.formatSeconds(clip.start)
@@ -388,7 +388,7 @@ PanelFrame {
                                     font.pixelSize: Theme.fontSizeXs
                                     font.family: Theme.fontFamily
                                 }
-                                TextField {
+                                ThemedTextField {
                                     id: durationField
                                     width: parent.width
                                     text: root.formatSeconds(clip.duration)
@@ -423,6 +423,19 @@ PanelFrame {
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSm
                                 wrapMode: TextArea.Wrap
+                                selectByMouse: true
+                                selectedTextColor: Theme.primaryForeground
+                                selectionColor: Theme.primary
+                                leftPadding: 8
+                                rightPadding: 8
+                                topPadding: 6
+                                bottomPadding: 6
+                                background: Rectangle {
+                                    radius: Theme.radiusSm
+                                    color: Theme.panelAccent
+                                    border.width: textContentField.activeFocus ? 1 : 0
+                                    border.color: Theme.panelSecondaryBorder
+                                }
                                 onEditingFinished: EditorState.setClipTextContent(
                                                        EditorState.selectedTrack, EditorState.selectedClip, text)
                             }
@@ -472,7 +485,7 @@ PanelFrame {
                                 }
                             }
 
-                            ComboBox {
+                            ThemedComboBox {
                                 id: fontFamilyBox
                                 width: parent.width
                                 model: Qt.fontFamilies()
@@ -495,7 +508,7 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    TextField {
+                                    ThemedTextField {
                                         id: pixelSizeField
                                         width: parent.width
                                         text: Number(root.textStyle.pixelSize).toString()
@@ -531,7 +544,7 @@ PanelFrame {
                                             border.width: 1
                                             border.color: Theme.panelBorder
                                         }
-                                        TextField {
+                                        ThemedTextField {
                                             id: textColorField
                                             width: 92
                                             text: root.textStyle.color
@@ -643,7 +656,7 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    TextField {
+                                    ThemedTextField {
                                         id: outlineWidthField
                                         width: parent.width
                                         text: Number(root.textStyle.outlineWidth).toFixed(1)
@@ -679,7 +692,7 @@ PanelFrame {
                                             border.width: 1
                                             border.color: Theme.panelBorder
                                         }
-                                        TextField {
+                                        ThemedTextField {
                                             id: outlineColorField
                                             width: 92
                                             text: root.textStyle.outlineColor
@@ -731,7 +744,7 @@ PanelFrame {
                                     border.width: 1
                                     border.color: Theme.panelBorder
                                 }
-                                TextField {
+                                ThemedTextField {
                                     id: boxColorField
                                     visible: root.textStyle.boxEnabled
                                     width: 92
@@ -757,7 +770,7 @@ PanelFrame {
                                     font.pixelSize: Theme.fontSizeXs
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
-                                TextField {
+                                ThemedTextField {
                                     id: boxPaddingField
                                     width: 72
                                     text: Number(root.textStyle.boxPadding).toFixed(1)
@@ -799,7 +812,7 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    TextField {
+                                    ThemedTextField {
                                         id: inPointField
                                         width: parent.width
                                         text: root.formatSeconds(clip.inPoint)
@@ -819,7 +832,7 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    TextField {
+                                    ThemedTextField {
                                         id: outPointField
                                         width: parent.width
                                         text: root.formatSeconds(clip.outPoint)
@@ -882,12 +895,19 @@ PanelFrame {
                                     propDef: root.propOpacity
                                     keyframeList: (clip.keyframes && clip.keyframes.opacity && clip.keyframes.opacity.points) || []
                                     interpolationMode: (clip.keyframes && clip.keyframes.opacity && clip.keyframes.opacity.interpolation) || "linear"
+                                    useSlider: true
+                                    sliderFrom: 0
+                                    sliderTo: 1
+                                    percent: true
                                 }
                                 PropertyKeyframeRow {
                                     width: (parent.width - parent.spacing) / 2
                                     propDef: root.propScale
                                     keyframeList: (clip.keyframes && clip.keyframes.scale && clip.keyframes.scale.points) || []
                                     interpolationMode: (clip.keyframes && clip.keyframes.scale && clip.keyframes.scale.interpolation) || "linear"
+                                    useSlider: true
+                                    sliderFrom: 0.05
+                                    sliderTo: 3
                                 }
                             }
                             Row {
@@ -1004,7 +1024,7 @@ PanelFrame {
                             }
                         }
 
-                        Slider {
+                        ThemedSlider {
                             id: speedSlider
                             visible: root.clipKind === "video" || root.clipKind === "audio"
                             width: parent.width
@@ -1012,8 +1032,16 @@ PanelFrame {
                             to: 4.0
                             stepSize: 0.05
                             value: clip.speed || 1.0
-                            onMoved: EditorState.setClipSpeed(
+                            onMoved: EditorState.previewSetClipSpeed(
                                          EditorState.selectedTrack, EditorState.selectedClip, value)
+                            onPressedChanged: {
+                                if (pressed) {
+                                    EditorState.beginPreviewDrag(qsTr("Speed changed"))
+                                } else {
+                                    EditorState.commitPreviewDrag()
+                                    value = Qt.binding(() => clip.speed || 1.0)
+                                }
+                            }
                         }
 
                         Text {
@@ -1059,6 +1087,20 @@ PanelFrame {
 
                             Button {
                                 text: "Add crossfade (0.5 s)"
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSm
+                                contentItem: Text {
+                                    text: parent.text
+                                    font: parent.font
+                                    color: Theme.primaryForeground
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 30
+                                    radius: Theme.radiusSm
+                                    color: parent.down ? Theme.panelSecondaryForeground : Theme.primary
+                                }
                                 onClicked: EditorState.addTransition(
                                                EditorState.selectedTrack, EditorState.selectedClip,
                                                "crossfade", 0.5)
@@ -1088,7 +1130,7 @@ PanelFrame {
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeXs
                                 }
-                                ComboBox {
+                                ThemedComboBox {
                                     id: transitionKindBox
                                     width: parent.width
                                     textRole: "label"
@@ -1121,7 +1163,7 @@ PanelFrame {
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeXs
                                 }
-                                TextField {
+                                ThemedTextField {
                                     id: transitionDurationField
                                     width: parent.width
                                     text: "0.50"
@@ -1143,6 +1185,22 @@ PanelFrame {
 
                             Button {
                                 text: "Remove transition"
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSm
+                                contentItem: Text {
+                                    text: parent.text
+                                    font: parent.font
+                                    color: Theme.destructive
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 30
+                                    radius: Theme.radiusSm
+                                    color: "transparent"
+                                    border.width: 1
+                                    border.color: Theme.panelBorder
+                                }
                                 onClicked: EditorState.removeTransition(
                                                root.transitionEditTrack, root.activeTransition.id)
                             }
@@ -1170,7 +1228,7 @@ PanelFrame {
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeXs
                         }
-                        ComboBox {
+                        ThemedComboBox {
                             id: blendModeBox
                             visible: root.clipKind !== "audio"
                             width: parent.width
@@ -1195,7 +1253,7 @@ PanelFrame {
                             font.pixelSize: Theme.fontSizeSm
                         }
 
-                        ComboBox {
+                        ThemedComboBox {
                             id: maskShapeBox
                             visible: root.clipKind !== "audio" && root.clipKind !== "text"
                             width: parent.width
@@ -1231,7 +1289,7 @@ PanelFrame {
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeXs
                                 }
-                                Slider {
+                                ThemedSlider {
                                     width: parent.width
                                     from: modelData.min
                                     to: modelData.max
@@ -1240,7 +1298,16 @@ PanelFrame {
                                     onMoved: {
                                         const mask = Object.assign({}, clip.mask || {})
                                         mask[modelData.key] = value
-                                        EditorState.setClipMask(EditorState.selectedTrack, EditorState.selectedClip, mask)
+                                        EditorState.previewSetClipMask(
+                                            EditorState.selectedTrack, EditorState.selectedClip, mask)
+                                    }
+                                    onPressedChanged: {
+                                        if (pressed) {
+                                            EditorState.beginPreviewDrag(qsTr("Mask changed"))
+                                        } else {
+                                            EditorState.commitPreviewDrag()
+                                            value = Qt.binding(() => (clip.mask && clip.mask[modelData.key]) || 0)
+                                        }
                                     }
                                 }
                             }
@@ -1278,7 +1345,7 @@ PanelFrame {
                         Text {
                             width: parent.width
                             visible: root.selectedEffects.length === 0
-                            text: "No effects yet. Use the + on an effect card, or drag one onto this clip."
+                            text: "No effects yet. Drag a preset from the Effects library onto this clip, or click a preset card."
                             wrapMode: Text.WordWrap
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
@@ -1294,51 +1361,100 @@ PanelFrame {
                                 width: tabColumn.width
                                 spacing: 6
 
-                                Row {
+                                Rectangle {
                                     width: parent.width
-                                    Text {
-                                        text: effectCard.modelData.label
-                                        color: Theme.panelForeground
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        width: parent.width - 24
-                                    }
-                                    IconButton {
-                                        icon: Theme.icons.x
-                                        variant: "ghost"
-                                        buttonSize: 22
-                                        iconSize: 12
-                                        tooltip: qsTr("Remove effect")
-                                        onClicked: EditorState.removeEffect(
-                                                       EditorState.selectedTrack, EditorState.selectedClip,
-                                                       effectCard.index)
+                                    height: effectHeader.implicitHeight + 8
+                                    radius: Theme.radiusSm
+                                    color: Theme.panelAccent
+
+                                    Row {
+                                        id: effectHeader
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 4
+                                        Text {
+                                            text: effectCard.modelData.label
+                                            color: Theme.panelForeground
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSm
+                                            font.weight: Font.Medium
+                                            width: parent.width - 28
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                        IconButton {
+                                            icon: Theme.icons.x
+                                            variant: "ghost"
+                                            buttonSize: 22
+                                            iconSize: 12
+                                            tooltip: qsTr("Remove effect")
+                                            onClicked: EditorState.removeEffect(
+                                                           EditorState.selectedTrack, EditorState.selectedClip,
+                                                           effectCard.index)
+                                        }
                                     }
                                 }
 
                                 Repeater {
                                     model: effectCard.modelData.params || []
-                                    delegate: Row {
+                                    delegate: Column {
+                                        id: paramRow
                                         required property var modelData
                                         width: tabColumn.width
-                                        spacing: 8
+                                        spacing: 4
 
-                                        Text {
-                                            width: 84
-                                            text: modelData.label
-                                            color: Theme.mutedForeground
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: Theme.fontSizeXs
-                                            anchors.verticalCenter: parent.verticalCenter
+                                        Row {
+                                            width: parent.width
+                                            spacing: 8
+                                            Text {
+                                                width: parent.width - 48
+                                                text: paramRow.modelData.label
+                                                color: Theme.mutedForeground
+                                                font.family: Theme.fontFamily
+                                                font.pixelSize: Theme.fontSizeXs
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
+                                            Text {
+                                                width: 40
+                                                horizontalAlignment: Text.AlignRight
+                                                text: paramRow.modelData.isBoolean
+                                                      ? (paramRow.modelData.value ? qsTr("On") : qsTr("Off"))
+                                                      : Number(paramSlider.value).toFixed(
+                                                            Math.abs(paramRow.modelData.max - paramRow.modelData.min) >= 10 ? 1 : 2)
+                                                color: Theme.panelForeground
+                                                font.family: Theme.monoFontFamily
+                                                font.pixelSize: Theme.fontSizeXs
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
                                         }
-                                        Slider {
-                                            width: tabColumn.width - 84 - parent.spacing
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            from: modelData.min
-                                            to: modelData.max
-                                            value: modelData.value
-                                            onMoved: EditorState.setEffectParam(
+
+                                        Switch {
+                                            visible: !!paramRow.modelData.isBoolean
+                                            checked: !!paramRow.modelData.value
+                                            onToggled: EditorState.setEffectParam(
+                                                           EditorState.selectedTrack, EditorState.selectedClip,
+                                                           effectCard.index, paramRow.modelData.key, checked ? 1 : 0)
+                                        }
+
+                                        ThemedSlider {
+                                            id: paramSlider
+                                            visible: !paramRow.modelData.isBoolean
+                                            width: parent.width
+                                            from: paramRow.modelData.min
+                                            to: paramRow.modelData.max
+                                            value: paramRow.modelData.value
+                                            onMoved: EditorState.previewSetEffectParam(
                                                          EditorState.selectedTrack, EditorState.selectedClip,
-                                                         effectCard.index, modelData.key, value)
+                                                         effectCard.index, paramRow.modelData.key, value)
+                                            onPressedChanged: {
+                                                if (pressed) {
+                                                    EditorState.beginPreviewDrag(qsTr("Edit effect"))
+                                                } else {
+                                                    EditorState.commitPreviewDrag()
+                                                    value = Qt.binding(() => paramRow.modelData.value)
+                                                }
+                                            }
                                         }
                                     }
                                 }

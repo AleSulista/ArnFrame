@@ -107,12 +107,16 @@ public:
     Q_INVOKABLE QVariantList builtinStickers() const;
     Q_INVOKABLE QVariantList builtinShapes() const;
     Q_INVOKABLE QVariantList previewClipsAtPlayhead() const;
-    Q_INVOKABLE void beginPreviewDrag();
+    Q_INVOKABLE void beginPreviewDrag(const QString &undoText = QStringLiteral("Edit clip"));
     Q_INVOKABLE void previewSetClipPosition(int trackIndex, int clipIndex, double posX, double posY);
     Q_INVOKABLE void previewSetClipScale(int trackIndex, int clipIndex, double scale);
     Q_INVOKABLE void previewSetClipRotation(int trackIndex, int clipIndex, double degrees);
     Q_INVOKABLE void previewSetClipKeyframe(int trackIndex, int clipIndex, const QString &prop,
                                             double atSeconds, double value);
+    Q_INVOKABLE void previewSetEffectParam(int trackIndex, int clipIndex, int effectIndex,
+                                           const QString &key, double value);
+    Q_INVOKABLE void previewSetClipSpeed(int trackIndex, int clipIndex, double speed);
+    Q_INVOKABLE void previewSetClipMask(int trackIndex, int clipIndex, const QVariantMap &mask);
     Q_INVOKABLE void commitPreviewDrag();
     Q_INVOKABLE int projectWidth() const;
     Q_INVOKABLE int projectHeight() const;
@@ -252,6 +256,8 @@ protected:
     QString m_lastMessage;
     bool m_previewDragActive = false;
     drift::Project m_previewDragBefore;
+    QString m_previewDragText = QStringLiteral("Edit clip");
+    void emitPreviewFrame();
     struct ClipboardItem
     {
         drift::Clip clip;

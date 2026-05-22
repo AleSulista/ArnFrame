@@ -117,7 +117,11 @@ void PlaybackEngine::setPlayheadUs(drift::TimeUs us)
 {
     m_playheadUs = qMax<drift::TimeUs>(0, us);
     m_clock.reset(m_playheadUs, m_sampleRate);
-    if (!m_playing)
+    // reset() clears the running flag; resume the clock if we are still in play
+    // so edits/seeks during playback don't freeze audio at one timeline spot.
+    if (m_playing)
+        m_clock.start();
+    else
         refreshFrame();
 }
 
@@ -158,6 +162,8 @@ void PlaybackEngine::setPreviewRenderSize(int width, int height)
     m_previewRenderHeight = height;
     if (m_playing)
         onCompositeTick();
+    else
+        refreshFrame();
 }
 
 bool PlaybackEngine::hasFrame() const
@@ -220,7 +226,9 @@ void PlaybackEngine::pause()
 
 void PlaybackEngine::refreshFrame()
 {
-    m_compositor.requestComposite(m_playheadUs);
+    // Use the same RenderOptions as the play loop so paused/scrubbed frames
+    // match what playback shows (preview scale + temporal-effect history).
+    m_compositor.requestComposite(m_playheadUs, playbackRenderOptions());
 }
 
 void PlaybackEngine::checkEndOfTimeline(drift::TimeUs timeUs)
@@ -275,14 +283,14 @@ FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
     FrameCompositor::RenderOptions options;
     if (m_previewQuality == QStringLiteral("quarter")) {
         options.previewScale = 0.25;
-        options.maxTimeEchoHistoryFrames = 0;
     } else if (m_previewQuality == QStringLiteral("half")) {
         options.previewScale = 0.5;
-        options.maxTimeEchoHistoryFrames = 1;
     } else {
         options.previewScale = 1.0;
-        options.maxTimeEchoHistoryFrames = -1;
     }
+    // Keep full temporal history in preview so effects like time_echo match
+    // pause and play (and stay closer to export). Scale alone handles cost.
+    options.maxTimeEchoHistoryFrames = -1;
 
     if (m_project && m_previewRenderWidth > 0 && m_previewRenderHeight > 0
         && m_previewQuality == QStringLiteral("full")) {
