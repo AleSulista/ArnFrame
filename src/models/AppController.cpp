@@ -74,6 +74,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
         m_timelineModel.refresh();
         m_clipListModel.refresh();
         m_playback.setProject(&m_project);
+        emit selectedTransitionDataChanged();
     });
     connect(this, &AppController::selectionChanged, this, [this] {
         m_clipListModel.setTrackIndex(m_selectedTrack >= 0 ? m_selectedTrack : 0);
@@ -92,6 +93,18 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     m_guideType = settings.value(QStringLiteral("preview/guideType"), QStringLiteral("thirds")).toString();
 }
 
+namespace {
+QVariantMap transitionToMap(const drift::Transition &t);
+QVariantMap maskToMap(const drift::Mask &m);
+drift::Mask maskFromMap(const QVariantMap &m);
+
+bool clipsAdjacentForTransition(const drift::Clip &fromClip, const drift::Clip &toClip)
+{
+    const drift::TimeUs gap = qAbs(fromClip.timelineEnd() - toClip.timelineStart);
+    return gap <= drift::secondsToUs(0.001);
+}
+} // namespace
+
 QVariantList AppController::tracks() const
 {
     QVariantList result;
@@ -104,9 +117,15 @@ QVariantList AppController::tracks() const
         for (const drift::Clip &clip : track.clips)
             clips.append(clipToMap(clip));
 
+        QVariantList transitions;
+        transitions.reserve(track.transitions.size());
+        for (const drift::Transition &transition : track.transitions)
+            transitions.append(transitionToMap(transition));
+
         result.append(QVariantMap{
             {QStringLiteral("type"), drift::trackTypeToString(track.type)},
             {QStringLiteral("clips"), clips},
+            {QStringLiteral("transitions"), transitions},
             {QStringLiteral("muted"), track.muted},
             {QStringLiteral("hidden"), track.hidden},
         });
@@ -141,6 +160,56 @@ QVariantMap shapeStyleToMap(const drift::ShapeStyle &s)
         {QStringLiteral("fill"), s.fill.name(QColor::HexArgb)},
         {QStringLiteral("stroke"), s.stroke.name(QColor::HexArgb)},
         {QStringLiteral("strokeWidth"), s.strokeWidth},
+    };
+}
+
+QVariantMap maskToMap(const drift::Mask &m)
+{
+    QVariantList points;
+    for (const QPointF &pt : m.points)
+        points.append(QVariantList{pt.x(), pt.y()});
+
+    return {
+        {QStringLiteral("shape"), drift::maskShapeToString(m.shape)},
+        {QStringLiteral("x"), m.x},
+        {QStringLiteral("y"), m.y},
+        {QStringLiteral("w"), m.w},
+        {QStringLiteral("h"), m.h},
+        {QStringLiteral("rotation"), m.rotation},
+        {QStringLiteral("feather"), m.feather},
+        {QStringLiteral("invert"), m.invert},
+        {QStringLiteral("points"), points},
+    };
+}
+
+drift::Mask maskFromMap(const QVariantMap &m)
+{
+    drift::Mask mask;
+    mask.shape = drift::maskShapeFromString(m.value(QStringLiteral("shape")).toString());
+    mask.x = m.value(QStringLiteral("x"), mask.x).toDouble();
+    mask.y = m.value(QStringLiteral("y"), mask.y).toDouble();
+    mask.w = m.value(QStringLiteral("w"), mask.w).toDouble();
+    mask.h = m.value(QStringLiteral("h"), mask.h).toDouble();
+    mask.rotation = m.value(QStringLiteral("rotation"), mask.rotation).toDouble();
+    mask.feather = m.value(QStringLiteral("feather"), mask.feather).toDouble();
+    mask.invert = m.value(QStringLiteral("invert"), mask.invert).toBool();
+    const QVariantList points = m.value(QStringLiteral("points")).toList();
+    for (const QVariant &value : points) {
+        const QVariantList pair = value.toList();
+        if (pair.size() >= 2)
+            mask.points.append(QPointF(pair.at(0).toDouble(), pair.at(1).toDouble()));
+    }
+    return mask;
+}
+
+QVariantMap transitionToMap(const drift::Transition &t)
+{
+    return {
+        {QStringLiteral("id"), t.id},
+        {QStringLiteral("fromClipId"), t.fromClipId},
+        {QStringLiteral("toClipId"), t.toClipId},
+        {QStringLiteral("kind"), drift::transitionKindToString(t.kind)},
+        {QStringLiteral("duration"), drift::usToSeconds(t.durationUs)},
     };
 }
 
@@ -370,6 +439,8 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("textStyle"), textStyleToMap(clip.textStyle)},
         {QStringLiteral("shapeStyle"), shapeStyleToMap(clip.shapeStyle)},
         {QStringLiteral("blendMode"), drift::blendModeToString(clip.blendMode)},
+        {QStringLiteral("speed"), clip.speed},
+        {QStringLiteral("mask"), maskToMap(clip.mask)},
         {QStringLiteral("start"), drift::usToSeconds(clip.timelineStart)},
         {QStringLiteral("duration"), drift::usToSeconds(clip.timelineDuration)},
         {QStringLiteral("inPoint"), drift::usToSeconds(clip.srcIn)},
@@ -649,7 +720,9 @@ double AppController::sourceTimeForClip(const QVariantMap &clip) const
 
     const double start = clip.value(QStringLiteral("start")).toDouble();
     const double inPoint = clip.value(QStringLiteral("inPoint")).toDouble();
-    return inPoint + (playheadSeconds() - start);
+    const double speed = clip.value(QStringLiteral("speed"), 1.0).toDouble();
+    const double effectiveSpeed = speed <= 0.0 ? 1.0 : speed;
+    return inPoint + (playheadSeconds() - start) * effectiveSpeed;
 }
 
 double AppController::sourceTimeAtPlayhead() const
@@ -843,7 +916,10 @@ void AppController::selectClip(int trackIndex, int clipIndex)
     m_selectedTrack = trackIndex;
     m_selectedClip = clipIndex;
     m_selection = {qMakePair(trackIndex, clipIndex)};
+    m_selectedTransitionTrack = -1;
+    m_selectedTransitionLeftClip = -1;
     emit selectionChanged();
+    emit selectedTransitionDataChanged();
 }
 
 void AppController::addToSelection(int trackIndex, int clipIndex)
@@ -884,13 +960,16 @@ void AppController::setSelection(const QVariantList &pairs)
 
 void AppController::clearSelection()
 {
-    if (m_selectedTrack < 0 && m_selectedClip < 0 && m_selection.isEmpty())
+    if (m_selectedTrack < 0 && m_selectedClip < 0 && m_selection.isEmpty() && m_selectedTransitionTrack < 0)
         return;
 
     m_selectedTrack = -1;
     m_selectedClip = -1;
     m_selection.clear();
+    m_selectedTransitionTrack = -1;
+    m_selectedTransitionLeftClip = -1;
     emit selectionChanged();
+    emit selectedTransitionDataChanged();
 }
 
 void AppController::deleteSelectedClip()
@@ -902,6 +981,7 @@ void AppController::deleteSelectedClip()
 
     const drift::Project before = m_project;
     QList<QPair<int, int>> pairs = m_selection;
+    QSet<QString> removedClipIds;
     std::sort(pairs.begin(), pairs.end(), [](const QPair<int, int> &a, const QPair<int, int> &b) {
         if (a.first != b.first)
             return a.first > b.first;
@@ -910,7 +990,15 @@ void AppController::deleteSelectedClip()
     for (const QPair<int, int> &pair : pairs) {
         if (!isValidClipIndex(pair.first, pair.second))
             continue;
+        removedClipIds.insert(m_project.tracks().at(pair.first).clips.at(pair.second).id);
         m_project.tracks()[pair.first].clips.removeAt(pair.second);
+    }
+    for (drift::Track &track : m_project.tracks()) {
+        for (int i = track.transitions.size() - 1; i >= 0; --i) {
+            const drift::Transition &transition = track.transitions.at(i);
+            if (removedClipIds.contains(transition.fromClipId) || removedClipIds.contains(transition.toClipId))
+                track.transitions.removeAt(i);
+        }
     }
     pushProjectEdit(before, QStringLiteral("Clip deleted"));
     clearSelection();
@@ -962,14 +1050,17 @@ void AppController::splitAtPlayhead()
             if (offset < drift::kMinClipDurationUs)
                 continue;
 
+            const drift::TimeUs sourceOffset =
+                static_cast<drift::TimeUs>(static_cast<double>(offset) * clip.effectiveSpeed());
+
             drift::Clip tail = clip;
             tail.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
             tail.timelineStart = m_playheadUs;
-            tail.srcIn = clip.srcIn + offset;
+            tail.srcIn = clip.srcIn + sourceOffset;
             tail.timelineDuration = clip.timelineDuration - offset;
 
             clip.timelineDuration = offset;
-            clip.srcOut = clip.srcIn + offset;
+            clip.srcOut = clip.srcIn + sourceOffset;
 
             track.clips.insert(clipIndex + 1, tail);
             splitAny = true;
@@ -1004,19 +1095,23 @@ void AppController::trimClipLeft(int trackIndex, int clipIndex, double newStart)
     if (delta > 0) {
         if (clip.timelineDuration - delta < drift::kMinClipDurationUs)
             return;
-        if (clip.srcIn + delta > clip.srcOut - drift::kMinClipDurationUs)
+        const drift::TimeUs sourceDelta =
+            static_cast<drift::TimeUs>(static_cast<double>(delta) * clip.effectiveSpeed());
+        if (clip.srcIn + sourceDelta > clip.srcOut - drift::kMinClipDurationUs)
             return;
 
         clip.timelineStart += delta;
-        clip.srcIn += delta;
+        clip.srcIn += sourceDelta;
         clip.timelineDuration -= delta;
     } else {
         const drift::TimeUs extendBy = -delta;
-        if (extendBy > clip.srcIn)
+        const drift::TimeUs sourceExtend =
+            static_cast<drift::TimeUs>(static_cast<double>(extendBy) * clip.effectiveSpeed());
+        if (sourceExtend > clip.srcIn)
             return;
 
         clip.timelineStart = snappedStart;
-        clip.srcIn -= extendBy;
+        clip.srcIn -= sourceExtend;
         clip.timelineDuration += extendBy;
     }
 
@@ -1041,7 +1136,7 @@ void AppController::trimClipRight(int trackIndex, int clipIndex, double newEnd)
     newDuration = qBound(drift::kMinClipDurationUs, newDuration, maxDuration);
 
     clip.timelineDuration = newDuration;
-    clip.srcOut = clip.srcIn + newDuration;
+    clip.srcOut = qMin(clip.srcIn + clip.sourceSpanUs(), sourceDurationForClip(clip));
     emit tracksChanged();
 }
 
@@ -1061,11 +1156,13 @@ void AppController::setClipTrim(int trackIndex, int clipIndex, double inPoint, d
     const drift::TimeUs clampedOut = qBound(clampedIn + drift::kMinClipDurationUs, drift::secondsToUs(outPoint),
                                             sourceDuration);
     const drift::TimeUs newDuration = clampedOut - clampedIn;
+    const double speed = clip.effectiveSpeed();
 
     const drift::Project before = m_project;
     clip.srcIn = clampedIn;
     clip.srcOut = clampedOut;
-    clip.timelineDuration = newDuration;
+    clip.timelineDuration = static_cast<drift::TimeUs>(llround(static_cast<double>(newDuration) / speed));
+    clip.timelineDuration = qMax(clip.timelineDuration, drift::kMinClipDurationUs);
     pushProjectEdit(before, QStringLiteral("Trim updated"));
     finishEdit(QStringLiteral("Trim updated"));
 }
@@ -1152,9 +1249,11 @@ void AppController::splitSelectedClipRight()
         return;
 
     const drift::Project before = m_project;
+    const drift::TimeUs sourceOffset =
+        static_cast<drift::TimeUs>(static_cast<double>(offset) * clip.effectiveSpeed());
 
     clip.timelineDuration = offset;
-    clip.srcOut = clip.srcIn + offset;
+    clip.srcOut = clip.srcIn + sourceOffset;
 
     pushProjectEdit(before, QStringLiteral("Split right"));
     finishEdit(QStringLiteral("Split right"));
@@ -1540,7 +1639,7 @@ void AppController::setClipDuration(int trackIndex, int clipIndex, double durati
                                           ? drift::secondsToUs(300.0)
                                           : sourceDurationForClip(clip) - clip.srcIn;
     clip.timelineDuration = qBound(drift::kMinClipDurationUs, drift::secondsToUs(duration), maxDuration);
-    clip.srcOut = clip.srcIn + clip.timelineDuration;
+    clip.srcOut = qMin(clip.srcIn + clip.sourceSpanUs(), sourceDurationForClip(clip));
     pushProjectEdit(before, QStringLiteral("Duration updated"));
     finishEdit(QStringLiteral("Duration updated"));
 }
@@ -1638,6 +1737,208 @@ void AppController::setClipBlendMode(int trackIndex, int clipIndex, const QStrin
     track.clips[clipIndex].blendMode = drift::blendModeFromString(mode);
     pushProjectEdit(before, QStringLiteral("Blend mode changed"));
     finishEdit(QStringLiteral("Blend mode updated"));
+}
+
+void AppController::setClipSpeed(int trackIndex, int clipIndex, double speed)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Video && clip.type != drift::ClipType::Audio)
+        return;
+
+    const drift::Project before = m_project;
+    clip.speed = qBound(0.25, speed, 4.0);
+    clip.syncSrcOutFromSpeed(sourceDurationForClip(clip));
+    pushProjectEdit(before, QStringLiteral("Speed changed"));
+    finishEdit(QStringLiteral("Clip speed updated"));
+}
+
+void AppController::setClipMask(int trackIndex, int clipIndex, const QVariantMap &maskMap)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Project before = m_project;
+    track.clips[clipIndex].mask = maskFromMap(maskMap);
+    pushProjectEdit(before, QStringLiteral("Mask changed"));
+    finishEdit(QStringLiteral("Clip mask updated"));
+}
+
+void AppController::addTransition(int trackIndex, int clipIndex, const QString &kind, double durationSeconds)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (track.type != drift::TrackType::Video && track.type != drift::TrackType::Shape)
+        return;
+    if (clipIndex < 0 || clipIndex + 1 >= track.clips.size())
+        return;
+
+    const drift::Clip &fromClip = track.clips.at(clipIndex);
+    const drift::Clip &toClip = track.clips.at(clipIndex + 1);
+    if (!clipsAdjacentForTransition(fromClip, toClip))
+        return;
+
+    for (const drift::Transition &existing : track.transitions) {
+        if (existing.fromClipId == fromClip.id && existing.toClipId == toClip.id)
+            return;
+    }
+
+    drift::Transition transition;
+    transition.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    transition.fromClipId = fromClip.id;
+    transition.toClipId = toClip.id;
+    transition.kind = drift::transitionKindFromString(kind);
+    transition.durationUs = qMax<drift::TimeUs>(drift::secondsToUs(0.1), drift::secondsToUs(durationSeconds));
+
+    const drift::Project before = m_project;
+    track.transitions.append(transition);
+    pushProjectEdit(before, QStringLiteral("Add transition"));
+    finishEdit(QStringLiteral("Transition added"));
+    selectTransition(trackIndex, clipIndex);
+}
+
+void AppController::removeTransition(int trackIndex, const QString &transitionId)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    const drift::Project before = m_project;
+    for (int i = 0; i < track.transitions.size(); ++i) {
+        if (track.transitions.at(i).id == transitionId) {
+            if (m_selectedTransitionTrack == trackIndex && m_selectedTransitionLeftClip >= 0) {
+                const QString fromId = track.clips.value(m_selectedTransitionLeftClip).id;
+                if (track.transitions.at(i).fromClipId == fromId)
+                    clearTransitionSelection();
+            }
+            track.transitions.removeAt(i);
+            pushProjectEdit(before, QStringLiteral("Remove transition"));
+            finishEdit(QStringLiteral("Transition removed"));
+            return;
+        }
+    }
+}
+
+void AppController::setTransitionDuration(int trackIndex, const QString &transitionId, double durationSeconds)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    const drift::Project before = m_project;
+    for (drift::Transition &transition : track.transitions) {
+        if (transition.id == transitionId) {
+            transition.durationUs = qMax<drift::TimeUs>(drift::secondsToUs(0.1), drift::secondsToUs(durationSeconds));
+            pushProjectEdit(before, QStringLiteral("Transition duration"));
+            finishEdit(QStringLiteral("Transition duration updated"));
+            emit selectedTransitionDataChanged();
+            return;
+        }
+    }
+}
+
+void AppController::setTransitionKind(int trackIndex, const QString &transitionId, const QString &kind)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    const drift::Project before = m_project;
+    for (drift::Transition &transition : track.transitions) {
+        if (transition.id == transitionId) {
+            transition.kind = drift::transitionKindFromString(kind);
+            pushProjectEdit(before, QStringLiteral("Transition kind"));
+            finishEdit(QStringLiteral("Transition kind updated"));
+            emit selectedTransitionDataChanged();
+            return;
+        }
+    }
+}
+
+QVariantMap AppController::transitionBetweenClips(int trackIndex, int clipIndex) const
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return {};
+
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex + 1 >= track.clips.size())
+        return {};
+
+    const QString fromId = track.clips.at(clipIndex).id;
+    const QString toId = track.clips.at(clipIndex + 1).id;
+    for (const drift::Transition &transition : track.transitions) {
+        if (transition.fromClipId == fromId && transition.toClipId == toId)
+            return transitionToMap(transition);
+    }
+    return {};
+}
+
+QVariantList AppController::transitionKinds() const
+{
+    const QList<drift::TransitionKind> kinds = {
+        drift::TransitionKind::Crossfade,
+        drift::TransitionKind::DipToBlack,
+        drift::TransitionKind::DipToWhite,
+        drift::TransitionKind::WipeLeft,
+        drift::TransitionKind::WipeRight,
+        drift::TransitionKind::WipeUp,
+        drift::TransitionKind::WipeDown,
+        drift::TransitionKind::PushLeft,
+        drift::TransitionKind::ZoomIn,
+    };
+
+    QVariantList result;
+    result.reserve(kinds.size());
+    for (drift::TransitionKind kind : kinds) {
+        result.append(QVariantMap{
+            {QStringLiteral("kind"), drift::transitionKindToString(kind)},
+            {QStringLiteral("label"), drift::transitionKindLabel(kind)},
+        });
+    }
+    return result;
+}
+
+QVariantMap AppController::selectedTransitionData() const
+{
+    if (m_selectedTransitionTrack < 0 || m_selectedTransitionLeftClip < 0)
+        return {};
+    return transitionBetweenClips(m_selectedTransitionTrack, m_selectedTransitionLeftClip);
+}
+
+void AppController::selectTransition(int trackIndex, int leftClipIndex)
+{
+    if (transitionBetweenClips(trackIndex, leftClipIndex).isEmpty())
+        return;
+
+    m_selectedTransitionTrack = trackIndex;
+    m_selectedTransitionLeftClip = leftClipIndex;
+    m_selectedTrack = trackIndex;
+    m_selectedClip = leftClipIndex;
+    m_selection = {qMakePair(trackIndex, leftClipIndex)};
+    emit selectionChanged();
+    emit selectedTransitionDataChanged();
+}
+
+void AppController::clearTransitionSelection()
+{
+    if (m_selectedTransitionTrack < 0 && m_selectedTransitionLeftClip < 0)
+        return;
+
+    m_selectedTransitionTrack = -1;
+    m_selectedTransitionLeftClip = -1;
+    emit selectedTransitionDataChanged();
 }
 
 void AppController::setClipKeyframe(int trackIndex, int clipIndex, const QString &prop, double atSeconds,

@@ -31,6 +31,10 @@ add_library(driftcore STATIC
     src/core/MediaAsset.cpp
     src/core/Clip.h
     src/core/Clip.cpp
+    src/core/Mask.h
+    src/core/Mask.cpp
+    src/core/Transition.h
+    src/core/Transition.cpp
     src/core/TextStyle.h
     src/core/TextStyle.cpp
     src/core/ShapeStyle.h
@@ -73,6 +77,10 @@ add_library(driftengine STATIC
     src/engine/CompositorFrameHistory.cpp
     src/engine/FrameCompositor.h
     src/engine/FrameCompositor.cpp
+    src/engine/MaskApplier.h
+    src/engine/MaskApplier.cpp
+    src/engine/AudioAtempo.h
+    src/engine/AudioAtempo.cpp
     src/engine/AudioMixer.h
     src/engine/AudioMixer.cpp
 )

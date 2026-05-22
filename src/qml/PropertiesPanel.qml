@@ -9,11 +9,49 @@ PanelFrame {
     // selectedClipData is a QVariantMap; key the binding on an explicit revision
     // so nested fields such as effects refresh after project edits.
     property int clipDataRevision: 0
+    property int transitionDataRevision: 0
+    property bool suppressTransitionKindUpdate: false
+    property int previousTab: 0
     readonly property var clip: {
         void clipDataRevision
         return EditorState.selectedClipData
     }
     readonly property bool hasSelection: !!clip && Object.keys(clip).length > 0
+    readonly property var transition: EditorState.selectedTransitionData
+    readonly property bool hasTransitionSelection: !!transition && Object.keys(transition).length > 0
+    readonly property int transitionEditTrack: EditorState.selectedTransitionTrack >= 0
+                                                 ? EditorState.selectedTransitionTrack
+                                                 : EditorState.selectedTrack
+    readonly property int transitionEditLeftClip: EditorState.selectedTransitionLeftClip >= 0
+                                                    ? EditorState.selectedTransitionLeftClip
+                                                    : EditorState.selectedClip
+    readonly property var activeTransition: {
+        void transitionDataRevision
+        const selected = EditorState.selectedTransitionData
+        if (selected && Object.keys(selected).length > 0)
+            return selected
+        return EditorState.transitionBetweenClips(
+                   root.transitionEditTrack, root.transitionEditLeftClip)
+    }
+    readonly property bool hasActiveTransition: !!activeTransition && Object.keys(activeTransition).length > 0
+    readonly property bool canAddOutgoingTransition: {
+        if (!root.hasSelection)
+            return false
+        const tracks = EditorState.tracks
+        const t = EditorState.selectedTrack
+        const c = EditorState.selectedClip
+        if (t < 0 || !tracks || t >= tracks.length)
+            return false
+        const track = tracks[t]
+        if (track.type !== "video" && track.type !== "shape")
+            return false
+        if (c + 1 >= track.clips.length)
+            return false
+        const left = track.clips[c]
+        const right = track.clips[c + 1]
+        return Math.abs((left.start + left.duration) - right.start) < 0.001
+    }
+    readonly property int transitionTabIndex: 5
     readonly property var selectedEffects: EditorState.selectedClipEffects
     readonly property string clipKind: hasSelection ? (clip.kind || "") : ""
     readonly property bool hasTextStyle: hasSelection && clipKind === "text" && !!clip.textStyle
@@ -32,6 +70,13 @@ PanelFrame {
                                                                    })
     property int activeTab: 0
     readonly property string currentTabId: tabsModel.get(activeTab).tabId
+
+    onActiveTabChanged: {
+        if (tabsModel.get(root.previousTab).tabId === "transition")
+            root.commitTransitionEdits()
+        root.previousTab = activeTab
+        root.refreshTransitionFields()
+    }
 
     // Keep inspector fields synced when selection/project changes without fighting active edits.
     function formatSeconds(value) {
@@ -71,23 +116,81 @@ PanelFrame {
         }
     }
 
+    function refreshTransitionFields() {
+        if (!root.hasActiveTransition)
+            return
+        if (transitionDurationField && !transitionDurationField.activeFocus)
+            transitionDurationField.text = Number(root.activeTransition.duration || 0.5).toFixed(2)
+        if (transitionKindBox) {
+            const kinds = EditorState.transitionKinds()
+            const active = root.activeTransition.kind || "crossfade"
+            let idx = 0
+            for (let i = 0; i < kinds.length; ++i) {
+                if (kinds[i].kind === active) {
+                    idx = i
+                    break
+                }
+            }
+            root.suppressTransitionKindUpdate = true
+            transitionKindBox.currentIndex = idx
+            root.suppressTransitionKindUpdate = false
+        }
+    }
+
+    function commitTransitionEdits() {
+        if (!root.hasActiveTransition)
+            return
+        const transitionId = root.activeTransition.id
+        if (!transitionId)
+            return
+        if (transitionDurationField) {
+            const v = parseFloat(transitionDurationField.text)
+            if (!isNaN(v)) {
+                const current = Number(root.activeTransition.duration || 0.5)
+                if (Math.abs(v - current) > 0.0001)
+                    EditorState.setTransitionDuration(
+                        root.transitionEditTrack, transitionId, v)
+            }
+        }
+        if (transitionKindBox && transitionKindBox.currentIndex >= 0) {
+            const kinds = EditorState.transitionKinds()
+            const item = kinds[transitionKindBox.currentIndex]
+            if (item && item.kind !== (root.activeTransition.kind || "crossfade"))
+                EditorState.setTransitionKind(
+                    root.transitionEditTrack, transitionId, item.kind)
+        }
+    }
+
     Connections {
         target: EditorState
         function onSelectionChanged() {
             root.clipDataRevision++
+            root.transitionDataRevision++
             root.refreshInspectorFields()
+            root.refreshTransitionFields()
         }
         function onSelectedClipDataChanged() {
             root.clipDataRevision++
             root.refreshInspectorFields()
         }
+        function onSelectedTransitionDataChanged() {
+            root.transitionDataRevision++
+            if (root.hasTransitionSelection)
+                root.activeTab = root.transitionTabIndex
+            root.refreshTransitionFields()
+        }
         function onTracksChanged() {
             root.clipDataRevision++
+            root.transitionDataRevision++
             root.refreshInspectorFields()
+            root.refreshTransitionFields()
         }
     }
 
-    Component.onCompleted: root.refreshInspectorFields()
+    Component.onCompleted: {
+        root.refreshInspectorFields()
+        root.refreshTransitionFields()
+    }
 
     ListModel {
         id: tabsModel
@@ -96,8 +199,9 @@ PanelFrame {
         ListElement { tabId: "audio"; icon: 2; label: "Audio" }
         ListElement { tabId: "speed"; icon: 3; label: "Speed" }
         ListElement { tabId: "blending"; icon: 4; label: "Blending" }
-        ListElement { tabId: "masks"; icon: 5; label: "Masks" }
-        ListElement { tabId: "effects"; icon: 6; label: "Effects" }
+        ListElement { tabId: "transition"; icon: 5; label: "Transition" }
+        ListElement { tabId: "masks"; icon: 6; label: "Masks" }
+        ListElement { tabId: "effects"; icon: 7; label: "Effects" }
     }
     property var tabIcons: [
         Theme.icons.folder,
@@ -105,6 +209,7 @@ PanelFrame {
         Theme.icons.headphones,
         Theme.icons.zoomIn,
         Theme.icons.layers,
+        Theme.icons.linkTwo,
         Theme.icons.grid,
         Theme.icons.wand
     ]
@@ -146,7 +251,7 @@ PanelFrame {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            text: "Click an element on the timeline to edit its properties"
+            text: "Click a clip on the timeline to edit its properties"
             color: Theme.mutedForeground
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeXs
@@ -837,14 +942,211 @@ PanelFrame {
                         }
                     }
 
-                    // ----- Speed (not implemented yet) ---------------------------------------
-                    Text {
+                    // ----- Speed ---------------------------------------------------------------
+                    Column {
                         width: tabColumn.width
+                        spacing: 8
                         visible: root.currentTabId === "speed"
-                        text: "Speed — coming soon"
-                        color: Theme.mutedForeground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSm
+
+                        Text {
+                            visible: root.clipKind !== "video" && root.clipKind !== "audio"
+                            text: "Speed applies to video and audio clips"
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSm
+                        }
+
+                        Text {
+                            visible: root.clipKind === "video" || root.clipKind === "audio"
+                            text: "Playback speed"
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                        }
+
+                        Row {
+                            width: parent.width
+                            spacing: 6
+                            visible: root.clipKind === "video" || root.clipKind === "audio"
+                            Repeater {
+                                model: [
+                                    { label: "0.25×", value: 0.25 },
+                                    { label: "0.5×", value: 0.5 },
+                                    { label: "1×", value: 1.0 },
+                                    { label: "2×", value: 2.0 },
+                                    { label: "4×", value: 4.0 }
+                                ]
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    width: speedPresetLabel.implicitWidth + 14
+                                    height: 26
+                                    radius: Theme.radiusSm
+                                    color: Math.abs((clip.speed || 1) - modelData.value) < 0.01
+                                           ? Theme.primary : "transparent"
+                                    border.width: 1
+                                    border.color: Theme.panelBorder
+                                    Text {
+                                        id: speedPresetLabel
+                                        anchors.centerIn: parent
+                                        text: modelData.label
+                                        color: Theme.panelForeground
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeXs
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: EditorState.setClipSpeed(
+                                                       EditorState.selectedTrack, EditorState.selectedClip,
+                                                       modelData.value)
+                                    }
+                                }
+                            }
+                        }
+
+                        Slider {
+                            id: speedSlider
+                            visible: root.clipKind === "video" || root.clipKind === "audio"
+                            width: parent.width
+                            from: 0.25
+                            to: 4.0
+                            stepSize: 0.05
+                            value: clip.speed || 1.0
+                            onMoved: EditorState.setClipSpeed(
+                                         EditorState.selectedTrack, EditorState.selectedClip, value)
+                        }
+
+                        Text {
+                            visible: root.clipKind === "video" || root.clipKind === "audio"
+                            text: (clip.speed || 1).toFixed(2) + "×"
+                            color: Theme.mutedForeground
+                            font.family: Theme.monoFontFamily
+                            font.pixelSize: Theme.fontSizeSm
+                        }
+                    }
+
+                    // ----- Transition ----------------------------------------------------------
+                    Column {
+                        width: tabColumn.width
+                        spacing: 12
+                        visible: root.currentTabId === "transition"
+
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            visible: !root.hasActiveTransition && !root.canAddOutgoingTransition
+                            text: root.clipKind === "video" || root.clipKind === "shape"
+                                  ? "Select a clip with another clip immediately after it on the same track."
+                                  : "Transitions apply between two clips on a video or shape track."
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSm
+                        }
+
+                        Column {
+                            width: parent.width
+                            spacing: 8
+                            visible: !root.hasActiveTransition && root.canAddOutgoingTransition
+
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                text: "No transition after this clip. Add one at the cut to the next clip."
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSm
+                            }
+
+                            Button {
+                                text: "Add crossfade (0.5 s)"
+                                onClicked: EditorState.addTransition(
+                                               EditorState.selectedTrack, EditorState.selectedClip,
+                                               "crossfade", 0.5)
+                            }
+                        }
+
+                        Column {
+                            width: parent.width
+                            spacing: 12
+                            visible: root.hasActiveTransition
+
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                text: "Outgoing transition to the next clip. Scrub the playhead across the cut to preview."
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            Column {
+                                width: parent.width
+                                spacing: 4
+                                Text {
+                                    text: "Kind"
+                                    color: Theme.mutedForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                }
+                                ComboBox {
+                                    id: transitionKindBox
+                                    width: parent.width
+                                    textRole: "label"
+                                    valueRole: "kind"
+                                    model: EditorState.transitionKinds()
+                                    onActivated: transitionKindBox.commitTransitionKind()
+                                    onCurrentIndexChanged: {
+                                        if (root.suppressTransitionKindUpdate || !root.hasActiveTransition)
+                                            return
+                                        transitionKindBox.commitTransitionKind()
+                                    }
+
+                                    function commitTransitionKind() {
+                                        const item = model[currentIndex]
+                                        if (!item || !root.hasActiveTransition)
+                                            return
+                                        EditorState.setTransitionKind(
+                                            root.transitionEditTrack,
+                                            root.activeTransition.id, item.kind)
+                                    }
+                                }
+                            }
+
+                            Column {
+                                width: parent.width
+                                spacing: 4
+                                Text {
+                                    text: "Duration (s)"
+                                    color: Theme.mutedForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                }
+                                TextField {
+                                    id: transitionDurationField
+                                    width: parent.width
+                                    text: "0.50"
+                                    color: Theme.panelForeground
+                                    font.family: Theme.monoFontFamily
+                                    font.pixelSize: Theme.fontSizeSm
+                                    onEditingFinished: root.commitTransitionDuration()
+
+                                    function commitTransitionDuration() {
+                                        if (!root.hasActiveTransition)
+                                            return
+                                        const v = parseFloat(text)
+                                        if (!isNaN(v))
+                                            EditorState.setTransitionDuration(
+                                                root.transitionEditTrack, root.activeTransition.id, v)
+                                    }
+                                }
+                            }
+
+                            Button {
+                                text: "Remove transition"
+                                onClicked: EditorState.removeTransition(
+                                               root.transitionEditTrack, root.activeTransition.id)
+                            }
+                        }
                     }
 
                     // ----- Blending ------------------------------------------------------------
@@ -879,14 +1181,92 @@ PanelFrame {
                         }
                     }
 
-                    // ----- Masks (not implemented yet) -----------------------------------------
-                    Text {
+                    // ----- Masks ---------------------------------------------------------------
+                    Column {
                         width: tabColumn.width
+                        spacing: 8
                         visible: root.currentTabId === "masks"
-                        text: "Masks — coming soon"
-                        color: Theme.mutedForeground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSm
+
+                        Text {
+                            visible: root.clipKind === "audio" || root.clipKind === "text"
+                            text: "Masks apply to visual clips"
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSm
+                        }
+
+                        ComboBox {
+                            id: maskShapeBox
+                            visible: root.clipKind !== "audio" && root.clipKind !== "text"
+                            width: parent.width
+                            model: ["none", "rectangle", "ellipse", "star", "heart", "bars", "freeform"]
+                            currentIndex: Math.max(0, model.indexOf((clip.mask && clip.mask.shape) || "none"))
+                            onActivated: {
+                                const mask = Object.assign({}, clip.mask || {})
+                                mask.shape = model[currentIndex]
+                                EditorState.setClipMask(EditorState.selectedTrack, EditorState.selectedClip, mask)
+                            }
+                        }
+
+                        Repeater {
+                            model: [
+                                { key: "x", label: "Center X", min: 0, max: 1 },
+                                { key: "y", label: "Center Y", min: 0, max: 1 },
+                                { key: "w", label: "Width", min: 0.05, max: 1 },
+                                { key: "h", label: "Height", min: 0.05, max: 1 },
+                                { key: "rotation", label: "Rotation", min: -180, max: 180 },
+                                { key: "feather", label: "Feather", min: 0, max: 64 }
+                            ]
+                            delegate: Column {
+                                required property var modelData
+                                width: parent.width
+                                spacing: 4
+                                visible: root.clipKind !== "audio" && root.clipKind !== "text"
+                                         && clip.mask && clip.mask.shape !== "none"
+                                         && (modelData.key !== "rotation" || clip.mask.shape !== "bars")
+
+                                Text {
+                                    text: modelData.label
+                                    color: Theme.mutedForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                }
+                                Slider {
+                                    width: parent.width
+                                    from: modelData.min
+                                    to: modelData.max
+                                    stepSize: modelData.key === "feather" ? 1 : 0.01
+                                    value: (clip.mask && clip.mask[modelData.key]) || 0
+                                    onMoved: {
+                                        const mask = Object.assign({}, clip.mask || {})
+                                        mask[modelData.key] = value
+                                        EditorState.setClipMask(EditorState.selectedTrack, EditorState.selectedClip, mask)
+                                    }
+                                }
+                            }
+                        }
+
+                        Row {
+                            width: parent.width
+                            spacing: 8
+                            visible: root.clipKind !== "audio" && root.clipKind !== "text"
+                                     && clip.mask && clip.mask.shape !== "none"
+                            Text {
+                                text: "Invert"
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Switch {
+                                checked: !!(clip.mask && clip.mask.invert)
+                                onToggled: {
+                                    const mask = Object.assign({}, clip.mask || {})
+                                    mask.invert = checked
+                                    EditorState.setClipMask(EditorState.selectedTrack, EditorState.selectedClip, mask)
+                                }
+                            }
+                        }
                     }
 
                     // ----- Effects ---------------------------------------------------------------

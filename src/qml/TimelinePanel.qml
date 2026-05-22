@@ -1075,6 +1075,64 @@ PanelFrame {
                                         }
                                     }
                                 }
+
+                                // Transition handles above clips — otherwise the next clip's MouseArea steals clicks.
+                                Repeater {
+                                    model: Math.max(0, root.tracks[trackRow.trackIndex].clips.length - 1)
+                                    delegate: Item {
+                                        id: transitionHandle
+                                        property var leftClip: root.tracks[trackRow.trackIndex].clips[modelData]
+                                        property var rightClip: root.tracks[trackRow.trackIndex].clips[modelData + 1]
+                                        property string trackType: root.tracks[trackRow.trackIndex].type
+                                        property bool clipsAdjacent: Math.abs(
+                                            (leftClip.start + leftClip.duration) - rightClip.start) < 0.001
+                                        property var transitionData: EditorState.transitionBetweenClips(
+                                                                         trackRow.trackIndex, modelData)
+                                        property bool hasTransition: transitionData
+                                                                       && Object.keys(transitionData).length > 0
+                                        property bool transitionSelected: EditorState.selectedTransitionTrack === trackRow.trackIndex
+                                                                          && EditorState.selectedTransitionLeftClip === modelData
+
+                                        z: 10
+                                        width: 24
+                                        height: 24
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        x: (leftClip.start + leftClip.duration) * root.pxPerSecond - width / 2
+                                        visible: (trackType === "video" || trackType === "shape") && clipsAdjacent
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: 4
+                                            color: transitionHandle.transitionSelected ? Theme.primary
+                                                   : (transitionHandle.hasTransition ? Theme.primary : Theme.panelAccent)
+                                            opacity: transitionHandle.transitionSelected ? 1.0 : (transitionHandle.hasTransition ? 0.85 : 1.0)
+                                            border.width: 1
+                                            border.color: Theme.panelBorder
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: transitionHandle.hasTransition ? "T" : "+"
+                                                color: Theme.panelForeground
+                                                font.family: Theme.fontFamily
+                                                font.pixelSize: Theme.fontSizeTiny
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            anchors.margins: -4
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (transitionHandle.hasTransition) {
+                                                    EditorState.selectTransition(trackRow.trackIndex, modelData)
+                                                } else {
+                                                    EditorState.addTransition(trackRow.trackIndex, modelData,
+                                                                              "crossfade", 0.5)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

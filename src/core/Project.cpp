@@ -133,6 +133,71 @@ ShapeStyle shapeStyleFromJson(const QJsonObject &o)
     return s;
 }
 
+QJsonObject maskToJson(const Mask &m)
+{
+    QJsonArray points;
+    for (const QPointF &pt : m.points)
+        points.append(QJsonArray{pt.x(), pt.y()});
+
+    return QJsonObject{
+        {QStringLiteral("shape"), maskShapeToString(m.shape)},
+        {QStringLiteral("x"), m.x},
+        {QStringLiteral("y"), m.y},
+        {QStringLiteral("w"), m.w},
+        {QStringLiteral("h"), m.h},
+        {QStringLiteral("rotation"), m.rotation},
+        {QStringLiteral("feather"), m.feather},
+        {QStringLiteral("invert"), m.invert},
+        {QStringLiteral("points"), points},
+    };
+}
+
+Mask maskFromJson(const QJsonObject &o)
+{
+    Mask m;
+    if (o.isEmpty())
+        return m;
+    m.shape = maskShapeFromString(o.value(QStringLiteral("shape")).toString());
+    m.x = o.value(QStringLiteral("x")).toDouble(m.x);
+    m.y = o.value(QStringLiteral("y")).toDouble(m.y);
+    m.w = o.value(QStringLiteral("w")).toDouble(m.w);
+    m.h = o.value(QStringLiteral("h")).toDouble(m.h);
+    m.rotation = o.value(QStringLiteral("rotation")).toDouble(m.rotation);
+    m.feather = o.value(QStringLiteral("feather")).toDouble(m.feather);
+    m.invert = o.value(QStringLiteral("invert")).toBool(m.invert);
+    const QJsonArray points = o.value(QStringLiteral("points")).toArray();
+    for (const QJsonValue &value : points) {
+        const QJsonArray pair = value.toArray();
+        if (pair.size() >= 2)
+            m.points.append(QPointF(pair.at(0).toDouble(), pair.at(1).toDouble()));
+    }
+    return m;
+}
+
+QJsonObject transitionToJson(const Transition &t)
+{
+    return QJsonObject{
+        {QStringLiteral("id"), t.id},
+        {QStringLiteral("fromClipId"), t.fromClipId},
+        {QStringLiteral("toClipId"), t.toClipId},
+        {QStringLiteral("kind"), transitionKindToString(t.kind)},
+        {QStringLiteral("durationUs"), static_cast<double>(t.durationUs)},
+    };
+}
+
+Transition transitionFromJson(const QJsonObject &o)
+{
+    Transition t;
+    if (o.isEmpty())
+        return t;
+    t.id = o.value(QStringLiteral("id")).toString();
+    t.fromClipId = o.value(QStringLiteral("fromClipId")).toString();
+    t.toClipId = o.value(QStringLiteral("toClipId")).toString();
+    t.kind = transitionKindFromString(o.value(QStringLiteral("kind")).toString());
+    t.durationUs = static_cast<TimeUs>(o.value(QStringLiteral("durationUs")).toDouble(t.durationUs));
+    return t;
+}
+
 QJsonObject clipToJson(const Clip &clip)
 {
     return QJsonObject{
@@ -147,6 +212,8 @@ QJsonObject clipToJson(const Clip &clip)
         {QStringLiteral("thumbnailPath"), clip.thumbnailPath},
         {QStringLiteral("filmstripPath"), clip.filmstripPath},
         {QStringLiteral("blendMode"), blendModeToString(clip.blendMode)},
+        {QStringLiteral("speed"), clip.speed},
+        {QStringLiteral("mask"), maskToJson(clip.mask)},
         {QStringLiteral("timelineStartUs"), static_cast<double>(clip.timelineStart)},
         {QStringLiteral("timelineDurationUs"), static_cast<double>(clip.timelineDuration)},
         {QStringLiteral("srcInUs"), static_cast<double>(clip.srcIn)},
@@ -175,6 +242,8 @@ Clip clipFromJsonV2(const QJsonObject &object)
     clip.thumbnailPath = object.value(QStringLiteral("thumbnailPath")).toString();
     clip.filmstripPath = object.value(QStringLiteral("filmstripPath")).toString();
     clip.blendMode = blendModeFromString(object.value(QStringLiteral("blendMode")).toString());
+    clip.speed = object.value(QStringLiteral("speed")).toDouble(1.0);
+    clip.mask = maskFromJson(object.value(QStringLiteral("mask")).toObject());
     clip.timelineStart = static_cast<TimeUs>(object.value(QStringLiteral("timelineStartUs")).toDouble());
     clip.timelineDuration = static_cast<TimeUs>(object.value(QStringLiteral("timelineDurationUs")).toDouble());
     clip.srcIn = static_cast<TimeUs>(object.value(QStringLiteral("srcInUs")).toDouble());
@@ -363,6 +432,11 @@ Project Project::fromJson(const QJsonObject &object, QString *errorOut)
             else
                 track.clips.append(clipFromJsonV1(clipObject, project.m_assetOrder));
         }
+
+        track.transitions.clear();
+        const QJsonArray transitionsArray = trackObject.value(QStringLiteral("transitions")).toArray();
+        for (const QJsonValue &transitionValue : transitionsArray)
+            track.transitions.append(transitionFromJson(transitionValue.toObject()));
     }
 
     project.m_bookmarks.clear();
@@ -399,12 +473,17 @@ QJsonObject Project::toJson() const
         for (const Clip &clip : track.clips)
             clipsArray.append(clipToJson(clip));
 
+        QJsonArray transitionsArray;
+        for (const Transition &transition : track.transitions)
+            transitionsArray.append(transitionToJson(transition));
+
         tracksArray.append(QJsonObject{
             {QStringLiteral("type"), trackTypeToString(track.type)},
             {QStringLiteral("muted"), track.muted},
             {QStringLiteral("hidden"), track.hidden},
             {QStringLiteral("locked"), track.locked},
             {QStringLiteral("clips"), clipsArray},
+            {QStringLiteral("transitions"), transitionsArray},
         });
     }
 

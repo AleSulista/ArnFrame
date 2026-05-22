@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Clip.h"
+#include "Transition.h"
 
 #include <QList>
 #include <QString>
@@ -16,6 +17,7 @@ struct Track
 {
     TrackType type = TrackType::Video;
     QList<Clip> clips;
+    QList<Transition> transitions;
     bool muted = false;
     bool hidden = false;
     bool locked = false;

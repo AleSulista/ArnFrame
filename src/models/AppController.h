@@ -40,6 +40,9 @@ class AppController : public QObject
     Q_PROPERTY(QVariantList selection READ selection NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selectedClipData READ selectedClipData NOTIFY selectedClipDataChanged)
     Q_PROPERTY(QVariantList selectedClipEffects READ selectedClipEffects NOTIFY selectedClipDataChanged)
+    Q_PROPERTY(QVariantMap selectedTransitionData READ selectedTransitionData NOTIFY selectedTransitionDataChanged)
+    Q_PROPERTY(int selectedTransitionTrack READ selectedTransitionTrack NOTIFY selectedTransitionDataChanged)
+    Q_PROPERTY(int selectedTransitionLeftClip READ selectedTransitionLeftClip NOTIFY selectedTransitionDataChanged)
     Q_PROPERTY(bool guidesEnabled READ guidesEnabled WRITE setGuidesEnabled NOTIFY guidesChanged)
     Q_PROPERTY(QString guideType READ guideType WRITE setGuideType NOTIFY guidesChanged)
     Q_PROPERTY(QVariantList actions READ actions NOTIFY shortcutsChanged)
@@ -72,6 +75,9 @@ public:
     QVariantList selection() const;
     QVariantMap selectedClipData() const;
     QVariantList selectedClipEffects() const;
+    QVariantMap selectedTransitionData() const;
+    int selectedTransitionTrack() const { return m_selectedTransitionTrack; }
+    int selectedTransitionLeftClip() const { return m_selectedTransitionLeftClip; }
     bool guidesEnabled() const { return m_guidesEnabled; }
     QString guideType() const { return m_guideType; }
     QVariantList actions() const;
@@ -137,6 +143,16 @@ public:
     Q_INVOKABLE void setTextStyle(int trackIndex, int clipIndex, const QVariantMap &style);
     Q_INVOKABLE void applyTextPreset(int trackIndex, int clipIndex, const QString &presetId);
     Q_INVOKABLE void setClipBlendMode(int trackIndex, int clipIndex, const QString &mode);
+    Q_INVOKABLE void setClipSpeed(int trackIndex, int clipIndex, double speed);
+    Q_INVOKABLE void setClipMask(int trackIndex, int clipIndex, const QVariantMap &mask);
+    Q_INVOKABLE void addTransition(int trackIndex, int clipIndex, const QString &kind, double durationSeconds);
+    Q_INVOKABLE void removeTransition(int trackIndex, const QString &transitionId);
+    Q_INVOKABLE void setTransitionDuration(int trackIndex, const QString &transitionId, double durationSeconds);
+    Q_INVOKABLE void setTransitionKind(int trackIndex, const QString &transitionId, const QString &kind);
+    Q_INVOKABLE QVariantMap transitionBetweenClips(int trackIndex, int clipIndex) const;
+    Q_INVOKABLE QVariantList transitionKinds() const;
+    Q_INVOKABLE void selectTransition(int trackIndex, int leftClipIndex);
+    Q_INVOKABLE void clearTransitionSelection();
     Q_INVOKABLE void setClipKeyframe(int trackIndex, int clipIndex, const QString &prop, double atSeconds,
                                      double value);
     Q_INVOKABLE void removeClipKeyframe(int trackIndex, int clipIndex, const QString &prop, double atSeconds);
@@ -186,6 +202,7 @@ signals:
     void exportInProgressChanged();
     void selectionChanged();
     void selectedClipDataChanged();
+    void selectedTransitionDataChanged();
     void bookmarksChanged();
     void projectNameChanged();
     void lastMessageChanged();
@@ -225,6 +242,8 @@ protected:
     bool m_exportInProgress = false;
     int m_selectedTrack = -1;
     int m_selectedClip = -1;
+    int m_selectedTransitionTrack = -1;
+    int m_selectedTransitionLeftClip = -1;
     QList<QPair<int, int>> m_selection;
     bool m_guidesEnabled = false;
     QString m_guideType = QStringLiteral("thirds");

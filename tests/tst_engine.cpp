@@ -16,6 +16,8 @@
 #include "engine/EffectCatalog.h"
 #include "engine/EffectProcessor.h"
 #include "engine/FrameCompositor.h"
+#include "engine/MaskApplier.h"
+#include "core/Transition.h"
 
 class EngineTest : public QObject
 {
@@ -63,6 +65,10 @@ private slots:
     void timeEchoBlendsPriorVideoFrames();
     void shockwavePulseZeroStrengthPassthrough();
     void shockwavePulseChangesPixelsNearWavefront();
+    void compositorCrossfadeBetweenShapeClips();
+    void compositorDipToBlackMidpointIsBlack();
+    void compositorWipeRightRevealsIncomingClip();
+    void maskApplierEllipseMasksCorners();
 
 private:
     static QString makeColorSegmentsVideo(QTemporaryDir &dir);
@@ -1162,6 +1168,140 @@ void EngineTest::shockwavePulseChangesPixelsNearWavefront()
     QVERIFY(def);
     QVERIFY(def->meta.compositorOnly);
     QCOMPARE(buildFilterGraphForEffect({.catalogId = QStringLiteral("shockwave_pulse")}), QString());
+}
+
+void EngineTest::compositorCrossfadeBetweenShapeClips()
+{
+    drift::Project project;
+    project.setResolution(128, 128);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clipA;
+    clipA.id = QStringLiteral("a");
+    clipA.type = drift::ClipType::Shape;
+    clipA.timelineStart = 0;
+    clipA.timelineDuration = drift::secondsToUs(2.0);
+    clipA.shapeStyle.kind = drift::ShapeKind::Rectangle;
+    clipA.shapeStyle.fill = Qt::red;
+
+    drift::Clip clipB;
+    clipB.id = QStringLiteral("b");
+    clipB.type = drift::ClipType::Shape;
+    clipB.timelineStart = drift::secondsToUs(2.0);
+    clipB.timelineDuration = drift::secondsToUs(2.0);
+    clipB.shapeStyle.kind = drift::ShapeKind::Rectangle;
+    clipB.shapeStyle.fill = Qt::blue;
+
+    project.tracks()[0].clips.append(clipA);
+    project.tracks()[0].clips.append(clipB);
+
+    drift::Transition transition;
+    transition.id = QStringLiteral("tr");
+    transition.fromClipId = clipA.id;
+    transition.toClipId = clipB.id;
+    transition.kind = drift::TransitionKind::Crossfade;
+    transition.durationUs = drift::secondsToUs(1.0);
+    project.tracks()[0].transitions.append(transition);
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+
+    const QImage redOnly = compositor.compositeAt(drift::secondsToUs(1.0));
+    const QImage blueOnly = compositor.compositeAt(drift::secondsToUs(3.0));
+    const QImage mid = compositor.compositeAt(drift::secondsToUs(2.0));
+    QVERIFY(!mid.isNull());
+    const QRgb center = mid.pixel(64, 64);
+    const QRgb redCenter = redOnly.pixel(64, 64);
+    const QRgb blueCenter = blueOnly.pixel(64, 64);
+    QVERIFY(center != redCenter);
+    QVERIFY(center != blueCenter);
+    QVERIFY(qRed(center) > 0);
+    QVERIFY(qBlue(center) > 0);
+}
+
+static void appendRedBlueShapeTransition(drift::Project &project, drift::TransitionKind kind)
+{
+    project.setResolution(128, 128);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clipA;
+    clipA.id = QStringLiteral("a");
+    clipA.type = drift::ClipType::Shape;
+    clipA.timelineStart = 0;
+    clipA.timelineDuration = drift::secondsToUs(2.0);
+    clipA.shapeStyle.kind = drift::ShapeKind::Rectangle;
+    clipA.shapeStyle.fill = Qt::red;
+
+    drift::Clip clipB;
+    clipB.id = QStringLiteral("b");
+    clipB.type = drift::ClipType::Shape;
+    clipB.timelineStart = drift::secondsToUs(2.0);
+    clipB.timelineDuration = drift::secondsToUs(2.0);
+    clipB.shapeStyle.kind = drift::ShapeKind::Rectangle;
+    clipB.shapeStyle.fill = Qt::blue;
+
+    project.tracks()[0].clips.append(clipA);
+    project.tracks()[0].clips.append(clipB);
+
+    drift::Transition transition;
+    transition.id = QStringLiteral("tr");
+    transition.fromClipId = clipA.id;
+    transition.toClipId = clipB.id;
+    transition.kind = kind;
+    transition.durationUs = drift::secondsToUs(1.0);
+    project.tracks()[0].transitions.append(transition);
+}
+
+void EngineTest::compositorDipToBlackMidpointIsBlack()
+{
+    drift::Project project;
+    appendRedBlueShapeTransition(project, drift::TransitionKind::DipToBlack);
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+
+    const QImage mid = compositor.compositeAt(drift::secondsToUs(2.0));
+    QVERIFY(!mid.isNull());
+    const QRgb center = mid.pixel(64, 64);
+    QVERIFY(qRed(center) < 30);
+    QVERIFY(qGreen(center) < 30);
+    QVERIFY(qBlue(center) < 30);
+}
+
+void EngineTest::compositorWipeRightRevealsIncomingClip()
+{
+    drift::Project project;
+    appendRedBlueShapeTransition(project, drift::TransitionKind::WipeRight);
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+
+    const QImage early = compositor.compositeAt(drift::secondsToUs(1.75));
+    const QImage late = compositor.compositeAt(drift::secondsToUs(2.25));
+    QVERIFY(!early.isNull());
+    QVERIFY(!late.isNull());
+    // Shape clips are small and centered; sample canvas center, not edges.
+    QVERIFY(qRed(early.pixel(64, 64)) > qBlue(early.pixel(64, 64)));
+    QVERIFY(qBlue(late.pixel(64, 64)) > qRed(late.pixel(64, 64)));
+}
+
+void EngineTest::maskApplierEllipseMasksCorners()
+{
+    QImage image(64, 64, QImage::Format_RGBA8888);
+    image.fill(Qt::white);
+
+    drift::Mask mask;
+    mask.shape = drift::MaskShape::Ellipse;
+    mask.x = 0.5;
+    mask.y = 0.5;
+    mask.w = 0.5;
+    mask.h = 0.5;
+
+    const QImage masked = drift::applyMask(image, mask, 64, 64);
+    QVERIFY(qAlpha(masked.pixel(32, 32)) > 200);
+    QVERIFY(qAlpha(masked.pixel(0, 0)) < 20);
 }
 
 QTEST_MAIN(EngineTest)

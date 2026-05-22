@@ -4,8 +4,10 @@
 #include "CompositorFrameHistory.h"
 #include "EffectCatalog.h"
 #include "EffectProcessor.h"
+#include "MaskApplier.h"
 #include "core/Clip.h"
 #include "core/Time.h"
+#include "core/Transition.h"
 
 #include <QFont>
 #include <QFontMetrics>
@@ -101,16 +103,21 @@ QImage decodeClipMediaFrame(const drift::Clip &clip, drift::TimeUs timelineUs, i
     }
 
     if (clip.type == drift::ClipType::Video) {
-        const drift::TimeUs sourceUs = clip.srcIn + (timelineUs - clip.timelineStart);
+        const drift::TimeUs sourceUs = clip.timelineToSourceUs(timelineUs);
         return ClipReaderPool::instance().readVideoFrame(clip.path, sourceUs, width, height);
     }
 
     return {};
 }
 
+QImage shapeImageForClip(const drift::Clip &clip, int canvasWidth, int canvasHeight);
+
 QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int width, int height, int projectFps,
                     int maxTimeEchoHistoryFrames)
 {
+    if (clip.type == drift::ClipType::Shape)
+        return shapeImageForClip(clip, width, height);
+
     if (clip.path.isEmpty())
         return {};
 
@@ -156,10 +163,16 @@ QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int width
         image = decodeClipMediaFrame(clip, timelineUs, width, height);
     }
 
-    if (image.isNull() || otherEffects.isEmpty())
+    if (image.isNull() || otherEffects.isEmpty()) {
+        if (!image.isNull() && clip.mask.shape != drift::MaskShape::None)
+            image = drift::applyMask(image, clip.mask, width, height);
         return image;
+    }
 
-    return EffectProcessor::applyEffects(image, otherEffects, clipTimeUs);
+    image = EffectProcessor::applyEffects(image, otherEffects, clipTimeUs);
+    if (clip.mask.shape != drift::MaskShape::None)
+        image = drift::applyMask(image, clip.mask, width, height);
+    return image;
 }
 
 QImage shapeImageForClip(const drift::Clip &clip, int canvasWidth, int canvasHeight)
@@ -252,22 +265,118 @@ double transformValue(const drift::KeyframeTrack<double> &track, drift::TimeUs r
 }
 
 void drawClipFrame(QPainter &painter, const QImage &frame, const drift::Clip &clip, drift::TimeUs timelineUs,
-                   int canvasWidth, int canvasHeight)
+                   int canvasWidth, int canvasHeight, double opacityMultiplier = 1.0,
+                   const QRectF *canvasClipRect = nullptr, QPointF extraOffset = QPointF(), double extraScale = 1.0)
 {
     const drift::TimeUs relative = timelineUs - clip.timelineStart;
     const double posX = transformValue(clip.posX, relative, 0.5);
     const double posY = transformValue(clip.posY, relative, 0.5);
-    const double scale = transformValue(clip.scale, relative, 1.0);
+    const double scale = transformValue(clip.scale, relative, 1.0) * extraScale;
     const double rotation = transformValue(clip.rotation, relative, 0.0);
 
     painter.save();
-    painter.setOpacity(opacityForClip(clip, timelineUs));
+    if (canvasClipRect)
+        painter.setClipRect(*canvasClipRect, Qt::IntersectClip);
+    painter.setOpacity(opacityForClip(clip, timelineUs) * qBound(0.0, opacityMultiplier, 1.0));
     painter.setCompositionMode(toQtComposition(clip.blendMode));
-    painter.translate(posX * canvasWidth, posY * canvasHeight);
+    painter.translate(posX * canvasWidth + extraOffset.x(), posY * canvasHeight + extraOffset.y());
     painter.rotate(rotation);
     painter.scale(scale, scale);
     painter.drawImage(QPointF(-frame.width() / 2.0, -frame.height() / 2.0), frame);
     painter.restore();
+}
+
+QRectF incomingWipeClipRect(drift::TransitionKind kind, double progress, int width, int height)
+{
+    const double p = qBound(0.0, progress, 1.0);
+    switch (kind) {
+    case drift::TransitionKind::WipeLeft:
+        return QRectF(0, 0, width * p, height);
+    case drift::TransitionKind::WipeRight: {
+        const double x = width * (1.0 - p);
+        return QRectF(x, 0, width - x, height);
+    }
+    case drift::TransitionKind::WipeUp: {
+        const double y = height * (1.0 - p);
+        return QRectF(0, y, width, height - y);
+    }
+    case drift::TransitionKind::WipeDown:
+        return QRectF(0, 0, width, height * p);
+    default:
+        return QRectF(0, 0, width, height);
+    }
+}
+
+bool isWipeKind(drift::TransitionKind kind)
+{
+    switch (kind) {
+    case drift::TransitionKind::WipeLeft:
+    case drift::TransitionKind::WipeRight:
+    case drift::TransitionKind::WipeUp:
+    case drift::TransitionKind::WipeDown:
+        return true;
+    default:
+        return false;
+    }
+}
+
+void drawTransitionFrame(QPainter &painter, const drift::Transition &transition, const drift::Clip &fromClip,
+                         const drift::Clip &toClip, drift::TimeUs timelineUs, drift::TimeUs windowStart,
+                         drift::TimeUs windowEnd, int width, int height, int projectFps, int maxTimeEchoHistoryFrames)
+{
+    const double p = drift::transitionProgress(timelineUs, windowStart, windowEnd);
+    const drift::TransitionBlendOpacities blend = drift::transitionBlendOpacities(transition.kind, p);
+    const QImage frameA = imageForClip(fromClip, timelineUs, width, height, projectFps, maxTimeEchoHistoryFrames);
+    const QImage frameB = imageForClip(toClip, timelineUs, width, height, projectFps, maxTimeEchoHistoryFrames);
+    if (frameA.isNull() && frameB.isNull())
+        return;
+
+    if (transition.kind == drift::TransitionKind::PushLeft) {
+        const QPointF outOffset(-width * p, 0);
+        const QPointF inOffset(width * (1.0 - p), 0);
+        if (!frameA.isNull())
+            drawClipFrame(painter, frameA, fromClip, timelineUs, width, height, blend.outgoing, nullptr, outOffset);
+        if (!frameB.isNull())
+            drawClipFrame(painter, frameB, toClip, timelineUs, width, height, blend.incoming, nullptr, inOffset);
+        return;
+    }
+
+    if (transition.kind == drift::TransitionKind::ZoomIn) {
+        const double inScale = 0.82 + 0.18 * p;
+        if (!frameA.isNull())
+            drawClipFrame(painter, frameA, fromClip, timelineUs, width, height, blend.outgoing);
+        if (!frameB.isNull())
+            drawClipFrame(painter, frameB, toClip, timelineUs, width, height, blend.incoming, nullptr, QPointF(), inScale);
+        return;
+    }
+
+    if (isWipeKind(transition.kind)) {
+        if (!frameA.isNull())
+            drawClipFrame(painter, frameA, fromClip, timelineUs, width, height, blend.outgoing);
+        if (!frameB.isNull()) {
+            const QRectF wipeClip = incomingWipeClipRect(transition.kind, p, width, height);
+            drawClipFrame(painter, frameB, toClip, timelineUs, width, height, blend.incoming, &wipeClip);
+        }
+        return;
+    }
+
+    if (!frameA.isNull())
+        drawClipFrame(painter, frameA, fromClip, timelineUs, width, height, blend.outgoing);
+    if (!frameB.isNull())
+        drawClipFrame(painter, frameB, toClip, timelineUs, width, height, blend.incoming);
+
+    if (blend.blackOverlay > 0.0) {
+        painter.save();
+        painter.setOpacity(blend.blackOverlay);
+        painter.fillRect(0, 0, width, height, Qt::black);
+        painter.restore();
+    }
+    if (blend.whiteOverlay > 0.0) {
+        painter.save();
+        painter.setOpacity(blend.whiteOverlay);
+        painter.fillRect(0, 0, width, height, Qt::white);
+        painter.restore();
+    }
 }
 
 void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, int w, int h, double scale,
@@ -368,7 +477,27 @@ QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs, const RenderOption
         if (track.hidden || track.type == drift::TrackType::Audio)
             continue;
 
+        QSet<QString> transitionClipIds;
+        drift::TimeUs transitionStart = 0;
+        drift::TimeUs transitionEnd = 0;
+        const drift::Transition *activeTransition =
+            drift::activeTransitionAt(track, timelineUs, transitionStart, transitionEnd);
+        if (activeTransition) {
+            const drift::Clip *fromClip = drift::clipById(track, activeTransition->fromClipId);
+            const drift::Clip *toClip = drift::clipById(track, activeTransition->toClipId);
+            if (fromClip && toClip) {
+                drawTransitionFrame(painter, *activeTransition, *fromClip, *toClip, timelineUs, transitionStart,
+                                    transitionEnd, width, height, m_project->fps(),
+                                    options.maxTimeEchoHistoryFrames);
+                transitionClipIds.insert(fromClip->id);
+                transitionClipIds.insert(toClip->id);
+            }
+        }
+
         for (const drift::Clip &clip : track.clips) {
+            if (transitionClipIds.contains(clip.id))
+                continue;
+
             if (!clip.containsTime(timelineUs))
                 continue;
 
@@ -378,11 +507,14 @@ QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs, const RenderOption
             }
 
             QImage frame;
-            if (clip.type == drift::ClipType::Shape)
+            if (clip.type == drift::ClipType::Shape) {
                 frame = shapeImageForClip(clip, width, height);
-            else
+                if (!frame.isNull() && clip.mask.shape != drift::MaskShape::None)
+                    frame = drift::applyMask(frame, clip.mask, width, height);
+            } else {
                 frame = imageForClip(clip, timelineUs, width, height, m_project->fps(),
                                      options.maxTimeEchoHistoryFrames);
+            }
             if (frame.isNull())
                 continue;
 

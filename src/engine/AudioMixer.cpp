@@ -1,7 +1,9 @@
 #include "AudioMixer.h"
 
+#include "AudioAtempo.h"
 #include "ClipReaderPool.h"
 #include "core/Clip.h"
+#include "core/Transition.h"
 
 #include <QtMath>
 #include <cstring>
@@ -25,8 +27,25 @@ double volumeForClip(const drift::Clip &clip, drift::TimeUs timelineUs)
     return qBound(0.0, clip.volume.evaluateAt(relative), 2.0);
 }
 
-void accumulateClipAudio(const drift::Clip &clip, drift::TimeUs timelineStartUs, int sampleCount,
-                         int sampleRate, float *mixBuffer)
+double transitionGainForClip(const drift::Track &track, const drift::Clip &clip, drift::TimeUs timelineUs)
+{
+    drift::TimeUs windowStart = 0;
+    drift::TimeUs windowEnd = 0;
+    const drift::Transition *transition = drift::activeTransitionAt(track, timelineUs, windowStart, windowEnd);
+    if (!transition)
+        return 1.0;
+
+    const double p = drift::transitionProgress(timelineUs, windowStart, windowEnd);
+    const drift::TransitionBlendOpacities blend = drift::transitionBlendOpacities(transition->kind, p);
+    if (clip.id == transition->fromClipId)
+        return blend.outgoing;
+    if (clip.id == transition->toClipId)
+        return blend.incoming;
+    return 1.0;
+}
+
+void accumulateClipAudio(const drift::Clip &clip, const drift::Track &track, drift::TimeUs timelineStartUs,
+                         int sampleCount, int sampleRate, float *mixBuffer)
 {
     if (clip.path.isEmpty())
         return;
@@ -35,21 +54,37 @@ void accumulateClipAudio(const drift::Clip &clip, drift::TimeUs timelineStartUs,
                                                             (static_cast<int64_t>(sampleCount) * drift::kUsPerSecond)
                                                             / sampleRate);
 
-    if (!clip.containsTime(timelineStartUs) && !clip.containsTime(bufferEndUs - 1))
+    const bool overlaps = clip.containsTime(timelineStartUs) || clip.containsTime(bufferEndUs - 1)
+                          || (timelineStartUs < clip.timelineStart && bufferEndUs > clip.timelineEnd());
+    if (!overlaps)
         return;
 
+    const double speed = clip.effectiveSpeed();
     const drift::TimeUs clipOffsetUs = qMax<drift::TimeUs>(0, timelineStartUs - clip.timelineStart);
-    const drift::TimeUs sourceStartUs = clip.srcIn + clipOffsetUs;
+    const drift::TimeUs sourceStartUs = clip.srcIn + static_cast<drift::TimeUs>(clipOffsetUs * speed);
 
-    QVector<float> chunk(sampleCount * 2);
-    const int got = ClipReaderPool::instance().readAudioInterleaved(clip.path, sourceStartUs, sampleCount,
-                                                                    sampleRate, chunk.data());
+    const int sourceSampleCount = qMax(1, static_cast<int>(std::llround(sampleCount * speed)));
+    QVector<float> sourceChunk(sourceSampleCount * 2);
+    const int got = ClipReaderPool::instance().readAudioInterleaved(clip.path, sourceStartUs, sourceSampleCount,
+                                                                    sampleRate, sourceChunk.data());
     if (got <= 0)
         return;
 
-    const float gain = static_cast<float>(volumeForClip(clip, timelineStartUs));
-    for (int i = 0; i < got * 2; ++i)
-        mixBuffer[i] += chunk[i] * gain;
+    QVector<float> chunk;
+    if (qFuzzyCompare(speed, 1.0))
+        chunk = sourceChunk;
+    else
+        chunk = AudioAtempo::apply(sourceChunk.constData(), got, sampleRate, speed, sampleCount);
+
+    const int frames = qMin(sampleCount, chunk.size() / 2);
+    for (int i = 0; i < frames; ++i) {
+        const drift::TimeUs sampleTimeUs =
+            timelineStartUs + static_cast<drift::TimeUs>((static_cast<int64_t>(i) * drift::kUsPerSecond) / sampleRate);
+        const float gain = static_cast<float>(volumeForClip(clip, sampleTimeUs)
+                                              * transitionGainForClip(track, clip, sampleTimeUs));
+        mixBuffer[i * 2] += chunk[i * 2] * gain;
+        mixBuffer[i * 2 + 1] += chunk[i * 2 + 1] * gain;
+    }
 }
 
 } // namespace
@@ -68,11 +103,11 @@ void AudioMixer::mix(drift::TimeUs timelineStartUs, int sampleCount, int sampleR
 
         if (track.type == drift::TrackType::Audio) {
             for (const drift::Clip &clip : track.clips)
-                accumulateClipAudio(clip, timelineStartUs, sampleCount, sampleRate, interleavedStereoOut);
+                accumulateClipAudio(clip, track, timelineStartUs, sampleCount, sampleRate, interleavedStereoOut);
         } else if (track.type == drift::TrackType::Video) {
             for (const drift::Clip &clip : track.clips) {
                 if (clip.type == drift::ClipType::Video)
-                    accumulateClipAudio(clip, timelineStartUs, sampleCount, sampleRate, interleavedStereoOut);
+                    accumulateClipAudio(clip, track, timelineStartUs, sampleCount, sampleRate, interleavedStereoOut);
             }
         }
     }

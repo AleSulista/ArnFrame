@@ -7,6 +7,7 @@
 #include "core/Keyframe.h"
 #include "core/Project.h"
 #include "core/TimelineOps.h"
+#include "core/Transition.h"
 
 class CoreTest : public QObject
 {
@@ -27,6 +28,9 @@ private slots:
     void effectCatalogIdSerialization();
     void rgbSplitEffectParametersSerialization();
     void blockGlitchEffectParametersSerialization();
+    void clipSpeedSourceMapping();
+    void maskAndTransitionSerialization();
+    void allTransitionKindsRoundTrip();
 };
 
 void CoreTest::timeConversion()
@@ -417,6 +421,117 @@ void CoreTest::blockGlitchEffectParametersSerialization()
     QCOMPARE(params.value(QStringLiteral("shiftAmount")).toDouble(), 36.0);
     QCOMPARE(params.value(QStringLiteral("frequency")).toDouble(), 0.4);
     QCOMPARE(params.value(QStringLiteral("seed")).toDouble(), 7.0);
+}
+
+void CoreTest::clipSpeedSourceMapping()
+{
+    drift::Clip clip;
+    clip.timelineStart = drift::secondsToUs(1.0);
+    clip.timelineDuration = drift::secondsToUs(4.0);
+    clip.srcIn = drift::secondsToUs(2.0);
+    clip.speed = 2.0;
+    clip.srcOut = clip.srcIn + clip.sourceSpanUs();
+
+    QCOMPARE(clip.sourceSpanUs(), drift::secondsToUs(8.0));
+    QCOMPARE(clip.timelineToSourceUs(drift::secondsToUs(3.0)), drift::secondsToUs(6.0));
+
+    clip.syncSrcOutFromSpeed(drift::secondsToUs(20.0));
+    QCOMPARE(clip.srcOut, clip.srcIn + drift::secondsToUs(8.0));
+}
+
+void CoreTest::maskAndTransitionSerialization()
+{
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clipA;
+    clipA.id = QStringLiteral("clip-a");
+    clipA.type = drift::ClipType::Video;
+    clipA.timelineStart = 0;
+    clipA.timelineDuration = drift::secondsToUs(2.0);
+    clipA.speed = 2.0;
+    clipA.mask.shape = drift::MaskShape::Ellipse;
+    clipA.mask.w = 0.5;
+    clipA.mask.feather = 4.0;
+
+    drift::Clip clipB;
+    clipB.id = QStringLiteral("clip-b");
+    clipB.type = drift::ClipType::Video;
+    clipB.timelineStart = drift::secondsToUs(2.0);
+    clipB.timelineDuration = drift::secondsToUs(2.0);
+
+    project.tracks()[0].clips.append(clipA);
+    project.tracks()[0].clips.append(clipB);
+
+    drift::Transition transition;
+    transition.id = QStringLiteral("tr-1");
+    transition.fromClipId = clipA.id;
+    transition.toClipId = clipB.id;
+    transition.kind = drift::TransitionKind::DipToBlack;
+    transition.durationUs = drift::secondsToUs(0.5);
+    project.tracks()[0].transitions.append(transition);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    QCOMPARE(loaded.tracks()[0].clips[0].speed, 2.0);
+    QCOMPARE(loaded.tracks()[0].clips[0].mask.shape, drift::MaskShape::Ellipse);
+    QCOMPARE(loaded.tracks()[0].transitions.size(), 1);
+    QCOMPARE(loaded.tracks()[0].transitions[0].kind, drift::TransitionKind::DipToBlack);
+    QCOMPARE(loaded.tracks()[0].transitions[0].fromClipId, QStringLiteral("clip-a"));
+}
+
+void CoreTest::allTransitionKindsRoundTrip()
+{
+    const QList<drift::TransitionKind> kinds = {
+        drift::TransitionKind::Crossfade,
+        drift::TransitionKind::DipToBlack,
+        drift::TransitionKind::DipToWhite,
+        drift::TransitionKind::WipeLeft,
+        drift::TransitionKind::WipeRight,
+        drift::TransitionKind::WipeUp,
+        drift::TransitionKind::WipeDown,
+        drift::TransitionKind::PushLeft,
+        drift::TransitionKind::ZoomIn,
+    };
+
+    for (drift::TransitionKind kind : kinds) {
+        drift::Project project;
+        project.tracks().clear();
+        project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+        drift::Clip clipA;
+        clipA.id = QStringLiteral("a");
+        clipA.type = drift::ClipType::Video;
+        clipA.timelineStart = 0;
+        clipA.timelineDuration = drift::secondsToUs(1.0);
+
+        drift::Clip clipB;
+        clipB.id = QStringLiteral("b");
+        clipB.type = drift::ClipType::Video;
+        clipB.timelineStart = drift::secondsToUs(1.0);
+        clipB.timelineDuration = drift::secondsToUs(1.0);
+
+        project.tracks()[0].clips.append(clipA);
+        project.tracks()[0].clips.append(clipB);
+
+        drift::Transition transition;
+        transition.id = QStringLiteral("tr");
+        transition.fromClipId = clipA.id;
+        transition.toClipId = clipB.id;
+        transition.kind = kind;
+        project.tracks()[0].transitions.append(transition);
+
+        QString error;
+        const drift::Project loaded = drift::Project::fromJson(project.toJson(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(loaded.tracks()[0].transitions[0].kind, kind);
+        QCOMPARE(drift::transitionKindToString(kind),
+                 drift::transitionKindToString(loaded.tracks()[0].transitions[0].kind));
+    }
 }
 
 QTEST_MAIN(CoreTest)

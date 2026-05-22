@@ -6,6 +6,10 @@
 #include "models/AppController.h"
 #include "models/AssetLibrary.h"
 
+#include "core/Clip.h"
+#include "core/Project.h"
+#include "core/Track.h"
+
 class EditorStateTest : public QObject
 {
     Q_OBJECT
@@ -20,6 +24,8 @@ private slots:
     void textStyleBlendModeKeyframesAndEffects();
     void effectBrowserCategoriesAndApply();
     void multiSelectClipboardGuidesAndShortcuts();
+    void addTransitionBetweenAdjacentClips();
+    void setTransitionKindAndDurationPersist();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -253,6 +259,60 @@ void EditorStateTest::multiSelectClipboardGuidesAndShortcuts()
 
     state.triggerAction(QStringLiteral("toggleGuides"));
     QCOMPARE(state.guidesEnabled(), false);
+}
+
+static void appendAdjacentShapeClips(drift::Project &project, drift::TimeUs gapUs = 0)
+{
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clipA;
+    clipA.id = QStringLiteral("clip-a");
+    clipA.type = drift::ClipType::Shape;
+    clipA.timelineStart = 0;
+    clipA.timelineDuration = drift::secondsToUs(2.0);
+
+    drift::Clip clipB;
+    clipB.id = QStringLiteral("clip-b");
+    clipB.type = drift::ClipType::Shape;
+    clipB.timelineStart = clipA.timelineEnd() + gapUs;
+    clipB.timelineDuration = drift::secondsToUs(2.0);
+
+    project.tracks()[0].clips.append(clipA);
+    project.tracks()[0].clips.append(clipB);
+}
+
+void EditorStateTest::addTransitionBetweenAdjacentClips()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendAdjacentShapeClips(*state.project(), 500);
+
+    state.selectClip(0, 0);
+    state.addTransition(0, 0, QStringLiteral("wipe_left"), 0.75);
+
+    const QVariantMap transition = state.transitionBetweenClips(0, 0);
+    QVERIFY(!transition.isEmpty());
+    QCOMPARE(transition.value(QStringLiteral("kind")).toString(), QStringLiteral("wipe_left"));
+    QCOMPARE(transition.value(QStringLiteral("duration")).toDouble(), 0.75);
+}
+
+void EditorStateTest::setTransitionKindAndDurationPersist()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendAdjacentShapeClips(*state.project());
+
+    state.addTransition(0, 0, QStringLiteral("crossfade"), 0.5);
+    const QString transitionId = state.transitionBetweenClips(0, 0).value(QStringLiteral("id")).toString();
+    QVERIFY(!transitionId.isEmpty());
+
+    state.setTransitionKind(0, transitionId, QStringLiteral("zoom_in"));
+    state.setTransitionDuration(0, transitionId, 1.25);
+
+    const QVariantMap transition = state.transitionBetweenClips(0, 0);
+    QCOMPARE(transition.value(QStringLiteral("kind")).toString(), QStringLiteral("zoom_in"));
+    QCOMPARE(transition.value(QStringLiteral("duration")).toDouble(), 1.25);
 }
 
 QTEST_MAIN(EditorStateTest)

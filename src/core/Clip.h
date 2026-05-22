@@ -2,6 +2,7 @@
 
 #include "Effect.h"
 #include "Keyframe.h"
+#include "Mask.h"
 #include "MediaAsset.h"
 #include "ShapeStyle.h"
 #include "TextStyle.h"
@@ -43,6 +44,8 @@ struct Clip
     QString filmstripPath;
 
     BlendMode blendMode = BlendMode::Normal;
+    double speed = 1.0; // 1.0 = realtime; >1 faster, <1 slower
+    Mask mask;
 
     KeyframeTrack<double> opacity;
     KeyframeTrack<double> posX;
@@ -53,6 +56,30 @@ struct Clip
     QList<Effect> effects;
 
     TimeUs timelineEnd() const { return timelineStart + timelineDuration; }
+
+    double effectiveSpeed() const { return speed <= 0.0 ? 1.0 : speed; }
+
+    TimeUs sourceSpanUs() const
+    {
+        return static_cast<TimeUs>(llround(static_cast<double>(timelineDuration) * effectiveSpeed()));
+    }
+
+    TimeUs timelineToSourceUs(TimeUs timelineUs) const
+    {
+        const TimeUs rel = qBound(TimeUs{0}, timelineUs - timelineStart, timelineDuration);
+        return srcIn + static_cast<TimeUs>(static_cast<double>(rel) * effectiveSpeed());
+    }
+
+    void syncSrcOutFromSpeed(TimeUs maxSourceUs)
+    {
+        const TimeUs span = sourceSpanUs();
+        srcOut = qMin(srcIn + span, maxSourceUs);
+        if (effectiveSpeed() > 0.0) {
+            const TimeUs actualSpan = srcOut - srcIn;
+            timelineDuration = static_cast<TimeUs>(llround(static_cast<double>(actualSpan) / effectiveSpeed()));
+            timelineDuration = qMax(timelineDuration, TimeUs{1});
+        }
+    }
 
     bool containsTime(TimeUs time) const
     {
