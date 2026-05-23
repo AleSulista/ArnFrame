@@ -33,7 +33,8 @@ PanelFrame {
     function assetVisible(kind) {
         const tabId = tabsModel.get(activeTab).tabId
         if (tabId === "text" || tabId === "stickers" || tabId === "effects"
-                || tabId === "adjustment" || tabId === "settings" || tabId === "sounds")
+                || tabId === "adjustment" || tabId === "settings" || tabId === "sounds"
+                || tabId === "transitions")
             return false
         const kinds = kindsForTab(tabId)
         return kinds.length === 0 || kinds.indexOf(kind) >= 0
@@ -46,7 +47,8 @@ PanelFrame {
         ListElement { tabId: "text"; icon: 2; label: "Text" }
         ListElement { tabId: "stickers"; icon: 3; label: "Stickers" }
         ListElement { tabId: "effects"; icon: 4; label: "Effects" }
-        ListElement { tabId: "settings"; icon: 5; label: "Settings" }
+        ListElement { tabId: "transitions"; icon: 5; label: "Transitions" }
+        ListElement { tabId: "settings"; icon: 6; label: "Settings" }
     }
     property var tabIcons: [
         Theme.icons.folder,
@@ -54,6 +56,7 @@ PanelFrame {
         Theme.icons.type,
         Theme.icons.smile,
         Theme.icons.wand,
+        Theme.icons.chevronsRight,
         Theme.icons.settings
     ]
     property int activeTab: 0
@@ -500,6 +503,109 @@ PanelFrame {
                 visible: tabsModel.get(activeTab).tabId === "effects"
                 width: parent.width
                 height: parent.height - Theme.panelHeaderHeight
+            }
+
+            // Transitions browser
+            Item {
+                visible: tabsModel.get(activeTab).tabId === "transitions"
+                width: parent.width
+                height: parent.height - Theme.panelHeaderHeight
+
+                Column {
+                    anchors.fill: parent
+                    spacing: 0
+
+                    Text {
+                        width: parent.width - 24
+                        leftPadding: 12
+                        rightPadding: 12
+                        topPadding: 8
+                        bottomPadding: 4
+                        wrapMode: Text.WordWrap
+                        horizontalAlignment: Text.AlignHCenter
+                        text: qsTr("Drag onto an overlapping region between two clips. Overlaps default to crossfade.")
+                        color: Theme.mutedForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeXs
+                    }
+
+                    Flickable {
+                        width: parent.width
+                        height: Math.max(0, parent.height - 48)
+                        contentHeight: transitionGrid.height + 24
+                        clip: true
+                        ScrollBar.vertical: AppScrollBar { }
+
+                        Grid {
+                            id: transitionGrid
+                            x: 12
+                            y: 12
+                            width: parent.width - 24
+                            columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
+                            columnSpacing: Theme.assetCardGap
+                            rowSpacing: Theme.assetCardGap
+
+                            Repeater {
+                                model: EditorState.transitionKinds()
+                                delegate: Rectangle {
+                                    id: transitionCard
+                                    required property var modelData
+                                    width: Theme.assetCardWidth
+                                    height: 72
+                                    radius: Theme.radiusSm
+                                    color: transitionHover.hovered ? Theme.panelSecondaryBg : Theme.panelAccent
+                                    border.width: transitionDrag.active ? 1 : 0
+                                    border.color: Theme.transitionOverlap
+                                    opacity: transitionDrag.active ? 0.85 : 1
+
+                                    Drag.active: transitionDrag.active
+                                    Drag.dragType: Drag.Automatic
+                                    Drag.supportedActions: Qt.CopyAction
+                                    Drag.keys: ["application/x-drift-transition"]
+                                    Drag.mimeData: ({ "application/x-drift-transition": transitionCard.modelData.kind })
+                                    Drag.hotSpot.x: width / 2
+                                    Drag.hotSpot.y: height / 2
+
+                                    HoverHandler { id: transitionHover }
+
+                                    DragHandler {
+                                        id: transitionDrag
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                    }
+
+                                    Column {
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        spacing: 4
+
+                                        Text {
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            text: "≫"
+                                            color: Theme.transitionOverlap
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: 18
+                                            font.weight: Font.Bold
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: transitionCard.modelData.label
+                                            color: Theme.panelForeground
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeCard
+                                            font.weight: Font.Medium
+                                            horizontalAlignment: Text.AlignHCenter
+                                            wrapMode: Text.WordWrap
+                                            maximumLineCount: 2
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             Flickable {

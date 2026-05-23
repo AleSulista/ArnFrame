@@ -95,6 +95,7 @@ QtObject {
     readonly property color clipAudio: "#8F5DBA"
     readonly property color clipGraphic: "#BA5D7A"
     readonly property color clipEffect: "#5d93ba"
+    readonly property color transitionOverlap: "#9B5DE5"
     readonly property color waveformColor: "#ffffffb3" // rgba(255,255,255,0.7)
     // Video clips normally show real thumbnails (always photographic/dark-ish); until
     // thumbnail generation exists, use a fixed dark placeholder so the white filename
@@ -183,6 +184,7 @@ QtObject {
         image: "",
         shapes: "",
         chevronDown: "",
+        chevronsRight: "",
         x: "",
         search: "",
         messageSquare: "",

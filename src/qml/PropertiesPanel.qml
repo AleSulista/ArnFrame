@@ -53,11 +53,20 @@ PanelFrame {
         const track = tracks[t]
         if (track.type !== "video" && track.type !== "shape")
             return false
-        if (c + 1 >= track.clips.length)
+        if (c < 0 || c >= track.clips.length)
             return false
         const left = track.clips[c]
-        const right = track.clips[c + 1]
-        return Math.abs((left.start + left.duration) - right.start) < 0.001
+        for (let i = 0; i < track.clips.length; i++) {
+            if (i === c)
+                continue
+            const right = track.clips[i]
+            if (right.start < left.start)
+                continue
+            const gap = right.start - (left.start + left.duration)
+            if (gap <= 0.001)
+                return true
+        }
+        return false
     }
     readonly property int transitionTabIndex: 5
     readonly property var selectedEffects: EditorState.selectedClipEffects
@@ -1153,7 +1162,7 @@ PanelFrame {
                             wrapMode: Text.WordWrap
                             visible: !root.hasActiveTransition && !root.canAddOutgoingTransition
                             text: root.clipKind === "video" || root.clipKind === "shape"
-                                  ? "Select a clip with another clip immediately after it on the same track."
+                                  ? "Select a purple overlap between two clips, or drag a clip so it overlaps the next one."
                                   : "Transitions apply between two clips on a video or shape track."
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
@@ -1204,7 +1213,9 @@ PanelFrame {
                             Text {
                                 width: parent.width
                                 wrapMode: Text.WordWrap
-                                text: "Outgoing transition to the next clip. Scrub the playhead across the cut to preview."
+                                text: root.activeTransition.overlapping
+                                      ? "Overlap transition. Drag another kind from the Transitions library to replace it."
+                                      : "Outgoing transition to the next clip. Scrub the playhead across the cut to preview."
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs

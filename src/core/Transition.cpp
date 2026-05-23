@@ -140,24 +140,56 @@ const Clip *clipById(const Track &track, const QString &clipId)
     return nullptr;
 }
 
+bool clipsEligibleForTransition(const Clip &fromClip, const Clip &toClip)
+{
+    // Partner must start at/after the outgoing clip and abut or overlap it.
+    if (toClip.timelineStart < fromClip.timelineStart)
+        return false;
+    const TimeUs gap = toClip.timelineStart - fromClip.timelineEnd();
+    return gap <= secondsToUs(0.001);
+}
+
+bool clipsPhysicallyOverlap(const Clip &fromClip, const Clip &toClip)
+{
+    return toClip.timelineStart < fromClip.timelineEnd() && toClip.timelineStart >= fromClip.timelineStart;
+}
+
+TimeUs physicalOverlapDurationUs(const Clip &fromClip, const Clip &toClip)
+{
+    if (!clipsPhysicallyOverlap(fromClip, toClip))
+        return 0;
+    return fromClip.timelineEnd() - toClip.timelineStart;
+}
+
 TimeUs transitionCenterUs(const Track &track, const Transition &transition)
 {
     const Clip *fromClip = clipById(track, transition.fromClipId);
+    const Clip *toClip = clipById(track, transition.toClipId);
     if (!fromClip)
         return 0;
+    if (toClip && clipsPhysicallyOverlap(*fromClip, *toClip))
+        return toClip->timelineStart + physicalOverlapDurationUs(*fromClip, *toClip) / 2;
     return fromClip->timelineEnd();
 }
 
 bool transitionWindow(const Track &track, const Transition &transition, TimeUs &startUs, TimeUs &endUs)
 {
-    if (transition.durationUs <= 0)
-        return false;
-
     const Clip *fromClip = clipById(track, transition.fromClipId);
     const Clip *toClip = clipById(track, transition.toClipId);
     if (!fromClip || !toClip)
         return false;
 
+    // Physical overlap on the timeline is the transition window.
+    if (clipsPhysicallyOverlap(*fromClip, *toClip)) {
+        startUs = toClip->timelineStart;
+        endUs = fromClip->timelineEnd();
+        return endUs > startUs;
+    }
+
+    if (transition.durationUs <= 0)
+        return false;
+
+    // Adjacent clips: virtual window centered on the cut.
     const TimeUs center = fromClip->timelineEnd();
     const TimeUs half = transition.durationUs / 2;
     startUs = center - half;

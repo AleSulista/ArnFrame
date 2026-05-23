@@ -27,6 +27,8 @@ private slots:
     void multiSelectClipboardGuidesAndShortcuts();
     void addTransitionBetweenAdjacentClips();
     void setTransitionKindAndDurationPersist();
+    void replaceTransitionOnDrop();
+    void overlapAutoAppliesCrossfade();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -348,6 +350,43 @@ void EditorStateTest::setTransitionKindAndDurationPersist()
     const QVariantMap transition = state.transitionBetweenClips(0, 0);
     QCOMPARE(transition.value(QStringLiteral("kind")).toString(), QStringLiteral("zoom_in"));
     QCOMPARE(transition.value(QStringLiteral("duration")).toDouble(), 1.25);
+}
+
+void EditorStateTest::replaceTransitionOnDrop()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendAdjacentShapeClips(*state.project());
+
+    state.addTransition(0, 0, QStringLiteral("crossfade"), 0.5);
+    const QString firstId = state.transitionBetweenClips(0, 0).value(QStringLiteral("id")).toString();
+    QVERIFY(!firstId.isEmpty());
+
+    state.addTransition(0, 0, QStringLiteral("wipe_right"), 0.5);
+    const QVariantMap replaced = state.transitionBetweenClips(0, 0);
+    QCOMPARE(replaced.value(QStringLiteral("id")).toString(), firstId);
+    QCOMPARE(replaced.value(QStringLiteral("kind")).toString(), QStringLiteral("wipe_right"));
+    QCOMPARE(state.project()->tracks().at(0).transitions.size(), 1);
+}
+
+void EditorStateTest::overlapAutoAppliesCrossfade()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendAdjacentShapeClips(*state.project(), -drift::secondsToUs(0.5)); // 0.5s physical overlap
+
+    // Overlap sync runs on finishEdit; nudge via a no-op-ish move to trigger it.
+    state.moveClip(0, 1, drift::usToSeconds(state.project()->tracks().at(0).clips.at(1).timelineStart));
+
+    const QVariantMap transition = state.transitionBetweenClips(0, 0);
+    QVERIFY(!transition.isEmpty());
+    QCOMPARE(transition.value(QStringLiteral("kind")).toString(), QStringLiteral("crossfade"));
+    QCOMPARE(transition.value(QStringLiteral("overlapping")).toBool(), true);
+    QCOMPARE(transition.value(QStringLiteral("duration")).toDouble(), 0.5);
+
+    state.addTransition(0, 0, QStringLiteral("dip"), 0.5);
+    QCOMPARE(state.transitionBetweenClips(0, 0).value(QStringLiteral("kind")).toString(),
+             QStringLiteral("dip"));
 }
 
 QTEST_MAIN(EditorStateTest)

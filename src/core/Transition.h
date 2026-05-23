@@ -46,6 +46,9 @@ struct Transition
 };
 
 const Clip *clipById(const Track &track, const QString &clipId);
+bool clipsEligibleForTransition(const Clip &fromClip, const Clip &toClip);
+bool clipsPhysicallyOverlap(const Clip &fromClip, const Clip &toClip);
+TimeUs physicalOverlapDurationUs(const Clip &fromClip, const Clip &toClip);
 TimeUs transitionCenterUs(const Track &track, const Transition &transition);
 bool transitionWindow(const Track &track, const Transition &transition, TimeUs &startUs, TimeUs &endUs);
 double transitionProgress(TimeUs timelineUs, TimeUs windowStartUs, TimeUs windowEndUs);

@@ -32,6 +32,7 @@ private slots:
     void clipSpeedSourceMapping();
     void maskAndTransitionSerialization();
     void allTransitionKindsRoundTrip();
+    void physicalOverlapTransitionWindow();
 };
 
 void CoreTest::timeConversion()
@@ -588,6 +589,39 @@ void CoreTest::allTransitionKindsRoundTrip()
         QCOMPARE(drift::transitionKindToString(kind),
                  drift::transitionKindToString(loaded.tracks()[0].transitions[0].kind));
     }
+}
+
+void CoreTest::physicalOverlapTransitionWindow()
+{
+    drift::Track track;
+    track.type = drift::TrackType::Video;
+
+    drift::Clip clipA;
+    clipA.id = QStringLiteral("a");
+    clipA.timelineStart = 0;
+    clipA.timelineDuration = drift::secondsToUs(2.0);
+
+    drift::Clip clipB;
+    clipB.id = QStringLiteral("b");
+    clipB.timelineStart = drift::secondsToUs(1.5);
+    clipB.timelineDuration = drift::secondsToUs(2.0);
+
+    track.clips.append(clipA);
+    track.clips.append(clipB);
+
+    QVERIFY(drift::clipsPhysicallyOverlap(clipA, clipB));
+    QCOMPARE(drift::physicalOverlapDurationUs(clipA, clipB), drift::secondsToUs(0.5));
+
+    drift::Transition transition;
+    transition.fromClipId = clipA.id;
+    transition.toClipId = clipB.id;
+    transition.durationUs = drift::secondsToUs(1.0); // ignored when overlapping
+
+    drift::TimeUs startUs = 0;
+    drift::TimeUs endUs = 0;
+    QVERIFY(drift::transitionWindow(track, transition, startUs, endUs));
+    QCOMPARE(startUs, drift::secondsToUs(1.5));
+    QCOMPARE(endUs, drift::secondsToUs(2.0));
 }
 
 QTEST_MAIN(CoreTest)

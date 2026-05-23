@@ -3,6 +3,7 @@
 #include "AssetLibrary.h"
 #include "core/Clip.h"
 #include "core/TimelineOps.h"
+#include "core/Transition.h"
 #include "core/commands/ProjectCommands.h"
 #include "engine/EffectCatalog.h"
 #include "engine/MediaThumbnail.h"
@@ -18,8 +19,9 @@
 #include <QUuid>
 #include <QtConcurrent>
 #include <QtMath>
-#include <climits>
 #include <algorithm>
+#include <climits>
+#include <limits>
 
 namespace {
 QHash<QString, QString> defaultShortcuts();
@@ -95,15 +97,94 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
 }
 
 namespace {
-QVariantMap transitionToMap(const drift::Transition &t);
+QVariantMap transitionToMap(const drift::Track &track, const drift::Transition &t);
 QVariantMap maskToMap(const drift::Mask &m);
 drift::Mask maskFromMap(const QVariantMap &m);
 
-bool clipsAdjacentForTransition(const drift::Clip &fromClip, const drift::Clip &toClip)
+int findTransitionPartnerIndex(const drift::Track &track, int fromIndex)
 {
-    const drift::TimeUs gap = qAbs(fromClip.timelineEnd() - toClip.timelineStart);
-    return gap <= drift::secondsToUs(0.001);
+    if (fromIndex < 0 || fromIndex >= track.clips.size())
+        return -1;
+
+    const drift::Clip &fromClip = track.clips.at(fromIndex);
+    int best = -1;
+    drift::TimeUs bestStart = std::numeric_limits<drift::TimeUs>::max();
+    for (int i = 0; i < track.clips.size(); ++i) {
+        if (i == fromIndex)
+            continue;
+        const drift::Clip &candidate = track.clips.at(i);
+        if (!drift::clipsEligibleForTransition(fromClip, candidate))
+            continue;
+        if (candidate.timelineStart < bestStart) {
+            bestStart = candidate.timelineStart;
+            best = i;
+        }
+    }
+    return best;
 }
+
+void syncOverlapTransitions(drift::Project &project)
+{
+    for (drift::Track &track : project.tracks()) {
+        if (track.type != drift::TrackType::Video && track.type != drift::TrackType::Shape)
+            continue;
+
+        QList<int> order;
+        order.reserve(track.clips.size());
+        for (int i = 0; i < track.clips.size(); ++i)
+            order.append(i);
+        std::sort(order.begin(), order.end(), [&track](int a, int b) {
+            const drift::Clip &ca = track.clips.at(a);
+            const drift::Clip &cb = track.clips.at(b);
+            if (ca.timelineStart != cb.timelineStart)
+                return ca.timelineStart < cb.timelineStart;
+            return ca.id < cb.id;
+        });
+
+        for (int i = 0; i + 1 < order.size(); ++i) {
+            const int fromIndex = order.at(i);
+            const int toIndex = order.at(i + 1);
+            const drift::Clip &fromClip = track.clips.at(fromIndex);
+            const drift::Clip &toClip = track.clips.at(toIndex);
+            if (!drift::clipsPhysicallyOverlap(fromClip, toClip))
+                continue;
+
+            const drift::TimeUs overlapUs = drift::physicalOverlapDurationUs(fromClip, toClip);
+            if (overlapUs < drift::secondsToUs(0.05))
+                continue;
+
+            drift::Transition *existing = nullptr;
+            for (drift::Transition &transition : track.transitions) {
+                if (transition.fromClipId == fromClip.id && transition.toClipId == toClip.id) {
+                    existing = &transition;
+                    break;
+                }
+            }
+
+            if (existing) {
+                existing->durationUs = overlapUs;
+                continue;
+            }
+
+            drift::Transition transition;
+            transition.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            transition.fromClipId = fromClip.id;
+            transition.toClipId = toClip.id;
+            transition.kind = drift::TransitionKind::Crossfade;
+            transition.durationUs = overlapUs;
+            track.transitions.append(transition);
+        }
+
+        for (int i = track.transitions.size() - 1; i >= 0; --i) {
+            const drift::Transition &transition = track.transitions.at(i);
+            const drift::Clip *fromClip = drift::clipById(track, transition.fromClipId);
+            const drift::Clip *toClip = drift::clipById(track, transition.toClipId);
+            if (!fromClip || !toClip || !drift::clipsEligibleForTransition(*fromClip, *toClip))
+                track.transitions.removeAt(i);
+        }
+    }
+}
+
 } // namespace
 
 QVariantList AppController::tracks() const
@@ -121,7 +202,7 @@ QVariantList AppController::tracks() const
         QVariantList transitions;
         transitions.reserve(track.transitions.size());
         for (const drift::Transition &transition : track.transitions)
-            transitions.append(transitionToMap(transition));
+            transitions.append(transitionToMap(track, transition));
 
         result.append(QVariantMap{
             {QStringLiteral("type"), drift::trackTypeToString(track.type)},
@@ -203,14 +284,26 @@ drift::Mask maskFromMap(const QVariantMap &m)
     return mask;
 }
 
-QVariantMap transitionToMap(const drift::Transition &t)
+QVariantMap transitionToMap(const drift::Track &track, const drift::Transition &t)
 {
+    drift::TimeUs startUs = 0;
+    drift::TimeUs endUs = 0;
+    const bool hasWindow = drift::transitionWindow(track, t, startUs, endUs);
+    const drift::Clip *fromClip = drift::clipById(track, t.fromClipId);
+    const drift::Clip *toClip = drift::clipById(track, t.toClipId);
+    const bool overlapping = fromClip && toClip && drift::clipsPhysicallyOverlap(*fromClip, *toClip);
+    const drift::TimeUs durationUs = hasWindow ? (endUs - startUs) : t.durationUs;
+
     return {
         {QStringLiteral("id"), t.id},
         {QStringLiteral("fromClipId"), t.fromClipId},
         {QStringLiteral("toClipId"), t.toClipId},
         {QStringLiteral("kind"), drift::transitionKindToString(t.kind)},
-        {QStringLiteral("duration"), drift::usToSeconds(t.durationUs)},
+        {QStringLiteral("duration"), drift::usToSeconds(durationUs)},
+        {QStringLiteral("start"), hasWindow ? drift::usToSeconds(startUs) : 0.0},
+        {QStringLiteral("end"), hasWindow ? drift::usToSeconds(endUs) : 0.0},
+        {QStringLiteral("overlapping"), overlapping},
+        {QStringLiteral("label"), drift::transitionKindLabel(t.kind)},
     };
 }
 
@@ -760,6 +853,7 @@ void AppController::pushProjectEdit(const drift::Project &before, const QString 
 
 void AppController::finishEdit(const QString &message)
 {
+    syncOverlapTransitions(m_project);
     normalizeSelection();
     // During playback the engine clock owns the playhead. Seeking here would
     // PlaybackClock::reset() and (historically) stop the clock while audio kept
@@ -1145,6 +1239,7 @@ void AppController::trimClipLeft(int trackIndex, int clipIndex, double newStart)
         clip.timelineDuration += extendBy;
     }
 
+    syncOverlapTransitions(m_project);
     emit tracksChanged();
 }
 
@@ -1167,6 +1262,7 @@ void AppController::trimClipRight(int trackIndex, int clipIndex, double newEnd)
 
     clip.timelineDuration = newDuration;
     clip.srcOut = qMin(clip.srcIn + clip.sourceSpanUs(), sourceDurationForClip(clip));
+    syncOverlapTransitions(m_project);
     emit tracksChanged();
 }
 
@@ -2010,25 +2106,36 @@ void AppController::addTransition(int trackIndex, int clipIndex, const QString &
     drift::Track &track = m_project.tracks()[trackIndex];
     if (track.type != drift::TrackType::Video && track.type != drift::TrackType::Shape)
         return;
-    if (clipIndex < 0 || clipIndex + 1 >= track.clips.size())
+
+    const int partnerIndex = findTransitionPartnerIndex(track, clipIndex);
+    if (partnerIndex < 0)
         return;
 
     const drift::Clip &fromClip = track.clips.at(clipIndex);
-    const drift::Clip &toClip = track.clips.at(clipIndex + 1);
-    if (!clipsAdjacentForTransition(fromClip, toClip))
-        return;
+    const drift::Clip &toClip = track.clips.at(partnerIndex);
+    const drift::TimeUs overlapUs = drift::physicalOverlapDurationUs(fromClip, toClip);
+    const drift::TimeUs requestedUs = qMax<drift::TimeUs>(drift::secondsToUs(0.1), drift::secondsToUs(durationSeconds));
+    const drift::TimeUs durationUs = overlapUs > 0 ? overlapUs : requestedUs;
+    const drift::TransitionKind transitionKind = drift::transitionKindFromString(kind);
 
-    for (const drift::Transition &existing : track.transitions) {
-        if (existing.fromClipId == fromClip.id && existing.toClipId == toClip.id)
+    for (drift::Transition &existing : track.transitions) {
+        if (existing.fromClipId == fromClip.id && existing.toClipId == toClip.id) {
+            const drift::Project before = m_project;
+            existing.kind = transitionKind;
+            existing.durationUs = durationUs;
+            pushProjectEdit(before, QStringLiteral("Replace transition"));
+            finishEdit(QStringLiteral("Transition updated"));
+            selectTransition(trackIndex, clipIndex);
             return;
+        }
     }
 
     drift::Transition transition;
     transition.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     transition.fromClipId = fromClip.id;
     transition.toClipId = toClip.id;
-    transition.kind = drift::transitionKindFromString(kind);
-    transition.durationUs = qMax<drift::TimeUs>(drift::secondsToUs(0.1), drift::secondsToUs(durationSeconds));
+    transition.kind = transitionKind;
+    transition.durationUs = durationUs;
 
     const drift::Project before = m_project;
     track.transitions.append(transition);
@@ -2045,17 +2152,32 @@ void AppController::removeTransition(int trackIndex, const QString &transitionId
     drift::Track &track = m_project.tracks()[trackIndex];
     const drift::Project before = m_project;
     for (int i = 0; i < track.transitions.size(); ++i) {
-        if (track.transitions.at(i).id == transitionId) {
-            if (m_selectedTransitionTrack == trackIndex && m_selectedTransitionLeftClip >= 0) {
-                const QString fromId = track.clips.value(m_selectedTransitionLeftClip).id;
-                if (track.transitions.at(i).fromClipId == fromId)
-                    clearTransitionSelection();
-            }
-            track.transitions.removeAt(i);
-            pushProjectEdit(before, QStringLiteral("Remove transition"));
-            finishEdit(QStringLiteral("Transition removed"));
-            return;
+        if (track.transitions.at(i).id != transitionId)
+            continue;
+
+        const drift::Transition transition = track.transitions.at(i);
+        if (m_selectedTransitionTrack == trackIndex && m_selectedTransitionLeftClip >= 0) {
+            const QString fromId = track.clips.value(m_selectedTransitionLeftClip).id;
+            if (transition.fromClipId == fromId)
+                clearTransitionSelection();
         }
+
+        // Physical overlaps auto-sync a crossfade; separate the clips so removal sticks.
+        drift::Clip *fromClip = nullptr;
+        drift::Clip *toClip = nullptr;
+        for (drift::Clip &clip : track.clips) {
+            if (clip.id == transition.fromClipId)
+                fromClip = &clip;
+            else if (clip.id == transition.toClipId)
+                toClip = &clip;
+        }
+        if (fromClip && toClip && drift::clipsPhysicallyOverlap(*fromClip, *toClip))
+            toClip->timelineStart = fromClip->timelineEnd();
+
+        track.transitions.removeAt(i);
+        pushProjectEdit(before, QStringLiteral("Remove transition"));
+        finishEdit(QStringLiteral("Transition removed"));
+        return;
     }
 }
 
@@ -2067,13 +2189,34 @@ void AppController::setTransitionDuration(int trackIndex, const QString &transit
     drift::Track &track = m_project.tracks()[trackIndex];
     const drift::Project before = m_project;
     for (drift::Transition &transition : track.transitions) {
-        if (transition.id == transitionId) {
-            transition.durationUs = qMax<drift::TimeUs>(drift::secondsToUs(0.1), drift::secondsToUs(durationSeconds));
-            pushProjectEdit(before, QStringLiteral("Transition duration"));
-            finishEdit(QStringLiteral("Transition duration updated"));
-            emit selectedTransitionDataChanged();
-            return;
+        if (transition.id != transitionId)
+            continue;
+
+        const drift::TimeUs durationUs =
+            qMax<drift::TimeUs>(drift::secondsToUs(0.1), drift::secondsToUs(durationSeconds));
+        drift::Clip *fromClip = nullptr;
+        drift::Clip *toClip = nullptr;
+        for (drift::Clip &clip : track.clips) {
+            if (clip.id == transition.fromClipId)
+                fromClip = &clip;
+            else if (clip.id == transition.toClipId)
+                toClip = &clip;
         }
+
+        if (fromClip && toClip && drift::clipsPhysicallyOverlap(*fromClip, *toClip)) {
+            const drift::TimeUs maxOverlap =
+                qMin(fromClip->timelineDuration, toClip->timelineDuration) - drift::secondsToUs(0.05);
+            const drift::TimeUs clamped = qBound(drift::secondsToUs(0.1), durationUs, qMax(drift::secondsToUs(0.1), maxOverlap));
+            toClip->timelineStart = fromClip->timelineEnd() - clamped;
+            transition.durationUs = clamped;
+        } else {
+            transition.durationUs = durationUs;
+        }
+
+        pushProjectEdit(before, QStringLiteral("Transition duration"));
+        finishEdit(QStringLiteral("Transition duration updated"));
+        emit selectedTransitionDataChanged();
+        return;
     }
 }
 
@@ -2101,14 +2244,15 @@ QVariantMap AppController::transitionBetweenClips(int trackIndex, int clipIndex)
         return {};
 
     const drift::Track &track = m_project.tracks().at(trackIndex);
-    if (clipIndex < 0 || clipIndex + 1 >= track.clips.size())
+    const int partnerIndex = findTransitionPartnerIndex(track, clipIndex);
+    if (partnerIndex < 0)
         return {};
 
     const QString fromId = track.clips.at(clipIndex).id;
-    const QString toId = track.clips.at(clipIndex + 1).id;
+    const QString toId = track.clips.at(partnerIndex).id;
     for (const drift::Transition &transition : track.transitions) {
         if (transition.fromClipId == fromId && transition.toClipId == toId)
-            return transitionToMap(transition);
+            return transitionToMap(track, transition);
     }
     return {};
 }

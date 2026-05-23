@@ -85,6 +85,58 @@ PanelFrame {
         effectDropClipIndex = clipIndex
     }
 
+    // Find the outgoing (earlier) clip index for a transition drop at timeline x.
+    function transitionLeftClipAtPosition(trackIndex, xPixels) {
+        if (trackIndex < 0 || trackIndex >= tracks.length)
+            return -1
+        const track = tracks[trackIndex]
+        if (track.type !== "video" && track.type !== "shape")
+            return -1
+        const seconds = xPixels / pxPerSecond
+        const clips = track.clips
+        let best = -1
+        let bestDist = 1e9
+        for (let i = 0; i < clips.length; i++) {
+            const left = clips[i]
+            for (let j = 0; j < clips.length; j++) {
+                if (i === j)
+                    continue
+                const right = clips[j]
+                if (right.start < left.start)
+                    continue
+                const leftEnd = left.start + left.duration
+                const gap = right.start - leftEnd
+                if (gap > 0.001)
+                    continue
+                let regionStart
+                let regionEnd
+                if (right.start < leftEnd) {
+                    regionStart = right.start
+                    regionEnd = leftEnd
+                } else {
+                    regionStart = leftEnd - 0.25
+                    regionEnd = leftEnd + 0.25
+                }
+                if (seconds >= regionStart && seconds <= regionEnd) {
+                    const mid = (regionStart + regionEnd) / 2
+                    const dist = Math.abs(seconds - mid)
+                    if (dist < bestDist) {
+                        bestDist = dist
+                        best = i
+                    }
+                }
+            }
+        }
+        return best
+    }
+
+    function applyTransitionDrop(trackIndex, xPixels, kind) {
+        const leftClip = transitionLeftClipAtPosition(trackIndex, xPixels)
+        if (leftClip < 0 || !kind || kind.length === 0)
+            return
+        EditorState.addTransition(trackIndex, leftClip, kind, 0.5)
+    }
+
     function assetDurationSeconds(assetIndex) {
         const asset = AssetLibrary.assetAt(assetIndex)
         if (!asset)
@@ -746,7 +798,7 @@ PanelFrame {
 
                                 DropArea {
                                     anchors.fill: parent
-                                    keys: ["text/plain", "application/x-drift-effect", "application/x-drift-shape"]
+                                    keys: ["text/plain", "application/x-drift-effect", "application/x-drift-shape", "application/x-drift-transition"]
 
                                     function isEffectDrag(drop) {
                                         return drop.keys.indexOf("application/x-drift-effect") !== -1
@@ -754,6 +806,10 @@ PanelFrame {
 
                                     function isShapeDrag(drop) {
                                         return drop.keys.indexOf("application/x-drift-shape") !== -1
+                                    }
+
+                                    function isTransitionDrag(drop) {
+                                        return drop.keys.indexOf("application/x-drift-transition") !== -1
                                     }
 
                                     function assetIndexFromDrop(drop) {
@@ -765,6 +821,11 @@ PanelFrame {
                                     }
 
                                     function updateAssetPreview(drop) {
+                                        if (isTransitionDrag(drop)) {
+                                            root.clearLandingPreview()
+                                            root.clearEffectDropHighlight()
+                                            return
+                                        }
                                         if (isEffectDrag(drop)) {
                                             root.updateEffectDropHighlight(trackRow.trackIndex, drop.x)
                                             return
@@ -804,6 +865,11 @@ PanelFrame {
                                     }
                                     onDropped: (drop) => {
                                         drop.accept(Qt.CopyAction)
+                                        if (isTransitionDrag(drop)) {
+                                            const kind = drop.getDataAsString("application/x-drift-transition")
+                                            root.applyTransitionDrop(trackRow.trackIndex, drop.x, kind)
+                                            return
+                                        }
                                         if (isEffectDrag(drop)) {
                                             const effectId = drop.getDataAsString("application/x-drift-effect")
                                             const clipIndex = root.clipIndexAtPosition(trackRow.trackIndex, drop.x)
@@ -1159,57 +1225,169 @@ PanelFrame {
                                     }
                                 }
 
-                                // Transition handles above clips — otherwise the next clip's MouseArea steals clicks.
+                                // Transition overlap regions (purple) — above clips for hit-testing.
                                 Repeater {
-                                    model: Math.max(0, root.tracks[trackRow.trackIndex].clips.length - 1)
+                                    model: Math.max(0, root.tracks[trackRow.trackIndex].clips.length)
                                     delegate: Item {
-                                        id: transitionHandle
-                                        property var leftClip: root.tracks[trackRow.trackIndex].clips[modelData]
-                                        property var rightClip: root.tracks[trackRow.trackIndex].clips[modelData + 1]
+                                        id: transitionRegion
+                                        property int leftClipIndex: modelData
+                                        property var leftClip: root.tracks[trackRow.trackIndex].clips[leftClipIndex]
                                         property string trackType: root.tracks[trackRow.trackIndex].type
-                                        property bool clipsAdjacent: Math.abs(
-                                            (leftClip.start + leftClip.duration) - rightClip.start) < 0.001
                                         property var transitionData: EditorState.transitionBetweenClips(
-                                                                         trackRow.trackIndex, modelData)
+                                                                         trackRow.trackIndex, leftClipIndex)
                                         property bool hasTransition: transitionData
                                                                        && Object.keys(transitionData).length > 0
                                         property bool transitionSelected: EditorState.selectedTransitionTrack === trackRow.trackIndex
-                                                                          && EditorState.selectedTransitionLeftClip === modelData
+                                                                          && EditorState.selectedTransitionLeftClip === leftClipIndex
+
+                                        // Find partner clip that abuts/overlaps this one.
+                                        property int partnerIndex: {
+                                            const clips = root.tracks[trackRow.trackIndex].clips
+                                            const left = leftClip
+                                            if (!left)
+                                                return -1
+                                            let best = -1
+                                            let bestStart = 1e12
+                                            for (let i = 0; i < clips.length; i++) {
+                                                if (i === leftClipIndex)
+                                                    continue
+                                                const right = clips[i]
+                                                if (right.start < left.start)
+                                                    continue
+                                                const gap = right.start - (left.start + left.duration)
+                                                if (gap > 0.001)
+                                                    continue
+                                                if (right.start < bestStart) {
+                                                    bestStart = right.start
+                                                    best = i
+                                                }
+                                            }
+                                            return best
+                                        }
+                                        property var rightClip: partnerIndex >= 0
+                                            ? root.tracks[trackRow.trackIndex].clips[partnerIndex]
+                                            : null
+                                        property bool clipsLinked: partnerIndex >= 0
+                                        property real regionStart: {
+                                            if (!hasTransition && !clipsLinked)
+                                                return 0
+                                            if (hasTransition && transitionData.start !== undefined)
+                                                return transitionData.start
+                                            if (!rightClip)
+                                                return 0
+                                            const leftEnd = leftClip.start + leftClip.duration
+                                            if (rightClip.start < leftEnd)
+                                                return rightClip.start
+                                            return leftEnd - 0.25
+                                        }
+                                        property real regionEnd: {
+                                            if (!hasTransition && !clipsLinked)
+                                                return 0
+                                            if (hasTransition && transitionData.end !== undefined)
+                                                return transitionData.end
+                                            if (!rightClip)
+                                                return 0
+                                            const leftEnd = leftClip.start + leftClip.duration
+                                            if (rightClip.start < leftEnd)
+                                                return leftEnd
+                                            return leftEnd + 0.25
+                                        }
+                                        property bool showRegion: (trackType === "video" || trackType === "shape")
+                                                                  && clipsLinked
+                                                                  && regionEnd > regionStart
 
                                         z: 10
-                                        width: 24
-                                        height: 24
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        x: (leftClip.start + leftClip.duration) * root.pxPerSecond - width / 2
-                                        visible: (trackType === "video" || trackType === "shape") && clipsAdjacent
+                                        visible: showRegion
+                                        x: regionStart * root.pxPerSecond
+                                        width: Math.max(8, (regionEnd - regionStart) * root.pxPerSecond)
+                                        height: parent.height - Theme.clipSelectionRingWidth * 2
+                                        y: Theme.clipSelectionRingWidth
 
                                         Rectangle {
                                             anchors.fill: parent
-                                            radius: 4
-                                            color: transitionHandle.transitionSelected ? Theme.primary
-                                                   : (transitionHandle.hasTransition ? Theme.primary : Theme.panelAccent)
-                                            opacity: transitionHandle.transitionSelected ? 1.0 : (transitionHandle.hasTransition ? 0.85 : 1.0)
-                                            border.width: 1
-                                            border.color: Theme.panelBorder
+                                            radius: Theme.radiusSm
+                                            color: transitionRegion.transitionSelected
+                                                   ? Qt.rgba(Theme.transitionOverlap.r, Theme.transitionOverlap.g,
+                                                             Theme.transitionOverlap.b, 0.85)
+                                                   : (transitionRegion.hasTransition
+                                                      ? Qt.rgba(Theme.transitionOverlap.r, Theme.transitionOverlap.g,
+                                                                Theme.transitionOverlap.b, 0.65)
+                                                      : Qt.rgba(Theme.transitionOverlap.r, Theme.transitionOverlap.g,
+                                                                Theme.transitionOverlap.b, 0.35))
+                                            border.width: transitionRegion.transitionSelected ? 2 : 1
+                                            border.color: Theme.transitionOverlap
+
+                                            // Diagonal hatch so overlaps read as a blend zone.
+                                            Canvas {
+                                                anchors.fill: parent
+                                                anchors.margins: 1
+                                                opacity: 0.35
+                                                onPaint: {
+                                                    const ctx = getContext("2d")
+                                                    ctx.clearRect(0, 0, width, height)
+                                                    ctx.strokeStyle = "#ffffff"
+                                                    ctx.lineWidth = 1
+                                                    const step = 6
+                                                    for (let x = -height; x < width; x += step) {
+                                                        ctx.beginPath()
+                                                        ctx.moveTo(x, height)
+                                                        ctx.lineTo(x + height, 0)
+                                                        ctx.stroke()
+                                                    }
+                                                }
+                                                onWidthChanged: requestPaint()
+                                                onHeightChanged: requestPaint()
+                                            }
 
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: transitionHandle.hasTransition ? "T" : "+"
-                                                color: Theme.panelForeground
+                                                visible: parent.width >= 28
+                                                text: transitionRegion.hasTransition
+                                                      ? (transitionRegion.transitionData.label
+                                                         ? transitionRegion.transitionData.label.charAt(0)
+                                                         : "≫")
+                                                      : "≫"
+                                                color: "#ffffff"
                                                 font.family: Theme.fontFamily
                                                 font.pixelSize: Theme.fontSizeTiny
+                                                font.weight: Font.Bold
+                                            }
+
+                                            ToolTip {
+                                                visible: transitionMouse.containsMouse
+                                                         && transitionRegion.hasTransition
+                                                delay: 400
+                                                text: transitionRegion.transitionData.label
+                                                      || transitionRegion.transitionData.kind
+                                                      || ""
+                                            }
+                                        }
+
+                                        DropArea {
+                                            anchors.fill: parent
+                                            keys: ["application/x-drift-transition"]
+                                            onDropped: (drop) => {
+                                                drop.accept(Qt.CopyAction)
+                                                const kind = drop.getDataAsString("application/x-drift-transition")
+                                                if (kind.length > 0)
+                                                    EditorState.addTransition(trackRow.trackIndex,
+                                                                              transitionRegion.leftClipIndex,
+                                                                              kind, 0.5)
                                             }
                                         }
 
                                         MouseArea {
+                                            id: transitionMouse
                                             anchors.fill: parent
-                                            anchors.margins: -4
+                                            hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
-                                                if (transitionHandle.hasTransition) {
-                                                    EditorState.selectTransition(trackRow.trackIndex, modelData)
+                                                if (transitionRegion.hasTransition) {
+                                                    EditorState.selectTransition(trackRow.trackIndex,
+                                                                                 transitionRegion.leftClipIndex)
                                                 } else {
-                                                    EditorState.addTransition(trackRow.trackIndex, modelData,
+                                                    EditorState.addTransition(trackRow.trackIndex,
+                                                                              transitionRegion.leftClipIndex,
                                                                               "crossfade", 0.5)
                                                 }
                                             }
