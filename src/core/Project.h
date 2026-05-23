@@ -4,6 +4,7 @@
 #include "Track.h"
 #include "Time.h"
 
+#include <QColor>
 #include <QHash>
 #include <QJsonObject>
 #include <QList>
@@ -15,6 +16,16 @@ struct Bookmark
 {
     TimeUs timeUs = 0;
     QString label;
+};
+
+// How the canvas area behind/around clips is filled.
+enum class BackgroundKind { Color, Blur };
+
+struct Background
+{
+    BackgroundKind kind = BackgroundKind::Color;
+    QColor color = Qt::black;    // used when kind == Color
+    double blurStrength = 20.0;  // px blur radius; used when kind == Blur
 };
 
 // Root project document: tracks, assets, output settings.
@@ -48,6 +59,9 @@ public:
     const QList<Bookmark> &bookmarks() const { return m_bookmarks; }
     QList<Bookmark> &bookmarks() { return m_bookmarks; }
 
+    const Background &background() const { return m_background; }
+    void setBackground(const Background &background) { m_background = background; }
+
     void resetToDefaultTimeline();
     TimeUs durationUs() const;
 
@@ -68,6 +82,7 @@ private:
     int m_sampleRate = 48000;
     QList<Track> m_tracks;
     QList<Bookmark> m_bookmarks;
+    Background m_background;
     QList<QString> m_assetOrder;
     QHash<QString, MediaAsset> m_assetsById;
 };

@@ -9,6 +9,7 @@
 #include "core/Time.h"
 #include "core/Transition.h"
 
+#include <QColor>
 #include <QFont>
 #include <QFontMetrics>
 #include <QImageReader>
@@ -484,6 +485,109 @@ void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs time
     painter.restore();
 }
 
+// Fast separable box blur (two passes ≈ gaussian) over an RGBA8888 image.
+QImage boxBlurRgba(const QImage &src, int radius)
+{
+    if (src.isNull() || radius <= 0)
+        return src;
+
+    QImage image = src.convertToFormat(QImage::Format_RGBA8888);
+    const int w = image.width();
+    const int h = image.height();
+    const int r = qMin(radius, qMax(1, qMin(w, h) / 2));
+    const int window = r * 2 + 1;
+
+    auto blurPass = [&](const QImage &in, bool horizontal) {
+        QImage out(in.size(), QImage::Format_RGBA8888);
+        const int lines = horizontal ? h : w;
+        const int span = horizontal ? w : h;
+        for (int line = 0; line < lines; ++line) {
+            int sumR = 0, sumG = 0, sumB = 0, sumA = 0;
+            auto sample = [&](int i) -> const uchar * {
+                const int cx = horizontal ? i : line;
+                const int cy = horizontal ? line : i;
+                return in.constScanLine(cy) + cx * 4;
+            };
+            auto put = [&](int i, int rr, int gg, int bb, int aa) {
+                const int cx = horizontal ? i : line;
+                const int cy = horizontal ? line : i;
+                uchar *px = out.scanLine(cy) + cx * 4;
+                px[0] = static_cast<uchar>(rr / window);
+                px[1] = static_cast<uchar>(gg / window);
+                px[2] = static_cast<uchar>(bb / window);
+                px[3] = static_cast<uchar>(aa / window);
+            };
+            for (int k = -r; k <= r; ++k) {
+                const uchar *px = sample(qBound(0, k, span - 1));
+                sumR += px[0];
+                sumG += px[1];
+                sumB += px[2];
+                sumA += px[3];
+            }
+            for (int i = 0; i < span; ++i) {
+                put(i, sumR, sumG, sumB, sumA);
+                const uchar *addPx = sample(qBound(0, i + r + 1, span - 1));
+                const uchar *subPx = sample(qBound(0, i - r, span - 1));
+                sumR += addPx[0] - subPx[0];
+                sumG += addPx[1] - subPx[1];
+                sumB += addPx[2] - subPx[2];
+                sumA += addPx[3] - subPx[3];
+            }
+        }
+        return out;
+    };
+
+    image = blurPass(image, true);
+    image = blurPass(image, false);
+    return image;
+}
+
+// The topmost active video/image frame at this time, used to derive a blur fill.
+QImage topmostVisualFrame(const drift::Project &project, drift::TimeUs timelineUs, int width, int height)
+{
+    const QList<drift::Track> &tracks = project.tracks();
+    for (const drift::Track &track : tracks) {
+        if (track.hidden || track.type == drift::TrackType::Audio)
+            continue;
+        for (const drift::Clip &clip : track.clips) {
+            if (!clip.containsTime(timelineUs))
+                continue;
+            if (clip.type != drift::ClipType::Video && clip.type != drift::ClipType::Image)
+                continue;
+            QImage frame = imageForClip(clip, timelineUs, width, height, project.fps(), -1);
+            if (!frame.isNull())
+                return frame;
+        }
+    }
+    return {};
+}
+
+// Fills the canvas behind all clips from the project's background setting.
+void fillBackground(QPainter &painter, const drift::Project &project, drift::TimeUs timelineUs, int width,
+                    int height)
+{
+    const drift::Background &bg = project.background();
+
+    if (bg.kind == drift::BackgroundKind::Blur) {
+        const QImage frame = topmostVisualFrame(project, timelineUs, width, height);
+        if (!frame.isNull()) {
+            const QImage cover = frame.convertToFormat(QImage::Format_RGBA8888)
+                                     .scaled(width, height, Qt::KeepAspectRatioByExpanding,
+                                             Qt::SmoothTransformation);
+            const QImage blurred = boxBlurRgba(cover, qMax(1, static_cast<int>(bg.blurStrength)));
+            const int dx = (blurred.width() - width) / 2;
+            const int dy = (blurred.height() - height) / 2;
+            painter.fillRect(0, 0, width, height, Qt::black);
+            painter.drawImage(QPoint(0, 0), blurred, QRect(dx, dy, width, height));
+            return;
+        }
+        painter.fillRect(0, 0, width, height, Qt::black);
+        return;
+    }
+
+    painter.fillRect(0, 0, width, height, bg.color.isValid() ? bg.color : QColor(Qt::black));
+}
+
 } // namespace
 
 QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs) const
@@ -510,10 +614,11 @@ QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs, const RenderOption
     ClipReaderPool::instance().retainActivePaths(videoPaths, audioPaths);
 
     QImage canvas(width, height, QImage::Format_RGBA8888);
-    canvas.fill(Qt::black);
+    canvas.fill(Qt::transparent);
 
     QPainter painter(&canvas);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    fillBackground(painter, *m_project, timelineUs, width, height);
 
     // Tracks are ordered top-to-bottom in the timeline (index 0 is the topmost
     // track), and the topmost track composites in front. Draw from the last

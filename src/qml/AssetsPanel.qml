@@ -384,6 +384,78 @@ PanelFrame {
                     }
 
                     Text {
+                        text: "Canvas background"
+                        color: Theme.mutedForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeXs
+                        topPadding: 6
+                    }
+
+                    ThemedComboBox {
+                        id: bgKindCombo
+                        model: ["color", "blur"]
+                        currentIndex: Math.max(0, model.indexOf(EditorState.background.kind))
+                        onActivated: EditorState.setBackground({ kind: model[currentIndex] })
+                    }
+
+                    Flow {
+                        width: parent.width
+                        spacing: 6
+                        visible: EditorState.background.kind === "color"
+                        Repeater {
+                            model: ["#ff000000", "#ffffffff", "#ff808080", "#ff1e293b",
+                                    "#ff2563eb", "#ff059669", "#ffdc2626", "#ffd97706"]
+                            delegate: Rectangle {
+                                required property string modelData
+                                width: 22
+                                height: 22
+                                radius: 4
+                                color: modelData
+                                property bool selected: (EditorState.background.color || "").toLowerCase()
+                                                        === modelData.toLowerCase()
+                                border.width: selected ? 2 : 1
+                                border.color: selected ? Theme.accent : Theme.panelBorder
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: EditorState.setBackground({ kind: "color", color: parent.modelData })
+                                }
+                            }
+                        }
+                    }
+
+                    ThemedTextField {
+                        width: 120
+                        visible: EditorState.background.kind === "color"
+                        text: EditorState.background.color || "#ff000000"
+                        onEditingFinished: EditorState.setBackground({ kind: "color", color: text })
+                    }
+
+                    Column {
+                        width: parent.width
+                        spacing: 4
+                        visible: EditorState.background.kind === "blur"
+
+                        Text {
+                            text: "Blur strength"
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                        }
+                        ThemedSlider {
+                            width: parent.width
+                            from: 1
+                            to: 100
+                            stepSize: 1
+                            value: EditorState.background.blurStrength || 20
+                            onPressedChanged: {
+                                if (!pressed)
+                                    EditorState.setBackground({ kind: "blur", blurStrength: value })
+                            }
+                        }
+                    }
+
+                    Text {
                         text: "Keybindings"
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily

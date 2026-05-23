@@ -45,6 +45,7 @@ class AppController : public QObject
     Q_PROPERTY(int selectedTransitionLeftClip READ selectedTransitionLeftClip NOTIFY selectedTransitionDataChanged)
     Q_PROPERTY(bool guidesEnabled READ guidesEnabled WRITE setGuidesEnabled NOTIFY guidesChanged)
     Q_PROPERTY(QString guideType READ guideType WRITE setGuideType NOTIFY guidesChanged)
+    Q_PROPERTY(QVariantMap background READ background NOTIFY backgroundChanged)
     Q_PROPERTY(QVariantList actions READ actions NOTIFY shortcutsChanged)
     Q_PROPERTY(QVariantList bookmarks READ bookmarks NOTIFY bookmarksChanged)
     Q_PROPERTY(QString projectName READ projectName WRITE setProjectName NOTIFY projectNameChanged)
@@ -80,6 +81,7 @@ public:
     int selectedTransitionLeftClip() const { return m_selectedTransitionLeftClip; }
     bool guidesEnabled() const { return m_guidesEnabled; }
     QString guideType() const { return m_guideType; }
+    QVariantMap background() const;
     QVariantList actions() const;
     QVariantList bookmarks() const;
     QString projectName() const;
@@ -125,6 +127,7 @@ public:
     Q_INVOKABLE int projectFps() const;
     Q_INVOKABLE void setProjectResolution(int width, int height);
     Q_INVOKABLE void setProjectSetup(int width, int height, int fps);
+    Q_INVOKABLE void setBackground(const QVariantMap &background);
     Q_INVOKABLE bool timelineHasVisualClips() const;
     Q_INVOKABLE bool shouldConfigureProjectForAsset(int assetIndex) const;
     Q_INVOKABLE QVariantMap suggestedProjectSetupForAsset(int assetIndex) const;
@@ -225,6 +228,7 @@ signals:
     void waveformReady(const QString &path);
     void guidesChanged();
     void shortcutsChanged();
+    void backgroundChanged();
 
 protected:
     void pushProjectEdit(const drift::Project &before, const QString &text);

@@ -33,6 +33,7 @@ private slots:
     void maskAndTransitionSerialization();
     void allTransitionKindsRoundTrip();
     void physicalOverlapTransitionWindow();
+    void backgroundSerialization();
 };
 
 void CoreTest::timeConversion()
@@ -622,6 +623,48 @@ void CoreTest::physicalOverlapTransitionWindow()
     QVERIFY(drift::transitionWindow(track, transition, startUs, endUs));
     QCOMPARE(startUs, drift::secondsToUs(1.5));
     QCOMPARE(endUs, drift::secondsToUs(2.0));
+}
+
+void CoreTest::backgroundSerialization()
+{
+    // Default background is opaque black / Color and must survive a round-trip.
+    {
+        drift::Project project;
+        const drift::Project loaded = drift::Project::fromJson(project.toJson());
+        QCOMPARE(loaded.background().kind, drift::BackgroundKind::Color);
+        QCOMPARE(loaded.background().color, QColor(Qt::black));
+    }
+
+    // Non-default (blur + color + strength) round-trips.
+    {
+        drift::Project project;
+        drift::Background bg;
+        bg.kind = drift::BackgroundKind::Blur;
+        bg.color = QColor(QStringLiteral("#ff2563eb"));
+        bg.blurStrength = 42.0;
+        project.setBackground(bg);
+
+        QString error;
+        const drift::Project loaded = drift::Project::fromJson(project.toJson(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(loaded.background().kind, drift::BackgroundKind::Blur);
+        QCOMPARE(loaded.background().color, QColor(QStringLiteral("#ff2563eb")));
+        QCOMPARE(loaded.background().blurStrength, 42.0);
+    }
+
+    // Projects saved before this field default to solid black.
+    {
+        const QJsonObject root{
+            {QStringLiteral("version"), 3},
+            {QStringLiteral("projectName"), QStringLiteral("NoBackground")},
+            {QStringLiteral("fps"), 30},
+            {QStringLiteral("width"), 1920},
+            {QStringLiteral("height"), 1080},
+        };
+        const drift::Project loaded = drift::Project::fromJson(root);
+        QCOMPARE(loaded.background().kind, drift::BackgroundKind::Color);
+        QCOMPARE(loaded.background().color, QColor(Qt::black));
+    }
 }
 
 QTEST_MAIN(CoreTest)

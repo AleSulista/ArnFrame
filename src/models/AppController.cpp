@@ -55,6 +55,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
         emit bookmarksChanged();
         emit projectNameChanged();
         emit selectionChanged();
+        emit backgroundChanged();
     });
 
     m_playback.setProject(&m_project);
@@ -1651,6 +1652,46 @@ void AppController::setProjectSetup(int width, int height, int fps)
     finishEdit(QStringLiteral("Project setup updated"));
 }
 
+QVariantMap AppController::background() const
+{
+    const drift::Background &bg = m_project.background();
+    QVariantMap map;
+    map.insert(QStringLiteral("kind"),
+               bg.kind == drift::BackgroundKind::Blur ? QStringLiteral("blur") : QStringLiteral("color"));
+    map.insert(QStringLiteral("color"), bg.color.name(QColor::HexArgb));
+    map.insert(QStringLiteral("blurStrength"), bg.blurStrength);
+    return map;
+}
+
+void AppController::setBackground(const QVariantMap &background)
+{
+    drift::Background bg = m_project.background();
+    if (background.contains(QStringLiteral("kind"))) {
+        bg.kind = background.value(QStringLiteral("kind")).toString() == QStringLiteral("blur")
+                      ? drift::BackgroundKind::Blur
+                      : drift::BackgroundKind::Color;
+    }
+    if (background.contains(QStringLiteral("color"))) {
+        const QColor color(background.value(QStringLiteral("color")).toString());
+        if (color.isValid())
+            bg.color = color;
+    }
+    if (background.contains(QStringLiteral("blurStrength")))
+        bg.blurStrength = qBound(0.0, background.value(QStringLiteral("blurStrength")).toDouble(), 200.0);
+
+    const drift::Background &current = m_project.background();
+    if (current.kind == bg.kind && current.color == bg.color
+        && qFuzzyCompare(current.blurStrength + 1.0, bg.blurStrength + 1.0))
+        return;
+
+    const drift::Project before = m_project;
+    m_project.setBackground(bg);
+    pushProjectEdit(before, QStringLiteral("Change background"));
+    finishEdit(QStringLiteral("Background updated"));
+    emit backgroundChanged();
+    emitPreviewFrame();
+}
+
 bool AppController::timelineHasVisualClips() const
 {
     for (const drift::Track &track : m_project.tracks()) {
@@ -2966,6 +3007,7 @@ void AppController::loadProject(const QUrl &url)
     emit tracksChanged();
     emit bookmarksChanged();
     emit projectNameChanged();
+    emit backgroundChanged();
     setLastMessage(QStringLiteral("Project loaded"));
 }
 

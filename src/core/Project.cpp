@@ -198,6 +198,29 @@ Transition transitionFromJson(const QJsonObject &o)
     return t;
 }
 
+QJsonObject backgroundToJson(const Background &bg)
+{
+    return QJsonObject{
+        {QStringLiteral("kind"),
+         bg.kind == BackgroundKind::Blur ? QStringLiteral("blur") : QStringLiteral("color")},
+        {QStringLiteral("color"), bg.color.name(QColor::HexArgb)},
+        {QStringLiteral("blurStrength"), bg.blurStrength},
+    };
+}
+
+Background backgroundFromJson(const QJsonObject &o)
+{
+    Background bg;
+    if (o.isEmpty())
+        return bg; // old projects: default solid black
+    bg.kind = o.value(QStringLiteral("kind")).toString() == QStringLiteral("blur")
+                  ? BackgroundKind::Blur
+                  : BackgroundKind::Color;
+    bg.color = QColor(o.value(QStringLiteral("color")).toString(QStringLiteral("#ff000000")));
+    bg.blurStrength = o.value(QStringLiteral("blurStrength")).toDouble(bg.blurStrength);
+    return bg;
+}
+
 QJsonObject clipToJson(const Clip &clip)
 {
     return QJsonObject{
@@ -447,6 +470,7 @@ Project Project::fromJson(const QJsonObject &object, QString *errorOut)
     project.setResolution(object.value(QStringLiteral("width")).toInt(1920),
                           object.value(QStringLiteral("height")).toInt(1080));
     project.setSampleRate(object.value(QStringLiteral("sampleRate")).toInt(48000));
+    project.setBackground(backgroundFromJson(object.value(QStringLiteral("background")).toObject()));
 
     const QJsonArray assetsArray = object.value(QStringLiteral("assets")).toArray();
     for (const QJsonValue &value : assetsArray) {
@@ -548,6 +572,7 @@ QJsonObject Project::toJson() const
         {QStringLiteral("assets"), assetsArray},
         {QStringLiteral("tracks"), tracksArray},
         {QStringLiteral("bookmarks"), bookmarksArray},
+        {QStringLiteral("background"), backgroundToJson(m_background)},
     };
 }
 
