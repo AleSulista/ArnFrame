@@ -3,6 +3,9 @@ import QtQuick
 
 // Design tokens for the app shell and panel surfaces (dark + light), plus
 // shared layout/typography/iconography constants used across the UI.
+//
+// Control chrome (buttons, inputs, chips, dialogs) lives in
+// src/qml/components/Themed*.qml — use those; do not re-skin Qt controls inline.
 QtObject {
     id: theme
 

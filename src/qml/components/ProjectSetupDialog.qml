@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Drift
 
-Dialog {
+ThemedDialog {
     id: root
 
     property int assetIndex: -1
@@ -13,34 +13,9 @@ Dialog {
     property string aspectMode: "source"
     property string sourceName: ""
 
-    modal: true
-    anchors.centerIn: Overlay.overlay
     title: qsTr("Project output setup")
-    standardButtons: Dialog.Ok | Dialog.Cancel
+    acceptText: qsTr("Create")
     width: 420
-    padding: 16
-
-    background: Rectangle {
-        color: Theme.panelBg
-        border.width: 1
-        border.color: Theme.panelBorder
-        radius: Theme.radiusMd
-    }
-
-    header: Item {
-        height: 44
-        width: root.width
-        Text {
-            anchors.left: parent.left
-            anchors.leftMargin: 16
-            anchors.verticalCenter: parent.verticalCenter
-            text: root.title
-            color: Theme.panelForeground
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeMd
-            font.weight: Font.Medium
-        }
-    }
 
     function openForAsset(index, runner) {
         assetIndex = index
@@ -86,22 +61,16 @@ Dialog {
         spacing: 12
         width: parent ? parent.width : 400
 
-        Text {
+        ThemedLabel {
             width: parent.width
-            wrapMode: Text.WordWrap
+            size: "sm"
             text: sourceName.length > 0
                   ? qsTr("First clip “%1”. Choose the canvas resolution before it is placed.").arg(sourceName)
                   : qsTr("Choose the canvas resolution before placing the first clip.")
-            color: Theme.mutedForeground
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSm
         }
 
-        Text {
+        ThemedLabel {
             text: qsTr("Aspect ratio")
-            color: Theme.mutedForeground
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeXs
         }
 
         Flow {
@@ -118,29 +87,12 @@ Dialog {
                     { id: "custom", label: qsTr("Custom") }
                 ]
 
-                delegate: Rectangle {
+                delegate: ThemedChip {
                     required property var modelData
-                    width: labelText.implicitWidth + 16
-                    height: 28
-                    radius: Theme.radiusSm
-                    color: root.aspectMode === modelData.id ? Theme.primary : Theme.panelAccent
-                    border.width: 1
-                    border.color: Theme.panelBorder
-
-                    Text {
-                        id: labelText
-                        anchors.centerIn: parent
-                        text: modelData.label
-                        color: root.aspectMode === modelData.id ? "#ffffff" : Theme.panelForeground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeXs
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.applyAspectPreset(modelData.id)
-                    }
+                    text: modelData.label
+                    selected: root.aspectMode === modelData.id
+                    chipHeight: 28
+                    onClicked: root.applyAspectPreset(modelData.id)
                 }
             }
         }
@@ -152,12 +104,7 @@ Dialog {
             Column {
                 width: (parent.width - parent.spacing) / 2
                 spacing: 4
-                Text {
-                    text: qsTr("Width")
-                    color: Theme.mutedForeground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeXs
-                }
+                ThemedLabel { text: qsTr("Width") }
                 ThemedTextField {
                     width: parent.width
                     text: String(root.outWidth)
@@ -178,12 +125,7 @@ Dialog {
             Column {
                 width: (parent.width - parent.spacing) / 2
                 spacing: 4
-                Text {
-                    text: qsTr("Height")
-                    color: Theme.mutedForeground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeXs
-                }
+                ThemedLabel { text: qsTr("Height") }
                 ThemedTextField {
                     width: parent.width
                     text: String(root.outHeight)
@@ -202,12 +144,7 @@ Dialog {
         Column {
             width: parent.width
             spacing: 4
-            Text {
-                text: qsTr("Frame rate")
-                color: Theme.mutedForeground
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeXs
-            }
+            ThemedLabel { text: qsTr("Frame rate") }
             ThemedTextField {
                 width: parent.width / 2 - 4
                 text: String(root.outFps)
@@ -220,13 +157,12 @@ Dialog {
             }
         }
 
-        Text {
+        ThemedLabel {
             width: parent.width
-            wrapMode: Text.WordWrap
-            text: qsTr("Output: %1×%2 @ %3 fps").arg(root.outWidth).arg(root.outHeight).arg(root.outFps)
-            color: Theme.panelForeground
+            tone: "default"
+            size: "sm"
             font.family: Theme.monoFontFamily
-            font.pixelSize: Theme.fontSizeSm
+            text: qsTr("Output: %1×%2 @ %3 fps").arg(root.outWidth).arg(root.outHeight).arg(root.outFps)
         }
     }
 }

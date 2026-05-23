@@ -49,34 +49,12 @@ Column {
 
             Repeater {
                 model: root.categories
-                delegate: Rectangle {
-                    id: categoryChip
+                delegate: ThemedChip {
                     required property var modelData
-                    height: 26
-                    radius: Theme.radiusSm
-                    color: categoryChip.modelData.id === root.activeCategory
-                           ? Theme.panelSecondaryBg : Theme.panelAccent
-                    border.width: categoryChip.modelData.id === root.activeCategory ? 1 : 0
-                    border.color: Theme.panelSecondaryBorder
-
-                    Text {
-                        id: chipLabel
-                        anchors.centerIn: parent
-                        anchors.margins: 8
-                        text: categoryChip.modelData.label
-                        color: categoryChip.modelData.id === root.activeCategory
-                               ? Theme.panelSecondaryForeground : Theme.panelForeground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeXs
-                    }
-
-                    width: chipLabel.implicitWidth + 16
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.activeCategory = categoryChip.modelData.id
-                    }
+                    text: modelData.label
+                    variant: "secondary"
+                    selected: modelData.id === root.activeCategory
+                    onClicked: root.activeCategory = modelData.id
                 }
             }
         }

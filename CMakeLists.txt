@@ -144,7 +144,12 @@ qt_add_qml_module(drift
         src/qml/components/EffectBrowser.qml
         src/qml/components/ThemedSlider.qml
         src/qml/components/ThemedTextField.qml
+        src/qml/components/ThemedTextArea.qml
         src/qml/components/ThemedComboBox.qml
+        src/qml/components/ThemedButton.qml
+        src/qml/components/ThemedChip.qml
+        src/qml/components/ThemedLabel.qml
+        src/qml/components/ThemedDialog.qml
         src/qml/components/ProjectSetupDialog.qml
     RESOURCES
         resources/fonts/Inter.ttf

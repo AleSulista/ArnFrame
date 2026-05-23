@@ -431,28 +431,10 @@ PanelFrame {
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
                             }
-                            TextArea {
-                                id: textContentField
+                            ThemedTextArea {
                                 width: parent.width
                                 height: 80
                                 text: clip.textContent || ""
-                                color: Theme.panelForeground
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSm
-                                wrapMode: TextArea.Wrap
-                                selectByMouse: true
-                                selectedTextColor: Theme.primaryForeground
-                                selectionColor: Theme.primary
-                                leftPadding: 8
-                                rightPadding: 8
-                                topPadding: 6
-                                bottomPadding: 6
-                                background: Rectangle {
-                                    radius: Theme.radiusSm
-                                    color: Theme.panelAccent
-                                    border.width: textContentField.activeFocus ? 1 : 0
-                                    border.color: Theme.panelSecondaryBorder
-                                }
                                 onEditingFinished: EditorState.setClipTextContent(
                                                        EditorState.selectedTrack, EditorState.selectedClip, text)
                             }
@@ -475,29 +457,13 @@ PanelFrame {
                                 spacing: 6
                                 Repeater {
                                     model: ["Title", "Lower third", "Subtitle"]
-                                    delegate: Rectangle {
+                                    delegate: ThemedChip {
                                         required property string modelData
-                                        width: presetLabel.implicitWidth + 16
-                                        height: 26
-                                        radius: Theme.radiusSm
-                                        color: "transparent"
-                                        border.width: 1
-                                        border.color: Theme.panelBorder
-                                        Text {
-                                            id: presetLabel
-                                            anchors.centerIn: parent
-                                            text: modelData
-                                            color: Theme.panelForeground
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: Theme.fontSizeXs
-                                        }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: EditorState.applyTextPreset(
-                                                           EditorState.selectedTrack, EditorState.selectedClip,
-                                                           modelData.toLowerCase())
-                                        }
+                                        text: modelData
+                                        variant: "outline"
+                                        onClicked: EditorState.applyTextPreset(
+                                                       EditorState.selectedTrack, EditorState.selectedClip,
+                                                       modelData.toLowerCase())
                                     }
                                 }
                             }
@@ -1009,24 +975,8 @@ PanelFrame {
                                 unit: "°"
                             }
 
-                            Button {
+                            ThemedButton {
                                 text: qsTr("Reset transform")
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSm
-                                contentItem: Text {
-                                    text: parent.text
-                                    font: parent.font
-                                    color: Theme.panelForeground
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    implicitHeight: 30
-                                    radius: Theme.radiusSm
-                                    color: parent.down ? Theme.panelMuted : Theme.panelAccent
-                                    border.width: 1
-                                    border.color: Theme.panelBorder
-                                }
                                 onClicked: EditorState.resetClipTransform(
                                                EditorState.selectedTrack, EditorState.selectedClip)
                             }
@@ -1082,45 +1032,28 @@ PanelFrame {
                             font.pixelSize: Theme.fontSizeXs
                         }
 
-                        Row {
-                            width: parent.width
-                            spacing: 6
-                            visible: root.clipKind === "video" || root.clipKind === "audio"
-                            Repeater {
-                                model: [
-                                    { label: "0.25×", value: 0.25 },
-                                    { label: "0.5×", value: 0.5 },
-                                    { label: "1×", value: 1.0 },
-                                    { label: "2×", value: 2.0 },
-                                    { label: "4×", value: 4.0 }
-                                ]
-                                delegate: Rectangle {
-                                    required property var modelData
-                                    width: speedPresetLabel.implicitWidth + 14
-                                    height: 26
-                                    radius: Theme.radiusSm
-                                    color: Math.abs((clip.speed || 1) - modelData.value) < 0.01
-                                           ? Theme.primary : "transparent"
-                                    border.width: 1
-                                    border.color: Theme.panelBorder
-                                    Text {
-                                        id: speedPresetLabel
-                                        anchors.centerIn: parent
+                            Row {
+                                width: parent.width
+                                spacing: 6
+                                visible: root.clipKind === "video" || root.clipKind === "audio"
+                                Repeater {
+                                    model: [
+                                        { label: "0.25×", value: 0.25 },
+                                        { label: "0.5×", value: 0.5 },
+                                        { label: "1×", value: 1.0 },
+                                        { label: "2×", value: 2.0 },
+                                        { label: "4×", value: 4.0 }
+                                    ]
+                                    delegate: ThemedChip {
+                                        required property var modelData
                                         text: modelData.label
-                                        color: Theme.panelForeground
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeXs
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
+                                        selected: Math.abs((clip.speed || 1) - modelData.value) < 0.01
                                         onClicked: EditorState.setClipSpeed(
                                                        EditorState.selectedTrack, EditorState.selectedClip,
                                                        modelData.value)
                                     }
                                 }
                             }
-                        }
 
                         ThemedSlider {
                             id: speedSlider
@@ -1183,22 +1116,9 @@ PanelFrame {
                                 font.pixelSize: Theme.fontSizeSm
                             }
 
-                            Button {
+                            ThemedButton {
                                 text: "Add crossfade (0.5 s)"
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSm
-                                contentItem: Text {
-                                    text: parent.text
-                                    font: parent.font
-                                    color: Theme.primaryForeground
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    implicitHeight: 30
-                                    radius: Theme.radiusSm
-                                    color: parent.down ? Theme.panelSecondaryForeground : Theme.primary
-                                }
+                                variant: "primary"
                                 onClicked: EditorState.addTransition(
                                                EditorState.selectedTrack, EditorState.selectedClip,
                                                "crossfade", 0.5)
@@ -1283,24 +1203,9 @@ PanelFrame {
                                 }
                             }
 
-                            Button {
+                            ThemedButton {
                                 text: "Remove transition"
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSm
-                                contentItem: Text {
-                                    text: parent.text
-                                    font: parent.font
-                                    color: Theme.destructive
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    implicitHeight: 30
-                                    radius: Theme.radiusSm
-                                    color: "transparent"
-                                    border.width: 1
-                                    border.color: Theme.panelBorder
-                                }
+                                variant: "destructive"
                                 onClicked: EditorState.removeTransition(
                                                root.transitionEditTrack, root.activeTransition.id)
                             }

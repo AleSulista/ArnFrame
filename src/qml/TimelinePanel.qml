@@ -476,7 +476,7 @@ PanelFrame {
                     tooltip: qsTr("Zoom out")
                     onClicked: root.zoom = Math.max(root.minZoom, root.zoom / 1.5)
                 }
-                Slider {
+                ThemedSlider {
                     id: zoomSlider
                     width: 112
                     anchors.verticalCenter: parent.verticalCenter
@@ -485,33 +485,6 @@ PanelFrame {
                     to: 1
                     value: Math.log(root.zoom / root.minZoom) / Math.log(root.maxZoom / root.minZoom)
                     onMoved: root.zoom = root.minZoom * Math.pow(root.maxZoom / root.minZoom, value)
-
-                    background: Rectangle {
-                        x: zoomSlider.leftPadding
-                        y: zoomSlider.topPadding + zoomSlider.availableHeight / 2 - height / 2
-                        width: zoomSlider.availableWidth
-                        height: 4
-                        radius: 2
-                        color: Theme.panelMuted
-
-                        Rectangle {
-                            width: zoomSlider.visualPosition * parent.width
-                            height: parent.height
-                            radius: 2
-                            color: Theme.primary
-                        }
-                    }
-
-                    handle: Rectangle {
-                        x: zoomSlider.leftPadding + zoomSlider.visualPosition * (zoomSlider.availableWidth - width)
-                        y: zoomSlider.topPadding + zoomSlider.availableHeight / 2 - height / 2
-                        width: 12
-                        height: 12
-                        radius: 6
-                        color: Theme.primary
-                        border.width: 2
-                        border.color: Theme.primaryForeground
-                    }
                 }
                 IconButton {
                     icon: Theme.icons.zoomIn

@@ -162,43 +162,12 @@ PanelFrame {
                         }
                     }
 
-                    Rectangle {
-                        width: importRow.implicitWidth + 20
-                        height: 28
-                        radius: Theme.radiusSm
-                        color: "transparent"
-                        border.width: 1
-                        border.color: Theme.panelBorder
+                    ThemedButton {
+                        text: "Import"
+                        variant: "ghost"
+                        glyph: Theme.icons.upload
                         anchors.verticalCenter: parent.verticalCenter
-
-                        Row {
-                            id: importRow
-                            anchors.centerIn: parent
-                            spacing: 6
-
-                            IconGlyph {
-                                glyph: Theme.icons.upload
-                                iconSize: 16
-                                iconColor: Theme.panelForeground
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            Text {
-                                text: "Import"
-                                color: Theme.panelForeground
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSm
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            hoverEnabled: true
-                            onClicked: root.importMedia()
-                            onEntered: parent.color = Theme.panelAccent
-                            onExited: parent.color = "transparent"
-                        }
+                        onClicked: root.importMedia()
                     }
                 }
             }
@@ -211,46 +180,20 @@ PanelFrame {
                 spacing: 8
                 padding: 12
 
-                TextField {
+                ThemedTextField {
                     id: textClipInput
                     width: parent.width - 24
                     placeholderText: "Enter text for timeline clip"
-                    color: Theme.panelForeground
                     font.family: Theme.fontFamily
                 }
 
-                Rectangle {
-                    width: addTextRow.implicitWidth + 20
-                    height: 32
-                    radius: Theme.radiusSm
-                    color: Theme.primary
-
-                    Row {
-                        id: addTextRow
-                        anchors.centerIn: parent
-                        spacing: 6
-                        IconGlyph {
-                            glyph: Theme.icons.type
-                            iconSize: 14
-                            iconColor: "white"
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        Text {
-                            text: "Add to timeline"
-                            color: "white"
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSm
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            EditorState.addTextClip(textClipInput.text, -1)
-                            textClipInput.clear()
-                        }
+                ThemedButton {
+                    text: "Add to timeline"
+                    variant: "primary"
+                    glyph: Theme.icons.type
+                    onClicked: {
+                        EditorState.addTextClip(textClipInput.text, -1)
+                        textClipInput.clear()
                     }
                 }
             }
@@ -433,7 +376,7 @@ PanelFrame {
                             text: "Enabled"
                             onToggled: EditorState.guidesEnabled = checked
                         }
-                        ComboBox {
+                        ThemedComboBox {
                             model: ["thirds", "crosshair", "safe"]
                             currentIndex: Math.max(0, model.indexOf(EditorState.guideType))
                             onActivated: EditorState.guideType = model[currentIndex]

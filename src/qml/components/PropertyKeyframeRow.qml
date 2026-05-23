@@ -177,71 +177,41 @@ Column {
             width: Math.max(40, parent.width - 90)
         }
 
-        Rectangle {
+        ThemedChip {
+            text: "Lin"
+            variant: "secondary"
+            selected: root.interpolationMode === "linear"
+            chipHeight: 18
+            horizontalPadding: 10
             width: 30
-            height: 18
-            radius: Theme.radiusSm
-            color: root.interpolationMode === "linear" ? Theme.panelSecondaryBg : "transparent"
-            border.width: 1
-            border.color: Theme.panelBorder
             anchors.verticalCenter: parent.verticalCenter
-            Text {
-                anchors.centerIn: parent
-                text: "Lin"
-                color: Theme.panelForeground
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeXs
-            }
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.setInterpolation("linear")
-            }
+            onClicked: root.setInterpolation("linear")
         }
 
-        Rectangle {
+        ThemedChip {
+            text: "Hold"
+            variant: "secondary"
+            selected: root.interpolationMode === "hold"
+            chipHeight: 18
+            horizontalPadding: 10
             width: 34
-            height: 18
-            radius: Theme.radiusSm
-            color: root.interpolationMode === "hold" ? Theme.panelSecondaryBg : "transparent"
-            border.width: 1
-            border.color: Theme.panelBorder
             anchors.verticalCenter: parent.verticalCenter
-            Text {
-                anchors.centerIn: parent
-                text: "Hold"
-                color: Theme.panelForeground
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeXs
-            }
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.setInterpolation("hold")
-            }
+            onClicked: root.setInterpolation("hold")
         }
     }
 
     // --- Numeric field (default) ---------------------------------------------
-    Rectangle {
+    Item {
         visible: !root.useSlider
         width: root.width
         height: 30
-        radius: Theme.radiusSm
-        color: Theme.panelAccent
 
-        TextField {
+        ThemedTextField {
             id: valueField
             anchors.fill: parent
-            anchors.margins: 1
             verticalAlignment: TextInput.AlignVCenter
             text: root.formatValue(root.currentValue)
-            color: Theme.panelForeground
-            font.family: Theme.monoFontFamily
-            font.pixelSize: Theme.fontSizeSm
-            leftPadding: 8
             rightPadding: root.unit.length > 0 || root.percent ? 22 : 8
-            background: Item {}
             onEditingFinished: {
                 const v = root.parseInput(text)
                 root.editing = false
@@ -274,6 +244,7 @@ Column {
             color: Theme.mutedForeground
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeXs
+            z: 1
         }
     }
 
