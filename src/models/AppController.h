@@ -108,8 +108,10 @@ public:
     Q_INVOKABLE QVariantList builtinShapes() const;
     Q_INVOKABLE QVariantList previewClipsAtPlayhead() const;
     Q_INVOKABLE void beginPreviewDrag(const QString &undoText = QStringLiteral("Edit clip"));
-    Q_INVOKABLE void previewSetClipPosition(int trackIndex, int clipIndex, double posX, double posY);
-    Q_INVOKABLE void previewSetClipScale(int trackIndex, int clipIndex, double scale);
+    Q_INVOKABLE void previewSetClipPosition(int trackIndex, int clipIndex, double xPixels, double yPixels);
+    Q_INVOKABLE void previewSetClipSize(int trackIndex, int clipIndex, double widthPixels, double heightPixels);
+    Q_INVOKABLE void previewSetClipRect(int trackIndex, int clipIndex, double xPixels, double yPixels,
+                                        double widthPixels, double heightPixels);
     Q_INVOKABLE void previewSetClipRotation(int trackIndex, int clipIndex, double degrees);
     Q_INVOKABLE void previewSetClipKeyframe(int trackIndex, int clipIndex, const QString &prop,
                                             double atSeconds, double value);
@@ -120,6 +122,12 @@ public:
     Q_INVOKABLE void commitPreviewDrag();
     Q_INVOKABLE int projectWidth() const;
     Q_INVOKABLE int projectHeight() const;
+    Q_INVOKABLE int projectFps() const;
+    Q_INVOKABLE void setProjectResolution(int width, int height);
+    Q_INVOKABLE void setProjectSetup(int width, int height, int fps);
+    Q_INVOKABLE bool timelineHasVisualClips() const;
+    Q_INVOKABLE bool shouldConfigureProjectForAsset(int assetIndex) const;
+    Q_INVOKABLE QVariantMap suggestedProjectSetupForAsset(int assetIndex) const;
     Q_INVOKABLE void selectClip(int trackIndex, int clipIndex);
     Q_INVOKABLE void addToSelection(int trackIndex, int clipIndex);
     Q_INVOKABLE void setSelection(const QVariantList &pairs);
@@ -163,6 +171,7 @@ public:
     Q_INVOKABLE QVariantList clipKeyframes(int trackIndex, int clipIndex, const QString &prop) const;
     Q_INVOKABLE void setKeyframeInterpolation(int trackIndex, int clipIndex, const QString &prop,
                                               const QString &mode);
+    Q_INVOKABLE void resetClipTransform(int trackIndex, int clipIndex);
     Q_INVOKABLE QVariantList effectCatalog() const;
     Q_INVOKABLE QVariantList effectCategories() const;
     Q_INVOKABLE void addEffect(int trackIndex, int clipIndex, const QString &effectId);

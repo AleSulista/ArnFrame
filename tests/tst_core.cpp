@@ -19,6 +19,7 @@ private slots:
     void keyframeLinearInterpolation();
     void projectSerializationRoundTrip();
     void clipTransformSerialization();
+    void legacyFractionalTransformMigration();
     void volumeKeyframeSerialization();
     void projectLoadsLegacyV1Format();
     void trackAllowsClipTypes();
@@ -114,9 +115,10 @@ void CoreTest::clipTransformSerialization()
     clip.textContent = QStringLiteral("Hello");
     clip.timelineStart = 0;
     clip.timelineDuration = drift::secondsToUs(3.0);
-    clip.posX.setKeyframe(0, 0.25);
-    clip.posY.setKeyframe(0, 0.75);
-    clip.scale.setKeyframe(0, 1.5);
+    clip.transformX.setKeyframe(0, 100.0);
+    clip.transformY.setKeyframe(0, 200.0);
+    clip.transformW.setKeyframe(0, 640.0);
+    clip.transformH.setKeyframe(0, 360.0);
     clip.rotation.setKeyframe(0, 45.0);
     project.tracks()[0].clips.append(clip);
 
@@ -126,10 +128,64 @@ void CoreTest::clipTransformSerialization()
 
     QVERIFY(error.isEmpty());
     const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
-    QCOMPARE(loadedClip.posX.evaluateAt(0), 0.25);
-    QCOMPARE(loadedClip.posY.evaluateAt(0), 0.75);
-    QCOMPARE(loadedClip.scale.evaluateAt(0), 1.5);
+    QCOMPARE(loadedClip.transformX.evaluateAt(0), 100.0);
+    QCOMPARE(loadedClip.transformY.evaluateAt(0), 200.0);
+    QCOMPARE(loadedClip.transformW.evaluateAt(0), 640.0);
+    QCOMPARE(loadedClip.transformH.evaluateAt(0), 360.0);
     QCOMPARE(loadedClip.rotation.evaluateAt(0), 45.0);
+}
+
+void CoreTest::legacyFractionalTransformMigration()
+{
+    // Old projects stored center-normalized posX/posY + scale; load them as
+    // top-left pixel layout on the project canvas.
+    auto kf = [](double value) {
+        return QJsonObject{
+            {QStringLiteral("interpolation"), QStringLiteral("linear")},
+            {QStringLiteral("keyframes"),
+             QJsonArray{QJsonObject{{QStringLiteral("timeUs"), 0.0},
+                                    {QStringLiteral("value"), value}}}},
+        };
+    };
+    const QJsonObject root{
+        {QStringLiteral("version"), 2},
+        {QStringLiteral("projectName"), QStringLiteral("LegacyTransform")},
+        {QStringLiteral("fps"), 30},
+        {QStringLiteral("width"), 1920},
+        {QStringLiteral("height"), 1080},
+        {QStringLiteral("tracks"),
+         QJsonArray{
+             QJsonObject{
+                 {QStringLiteral("type"), QStringLiteral("video")},
+                 {QStringLiteral("clips"),
+                  QJsonArray{
+                      QJsonObject{
+                          {QStringLiteral("id"), QStringLiteral("legacy-clip")},
+                          {QStringLiteral("type"), QStringLiteral("video")},
+                          {QStringLiteral("name"), QStringLiteral("v")},
+                          {QStringLiteral("timelineStartUs"), 0},
+                          {QStringLiteral("timelineDurationUs"), 1000000},
+                          {QStringLiteral("srcInUs"), 0},
+                          {QStringLiteral("srcOutUs"), 1000000},
+                          {QStringLiteral("posX"), kf(0.5)},
+                          {QStringLiteral("posY"), kf(0.5)},
+                          {QStringLiteral("scale"), kf(1.0)},
+                      },
+                  }},
+             },
+         }},
+    };
+
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(root, &error);
+    QVERIFY(error.isEmpty());
+    QVERIFY(!loaded.tracks().isEmpty());
+    QVERIFY(!loaded.tracks()[0].clips.isEmpty());
+    const drift::Clip &clip = loaded.tracks()[0].clips[0];
+    QCOMPARE(clip.transformW.evaluateAt(0), 1920.0);
+    QCOMPARE(clip.transformH.evaluateAt(0), 1080.0);
+    QCOMPARE(clip.transformX.evaluateAt(0), 0.0);
+    QCOMPARE(clip.transformY.evaluateAt(0), 0.0);
 }
 
 void CoreTest::volumeKeyframeSerialization()
@@ -304,8 +360,8 @@ void CoreTest::shapeStyleSerialization()
     clip.shapeStyle.fill = QColor(10, 20, 30, 200);
     clip.shapeStyle.stroke = QColor(255, 255, 255);
     clip.shapeStyle.strokeWidth = 6.0;
-    clip.posX.setKeyframe(0, 0.25);
-    clip.posY.setKeyframe(0, 0.75);
+    clip.transformX.setKeyframe(0, 100.0);
+    clip.transformY.setKeyframe(0, 200.0);
     project.tracks()[0].clips.append(clip);
 
     const QJsonObject json = project.toJson();
@@ -319,8 +375,8 @@ void CoreTest::shapeStyleSerialization()
     QCOMPARE(loadedClip.shapeStyle.fill, QColor(10, 20, 30, 200));
     QCOMPARE(loadedClip.shapeStyle.stroke, QColor(255, 255, 255));
     QCOMPARE(loadedClip.shapeStyle.strokeWidth, 6.0);
-    QCOMPARE(loadedClip.posX.evaluateAt(0), 0.25);
-    QCOMPARE(loadedClip.posY.evaluateAt(0), 0.75);
+    QCOMPARE(loadedClip.transformX.evaluateAt(0), 100.0);
+    QCOMPARE(loadedClip.transformY.evaluateAt(0), 200.0);
 }
 
 void CoreTest::effectCatalogIdSerialization()

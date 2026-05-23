@@ -264,25 +264,49 @@ double transformValue(const drift::KeyframeTrack<double> &track, drift::TimeUs r
     return track.evaluateAt(relative);
 }
 
-void drawClipFrame(QPainter &painter, const QImage &frame, const drift::Clip &clip, drift::TimeUs timelineUs,
-                   int canvasWidth, int canvasHeight, double opacityMultiplier = 1.0,
-                   const QRectF *canvasClipRect = nullptr, QPointF extraOffset = QPointF(), double extraScale = 1.0)
+// Layout is stored in project pixels. Preview/export canvases may be scaled
+// via renderScale — always map project → canvas here so WYSIWYG handles match.
+void layoutRectForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth, int projectHeight,
+                       double renderScale, double extraScale, double *xOut, double *yOut, double *wOut, double *hOut,
+                       double *rotationOut = nullptr)
 {
     const drift::TimeUs relative = timelineUs - clip.timelineStart;
-    const double posX = transformValue(clip.posX, relative, 0.5);
-    const double posY = transformValue(clip.posY, relative, 0.5);
-    const double scale = transformValue(clip.scale, relative, 1.0) * extraScale;
-    const double rotation = transformValue(clip.rotation, relative, 0.0);
+    const double scale = renderScale * extraScale;
+    *xOut = transformValue(clip.transformX, relative, 0.0) * renderScale;
+    *yOut = transformValue(clip.transformY, relative, 0.0) * renderScale;
+    *wOut = transformValue(clip.transformW, relative, static_cast<double>(projectWidth)) * scale;
+    *hOut = transformValue(clip.transformH, relative, static_cast<double>(projectHeight)) * scale;
+    if (rotationOut)
+        *rotationOut = transformValue(clip.rotation, relative, 0.0);
+}
+
+void drawClipFrame(QPainter &painter, const QImage &frame, const drift::Clip &clip, drift::TimeUs timelineUs,
+                   int projectWidth, int projectHeight, double renderScale, double opacityMultiplier = 1.0,
+                   const QRectF *canvasClipRect = nullptr, QPointF extraOffset = QPointF(), double extraScale = 1.0)
+{
+    double x = 0.0;
+    double y = 0.0;
+    double w = 0.0;
+    double h = 0.0;
+    double rotation = 0.0;
+    layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, extraScale, &x, &y, &w, &h,
+                      &rotation);
+    if (w <= 0.5 || h <= 0.5 || frame.isNull())
+        return;
+
+    const QImage drawn = (frame.width() == qRound(w) && frame.height() == qRound(h))
+                             ? frame
+                             : frame.scaled(qMax(1, qRound(w)), qMax(1, qRound(h)), Qt::IgnoreAspectRatio,
+                                            Qt::SmoothTransformation);
 
     painter.save();
     if (canvasClipRect)
         painter.setClipRect(*canvasClipRect, Qt::IntersectClip);
     painter.setOpacity(opacityForClip(clip, timelineUs) * qBound(0.0, opacityMultiplier, 1.0));
     painter.setCompositionMode(toQtComposition(clip.blendMode));
-    painter.translate(posX * canvasWidth + extraOffset.x(), posY * canvasHeight + extraOffset.y());
+    painter.translate(x + w * 0.5 + extraOffset.x(), y + h * 0.5 + extraOffset.y());
     painter.rotate(rotation);
-    painter.scale(scale, scale);
-    painter.drawImage(QPointF(-frame.width() / 2.0, -frame.height() / 2.0), frame);
+    painter.drawImage(QPointF(-w * 0.5, -h * 0.5), drawn);
     painter.restore();
 }
 
@@ -322,59 +346,79 @@ bool isWipeKind(drift::TransitionKind kind)
 
 void drawTransitionFrame(QPainter &painter, const drift::Transition &transition, const drift::Clip &fromClip,
                          const drift::Clip &toClip, drift::TimeUs timelineUs, drift::TimeUs windowStart,
-                         drift::TimeUs windowEnd, int width, int height, int projectFps, int maxTimeEchoHistoryFrames)
+                         drift::TimeUs windowEnd, int projectWidth, int projectHeight, double renderScale,
+                         int canvasWidth, int canvasHeight, int projectFps, int maxTimeEchoHistoryFrames)
 {
     const double p = drift::transitionProgress(timelineUs, windowStart, windowEnd);
     const drift::TransitionBlendOpacities blend = drift::transitionBlendOpacities(transition.kind, p);
-    const QImage frameA = imageForClip(fromClip, timelineUs, width, height, projectFps, maxTimeEchoHistoryFrames);
-    const QImage frameB = imageForClip(toClip, timelineUs, width, height, projectFps, maxTimeEchoHistoryFrames);
+
+    auto decodeLayout = [&](const drift::Clip &clip) {
+        double x = 0.0;
+        double y = 0.0;
+        double w = 0.0;
+        double h = 0.0;
+        layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, 1.0, &x, &y, &w, &h);
+        return imageForClip(clip, timelineUs, qMax(1, qRound(w)), qMax(1, qRound(h)), projectFps,
+                            maxTimeEchoHistoryFrames);
+    };
+
+    const QImage frameA = decodeLayout(fromClip);
+    const QImage frameB = decodeLayout(toClip);
     if (frameA.isNull() && frameB.isNull())
         return;
 
     if (transition.kind == drift::TransitionKind::PushLeft) {
-        const QPointF outOffset(-width * p, 0);
-        const QPointF inOffset(width * (1.0 - p), 0);
+        const QPointF outOffset(-canvasWidth * p, 0);
+        const QPointF inOffset(canvasWidth * (1.0 - p), 0);
         if (!frameA.isNull())
-            drawClipFrame(painter, frameA, fromClip, timelineUs, width, height, blend.outgoing, nullptr, outOffset);
+            drawClipFrame(painter, frameA, fromClip, timelineUs, projectWidth, projectHeight, renderScale,
+                          blend.outgoing, nullptr, outOffset);
         if (!frameB.isNull())
-            drawClipFrame(painter, frameB, toClip, timelineUs, width, height, blend.incoming, nullptr, inOffset);
+            drawClipFrame(painter, frameB, toClip, timelineUs, projectWidth, projectHeight, renderScale,
+                          blend.incoming, nullptr, inOffset);
         return;
     }
 
     if (transition.kind == drift::TransitionKind::ZoomIn) {
         const double inScale = 0.82 + 0.18 * p;
         if (!frameA.isNull())
-            drawClipFrame(painter, frameA, fromClip, timelineUs, width, height, blend.outgoing);
+            drawClipFrame(painter, frameA, fromClip, timelineUs, projectWidth, projectHeight, renderScale,
+                          blend.outgoing);
         if (!frameB.isNull())
-            drawClipFrame(painter, frameB, toClip, timelineUs, width, height, blend.incoming, nullptr, QPointF(), inScale);
+            drawClipFrame(painter, frameB, toClip, timelineUs, projectWidth, projectHeight, renderScale,
+                          blend.incoming, nullptr, QPointF(), inScale);
         return;
     }
 
     if (isWipeKind(transition.kind)) {
         if (!frameA.isNull())
-            drawClipFrame(painter, frameA, fromClip, timelineUs, width, height, blend.outgoing);
+            drawClipFrame(painter, frameA, fromClip, timelineUs, projectWidth, projectHeight, renderScale,
+                          blend.outgoing);
         if (!frameB.isNull()) {
-            const QRectF wipeClip = incomingWipeClipRect(transition.kind, p, width, height);
-            drawClipFrame(painter, frameB, toClip, timelineUs, width, height, blend.incoming, &wipeClip);
+            const QRectF wipeClip = incomingWipeClipRect(transition.kind, p, canvasWidth, canvasHeight);
+            drawClipFrame(painter, frameB, toClip, timelineUs, projectWidth, projectHeight, renderScale,
+                          blend.incoming, &wipeClip);
         }
         return;
     }
 
     if (!frameA.isNull())
-        drawClipFrame(painter, frameA, fromClip, timelineUs, width, height, blend.outgoing);
+        drawClipFrame(painter, frameA, fromClip, timelineUs, projectWidth, projectHeight, renderScale,
+                      blend.outgoing);
     if (!frameB.isNull())
-        drawClipFrame(painter, frameB, toClip, timelineUs, width, height, blend.incoming);
+        drawClipFrame(painter, frameB, toClip, timelineUs, projectWidth, projectHeight, renderScale,
+                      blend.incoming);
 
     if (blend.blackOverlay > 0.0) {
         painter.save();
         painter.setOpacity(blend.blackOverlay);
-        painter.fillRect(0, 0, width, height, Qt::black);
+        painter.fillRect(0, 0, canvasWidth, canvasHeight, Qt::black);
         painter.restore();
     }
     if (blend.whiteOverlay > 0.0) {
         painter.save();
         painter.setOpacity(blend.whiteOverlay);
-        painter.fillRect(0, 0, width, height, Qt::white);
+        painter.fillRect(0, 0, canvasWidth, canvasHeight, Qt::white);
         painter.restore();
     }
 }
@@ -415,25 +459,28 @@ void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, i
     }
 }
 
-void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs timelineUs, int width, int height,
-                  double renderScale)
+void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth,
+                  int projectHeight, double renderScale)
 {
     const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
     if (text.isEmpty())
         return;
 
-    const drift::TimeUs relative = timelineUs - clip.timelineStart;
-    const double posX = transformValue(clip.posX, relative, 0.5);
-    const double posY = transformValue(clip.posY, relative, 0.5);
-    const double scale = transformValue(clip.scale, relative, 1.0);
-    const double rotation = transformValue(clip.rotation, relative, 0.0);
+    double x = 0.0;
+    double y = 0.0;
+    double w = 0.0;
+    double h = 0.0;
+    double rotation = 0.0;
+    layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, 1.0, &x, &y, &w, &h, &rotation);
+    if (w <= 0.5 || h <= 0.5)
+        return;
 
     painter.save();
     painter.setOpacity(opacityForClip(clip, timelineUs));
     painter.setCompositionMode(toQtComposition(clip.blendMode));
-    painter.translate(posX * width, posY * height);
+    painter.translate(x + w * 0.5, y + h * 0.5);
     painter.rotate(rotation);
-    drawStyledText(painter, clip, text, width, height, scale, renderScale);
+    drawStyledText(painter, clip, text, qMax(1, qRound(w)), qMax(1, qRound(h)), 1.0, renderScale);
     painter.restore();
 }
 
@@ -487,8 +534,8 @@ QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs, const RenderOption
             const drift::Clip *toClip = drift::clipById(track, activeTransition->toClipId);
             if (fromClip && toClip) {
                 drawTransitionFrame(painter, *activeTransition, *fromClip, *toClip, timelineUs, transitionStart,
-                                    transitionEnd, width, height, m_project->fps(),
-                                    options.maxTimeEchoHistoryFrames);
+                                    transitionEnd, projectWidth, projectHeight, renderScale, width, height,
+                                    m_project->fps(), options.maxTimeEchoHistoryFrames);
                 transitionClipIds.insert(fromClip->id);
                 transitionClipIds.insert(toClip->id);
             }
@@ -502,23 +549,32 @@ QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs, const RenderOption
                 continue;
 
             if (clip.type == drift::ClipType::Text) {
-                drawTextClip(painter, clip, timelineUs, width, height, renderScale);
+                drawTextClip(painter, clip, timelineUs, projectWidth, projectHeight, renderScale);
                 continue;
             }
 
+            double layoutX = 0.0;
+            double layoutY = 0.0;
+            double layoutWd = 0.0;
+            double layoutHd = 0.0;
+            layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, 1.0, &layoutX, &layoutY,
+                              &layoutWd, &layoutHd);
+            const int layoutW = qMax(1, qRound(layoutWd));
+            const int layoutH = qMax(1, qRound(layoutHd));
+
             QImage frame;
             if (clip.type == drift::ClipType::Shape) {
-                frame = shapeImageForClip(clip, width, height);
+                frame = shapeImageForClip(clip, layoutW, layoutH);
                 if (!frame.isNull() && clip.mask.shape != drift::MaskShape::None)
-                    frame = drift::applyMask(frame, clip.mask, width, height);
+                    frame = drift::applyMask(frame, clip.mask, layoutW, layoutH);
             } else {
-                frame = imageForClip(clip, timelineUs, width, height, m_project->fps(),
+                frame = imageForClip(clip, timelineUs, layoutW, layoutH, m_project->fps(),
                                      options.maxTimeEchoHistoryFrames);
             }
             if (frame.isNull())
                 continue;
 
-            drawClipFrame(painter, frame, clip, timelineUs, width, height);
+            drawClipFrame(painter, frame, clip, timelineUs, projectWidth, projectHeight, renderScale);
         }
     }
 

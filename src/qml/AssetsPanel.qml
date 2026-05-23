@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Window
 import Drift
 import "components"
 
@@ -7,6 +8,14 @@ PanelFrame {
     id: root
 
     Component.onCompleted: AssetLibrary.ensureAllMedia()
+
+    function addAssetToTimeline(assetIndex) {
+        if (typeof Window !== "undefined" && Window.window && Window.window.configureAndAddAsset) {
+            Window.window.configureAndAddAsset(assetIndex, () => EditorState.addClipFromAsset(assetIndex))
+        } else {
+            EditorState.addClipFromAsset(assetIndex)
+        }
+    }
 
     function importMedia() {
         var urls = FileDialogs.openFiles(qsTr("Import Media"), [
@@ -536,7 +545,7 @@ PanelFrame {
                             Drag.keys: ["text/plain"]
                             Drag.mimeData: { "text/plain": assetIndex.toString() }
 
-                            TapHandler { onTapped: EditorState.addClipFromAsset(assetIndex) }
+                            TapHandler { onTapped: root.addAssetToTimeline(assetIndex) }
                             DragHandler {
                                 id: assetDrag
                                 onActiveChanged: {
@@ -682,7 +691,7 @@ PanelFrame {
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: EditorState.addClipFromAsset(assetIndex)
+                                onClicked: root.addAssetToTimeline(assetIndex)
                             }
                         }
                     }

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Window
 import Drift
 import "components"
 
@@ -223,23 +224,30 @@ PanelFrame {
         if (assetIndex < 0)
             return
 
-        if (!timelineHasClips()) {
-            const trackIdx = firstCompatibleTrackIndex(assetIndex)
-            if (trackIdx >= 0)
+        function runAdd() {
+            if (!timelineHasClips()) {
+                const trackIdx = firstCompatibleTrackIndex(assetIndex)
+                if (trackIdx >= 0)
+                    EditorState.addClipFromAssetAt(assetIndex, trackIdx, atSeconds)
+                return
+            }
+
+            if (assetDropTopSlop > 0 && dropY < assetDropTopSlop) {
+                EditorState.addClipFromAssetOnNewTrack(assetIndex, atSeconds)
+                return
+            }
+
+            const trackIdx = trackIndexAtY(dropY - assetDropTopSlop)
+            if (trackIdx >= 0 && EditorState.trackAcceptsAsset(trackIdx, assetIndex))
                 EditorState.addClipFromAssetAt(assetIndex, trackIdx, atSeconds)
-            return
+            else
+                EditorState.addClipFromAssetOnNewTrack(assetIndex, atSeconds)
         }
 
-        if (assetDropTopSlop > 0 && dropY < assetDropTopSlop) {
-            EditorState.addClipFromAssetOnNewTrack(assetIndex, atSeconds)
-            return
-        }
-
-        const trackIdx = trackIndexAtY(dropY - assetDropTopSlop)
-        if (trackIdx >= 0 && EditorState.trackAcceptsAsset(trackIdx, assetIndex))
-            EditorState.addClipFromAssetAt(assetIndex, trackIdx, atSeconds)
+        if (typeof Window !== "undefined" && Window.window && Window.window.configureAndAddAsset)
+            Window.window.configureAndAddAsset(assetIndex, runAdd)
         else
-            EditorState.addClipFromAssetOnNewTrack(assetIndex, atSeconds)
+            runAdd()
     }
 
     function handleTimelineWheel(wheel) {

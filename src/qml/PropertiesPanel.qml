@@ -17,6 +17,14 @@ PanelFrame {
         return EditorState.selectedClipData
     }
     readonly property bool hasSelection: !!clip && Object.keys(clip).length > 0
+    readonly property int canvasW: {
+        void EditorState.tracks
+        return Math.max(1, EditorState.projectWidth())
+    }
+    readonly property int canvasH: {
+        void EditorState.tracks
+        return Math.max(1, EditorState.projectHeight())
+    }
     readonly property var transition: EditorState.selectedTransitionData
     readonly property bool hasTransitionSelection: !!transition && Object.keys(transition).length > 0
     readonly property int transitionEditTrack: EditorState.selectedTransitionTrack >= 0
@@ -871,7 +879,7 @@ PanelFrame {
                     // ----- Transform -------------------------------------------------------
                     Column {
                         width: tabColumn.width
-                        spacing: 8
+                        spacing: 10
                         visible: root.currentTabId === "transform"
 
                         Text {
@@ -884,53 +892,134 @@ PanelFrame {
 
                         Column {
                             width: tabColumn.width
-                            spacing: 8
+                            spacing: 10
                             visible: root.clipKind !== "audio"
+
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                text: qsTr("Layout in project pixels (top-left origin). Values follow the playhead; drag in the preview to edit live.")
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            Text {
+                                text: qsTr("Position (px)")
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                                font.weight: Font.Medium
+                            }
 
                             Row {
                                 width: parent.width
                                 spacing: 8
                                 PropertyKeyframeRow {
                                     width: (parent.width - parent.spacing) / 2
-                                    propDef: root.propOpacity
-                                    keyframeList: (clip.keyframes && clip.keyframes.opacity && clip.keyframes.opacity.points) || []
-                                    interpolationMode: (clip.keyframes && clip.keyframes.opacity && clip.keyframes.opacity.interpolation) || "linear"
+                                    propDef: root.propX
+                                    keyframeList: (clip.keyframes && clip.keyframes.x && clip.keyframes.x.points) || []
+                                    interpolationMode: (clip.keyframes && clip.keyframes.x && clip.keyframes.x.interpolation) || "linear"
                                     useSlider: true
-                                    sliderFrom: 0
-                                    sliderTo: 1
-                                    percent: true
+                                    sliderFrom: -root.canvasW
+                                    sliderTo: root.canvasW * 2
+                                    unit: "px"
                                 }
                                 PropertyKeyframeRow {
                                     width: (parent.width - parent.spacing) / 2
-                                    propDef: root.propScale
-                                    keyframeList: (clip.keyframes && clip.keyframes.scale && clip.keyframes.scale.points) || []
-                                    interpolationMode: (clip.keyframes && clip.keyframes.scale && clip.keyframes.scale.interpolation) || "linear"
+                                    propDef: root.propY
+                                    keyframeList: (clip.keyframes && clip.keyframes.y && clip.keyframes.y.points) || []
+                                    interpolationMode: (clip.keyframes && clip.keyframes.y && clip.keyframes.y.interpolation) || "linear"
                                     useSlider: true
-                                    sliderFrom: 0.05
-                                    sliderTo: 3
+                                    sliderFrom: -root.canvasH
+                                    sliderTo: root.canvasH * 2
+                                    unit: "px"
                                 }
                             }
+
+                            Text {
+                                text: qsTr("Size (px)")
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                                font.weight: Font.Medium
+                            }
+
                             Row {
                                 width: parent.width
                                 spacing: 8
                                 PropertyKeyframeRow {
                                     width: (parent.width - parent.spacing) / 2
-                                    propDef: root.propPosX
-                                    keyframeList: (clip.keyframes && clip.keyframes.posX && clip.keyframes.posX.points) || []
-                                    interpolationMode: (clip.keyframes && clip.keyframes.posX && clip.keyframes.posX.interpolation) || "linear"
+                                    propDef: root.propWidth
+                                    keyframeList: (clip.keyframes && clip.keyframes.width && clip.keyframes.width.points) || []
+                                    interpolationMode: (clip.keyframes && clip.keyframes.width && clip.keyframes.width.interpolation) || "linear"
+                                    useSlider: true
+                                    sliderFrom: 1
+                                    sliderTo: Math.max(root.canvasW * 2, 2)
+                                    unit: "px"
                                 }
                                 PropertyKeyframeRow {
                                     width: (parent.width - parent.spacing) / 2
-                                    propDef: root.propPosY
-                                    keyframeList: (clip.keyframes && clip.keyframes.posY && clip.keyframes.posY.points) || []
-                                    interpolationMode: (clip.keyframes && clip.keyframes.posY && clip.keyframes.posY.interpolation) || "linear"
+                                    propDef: root.propHeight
+                                    keyframeList: (clip.keyframes && clip.keyframes.height && clip.keyframes.height.points) || []
+                                    interpolationMode: (clip.keyframes && clip.keyframes.height && clip.keyframes.height.interpolation) || "linear"
+                                    useSlider: true
+                                    sliderFrom: 1
+                                    sliderTo: Math.max(root.canvasH * 2, 2)
+                                    unit: "px"
                                 }
                             }
+
+                            Text {
+                                text: qsTr("Opacity & rotation")
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                                font.weight: Font.Medium
+                            }
+
+                            PropertyKeyframeRow {
+                                width: parent.width
+                                propDef: root.propOpacity
+                                keyframeList: (clip.keyframes && clip.keyframes.opacity && clip.keyframes.opacity.points) || []
+                                interpolationMode: (clip.keyframes && clip.keyframes.opacity && clip.keyframes.opacity.interpolation) || "linear"
+                                useSlider: true
+                                sliderFrom: 0
+                                sliderTo: 1
+                                percent: true
+                            }
+
                             PropertyKeyframeRow {
                                 width: parent.width
                                 propDef: root.propRotation
                                 keyframeList: (clip.keyframes && clip.keyframes.rotation && clip.keyframes.rotation.points) || []
                                 interpolationMode: (clip.keyframes && clip.keyframes.rotation && clip.keyframes.rotation.interpolation) || "linear"
+                                useSlider: true
+                                sliderFrom: -180
+                                sliderTo: 180
+                                unit: "°"
+                            }
+
+                            Button {
+                                text: qsTr("Reset transform")
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSm
+                                contentItem: Text {
+                                    text: parent.text
+                                    font: parent.font
+                                    color: Theme.panelForeground
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    implicitHeight: 30
+                                    radius: Theme.radiusSm
+                                    color: parent.down ? Theme.panelMuted : Theme.panelAccent
+                                    border.width: 1
+                                    border.color: Theme.panelBorder
+                                }
+                                onClicked: EditorState.resetClipTransform(
+                                               EditorState.selectedTrack, EditorState.selectedClip)
                             }
                         }
                     }
@@ -1467,10 +1556,11 @@ PanelFrame {
     }
 
     readonly property var propOpacity: { "key": "opacity", "label": "Opacity", "def": 1.0, "decimals": 2 }
-    readonly property var propScale: { "key": "scale", "label": "Scale", "def": 1.0, "decimals": 2 }
-    readonly property var propPosX: { "key": "posX", "label": "Position X", "def": 0.5, "decimals": 2 }
-    readonly property var propPosY: { "key": "posY", "label": "Position Y", "def": 0.5, "decimals": 2 }
-    readonly property var propRotation: { "key": "rotation", "label": "Rotation", "def": 0.0, "decimals": 1 }
+    readonly property var propX: { "key": "x", "label": "X", "def": 0.0, "decimals": 0 }
+    readonly property var propY: { "key": "y", "label": "Y", "def": 0.0, "decimals": 0 }
+    readonly property var propWidth: { "key": "width", "label": "Width", "def": root.canvasW, "decimals": 0 }
+    readonly property var propHeight: { "key": "height", "label": "Height", "def": root.canvasH, "decimals": 0 }
+    readonly property var propRotation: { "key": "rotation", "label": "Angle", "def": 0.0, "decimals": 1 }
     readonly property var propVolume: { "key": "volume", "label": "Volume", "def": 1.0, "decimals": 2 }
 
     function applyTrim(inPoint, outPoint) {

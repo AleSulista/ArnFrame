@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Templates as T
 import Drift
+import "components"
 
 ApplicationWindow {
     id: window
@@ -11,6 +12,18 @@ ApplicationWindow {
     visible: true
     title: "CutWire Drift"
     color: Theme.appBackground
+
+    function configureAndAddAsset(assetIndex, runner) {
+        if (!EditorState.shouldConfigureProjectForAsset(assetIndex)) {
+            runner()
+            return
+        }
+        projectSetupDialog.openForAsset(assetIndex, runner)
+    }
+
+    ProjectSetupDialog {
+        id: projectSetupDialog
+    }
 
     // Shortcut is not an Item, so wrap each binding in a zero-size host.
     Repeater {

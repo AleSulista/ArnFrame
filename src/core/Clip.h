@@ -47,10 +47,13 @@ struct Clip
     double speed = 1.0; // 1.0 = realtime; >1 faster, <1 slower
     Mask mask;
 
+    // Layout on the project canvas in pixels: top-left origin, size in px.
+    // Empty tracks use defaults (0,0,projectW,projectH) at evaluate time.
     KeyframeTrack<double> opacity;
-    KeyframeTrack<double> posX;
-    KeyframeTrack<double> posY;
-    KeyframeTrack<double> scale;
+    KeyframeTrack<double> transformX;
+    KeyframeTrack<double> transformY;
+    KeyframeTrack<double> transformW;
+    KeyframeTrack<double> transformH;
     KeyframeTrack<double> rotation;
     KeyframeTrack<double> volume;
     QList<Effect> effects;

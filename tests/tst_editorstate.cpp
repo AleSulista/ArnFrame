@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include <QSet>
+#include <QSignalSpy>
 #include <QTemporaryFile>
 
 #include "models/AppController.h"
@@ -137,6 +138,26 @@ void EditorStateTest::textStyleBlendModeKeyframesAndEffects()
     QVariantList keyframes = state.clipKeyframes(track, clip, QStringLiteral("opacity"));
     QCOMPARE(keyframes.size(), 1);
     QCOMPARE(keyframes.first().toMap().value(QStringLiteral("value")).toDouble(), 0.5);
+
+    // WYSIWYG-style preview updates must refresh selectedClipData for the inspector.
+    QSignalSpy clipDataSpy(&state, &AppController::selectedClipDataChanged);
+    state.beginPreviewDrag(QStringLiteral("Move clip"));
+    state.previewSetClipPosition(track, clip, 100.0, 200.0);
+    QVERIFY(clipDataSpy.count() >= 1);
+    const QVariantMap keys = state.selectedClipData().value(QStringLiteral("keyframes")).toMap();
+    const QVariantList xKeys = keys.value(QStringLiteral("x")).toMap().value(QStringLiteral("points")).toList();
+    QVERIFY(!xKeys.isEmpty());
+    QCOMPARE(xKeys.first().toMap().value(QStringLiteral("value")).toDouble(), 100.0);
+    state.commitPreviewDrag();
+
+    state.beginPreviewDrag(QStringLiteral("Resize clip"));
+    state.previewSetClipSize(track, clip, 640.0, 360.0);
+    state.commitPreviewDrag();
+    state.resetClipTransform(track, clip);
+    QCOMPARE(state.clipKeyframes(track, clip, QStringLiteral("opacity")).size(), 0);
+    // Reset writes a full-canvas layout keyframe at t=0 for each layout track.
+    QCOMPARE(state.clipKeyframes(track, clip, QStringLiteral("x")).size(), 1);
+    QCOMPARE(state.clipKeyframes(track, clip, QStringLiteral("width")).size(), 1);
 
     state.removeClipKeyframe(track, clip, QStringLiteral("opacity"), 0.0);
     QCOMPARE(state.clipKeyframes(track, clip, QStringLiteral("opacity")).size(), 0);

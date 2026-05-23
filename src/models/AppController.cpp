@@ -41,6 +41,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     // WYSIWYG preview drag emits only tracksChanged). This keeps the Clip
     // Properties panel in sync with the preview in both directions.
     connect(this, &AppController::selectionChanged, this, &AppController::selectedClipDataChanged);
+    connect(this, &AppController::tracksChanged, this, &AppController::selectedClipDataChanged);
 
     m_undoStack.setUndoLimit(kMaxUndoSteps);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, &AppController::undoStackChanged);
@@ -224,40 +225,6 @@ bool clipAcceptsPreviewTransform(const drift::Clip &clip)
            || clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Video;
 }
 
-void previewHalfExtents(const drift::Clip &clip, int canvasWidth, int canvasHeight, double scale,
-                        double &halfW, double &halfH)
-{
-    const int base = qMin(canvasWidth, canvasHeight);
-    if (clip.type == drift::ClipType::Shape) {
-        switch (clip.shapeStyle.kind) {
-        case drift::ShapeKind::Rectangle:
-            halfW = 0.15 * scale;
-            halfH = 0.10 * scale;
-            return;
-        case drift::ShapeKind::Square:
-            halfW = halfH = 0.125 * scale;
-            return;
-        case drift::ShapeKind::Triangle:
-        case drift::ShapeKind::Pentagon:
-        case drift::ShapeKind::Hexagon:
-            halfW = halfH = 0.15 * scale;
-            return;
-        }
-    }
-
-    if (clip.type == drift::ClipType::Text) {
-        halfW = 0.22 * scale;
-        halfH = 0.08 * scale;
-        return;
-    }
-
-    Q_UNUSED(base)
-    // Video and image clips are scaled to fill the canvas (keeping aspect), so
-    // the transform box spans the full frame at scale 1.
-    halfW = 0.5 * scale;
-    halfH = 0.5 * scale;
-}
-
 double clipTransformValue(const drift::KeyframeTrack<double> &track, drift::TimeUs relative, double defaultValue)
 {
     if (track.isEmpty())
@@ -293,12 +260,14 @@ drift::KeyframeTrack<double> *trackForProp(drift::Clip &clip, const QString &pro
 {
     if (prop == QStringLiteral("opacity"))
         return &clip.opacity;
-    if (prop == QStringLiteral("posX"))
-        return &clip.posX;
-    if (prop == QStringLiteral("posY"))
-        return &clip.posY;
-    if (prop == QStringLiteral("scale"))
-        return &clip.scale;
+    if (prop == QStringLiteral("x"))
+        return &clip.transformX;
+    if (prop == QStringLiteral("y"))
+        return &clip.transformY;
+    if (prop == QStringLiteral("width"))
+        return &clip.transformW;
+    if (prop == QStringLiteral("height"))
+        return &clip.transformH;
     if (prop == QStringLiteral("rotation"))
         return &clip.rotation;
     if (prop == QStringLiteral("volume"))
@@ -393,12 +362,66 @@ QVariantMap keyframesToMap(const drift::Clip &clip)
 {
     return {
         {QStringLiteral("opacity"), keyframeTrackToMap(clip.opacity, clip.timelineStart)},
-        {QStringLiteral("posX"), keyframeTrackToMap(clip.posX, clip.timelineStart)},
-        {QStringLiteral("posY"), keyframeTrackToMap(clip.posY, clip.timelineStart)},
-        {QStringLiteral("scale"), keyframeTrackToMap(clip.scale, clip.timelineStart)},
+        {QStringLiteral("x"), keyframeTrackToMap(clip.transformX, clip.timelineStart)},
+        {QStringLiteral("y"), keyframeTrackToMap(clip.transformY, clip.timelineStart)},
+        {QStringLiteral("width"), keyframeTrackToMap(clip.transformW, clip.timelineStart)},
+        {QStringLiteral("height"), keyframeTrackToMap(clip.transformH, clip.timelineStart)},
         {QStringLiteral("rotation"), keyframeTrackToMap(clip.rotation, clip.timelineStart)},
         {QStringLiteral("volume"), keyframeTrackToMap(clip.volume, clip.timelineStart)},
     };
+}
+
+void setClipLayoutPixels(drift::Clip &clip, double x, double y, double w, double h)
+{
+    clip.transformX = {};
+    clip.transformY = {};
+    clip.transformW = {};
+    clip.transformH = {};
+    clip.transformX.setKeyframe(0, x);
+    clip.transformY.setKeyframe(0, y);
+    clip.transformW.setKeyframe(0, qMax(1.0, w));
+    clip.transformH.setKeyframe(0, qMax(1.0, h));
+}
+
+void fitClipLayoutToCanvas(drift::Clip &clip, int mediaW, int mediaH, int canvasW, int canvasH)
+{
+    canvasW = qMax(1, canvasW);
+    canvasH = qMax(1, canvasH);
+    if (mediaW <= 0 || mediaH <= 0) {
+        setClipLayoutPixels(clip, 0, 0, canvasW, canvasH);
+        return;
+    }
+    const double scale = qMin(static_cast<double>(canvasW) / mediaW, static_cast<double>(canvasH) / mediaH);
+    setClipLayoutPixels(clip, 0, 0, mediaW * scale, mediaH * scale);
+}
+
+void applyAssetLayout(drift::Clip &clip, const QVariantMap &asset, int canvasW, int canvasH)
+{
+    int mediaW = asset.value(QStringLiteral("width")).toInt();
+    int mediaH = asset.value(QStringLiteral("height")).toInt();
+    const int rotation = asset.value(QStringLiteral("rotationDegrees")).toInt();
+    if (rotation == 90 || rotation == 270)
+        std::swap(mediaW, mediaH);
+    fitClipLayoutToCanvas(clip, mediaW, mediaH, canvasW, canvasH);
+}
+
+void applyDefaultVisualLayout(drift::Clip &clip, int canvasW, int canvasH)
+{
+    canvasW = qMax(1, canvasW);
+    canvasH = qMax(1, canvasH);
+    if (clip.type == drift::ClipType::Shape) {
+        const double w = canvasW * 0.30;
+        const double h = canvasH * 0.20;
+        setClipLayoutPixels(clip, 0, 0, w, h);
+        return;
+    }
+    if (clip.type == drift::ClipType::Text) {
+        setClipLayoutPixels(clip, 0, canvasH * 0.35, canvasW, canvasH * 0.30);
+        return;
+    }
+    // Stickers / generic images without metadata: modest top-left box.
+    const double side = qMin(canvasW, canvasH) * 0.25;
+    setClipLayoutPixels(clip, 0, 0, side, side);
 }
 
 QHash<QString, QString> defaultShortcuts()
@@ -795,6 +818,7 @@ void AppController::addClipFromAsset(int assetIndex)
     clip.timelineDuration = duration;
     clip.srcIn = 0;
     clip.srcOut = duration;
+    applyAssetLayout(clip, asset, m_project.width(), m_project.height());
 
     track.clips.append(clip);
     pushProjectEdit(before, QStringLiteral("Clip added"));
@@ -862,6 +886,7 @@ void AppController::addClipFromAssetOnNewTrack(int assetIndex, double atSeconds)
     clip.timelineDuration = duration;
     clip.srcIn = 0;
     clip.srcOut = duration;
+    applyAssetLayout(clip, asset, m_project.width(), m_project.height());
 
     track.clips.append(clip);
     pushProjectEdit(before, QStringLiteral("Clip added on new track"));
@@ -905,6 +930,7 @@ void AppController::addClipFromAssetAt(int assetIndex, int trackIndex, double at
     clip.timelineDuration = duration;
     clip.srcIn = 0;
     clip.srcOut = duration;
+    applyAssetLayout(clip, asset, m_project.width(), m_project.height());
 
     track.clips.append(clip);
     pushProjectEdit(before, QStringLiteral("Clip added"));
@@ -1317,6 +1343,7 @@ void AppController::addTextClip(const QString &text, double atSeconds)
     clip.timelineDuration = drift::kTextClipDurationUs;
     clip.srcIn = 0;
     clip.srcOut = drift::kTextClipDurationUs;
+    applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
 
     track.clips.append(clip);
     pushProjectEdit(before, QStringLiteral("Text clip added"));
@@ -1394,6 +1421,7 @@ void AppController::addShapeClipAt(const QString &shapeKind, int trackIndex, dou
     clip.timelineDuration = drift::kImageClipDurationUs;
     clip.srcIn = 0;
     clip.srcOut = drift::kImageClipDurationUs;
+    applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
 
     track.clips.append(clip);
     pushProjectEdit(before, QStringLiteral("Shape added"));
@@ -1437,6 +1465,7 @@ void AppController::addStickerClip(const QString &stickerId, double atSeconds)
     clip.timelineDuration = drift::kImageClipDurationUs;
     clip.srcIn = 0;
     clip.srcOut = drift::kImageClipDurationUs;
+    applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
 
     track.clips.append(clip);
     pushProjectEdit(before, QStringLiteral("Sticker added"));
@@ -1467,25 +1496,24 @@ QVariantList AppController::previewClipsAtPlayhead() const
                 continue;
 
             const drift::TimeUs relative = m_playheadUs - clip.timelineStart;
-            const double posX = clipTransformValue(clip.posX, relative, 0.5);
-            const double posY = clipTransformValue(clip.posY, relative, 0.5);
-            const double scale = clipTransformValue(clip.scale, relative, 1.0);
+            const double x = clipTransformValue(clip.transformX, relative, 0.0);
+            const double y = clipTransformValue(clip.transformY, relative, 0.0);
+            const double w = clipTransformValue(clip.transformW, relative, static_cast<double>(canvasWidth));
+            const double h = clipTransformValue(clip.transformH, relative, static_cast<double>(canvasHeight));
             const double rotation = clipTransformValue(clip.rotation, relative, 0.0);
-            double halfW = 0.0;
-            double halfH = 0.0;
-            previewHalfExtents(clip, canvasWidth, canvasHeight, scale, halfW, halfH);
 
             out.append(QVariantMap{
                 {QStringLiteral("track"), trackIndex},
                 {QStringLiteral("clip"), clipIndex},
                 {QStringLiteral("kind"), drift::clipTypeToString(clip.type)},
                 {QStringLiteral("name"), clip.name},
-                {QStringLiteral("posX"), posX},
-                {QStringLiteral("posY"), posY},
-                {QStringLiteral("scale"), scale},
+                {QStringLiteral("x"), x},
+                {QStringLiteral("y"), y},
+                {QStringLiteral("width"), w},
+                {QStringLiteral("height"), h},
                 {QStringLiteral("rotation"), rotation},
-                {QStringLiteral("halfW"), halfW},
-                {QStringLiteral("halfH"), halfH},
+                {QStringLiteral("canvasWidth"), canvasWidth},
+                {QStringLiteral("canvasHeight"), canvasHeight},
             });
         }
     }
@@ -1502,6 +1530,108 @@ int AppController::projectHeight() const
     return m_project.height();
 }
 
+int AppController::projectFps() const
+{
+    return m_project.fps();
+}
+
+void AppController::setProjectResolution(int width, int height)
+{
+    setProjectSetup(width, height, m_project.fps());
+}
+
+void AppController::setProjectSetup(int width, int height, int fps)
+{
+    width = qBound(16, width, 7680);
+    height = qBound(16, height, 4320);
+    fps = qBound(1, fps, 240);
+    if (m_project.width() == width && m_project.height() == height && m_project.fps() == fps)
+        return;
+
+    const drift::Project before = m_project;
+    m_project.setResolution(width, height);
+    m_project.setFps(fps);
+    pushProjectEdit(before, QStringLiteral("Project setup"));
+    finishEdit(QStringLiteral("Project setup updated"));
+}
+
+bool AppController::timelineHasVisualClips() const
+{
+    for (const drift::Track &track : m_project.tracks()) {
+        for (const drift::Clip &clip : track.clips) {
+            if (clip.type == drift::ClipType::Video || clip.type == drift::ClipType::Image
+                || clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Shape) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool AppController::shouldConfigureProjectForAsset(int assetIndex) const
+{
+    if (!m_assetLibrary)
+        return false;
+    const QVariantMap asset = m_assetLibrary->assetAt(assetIndex);
+    if (asset.isEmpty())
+        return false;
+    const QString kind = asset.value(QStringLiteral("kind")).toString();
+    if (kind != QStringLiteral("video") && kind != QStringLiteral("image"))
+        return false;
+
+    // Offer setup only for the first video/image clip (text/shapes alone don't count).
+    for (const drift::Track &track : m_project.tracks()) {
+        for (const drift::Clip &clip : track.clips) {
+            if (clip.type == drift::ClipType::Video || clip.type == drift::ClipType::Image)
+                return false;
+        }
+    }
+    return true;
+}
+
+QVariantMap AppController::suggestedProjectSetupForAsset(int assetIndex) const
+{
+    QVariantMap out{
+        {QStringLiteral("width"), m_project.width()},
+        {QStringLiteral("height"), m_project.height()},
+        {QStringLiteral("fps"), m_project.fps()},
+        {QStringLiteral("aspect"), QStringLiteral("custom")},
+    };
+    if (!m_assetLibrary)
+        return out;
+
+    const QVariantMap asset = m_assetLibrary->assetAt(assetIndex);
+    if (asset.isEmpty())
+        return out;
+
+    int w = asset.value(QStringLiteral("width")).toInt();
+    int h = asset.value(QStringLiteral("height")).toInt();
+    const int rotation = asset.value(QStringLiteral("rotationDegrees")).toInt();
+    if (rotation == 90 || rotation == 270)
+        std::swap(w, h);
+    if (w > 0 && h > 0) {
+        out.insert(QStringLiteral("width"), w);
+        out.insert(QStringLiteral("height"), h);
+        const double ratio = static_cast<double>(w) / static_cast<double>(h);
+        if (qAbs(ratio - 16.0 / 9.0) < 0.02)
+            out.insert(QStringLiteral("aspect"), QStringLiteral("16:9"));
+        else if (qAbs(ratio - 9.0 / 16.0) < 0.02)
+            out.insert(QStringLiteral("aspect"), QStringLiteral("9:16"));
+        else if (qAbs(ratio - 4.0 / 3.0) < 0.02)
+            out.insert(QStringLiteral("aspect"), QStringLiteral("4:3"));
+        else if (qAbs(ratio - 1.0) < 0.02)
+            out.insert(QStringLiteral("aspect"), QStringLiteral("1:1"));
+        else
+            out.insert(QStringLiteral("aspect"), QStringLiteral("source"));
+    }
+    const double fps = asset.value(QStringLiteral("fps")).toDouble();
+    if (fps >= 1.0)
+        out.insert(QStringLiteral("fps"), qRound(fps));
+    out.insert(QStringLiteral("name"), asset.value(QStringLiteral("name")).toString());
+    out.insert(QStringLiteral("kind"), asset.value(QStringLiteral("kind")).toString());
+    return out;
+}
+
 void AppController::beginPreviewDrag(const QString &undoText)
 {
     m_previewDragBefore = m_project;
@@ -1514,11 +1644,11 @@ void AppController::emitPreviewFrame()
     // Same rule as finishEdit: never seek the live clock for a preview refresh.
     if (!m_playback.isPlaying())
         m_playback.setPlayheadUs(m_playheadUs);
-    emit tracksChanged();
+    emit tracksChanged(); // also notifies selectedClipDataChanged via connection
     m_playback.refreshFrame();
 }
 
-void AppController::previewSetClipPosition(int trackIndex, int clipIndex, double posX, double posY)
+void AppController::previewSetClipPosition(int trackIndex, int clipIndex, double xPixels, double yPixels)
 {
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
         return;
@@ -1532,12 +1662,12 @@ void AppController::previewSetClipPosition(int trackIndex, int clipIndex, double
 
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
-    clip.posX.setKeyframe(relative, qBound(0.0, posX, 1.0));
-    clip.posY.setKeyframe(relative, qBound(0.0, posY, 1.0));
+    clip.transformX.setKeyframe(relative, xPixels);
+    clip.transformY.setKeyframe(relative, yPixels);
     emitPreviewFrame();
 }
 
-void AppController::previewSetClipScale(int trackIndex, int clipIndex, double scale)
+void AppController::previewSetClipSize(int trackIndex, int clipIndex, double widthPixels, double heightPixels)
 {
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
         return;
@@ -1547,11 +1677,34 @@ void AppController::previewSetClipScale(int trackIndex, int clipIndex, double sc
         return;
 
     if (!m_previewDragActive)
-        beginPreviewDrag(QStringLiteral("Scale clip"));
+        beginPreviewDrag(QStringLiteral("Resize clip"));
 
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
-    clip.scale.setKeyframe(relative, qBound(0.05, scale, 10.0));
+    clip.transformW.setKeyframe(relative, qMax(1.0, widthPixels));
+    clip.transformH.setKeyframe(relative, qMax(1.0, heightPixels));
+    emitPreviewFrame();
+}
+
+void AppController::previewSetClipRect(int trackIndex, int clipIndex, double xPixels, double yPixels,
+                                       double widthPixels, double heightPixels)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag(QStringLiteral("Transform clip"));
+
+    drift::Clip &clip = track.clips[clipIndex];
+    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
+    clip.transformX.setKeyframe(relative, xPixels);
+    clip.transformY.setKeyframe(relative, yPixels);
+    clip.transformW.setKeyframe(relative, qMax(1.0, widthPixels));
+    clip.transformH.setKeyframe(relative, qMax(1.0, heightPixels));
     emitPreviewFrame();
 }
 
@@ -2097,6 +2250,31 @@ void AppController::setKeyframeInterpolation(int trackIndex, int clipIndex, cons
                                                         : drift::Interpolation::Linear);
     pushProjectEdit(before, QStringLiteral("Keyframe interpolation changed"));
     finishEdit(QStringLiteral("Keyframe interpolation updated"));
+}
+
+void AppController::resetClipTransform(int trackIndex, int clipIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type == drift::ClipType::Audio)
+        return;
+
+    const drift::Project before = m_project;
+    clip.opacity = {};
+    clip.transformX = {};
+    clip.transformY = {};
+    clip.transformW = {};
+    clip.transformH = {};
+    clip.rotation = {};
+    setClipLayoutPixels(clip, 0, 0, m_project.width(), m_project.height());
+    pushProjectEdit(before, QStringLiteral("Reset transform"));
+    finishEdit(QStringLiteral("Transform reset"));
 }
 
 QVariantList AppController::effectCatalog() const

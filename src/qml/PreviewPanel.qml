@@ -35,7 +35,12 @@ PanelFrame {
                 anchors.margins: 8
                 anchors.bottomMargin: 0
 
-                property real aspect: 16 / 9
+                property real aspect: {
+                    void EditorState.tracks
+                    const w = EditorState.projectWidth()
+                    const h = EditorState.projectHeight()
+                    return (w > 0 && h > 0) ? (w / h) : (16 / 9)
+                }
                 property bool fitMode: true
                 property real fitWidth: fitMode ? Math.min(width, height * aspect) : width
                 property real fitHeight: fitMode ? fitWidth / aspect : height
@@ -103,26 +108,30 @@ PanelFrame {
 
                                 readonly property bool selected: EditorState.selectedTrack === modelData.track
                                                                         && EditorState.selectedClip === modelData.clip
+                                readonly property real canvasW: Math.max(1, modelData.canvasWidth)
+                                readonly property real canvasH: Math.max(1, modelData.canvasHeight)
+                                readonly property real sx: parent.width / canvasW
+                                readonly property real sy: parent.height / canvasH
 
                                 // Live overrides applied during a drag so the box tracks
                                 // the cursor without rebuilding the (stale) model.
-                                property real liveDX: 0
-                                property real liveDY: 0
-                                property real liveScale: -1
+                                property real liveX: -1e12
+                                property real liveY: -1e12
+                                property real liveW: -1
+                                property real liveH: -1
                                 property real liveRotation: 1e9
 
-                                readonly property real baseHalfW: modelData.halfW / Math.max(0.0001, modelData.scale)
-                                readonly property real baseHalfH: modelData.halfH / Math.max(0.0001, modelData.scale)
-                                readonly property real effScale: liveScale >= 0 ? liveScale : modelData.scale
-                                readonly property real centerX: modelData.posX * parent.width + liveDX
-                                readonly property real centerY: modelData.posY * parent.height + liveDY
-                                readonly property real boxW: Math.max(24, baseHalfW * effScale * 2 * parent.width)
-                                readonly property real boxH: Math.max(24, baseHalfH * effScale * 2 * parent.height)
+                                readonly property real layoutX: liveX > -1e11 ? liveX : modelData.x
+                                readonly property real layoutY: liveY > -1e11 ? liveY : modelData.y
+                                readonly property real layoutW: liveW >= 0 ? liveW : modelData.width
+                                readonly property real layoutH: liveH >= 0 ? liveH : modelData.height
+                                readonly property real centerX: (layoutX + layoutW * 0.5) * sx
+                                readonly property real centerY: (layoutY + layoutH * 0.5) * sy
 
-                                x: centerX - boxW / 2
-                                y: centerY - boxH / 2
-                                width: boxW
-                                height: boxH
+                                x: layoutX * sx
+                                y: layoutY * sy
+                                width: Math.max(24, layoutW * sx)
+                                height: Math.max(24, layoutH * sy)
                                 // Front-most track (lowest index) sits on top so it
                                 // wins click hit-testing over boxes behind it.
                                 z: -modelData.track
@@ -131,8 +140,8 @@ PanelFrame {
 
                                 property real dragStartX: 0
                                 property real dragStartY: 0
-                                property real dragStartScale: 1
-                                property real dragStartDist: 1
+                                property real dragStartW: 1
+                                property real dragStartH: 1
 
                                 Rectangle {
                                     anchors.fill: parent
@@ -152,13 +161,15 @@ PanelFrame {
                                     onActiveChanged: {
                                         if (active) {
                                             transformOverlay.interacting = true
-                                            handle.dragStartX = handle.modelData.posX
-                                            handle.dragStartY = handle.modelData.posY
+                                            handle.dragStartX = handle.modelData.x
+                                            handle.dragStartY = handle.modelData.y
+                                            handle.liveX = handle.dragStartX
+                                            handle.liveY = handle.dragStartY
                                             EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
                                             EditorState.beginPreviewDrag()
                                         } else {
-                                            handle.liveDX = 0
-                                            handle.liveDY = 0
+                                            handle.liveX = -1e12
+                                            handle.liveY = -1e12
                                             transformOverlay.endInteraction()
                                         }
                                     }
@@ -167,25 +178,28 @@ PanelFrame {
                                         const a = handle.rotation * Math.PI / 180
                                         const dx = translation.x * Math.cos(a) - translation.y * Math.sin(a)
                                         const dy = translation.x * Math.sin(a) + translation.y * Math.cos(a)
-                                        handle.liveDX = dx
-                                        handle.liveDY = dy
+                                        const xPx = handle.dragStartX + dx / handle.sx
+                                        const yPx = handle.dragStartY + dy / handle.sy
+                                        handle.liveX = xPx
+                                        handle.liveY = yPx
                                         EditorState.previewSetClipPosition(
                                             handle.modelData.track,
                                             handle.modelData.clip,
-                                            handle.dragStartX + dx / handle.parent.width,
-                                            handle.dragStartY + dy / handle.parent.height)
+                                            xPx,
+                                            yPx)
                                     }
                                 }
 
-                                // Corner resize handles (uniform scale)
+                                // Corner resize handles (opposite corner stays fixed)
                                 Repeater {
                                     model: handle.selected ? 4 : 0
 
                                     delegate: Rectangle {
                                         id: corner
                                         required property int index
-                                        readonly property real sx: (index === 0 || index === 2) ? -1 : 1
-                                        readonly property real sy: (index < 2) ? -1 : 1
+                                        // 0 TL, 1 TR, 2 BL, 3 BR
+                                        readonly property real sxSign: (index === 0 || index === 2) ? -1 : 1
+                                        readonly property real sySign: (index < 2) ? -1 : 1
 
                                         width: 12
                                         height: 12
@@ -193,26 +207,31 @@ PanelFrame {
                                         color: Theme.primary
                                         border.width: 1
                                         border.color: "#ffffff"
-                                        x: (sx < 0 ? 0 : handle.width) - width / 2
-                                        y: (sy < 0 ? 0 : handle.height) - height / 2
+                                        x: (sxSign < 0 ? 0 : handle.width) - width / 2
+                                        y: (sySign < 0 ? 0 : handle.height) - height / 2
 
                                         DragHandler {
                                             id: cornerDrag
                                             target: null
-                                            cursorShape: (corner.sx * corner.sy < 0) ? Qt.SizeBDiagCursor : Qt.SizeFDiagCursor
+                                            cursorShape: (corner.sxSign * corner.sySign < 0) ? Qt.SizeBDiagCursor : Qt.SizeFDiagCursor
                                             onActiveChanged: {
                                                 if (active) {
-                                                    const p0 = transformOverlay.mapFromItem(null, cornerDrag.centroid.scenePosition.x,
-                                                                                             cornerDrag.centroid.scenePosition.y)
-                                                    handle.dragStartScale = handle.modelData.scale
-                                                    handle.dragStartDist = Math.max(1, Math.hypot(p0.x - handle.centerX,
-                                                                                                   p0.y - handle.centerY))
+                                                    handle.dragStartX = handle.layoutX
+                                                    handle.dragStartY = handle.layoutY
+                                                    handle.dragStartW = handle.layoutW
+                                                    handle.dragStartH = handle.layoutH
+                                                    handle.liveX = handle.dragStartX
+                                                    handle.liveY = handle.dragStartY
+                                                    handle.liveW = handle.dragStartW
+                                                    handle.liveH = handle.dragStartH
                                                     transformOverlay.interacting = true
-                                                    handle.liveScale = handle.dragStartScale
                                                     EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
                                                     EditorState.beginPreviewDrag()
                                                 } else {
-                                                    handle.liveScale = -1
+                                                    handle.liveX = -1e12
+                                                    handle.liveY = -1e12
+                                                    handle.liveW = -1
+                                                    handle.liveH = -1
                                                     transformOverlay.endInteraction()
                                                 }
                                             }
@@ -221,13 +240,39 @@ PanelFrame {
                                                     return
                                                 const p = transformOverlay.mapFromItem(null, cornerDrag.centroid.scenePosition.x,
                                                                                         cornerDrag.centroid.scenePosition.y)
-                                                const dist = Math.hypot(p.x - handle.centerX, p.y - handle.centerY)
-                                                const newScale = Math.max(0.05, handle.dragStartScale * dist / handle.dragStartDist)
-                                                handle.liveScale = newScale
-                                                EditorState.previewSetClipScale(
+                                                const px = p.x / handle.sx
+                                                const py = p.y / handle.sy
+                                                const right = handle.dragStartX + handle.dragStartW
+                                                const bottom = handle.dragStartY + handle.dragStartH
+                                                let x = handle.dragStartX
+                                                let y = handle.dragStartY
+                                                let w = handle.dragStartW
+                                                let h = handle.dragStartH
+                                                if (corner.index === 0) { // TL
+                                                    x = Math.min(px, right - 1)
+                                                    y = Math.min(py, bottom - 1)
+                                                    w = right - x
+                                                    h = bottom - y
+                                                } else if (corner.index === 1) { // TR
+                                                    y = Math.min(py, bottom - 1)
+                                                    w = Math.max(1, px - handle.dragStartX)
+                                                    h = bottom - y
+                                                } else if (corner.index === 2) { // BL
+                                                    x = Math.min(px, right - 1)
+                                                    w = right - x
+                                                    h = Math.max(1, py - handle.dragStartY)
+                                                } else { // BR
+                                                    w = Math.max(1, px - handle.dragStartX)
+                                                    h = Math.max(1, py - handle.dragStartY)
+                                                }
+                                                handle.liveX = x
+                                                handle.liveY = y
+                                                handle.liveW = w
+                                                handle.liveH = h
+                                                EditorState.previewSetClipRect(
                                                     handle.modelData.track,
                                                     handle.modelData.clip,
-                                                    newScale)
+                                                    x, y, w, h)
                                             }
                                         }
                                     }

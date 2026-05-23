@@ -30,6 +30,7 @@ private slots:
     void clipReaderAudioSequential();
     void compositorDefaultRenderStaysFullResolution();
     void compositorPreviewScaleRendersLowerResolution();
+    void compositorPreviewScaleMapsProjectPixelLayout();
     void compositorAppliesMultiplyBlendMode();
     void compositorRendersShapeClip();
     void adjustmentEffectContrastCatalogEntry();
@@ -289,6 +290,42 @@ void EngineTest::compositorPreviewScaleRendersLowerResolution()
     QCOMPARE(fullFrame.size(), QSize(192, 108));
 }
 
+void EngineTest::compositorPreviewScaleMapsProjectPixelLayout()
+{
+    // Project-pixel layout must be scaled onto the preview canvas so WYSIWYG
+    // handles (which map project px → widget) stay aligned with the frame.
+    drift::Project project;
+    project.setResolution(200, 100);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("shape");
+    clip.type = drift::ClipType::Shape;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(1.0);
+    clip.shapeStyle.kind = drift::ShapeKind::Rectangle;
+    clip.shapeStyle.fill = Qt::red;
+    clip.shapeStyle.strokeWidth = 0.0;
+    clip.transformX.setKeyframe(0, 40.0);
+    clip.transformY.setKeyframe(0, 20.0);
+    clip.transformW.setKeyframe(0, 80.0);
+    clip.transformH.setKeyframe(0, 40.0);
+    project.tracks()[0].clips.append(clip);
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+
+    FrameCompositor::RenderOptions options;
+    options.previewScale = 0.5;
+    const QImage frame = compositor.compositeAt(0, options);
+    QCOMPARE(frame.size(), QSize(100, 50));
+    // Scaled layout: (20,10)-(60,30) on the half-res canvas.
+    QVERIFY(frame.pixelColor(40, 20).red() > 200);
+    QCOMPARE(frame.pixelColor(0, 0), QColor(0, 0, 0));
+    QCOMPARE(frame.pixelColor(90, 40), QColor(0, 0, 0));
+}
+
 void EngineTest::compositorAppliesMultiplyBlendMode()
 {
     QTemporaryDir dir;
@@ -357,8 +394,10 @@ void EngineTest::compositorRendersShapeClip()
     clip.shapeStyle.fill = QColor(255, 0, 0);
     clip.shapeStyle.stroke = Qt::white;
     clip.shapeStyle.strokeWidth = 2.0;
-    clip.posX.setKeyframe(0, 0.5);
-    clip.posY.setKeyframe(0, 0.5);
+    clip.transformX.setKeyframe(0, 32.0);
+    clip.transformY.setKeyframe(0, 32.0);
+    clip.transformW.setKeyframe(0, 64.0);
+    clip.transformH.setKeyframe(0, 64.0);
     project.tracks()[0].clips.append(clip);
 
     FrameCompositor compositor;

@@ -220,15 +220,46 @@ QJsonObject clipToJson(const Clip &clip)
         {QStringLiteral("srcOutUs"), static_cast<double>(clip.srcOut)},
         {QStringLiteral("volume"), keyframesToJson(clip.volume)},
         {QStringLiteral("opacity"), keyframesToJson(clip.opacity)},
-        {QStringLiteral("posX"), keyframesToJson(clip.posX)},
-        {QStringLiteral("posY"), keyframesToJson(clip.posY)},
-        {QStringLiteral("scale"), keyframesToJson(clip.scale)},
+        {QStringLiteral("x"), keyframesToJson(clip.transformX)},
+        {QStringLiteral("y"), keyframesToJson(clip.transformY)},
+        {QStringLiteral("width"), keyframesToJson(clip.transformW)},
+        {QStringLiteral("height"), keyframesToJson(clip.transformH)},
         {QStringLiteral("rotation"), keyframesToJson(clip.rotation)},
         {QStringLiteral("effects"), effectsToJson(clip.effects)},
     };
 }
 
-Clip clipFromJsonV2(const QJsonObject &object)
+KeyframeTrack<double> singleKeyframe(double value)
+{
+    KeyframeTrack<double> track;
+    track.setKeyframe(0, value);
+    return track;
+}
+
+void applyLegacyFractionalLayout(Clip &clip, const KeyframeTrack<double> &posX,
+                                 const KeyframeTrack<double> &posY, const KeyframeTrack<double> &scale,
+                                 int canvasW, int canvasH)
+{
+    const double cx = (posX.isEmpty() ? 0.5 : posX.evaluateAt(0)) * canvasW;
+    const double cy = (posY.isEmpty() ? 0.5 : posY.evaluateAt(0)) * canvasH;
+    const double s = scale.isEmpty() ? 1.0 : scale.evaluateAt(0);
+    const double w = qMax(1.0, canvasW * s);
+    const double h = qMax(1.0, canvasH * s);
+    clip.transformX = singleKeyframe(cx - w * 0.5);
+    clip.transformY = singleKeyframe(cy - h * 0.5);
+    clip.transformW = singleKeyframe(w);
+    clip.transformH = singleKeyframe(h);
+
+    // Preserve interpolation mode from the primary legacy track when present.
+    if (!posX.isEmpty()) {
+        clip.transformX.setInterpolation(posX.interpolation());
+        clip.transformY.setInterpolation(posY.isEmpty() ? posX.interpolation() : posY.interpolation());
+        clip.transformW.setInterpolation(scale.isEmpty() ? posX.interpolation() : scale.interpolation());
+        clip.transformH.setInterpolation(scale.isEmpty() ? posX.interpolation() : scale.interpolation());
+    }
+}
+
+Clip clipFromJsonV2(const QJsonObject &object, int canvasW = 1920, int canvasH = 1080)
 {
     Clip clip;
     clip.id = object.value(QStringLiteral("id")).toString(QUuid::createUuid().toString(QUuid::WithoutBraces));
@@ -254,11 +285,23 @@ Clip clipFromJsonV2(const QJsonObject &object)
         clip.volume.setKeyframe(0, object.value(QStringLiteral("volume")).toDouble(1.0));
     }
     clip.opacity = keyframesFromJson(object.value(QStringLiteral("opacity")).toObject());
-    clip.posX = keyframesFromJson(object.value(QStringLiteral("posX")).toObject());
-    clip.posY = keyframesFromJson(object.value(QStringLiteral("posY")).toObject());
-    clip.scale = keyframesFromJson(object.value(QStringLiteral("scale")).toObject());
     clip.rotation = keyframesFromJson(object.value(QStringLiteral("rotation")).toObject());
     clip.effects = effectsFromJson(object.value(QStringLiteral("effects")).toArray());
+
+    const bool hasPixelLayout = object.value(QStringLiteral("x")).isObject()
+                                || object.value(QStringLiteral("width")).isObject();
+    if (hasPixelLayout) {
+        clip.transformX = keyframesFromJson(object.value(QStringLiteral("x")).toObject());
+        clip.transformY = keyframesFromJson(object.value(QStringLiteral("y")).toObject());
+        clip.transformW = keyframesFromJson(object.value(QStringLiteral("width")).toObject());
+        clip.transformH = keyframesFromJson(object.value(QStringLiteral("height")).toObject());
+    } else {
+        applyLegacyFractionalLayout(clip,
+                                    keyframesFromJson(object.value(QStringLiteral("posX")).toObject()),
+                                    keyframesFromJson(object.value(QStringLiteral("posY")).toObject()),
+                                    keyframesFromJson(object.value(QStringLiteral("scale")).toObject()),
+                                    qMax(1, canvasW), qMax(1, canvasH));
+    }
     return clip;
 }
 
@@ -428,7 +471,7 @@ Project Project::fromJson(const QJsonObject &object, QString *errorOut)
         for (const QJsonValue &clipValue : clipsArray) {
             const QJsonObject clipObject = clipValue.toObject();
             if (version >= 2)
-                track.clips.append(clipFromJsonV2(clipObject));
+                track.clips.append(clipFromJsonV2(clipObject, project.width(), project.height()));
             else
                 track.clips.append(clipFromJsonV1(clipObject, project.m_assetOrder));
         }

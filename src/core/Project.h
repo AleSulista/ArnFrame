@@ -21,7 +21,7 @@ struct Bookmark
 class Project
 {
 public:
-    static constexpr int kCurrentVersion = 2;
+    static constexpr int kCurrentVersion = 3;
 
     Project() { resetToDefaultTimeline(); }
 
