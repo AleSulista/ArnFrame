@@ -136,6 +136,7 @@ public:
                                            const QString &key, double value);
     Q_INVOKABLE void previewSetClipSpeed(int trackIndex, int clipIndex, double speed);
     Q_INVOKABLE void previewSetClipMask(int trackIndex, int clipIndex, const QVariantMap &mask);
+    Q_INVOKABLE void previewSetClipFade(int trackIndex, int clipIndex, double fadeInSeconds, double fadeOutSeconds);
     Q_INVOKABLE void commitPreviewDrag();
     Q_INVOKABLE int projectWidth() const;
     Q_INVOKABLE int projectHeight() const;
@@ -175,6 +176,8 @@ public:
     Q_INVOKABLE void setClipBlendMode(int trackIndex, int clipIndex, const QString &mode);
     Q_INVOKABLE void setClipSpeed(int trackIndex, int clipIndex, double speed);
     Q_INVOKABLE void setClipMask(int trackIndex, int clipIndex, const QVariantMap &mask);
+    Q_INVOKABLE void setClipFade(int trackIndex, int clipIndex, double fadeInSeconds, double fadeOutSeconds);
+    Q_INVOKABLE void setClipFadeCurve(int trackIndex, int clipIndex, const QString &curve);
     Q_INVOKABLE void addTransition(int trackIndex, int clipIndex, const QString &kind, double durationSeconds);
     Q_INVOKABLE void removeTransition(int trackIndex, const QString &transitionId);
     Q_INVOKABLE void setTransitionDuration(int trackIndex, const QString &transitionId, double durationSeconds);

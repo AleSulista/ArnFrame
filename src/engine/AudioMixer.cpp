@@ -81,7 +81,8 @@ void accumulateClipAudio(const drift::Clip &clip, const drift::Track &track, dri
         const drift::TimeUs sampleTimeUs =
             timelineStartUs + static_cast<drift::TimeUs>((static_cast<int64_t>(i) * drift::kUsPerSecond) / sampleRate);
         const float gain = static_cast<float>(volumeForClip(clip, sampleTimeUs)
-                                              * transitionGainForClip(track, clip, sampleTimeUs));
+                                              * transitionGainForClip(track, clip, sampleTimeUs)
+                                              * clip.fadeMultiplier(sampleTimeUs));
         mixBuffer[i * 2] += chunk[i * 2] * gain;
         mixBuffer[i * 2 + 1] += chunk[i * 2 + 1] * gain;
     }

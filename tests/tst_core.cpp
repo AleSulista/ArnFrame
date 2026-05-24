@@ -34,6 +34,7 @@ private slots:
     void allTransitionKindsRoundTrip();
     void physicalOverlapTransitionWindow();
     void backgroundSerialization();
+    void fadeSerializationAndMultiplier();
 };
 
 void CoreTest::timeConversion()
@@ -665,6 +666,44 @@ void CoreTest::backgroundSerialization()
         QCOMPARE(loaded.background().kind, drift::BackgroundKind::Color);
         QCOMPARE(loaded.background().color, QColor(Qt::black));
     }
+}
+
+void CoreTest::fadeSerializationAndMultiplier()
+{
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("fade-clip");
+    clip.type = drift::ClipType::Video;
+    clip.timelineStart = drift::secondsToUs(1.0);
+    clip.timelineDuration = drift::secondsToUs(4.0);
+    clip.fadeInUs = drift::secondsToUs(1.0);
+    clip.fadeOutUs = drift::secondsToUs(2.0);
+    clip.fadeCurve = drift::FadeCurve::Linear;
+    project.tracks()[0].clips.append(clip);
+
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(project.toJson(), &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    const drift::Clip &c = loaded.tracks()[0].clips[0];
+    QCOMPARE(c.fadeInUs, drift::secondsToUs(1.0));
+    QCOMPARE(c.fadeOutUs, drift::secondsToUs(2.0));
+    QCOMPARE(c.fadeCurve, drift::FadeCurve::Linear);
+
+    // Linear ramp: at the very edges gain is 0, at the fade midpoints 0.5, and
+    // fully present between the fades.
+    QCOMPARE(c.fadeMultiplier(c.timelineStart), 0.0);
+    QVERIFY(qAbs(c.fadeMultiplier(c.timelineStart + drift::secondsToUs(0.5)) - 0.5) < 1e-6);
+    QVERIFY(qAbs(c.fadeMultiplier(c.timelineStart + drift::secondsToUs(1.5)) - 1.0) < 1e-6);
+    QVERIFY(qAbs(c.fadeMultiplier(c.timelineEnd() - drift::secondsToUs(1.0)) - 0.5) < 1e-6);
+
+    // A clip with no fades is always fully present.
+    drift::Clip plain;
+    plain.timelineStart = 0;
+    plain.timelineDuration = drift::secondsToUs(2.0);
+    QCOMPARE(plain.fadeMultiplier(drift::secondsToUs(1.0)), 1.0);
 }
 
 QTEST_MAIN(CoreTest)

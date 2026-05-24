@@ -252,10 +252,13 @@ QImage shapeImageForClip(const drift::Clip &clip, int canvasWidth, int canvasHei
 
 double opacityForClip(const drift::Clip &clip, drift::TimeUs timelineUs)
 {
-    if (clip.opacity.isEmpty())
-        return 1.0;
-    const drift::TimeUs relative = timelineUs - clip.timelineStart;
-    return qBound(0.0, clip.opacity.evaluateAt(relative), 1.0);
+    double value = 1.0;
+    if (!clip.opacity.isEmpty()) {
+        const drift::TimeUs relative = timelineUs - clip.timelineStart;
+        value = qBound(0.0, clip.opacity.evaluateAt(relative), 1.0);
+    }
+    // Edge-relative fades ride on top of any opacity keyframes.
+    return value * clip.fadeMultiplier(timelineUs);
 }
 
 double transformValue(const drift::KeyframeTrack<double> &track, drift::TimeUs relative, double defaultValue)

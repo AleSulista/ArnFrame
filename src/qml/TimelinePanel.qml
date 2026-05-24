@@ -936,6 +936,7 @@ PanelFrame {
                                         }
 
                                         Rectangle {
+                                            id: clipBackground
                                             anchors.fill: parent
                                             radius: Theme.radiusSm
                                             color: root.clipColor(clipItem.trackType === "shape" ? "graphic" : clipItem.trackType)
@@ -1010,6 +1011,50 @@ PanelFrame {
                                                         const timelineX = mapToItem(trackRow, mouse.x, mouse.y).x
                                                         EditorState.trimClipRight(trackRow.trackIndex, modelData,
                                                                                 timelineX / root.pxPerSecond)
+                                                    }
+                                                }
+                                            }
+
+                                            // Fade ramp overlay (always visible so fades read at a glance).
+                                            Canvas {
+                                                id: fadeCanvas
+                                                anchors.fill: parent
+                                                z: 2
+                                                property real fadeInPx: Math.min(width, (clipItem.clipData.fadeIn || 0) * root.pxPerSecond)
+                                                property real fadeOutPx: Math.min(width, (clipItem.clipData.fadeOut || 0) * root.pxPerSecond)
+                                                onFadeInPxChanged: requestPaint()
+                                                onFadeOutPxChanged: requestPaint()
+                                                onWidthChanged: requestPaint()
+                                                onHeightChanged: requestPaint()
+                                                onPaint: {
+                                                    var ctx = getContext("2d")
+                                                    ctx.reset()
+                                                    ctx.fillStyle = "rgba(0,0,0,0.38)"
+                                                    ctx.strokeStyle = "rgba(255,255,255,0.9)"
+                                                    ctx.lineWidth = 1.5
+                                                    if (fadeInPx > 0.5) {
+                                                        ctx.beginPath()
+                                                        ctx.moveTo(0, 0)
+                                                        ctx.lineTo(fadeInPx, 0)
+                                                        ctx.lineTo(0, height)
+                                                        ctx.closePath()
+                                                        ctx.fill()
+                                                        ctx.beginPath()
+                                                        ctx.moveTo(0, height)
+                                                        ctx.lineTo(fadeInPx, 0)
+                                                        ctx.stroke()
+                                                    }
+                                                    if (fadeOutPx > 0.5) {
+                                                        ctx.beginPath()
+                                                        ctx.moveTo(width, 0)
+                                                        ctx.lineTo(width - fadeOutPx, 0)
+                                                        ctx.lineTo(width, height)
+                                                        ctx.closePath()
+                                                        ctx.fill()
+                                                        ctx.beginPath()
+                                                        ctx.moveTo(width, height)
+                                                        ctx.lineTo(width - fadeOutPx, 0)
+                                                        ctx.stroke()
                                                     }
                                                 }
                                             }
@@ -1193,6 +1238,100 @@ PanelFrame {
                                                     EditorState.moveClipToTrack(originTrack, modelData, targetTrack, newStart)
                                                 else
                                                     EditorState.moveClip(trackRow.trackIndex, modelData, newStart)
+                                            }
+                                        }
+
+                                        // Fade handles live on the (non-clipping) clip item so they
+                                        // render fully at the corners and sit above the move/trim areas.
+                                        Rectangle {
+                                            id: fadeInHandle
+                                            width: 13
+                                            height: 13
+                                            radius: 6.5
+                                            y: 2
+                                            z: 20
+                                            visible: clipItem.selected && clipItem.width > 26
+                                            color: Theme.primary
+                                            border.color: "white"
+                                            border.width: 2
+
+                                            Binding {
+                                                target: fadeInHandle
+                                                property: "x"
+                                                when: !fadeInMouse.pressed
+                                                value: Math.max(0, Math.min(clipItem.width - fadeInHandle.width,
+                                                                            (clipItem.clipData.fadeIn || 0) * root.pxPerSecond - fadeInHandle.width / 2))
+                                            }
+
+                                            MouseArea {
+                                                id: fadeInMouse
+                                                anchors.fill: parent
+                                                anchors.margins: -6
+                                                preventStealing: true
+                                                hoverEnabled: true
+                                                cursorShape: Qt.SizeHorCursor
+                                                onPositionChanged: (mouse) => {
+                                                    if (!pressed)
+                                                        return
+                                                    const px = Math.max(0, Math.min(clipItem.width,
+                                                                                    mapToItem(clipItem, mouse.x, mouse.y).x))
+                                                    fadeInHandle.x = Math.min(clipItem.width - fadeInHandle.width, px - fadeInHandle.width / 2)
+                                                    EditorState.previewSetClipFade(trackRow.trackIndex, modelData,
+                                                                                   px / root.pxPerSecond,
+                                                                                   clipItem.clipData.fadeOut || 0)
+                                                }
+                                                onReleased: EditorState.commitPreviewDrag()
+
+                                                ToolTip {
+                                                    visible: fadeInMouse.pressed
+                                                    text: qsTr("Fade in %1s").arg((clipItem.clipData.fadeIn || 0).toFixed(2))
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            id: fadeOutHandle
+                                            width: 13
+                                            height: 13
+                                            radius: 6.5
+                                            y: 2
+                                            z: 20
+                                            visible: clipItem.selected && clipItem.width > 26
+                                            color: Theme.primary
+                                            border.color: "white"
+                                            border.width: 2
+
+                                            Binding {
+                                                target: fadeOutHandle
+                                                property: "x"
+                                                when: !fadeOutMouse.pressed
+                                                value: Math.max(0, Math.min(clipItem.width - fadeOutHandle.width,
+                                                                            clipItem.width - (clipItem.clipData.fadeOut || 0) * root.pxPerSecond - fadeOutHandle.width / 2))
+                                            }
+
+                                            MouseArea {
+                                                id: fadeOutMouse
+                                                anchors.fill: parent
+                                                anchors.margins: -6
+                                                preventStealing: true
+                                                hoverEnabled: true
+                                                cursorShape: Qt.SizeHorCursor
+                                                onPositionChanged: (mouse) => {
+                                                    if (!pressed)
+                                                        return
+                                                    const px = Math.max(0, Math.min(clipItem.width,
+                                                                                    mapToItem(clipItem, mouse.x, mouse.y).x))
+                                                    fadeOutHandle.x = Math.max(0, px - fadeOutHandle.width / 2)
+                                                    EditorState.previewSetClipFade(trackRow.trackIndex, modelData,
+                                                                                   clipItem.clipData.fadeIn || 0,
+                                                                                   Math.max(0, (clipItem.width - px) / root.pxPerSecond))
+                                                }
+                                                onReleased: EditorState.commitPreviewDrag()
+
+                                                ToolTip {
+                                                    visible: fadeOutMouse.pressed
+                                                    text: qsTr("Fade out %1s").arg((clipItem.clipData.fadeOut || 0).toFixed(2))
+                                                }
                                             }
                                         }
                                     }

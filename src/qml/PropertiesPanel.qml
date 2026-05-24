@@ -214,7 +214,7 @@ PanelFrame {
         ListElement { tabId: "general"; icon: 0; label: "General" }
         ListElement { tabId: "transform"; icon: 1; label: "Transform" }
         ListElement { tabId: "audio"; icon: 2; label: "Audio" }
-        ListElement { tabId: "speed"; icon: 3; label: "Speed" }
+        ListElement { tabId: "speed"; icon: 3; label: "Speed & Fade" }
         ListElement { tabId: "blending"; icon: 4; label: "Blending" }
         ListElement { tabId: "transition"; icon: 5; label: "Transition" }
         ListElement { tabId: "masks"; icon: 6; label: "Masks" }
@@ -1081,6 +1081,121 @@ PanelFrame {
                             color: Theme.mutedForeground
                             font.family: Theme.monoFontFamily
                             font.pixelSize: Theme.fontSizeSm
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            color: Theme.panelBorder
+                            opacity: 0.5
+                        }
+
+                        Text {
+                            text: root.clipKind === "audio" ? "Fade in / out (volume)" : "Fade in / out"
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                        }
+
+                        property real fadeMax: Math.max(0.1, clip.duration || 1)
+
+                        Row {
+                            width: parent.width
+                            spacing: 6
+
+                            ThemedButton {
+                                text: "Fade in"
+                                variant: "secondary"
+                                onClicked: EditorState.setClipFade(
+                                               EditorState.selectedTrack, EditorState.selectedClip,
+                                               0.5, clip.fadeOut || 0)
+                            }
+                            ThemedButton {
+                                text: "Fade out"
+                                variant: "secondary"
+                                onClicked: EditorState.setClipFade(
+                                               EditorState.selectedTrack, EditorState.selectedClip,
+                                               clip.fadeIn || 0, 0.5)
+                            }
+                            ThemedButton {
+                                text: "Clear"
+                                variant: "ghost"
+                                enabled: (clip.fadeIn || 0) > 0 || (clip.fadeOut || 0) > 0
+                                onClicked: EditorState.setClipFade(
+                                               EditorState.selectedTrack, EditorState.selectedClip, 0, 0)
+                            }
+                        }
+
+                        Text {
+                            text: "Fade in: " + (clip.fadeIn || 0).toFixed(2) + "s"
+                            color: Theme.mutedForeground
+                            font.family: Theme.monoFontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                        }
+
+                        ThemedSlider {
+                            id: fadeInSlider
+                            width: parent.width
+                            from: 0
+                            to: parent.fadeMax
+                            stepSize: 0.05
+                            value: clip.fadeIn || 0
+                            onMoved: EditorState.previewSetClipFade(
+                                         EditorState.selectedTrack, EditorState.selectedClip,
+                                         value, clip.fadeOut || 0)
+                            onPressedChanged: {
+                                if (pressed) {
+                                    EditorState.beginPreviewDrag(qsTr("Adjust fade"))
+                                } else {
+                                    EditorState.commitPreviewDrag()
+                                    value = Qt.binding(() => clip.fadeIn || 0)
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: "Fade out: " + (clip.fadeOut || 0).toFixed(2) + "s"
+                            color: Theme.mutedForeground
+                            font.family: Theme.monoFontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                        }
+
+                        ThemedSlider {
+                            id: fadeOutSlider
+                            width: parent.width
+                            from: 0
+                            to: parent.fadeMax
+                            stepSize: 0.05
+                            value: clip.fadeOut || 0
+                            onMoved: EditorState.previewSetClipFade(
+                                         EditorState.selectedTrack, EditorState.selectedClip,
+                                         clip.fadeIn || 0, value)
+                            onPressedChanged: {
+                                if (pressed) {
+                                    EditorState.beginPreviewDrag(qsTr("Adjust fade"))
+                                } else {
+                                    EditorState.commitPreviewDrag()
+                                    value = Qt.binding(() => clip.fadeOut || 0)
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: "Fade curve"
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                        }
+
+                        ThemedComboBox {
+                            id: fadeCurveCombo
+                            width: parent.width
+                            model: ["Linear", "Smooth", "Equal power"]
+                            readonly property var curveIds: ["linear", "smooth", "equalPower"]
+                            currentIndex: Math.max(0, curveIds.indexOf(clip.fadeCurve || "smooth"))
+                            onActivated: (index) => EditorState.setClipFadeCurve(
+                                             EditorState.selectedTrack, EditorState.selectedClip,
+                                             curveIds[index])
                         }
                     }
 

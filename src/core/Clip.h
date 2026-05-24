@@ -11,6 +11,8 @@
 #include <QList>
 #include <QString>
 
+#include <cmath>
+
 namespace drift {
 
 enum class ClipType { Video, Audio, Image, Text, Shape };
@@ -22,6 +24,14 @@ enum class BlendMode { Normal, Multiply, Screen, Overlay, Add, Darken, Lighten }
 
 QString blendModeToString(BlendMode mode);
 BlendMode blendModeFromString(const QString &mode);
+
+// Shape applied to fade-in / fade-out ramps. Linear is constant-rate, Smooth
+// eases both ends (nicer for visuals), EqualPower keeps perceived loudness
+// constant (nicer for audio).
+enum class FadeCurve { Linear, Smooth, EqualPower };
+
+QString fadeCurveToString(FadeCurve curve);
+FadeCurve fadeCurveFromString(const QString &curve);
 
 struct Clip
 {
@@ -46,6 +56,12 @@ struct Clip
     BlendMode blendMode = BlendMode::Normal;
     double speed = 1.0; // 1.0 = realtime; >1 faster, <1 slower
     Mask mask;
+
+    // Fades are edge-relative ramps applied multiplicatively on top of opacity
+    // (visual clips) or volume (audio). They auto-follow trims and speed changes.
+    TimeUs fadeInUs = 0;
+    TimeUs fadeOutUs = 0;
+    FadeCurve fadeCurve = FadeCurve::Smooth;
 
     // Layout on the project canvas in pixels: top-left origin, size in px.
     // Empty tracks use defaults (0,0,projectW,projectH) at evaluate time.
@@ -87,6 +103,42 @@ struct Clip
     bool containsTime(TimeUs time) const
     {
         return time >= timelineStart && time < timelineEnd();
+    }
+
+    // Fade gain in [0,1] at a timeline time, combining fade-in and fade-out
+    // through the selected curve. 1.0 when no fades are set.
+    double fadeMultiplier(TimeUs timelineUs) const
+    {
+        if (fadeInUs <= 0 && fadeOutUs <= 0)
+            return 1.0;
+
+        const TimeUs rel = qBound(TimeUs{0}, timelineUs - timelineStart, timelineDuration);
+
+        double in = 1.0;
+        if (fadeInUs > 0 && rel < fadeInUs)
+            in = static_cast<double>(rel) / static_cast<double>(fadeInUs);
+
+        double out = 1.0;
+        const TimeUs fromEnd = timelineDuration - rel;
+        if (fadeOutUs > 0 && fromEnd < fadeOutUs)
+            out = static_cast<double>(fromEnd) / static_cast<double>(fadeOutUs);
+
+        return shapeFade(in) * shapeFade(out);
+    }
+
+private:
+    double shapeFade(double p) const
+    {
+        p = p < 0.0 ? 0.0 : (p > 1.0 ? 1.0 : p);
+        switch (fadeCurve) {
+        case FadeCurve::Linear:
+            return p;
+        case FadeCurve::Smooth:
+            return p * p * (3.0 - 2.0 * p);
+        case FadeCurve::EqualPower:
+            return std::sin(p * 1.5707963267948966); // p * pi/2
+        }
+        return p;
     }
 };
 

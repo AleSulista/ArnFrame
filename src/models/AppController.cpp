@@ -586,6 +586,9 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("assetId"), clip.assetId},
         {QStringLiteral("assetIndex"), assetIndexForClip(clip)},
         {QStringLiteral("volume"), clip.volume.isEmpty() ? 1.0 : clip.volume.evaluateAt(0)},
+        {QStringLiteral("fadeIn"), drift::usToSeconds(clip.fadeInUs)},
+        {QStringLiteral("fadeOut"), drift::usToSeconds(clip.fadeOutUs)},
+        {QStringLiteral("fadeCurve"), drift::fadeCurveToString(clip.fadeCurve)},
         {QStringLiteral("effects"), effects},
         {QStringLiteral("keyframes"), keyframesToMap(clip)},
     };
@@ -1965,6 +1968,28 @@ void AppController::previewSetClipSpeed(int trackIndex, int clipIndex, double sp
     emitPreviewFrame();
 }
 
+void AppController::previewSetClipFade(int trackIndex, int clipIndex, double fadeInSeconds, double fadeOutSeconds)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag(QStringLiteral("Adjust fade"));
+
+    drift::Clip &clip = track.clips[clipIndex];
+    drift::TimeUs fin = qMax<drift::TimeUs>(0, drift::secondsToUs(fadeInSeconds));
+    drift::TimeUs fout = qMax<drift::TimeUs>(0, drift::secondsToUs(fadeOutSeconds));
+    fin = qMin(fin, clip.timelineDuration);
+    fout = qMin(fout, clip.timelineDuration - fin);
+    clip.fadeInUs = fin;
+    clip.fadeOutUs = fout;
+    emitPreviewFrame();
+}
+
 void AppController::previewSetClipMask(int trackIndex, int clipIndex, const QVariantMap &maskMap)
 {
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
@@ -2144,6 +2169,54 @@ void AppController::setClipSpeed(int trackIndex, int clipIndex, double speed)
     clip.syncSrcOutFromSpeed(sourceDurationForClip(clip));
     pushProjectEdit(before, QStringLiteral("Speed changed"));
     finishEdit(QStringLiteral("Clip speed updated"));
+}
+
+void AppController::setClipFade(int trackIndex, int clipIndex, double fadeInSeconds, double fadeOutSeconds)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    drift::TimeUs fin = qMax<drift::TimeUs>(0, drift::secondsToUs(fadeInSeconds));
+    drift::TimeUs fout = qMax<drift::TimeUs>(0, drift::secondsToUs(fadeOutSeconds));
+    fin = qMin(fin, clip.timelineDuration);
+    fout = qMin(fout, clip.timelineDuration - fin);
+    if (clip.fadeInUs == fin && clip.fadeOutUs == fout)
+        return;
+
+    const drift::Project before = m_project;
+    // First fade on an audio clip defaults to equal-power (constant loudness).
+    const bool hadFade = clip.fadeInUs > 0 || clip.fadeOutUs > 0;
+    if (!hadFade && (fin > 0 || fout > 0) && clip.type == drift::ClipType::Audio)
+        clip.fadeCurve = drift::FadeCurve::EqualPower;
+    clip.fadeInUs = fin;
+    clip.fadeOutUs = fout;
+    pushProjectEdit(before, QStringLiteral("Fade updated"));
+    finishEdit(QStringLiteral("Fade updated"));
+}
+
+void AppController::setClipFadeCurve(int trackIndex, int clipIndex, const QString &curve)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    const drift::FadeCurve newCurve = drift::fadeCurveFromString(curve);
+    if (clip.fadeCurve == newCurve)
+        return;
+
+    const drift::Project before = m_project;
+    clip.fadeCurve = newCurve;
+    pushProjectEdit(before, QStringLiteral("Fade curve changed"));
+    finishEdit(QStringLiteral("Fade curve updated"));
 }
 
 void AppController::setClipMask(int trackIndex, int clipIndex, const QVariantMap &maskMap)
