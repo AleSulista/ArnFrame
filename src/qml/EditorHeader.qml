@@ -24,14 +24,16 @@ Rectangle {
     }
 
     function exportVideo() {
-        var url = FileDialogs.saveFile(qsTr("Export Video"), [qsTr("MP4 video (*.mp4)")], "mp4")
-        if (url != "")
-            EditorState.exportProject(url)
+        exportDialog.openDialog()
     }
 
     Connections {
         target: EditorState
         function onProjectNameChanged() { root.projectName = EditorState.projectName }
+    }
+
+    ExportDialog {
+        id: exportDialog
     }
 
     Rectangle {
@@ -180,8 +182,10 @@ Rectangle {
                     }
                     Text {
                         visible: EditorState.exportInProgress
-                        text: "…"
+                        text: Math.round(EditorState.exportProgress * 100) + "%"
                         color: "white"
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSm
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }

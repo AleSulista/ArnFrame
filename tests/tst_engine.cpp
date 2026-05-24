@@ -12,6 +12,7 @@
 #include "core/Clip.h"
 #include "core/Project.h"
 #include "engine/ClipReader.h"
+#include "engine/Exporter.h"
 #include "engine/CompositorFrameHistory.h"
 #include "engine/EffectCatalog.h"
 #include "engine/EffectProcessor.h"
@@ -70,6 +71,7 @@ private slots:
     void compositorDipToBlackMidpointIsBlack();
     void compositorWipeRightRevealsIncomingClip();
     void maskApplierEllipseMasksCorners();
+    void exporterProducesPlayableFileWithBackground();
 
 private:
     static QString makeColorSegmentsVideo(QTemporaryDir &dir);
@@ -1341,6 +1343,63 @@ void EngineTest::maskApplierEllipseMasksCorners()
     const QImage masked = drift::applyMask(image, mask, 64, 64);
     QVERIFY(qAlpha(masked.pixel(32, 32)) > 200);
     QVERIFY(qAlpha(masked.pixel(0, 0)) < 20);
+}
+
+void EngineTest::exporterProducesPlayableFileWithBackground()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    drift::Project project;
+    project.setResolution(160, 90);
+    project.setFps(25);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
+
+    // A small centered shape so the canvas corners show the background.
+    drift::Clip clip;
+    clip.id = QStringLiteral("shape");
+    clip.type = drift::ClipType::Shape;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(1.0);
+    clip.shapeStyle.kind = drift::ShapeKind::Rectangle;
+    clip.shapeStyle.fill = Qt::red;
+    clip.shapeStyle.strokeWidth = 0.0;
+    clip.transformX.setKeyframe(0, 70.0);
+    clip.transformY.setKeyframe(0, 35.0);
+    clip.transformW.setKeyframe(0, 20.0);
+    clip.transformH.setKeyframe(0, 20.0);
+    project.tracks()[0].clips.append(clip);
+
+    // Non-default background must be baked into the exported frames.
+    drift::Background background;
+    background.kind = drift::BackgroundKind::Color;
+    background.color = QColor(Qt::blue);
+    project.setBackground(background);
+
+    const QString out = dir.filePath(QStringLiteral("out.mp4"));
+    const ExportPreset *preset = Exporter::presetById(QStringLiteral("source"));
+    QVERIFY(preset);
+
+    QString error;
+    const bool ok = Exporter::run(project, *preset, out, &error);
+    if (!ok && error.contains(QStringLiteral("encoder")))
+        QSKIP("H.264/AAC encoder not available in this FFmpeg build");
+    QVERIFY2(ok, qPrintable(error));
+    QVERIFY(QFileInfo(out).size() > 0);
+
+    ClipReader reader;
+    QVERIFY(reader.open(out));
+    QVERIFY(reader.hasVideo());
+
+    QImage frame;
+    QVERIFY(reader.readVideoFrameAt(drift::secondsToUs(0.5), frame, 160, 90));
+    QVERIFY(!frame.isNull());
+
+    // A corner is background (blue), away from the centered red shape.
+    const QRgb corner = frame.pixel(6, 6);
+    QVERIFY(qBlue(corner) > 150);
+    QVERIFY(qBlue(corner) > qRed(corner));
 }
 
 QTEST_MAIN(EngineTest)

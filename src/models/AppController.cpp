@@ -6,9 +6,9 @@
 #include "core/Transition.h"
 #include "core/commands/ProjectCommands.h"
 #include "engine/EffectCatalog.h"
+#include "engine/Exporter.h"
 #include "engine/MediaThumbnail.h"
 #include "engine/MediaWaveform.h"
-#include "engine/TimelineExporter.h"
 
 #include <QColor>
 #include <QFile>
@@ -3011,7 +3011,35 @@ void AppController::loadProject(const QUrl &url)
     setLastMessage(QStringLiteral("Project loaded"));
 }
 
+QVariantList AppController::exportPresets() const
+{
+    QVariantList out;
+    for (const ExportPreset &preset : Exporter::presets()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), preset.id},
+            {QStringLiteral("label"), preset.label},
+        });
+    }
+    return out;
+}
+
+double AppController::exportProgress() const
+{
+    return m_exportProgress;
+}
+
+void AppController::cancelExport()
+{
+    if (m_exportInProgress)
+        m_exportCancel.storeRelaxed(1);
+}
+
 void AppController::exportProject(const QUrl &outputUrl)
+{
+    exportWithPreset(outputUrl, QStringLiteral("source"));
+}
+
+void AppController::exportWithPreset(const QUrl &outputUrl, const QString &presetId)
 {
     const QString outputPath = outputUrl.toLocalFile();
     if (outputPath.isEmpty()) {
@@ -3025,71 +3053,46 @@ void AppController::exportProject(const QUrl &outputUrl)
         return;
     }
 
-    QList<ExportSegment> videoSegments;
-    QList<ExportSegment> audioSegments;
-    QList<ExportTextOverlay> textOverlays;
+    const ExportPreset *presetPtr = Exporter::presetById(presetId);
+    const ExportPreset preset = presetPtr ? *presetPtr : Exporter::presets().first();
 
-    for (const drift::Track &track : m_project.tracks()) {
-        if (track.muted || track.hidden)
-            continue;
+    // Stop playback so the decode pool isn't driven from two threads at once.
+    setPlaying(false);
 
-        if (track.type == drift::TrackType::Video || track.type == drift::TrackType::Shape) {
-            for (const drift::Clip &clip : track.clips) {
-                if (clip.type != drift::ClipType::Video && clip.type != drift::ClipType::Image
-                    && clip.type != drift::ClipType::Shape)
-                    continue;
-
-                if (clip.type == drift::ClipType::Shape)
-                    continue;
-
-                videoSegments.append({
-                    .path = clip.path,
-                    .kind = drift::clipTypeToString(clip.type),
-                    .timelineStart = drift::usToSeconds(clip.timelineStart),
-                    .inPoint = drift::usToSeconds(clip.srcIn),
-                    .duration = drift::usToSeconds(clip.timelineDuration),
-                });
-            }
-        } else if (track.type == drift::TrackType::Audio) {
-            for (const drift::Clip &clip : track.clips) {
-                audioSegments.append({
-                    .path = clip.path,
-                    .kind = QStringLiteral("audio"),
-                    .timelineStart = drift::usToSeconds(clip.timelineStart),
-                    .inPoint = drift::usToSeconds(clip.srcIn),
-                    .duration = drift::usToSeconds(clip.timelineDuration),
-                });
-            }
-        } else if (track.type == drift::TrackType::Text) {
-            for (const drift::Clip &clip : track.clips) {
-                const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
-                if (text.isEmpty())
-                    continue;
-                textOverlays.append({
-                    .text = text,
-                    .timelineStart = drift::usToSeconds(clip.timelineStart),
-                    .duration = drift::usToSeconds(clip.timelineDuration),
-                });
-            }
-        }
-    }
-
+    m_exportCancel.storeRelaxed(0);
+    m_exportProgress = 0.0;
+    emit exportProgressChanged();
     m_exportInProgress = true;
     emit exportInProgressChanged();
     setLastMessage(QStringLiteral("Exporting..."));
 
-    const QList<ExportSegment> videoCopy = videoSegments;
-    const QList<ExportSegment> audioCopy = audioSegments;
-    const QList<ExportTextOverlay> textCopy = textOverlays;
+    // Snapshot the project so edits during export can't race the encoder.
+    const drift::Project snapshot = m_project;
 
-    (void)QtConcurrent::run([this, outputPath, videoCopy, audioCopy, textCopy]() {
+    (void)QtConcurrent::run([this, snapshot, preset, outputPath]() {
         QString error;
-        const bool ok = TimelineExporter::exportTimeline(videoCopy, audioCopy, textCopy, outputPath, &error);
-        QMetaObject::invokeMethod(this, [this, ok, error]() {
-            m_exportInProgress = false;
-            emit exportInProgressChanged();
-            setLastMessage(ok ? QStringLiteral("Export complete") : error);
-            emit exportFinished(ok);
-        }, Qt::QueuedConnection);
+        const bool ok = Exporter::run(
+            snapshot, preset, outputPath, &error, [this](double fraction) {
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, fraction]() {
+                        m_exportProgress = fraction;
+                        emit exportProgressChanged();
+                    },
+                    Qt::QueuedConnection);
+                return m_exportCancel.loadRelaxed() == 0;
+            });
+
+        QMetaObject::invokeMethod(
+            this,
+            [this, ok, error]() {
+                m_exportInProgress = false;
+                m_exportProgress = ok ? 1.0 : 0.0;
+                emit exportProgressChanged();
+                emit exportInProgressChanged();
+                setLastMessage(ok ? QStringLiteral("Export complete") : error);
+                emit exportFinished(ok);
+            },
+            Qt::QueuedConnection);
     });
 }

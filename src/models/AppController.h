@@ -6,6 +6,7 @@
 #include "TimelineModel.h"
 #include "models/AssetLibrary.h"
 
+#include <QAtomicInt>
 #include <QHash>
 #include <QObject>
 #include <QPair>
@@ -35,6 +36,7 @@ class AppController : public QObject
     Q_PROPERTY(bool undoAvailable READ undoAvailable NOTIFY undoStackChanged)
     Q_PROPERTY(bool redoAvailable READ redoAvailable NOTIFY undoStackChanged)
     Q_PROPERTY(bool exportInProgress READ exportInProgress NOTIFY exportInProgressChanged)
+    Q_PROPERTY(double exportProgress READ exportProgress NOTIFY exportProgressChanged)
     Q_PROPERTY(int selectedTrack READ selectedTrack NOTIFY selectionChanged)
     Q_PROPERTY(int selectedClip READ selectedClip NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList selection READ selection NOTIFY selectionChanged)
@@ -71,6 +73,7 @@ public:
     bool undoAvailable() const { return m_undoStack.canUndo(); }
     bool redoAvailable() const { return m_undoStack.canRedo(); }
     bool exportInProgress() const { return m_exportInProgress; }
+    double exportProgress() const;
     int selectedTrack() const { return m_selectedTrack; }
     int selectedClip() const { return m_selectedClip; }
     QVariantList selection() const;
@@ -204,7 +207,10 @@ public:
     Q_INVOKABLE QVariantList waveformPeaks(const QString &path) const;
     Q_INVOKABLE void saveProject(const QUrl &url);
     Q_INVOKABLE void loadProject(const QUrl &url);
+    Q_INVOKABLE QVariantList exportPresets() const;
     Q_INVOKABLE void exportProject(const QUrl &outputUrl);
+    Q_INVOKABLE void exportWithPreset(const QUrl &outputUrl, const QString &presetId);
+    Q_INVOKABLE void cancelExport();
     Q_INVOKABLE QUrl fileUrl(const QString &path) const;
     Q_INVOKABLE QString imageUrl(const QString &path) const;
 
@@ -216,6 +222,7 @@ signals:
     void rippleEnabledChanged();
     void undoStackChanged();
     void exportInProgressChanged();
+    void exportProgressChanged();
     void selectionChanged();
     void selectedClipDataChanged();
     void selectedTransitionDataChanged();
@@ -257,6 +264,8 @@ protected:
     bool m_snapEnabled = true;
     bool m_rippleEnabled = false;
     bool m_exportInProgress = false;
+    double m_exportProgress = 0.0;
+    QAtomicInt m_exportCancel = 0;
     int m_selectedTrack = -1;
     int m_selectedClip = -1;
     int m_selectedTransitionTrack = -1;

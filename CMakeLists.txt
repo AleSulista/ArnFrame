@@ -59,8 +59,8 @@ add_library(driftengine STATIC
     src/engine/MediaThumbnail.cpp
     src/engine/MediaWaveform.h
     src/engine/MediaWaveform.cpp
-    src/engine/TimelineExporter.h
-    src/engine/TimelineExporter.cpp
+    src/engine/Exporter.h
+    src/engine/Exporter.cpp
     src/engine/ClipReader.h
     src/engine/ClipReader.cpp
     src/engine/ClipReaderWorker.h
@@ -151,6 +151,7 @@ qt_add_qml_module(drift
         src/qml/components/ThemedLabel.qml
         src/qml/components/ThemedDialog.qml
         src/qml/components/ProjectSetupDialog.qml
+        src/qml/components/ExportDialog.qml
     RESOURCES
         resources/fonts/Inter.ttf
         resources/fonts/lucide.ttf
