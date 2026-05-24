@@ -25,6 +25,20 @@ ApplicationWindow {
         id: projectSetupDialog
     }
 
+    RecoveryDialog {
+        id: recoveryDialog
+    }
+
+    // Offer to recover unsaved work if the previous session crashed. Deferred so
+    // the window is up before the modal appears.
+    Component.onCompleted: if (EditorState.recoveryAvailable) recoveryTimer.start()
+
+    Timer {
+        id: recoveryTimer
+        interval: 300
+        onTriggered: if (EditorState.recoveryAvailable) recoveryDialog.open()
+    }
+
     // Shortcut is not an Item, so wrap each binding in a zero-size host.
     Repeater {
         model: EditorState.actions

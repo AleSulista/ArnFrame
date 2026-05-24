@@ -18,6 +18,10 @@ Rectangle {
     }
 
     function saveProject() {
+        if (EditorState.currentProjectPath && EditorState.currentProjectPath.length > 0) {
+            EditorState.saveProject(EditorState.fileUrl(EditorState.currentProjectPath))
+            return
+        }
         var url = FileDialogs.saveFile(qsTr("Save Project"), [qsTr("Drift project (*.drift.json)")], "drift.json")
         if (url != "")
             EditorState.saveProject(url)
@@ -66,7 +70,7 @@ Rectangle {
 
             ToolTip {
                 visible: logoArea.containsMouse
-                text: qsTr("Open project")
+                text: qsTr("Open project / recent")
             }
 
             MouseArea {
@@ -74,7 +78,13 @@ Rectangle {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.openProject()
+                onClicked: recentPopup.open()
+            }
+
+            RecentProjectsPopup {
+                id: recentPopup
+                y: parent.height + 6
+                onOpenFileRequested: root.openProject()
             }
         }
 
@@ -102,6 +112,28 @@ Rectangle {
             MouseArea {
                 id: nameArea
                 anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.NoButton
+            }
+        }
+
+        Rectangle {
+            width: 7
+            height: 7
+            radius: 3.5
+            color: Theme.primary
+            anchors.verticalCenter: parent.verticalCenter
+            visible: EditorState.hasUnsavedChanges
+
+            ToolTip {
+                visible: unsavedArea.containsMouse
+                text: qsTr("Unsaved changes")
+            }
+
+            MouseArea {
+                id: unsavedArea
+                anchors.fill: parent
+                anchors.margins: -4
                 hoverEnabled: true
                 acceptedButtons: Qt.NoButton
             }

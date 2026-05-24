@@ -152,6 +152,8 @@ qt_add_qml_module(drift
         src/qml/components/ThemedDialog.qml
         src/qml/components/ProjectSetupDialog.qml
         src/qml/components/ExportDialog.qml
+        src/qml/components/RecoveryDialog.qml
+        src/qml/components/RecentProjectsPopup.qml
     RESOURCES
         resources/fonts/Inter.ttf
         resources/fonts/lucide.ttf

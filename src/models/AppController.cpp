@@ -11,10 +11,16 @@
 #include "engine/MediaWaveform.h"
 
 #include <QColor>
+#include <QCoreApplication>
+#include <QDateTime>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
+#include <QStandardPaths>
+#include <QTimer>
 #include <QUrl>
 #include <QUuid>
 #include <QtConcurrent>
@@ -51,6 +57,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
         m_timelineModel.refresh();
         m_clipListModel.refresh();
         normalizeSelection();
+        setDirty(true);
         emit tracksChanged();
         emit bookmarksChanged();
         emit projectNameChanged();
@@ -95,6 +102,20 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     settings.endGroup();
     m_guidesEnabled = settings.value(QStringLiteral("preview/guidesEnabled"), false).toBool();
     m_guideType = settings.value(QStringLiteral("preview/guideType"), QStringLiteral("thirds")).toString();
+
+    // Periodically snapshot unsaved work to a recovery file so a crash doesn't
+    // lose progress. The file is deleted on save and on a clean quit; if it is
+    // still present at the next startup we know the previous session crashed.
+    m_autosaveTimer = new QTimer(this);
+    m_autosaveTimer->setInterval(kAutosaveIntervalMs);
+    connect(m_autosaveTimer, &QTimer::timeout, this, [this] {
+        if (m_dirty)
+            writeRecoveryFile();
+    });
+    m_autosaveTimer->start();
+    connect(qApp, &QCoreApplication::aboutToQuit, this, [this] { deleteRecoveryFile(); });
+
+    detectRecoveryFile();
 }
 
 namespace {
@@ -724,6 +745,7 @@ void AppController::setProjectName(const QString &name)
         return;
 
     m_project.setName(name);
+    setDirty(true);
     emit projectNameChanged();
 }
 
@@ -2939,52 +2961,27 @@ void AppController::normalizeSelection()
     }
 }
 
-void AppController::saveProject(const QUrl &url)
+QByteArray AppController::serializeProjectJson() const
 {
-    const QString path = url.toLocalFile();
-    if (path.isEmpty()) {
-        setLastMessage(QStringLiteral("Invalid save path"));
-        return;
-    }
-
     QJsonObject root = m_project.toJson();
     root.insert(QStringLiteral("playheadUs"), static_cast<double>(m_playheadUs));
     root.insert(QStringLiteral("snapEnabled"), m_snapEnabled);
     root.insert(QStringLiteral("rippleEnabled"), m_rippleEnabled);
-
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly)) {
-        setLastMessage(QStringLiteral("Failed to save project"));
-        return;
-    }
-
-    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
-    setLastMessage(QStringLiteral("Project saved"));
+    return QJsonDocument(root).toJson(QJsonDocument::Indented);
 }
 
-void AppController::loadProject(const QUrl &url)
+bool AppController::applyProjectJson(const QByteArray &data, QString *error)
 {
-    const QString path = url.toLocalFile();
-    if (path.isEmpty()) {
-        setLastMessage(QStringLiteral("Invalid project path"));
-        return;
-    }
-
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        setLastMessage(QStringLiteral("Failed to open project"));
-        return;
-    }
-
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    const QJsonDocument document = QJsonDocument::fromJson(data);
     if (!document.isObject()) {
-        setLastMessage(QStringLiteral("Invalid project file"));
-        return;
+        if (error)
+            *error = QStringLiteral("Invalid project file");
+        return false;
     }
 
     const QJsonObject root = document.object();
-    QString error;
-    m_project = drift::Project::fromJson(root, &error);
+    QString parseError;
+    m_project = drift::Project::fromJson(root, &parseError);
     if (m_assetLibrary)
         m_assetLibrary->setProject(&m_project);
 
@@ -3002,13 +2999,242 @@ void AppController::loadProject(const QUrl &url)
     m_playback.setProject(&m_project);
     m_undoStack.clear();
     clearSelection();
+    setDirty(false);
     emit snapEnabledChanged();
     emit rippleEnabledChanged();
     emit tracksChanged();
     emit bookmarksChanged();
     emit projectNameChanged();
     emit backgroundChanged();
+    return true;
+}
+
+void AppController::saveProject(const QUrl &url)
+{
+    const QString path = url.toLocalFile();
+    if (path.isEmpty()) {
+        setLastMessage(QStringLiteral("Invalid save path"));
+        return;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        setLastMessage(QStringLiteral("Failed to save project"));
+        return;
+    }
+
+    file.write(serializeProjectJson());
+    file.close();
+
+    setCurrentProjectPath(path);
+    addRecentProject(path);
+    setDirty(false);
+    deleteRecoveryFile();
+    setLastMessage(QStringLiteral("Project saved"));
+}
+
+void AppController::loadProject(const QUrl &url)
+{
+    const QString path = url.toLocalFile();
+    if (path.isEmpty()) {
+        setLastMessage(QStringLiteral("Invalid project path"));
+        return;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        setLastMessage(QStringLiteral("Failed to open project"));
+        return;
+    }
+
+    QString error;
+    if (!applyProjectJson(file.readAll(), &error)) {
+        setLastMessage(error);
+        return;
+    }
+
+    setCurrentProjectPath(path);
+    addRecentProject(path);
+    deleteRecoveryFile();
     setLastMessage(QStringLiteral("Project loaded"));
+}
+
+void AppController::newProject()
+{
+    setPlaying(false);
+    m_project.resetToDefaultTimeline();
+    if (m_assetLibrary)
+        m_assetLibrary->setProject(&m_project);
+    m_playback.setProject(&m_project);
+    m_undoStack.clear();
+    clearSelection();
+    setPlayheadUs(0);
+    setCurrentProjectPath(QString());
+    setDirty(false);
+    deleteRecoveryFile();
+    emit snapEnabledChanged();
+    emit rippleEnabledChanged();
+    emit tracksChanged();
+    emit bookmarksChanged();
+    emit projectNameChanged();
+    emit backgroundChanged();
+    setLastMessage(QStringLiteral("New project"));
+}
+
+void AppController::openRecentProject(const QString &path)
+{
+    if (path.isEmpty())
+        return;
+    loadProject(QUrl::fromLocalFile(path));
+}
+
+QVariantList AppController::recentProjects() const
+{
+    QSettings settings;
+    const QStringList paths = settings.value(QStringLiteral("recentProjects")).toStringList();
+    QVariantList out;
+    for (const QString &path : paths) {
+        const QFileInfo info(path);
+        out.append(QVariantMap{
+            {QStringLiteral("path"), path},
+            {QStringLiteral("name"), info.fileName()},
+            {QStringLiteral("exists"), info.exists()},
+        });
+    }
+    return out;
+}
+
+void AppController::addRecentProject(const QString &path)
+{
+    if (path.isEmpty())
+        return;
+    QSettings settings;
+    QStringList paths = settings.value(QStringLiteral("recentProjects")).toStringList();
+    paths.removeAll(path);
+    paths.prepend(path);
+    while (paths.size() > kMaxRecentProjects)
+        paths.removeLast();
+    settings.setValue(QStringLiteral("recentProjects"), paths);
+    emit recentProjectsChanged();
+}
+
+void AppController::clearRecentProjects()
+{
+    QSettings settings;
+    settings.remove(QStringLiteral("recentProjects"));
+    emit recentProjectsChanged();
+}
+
+void AppController::setDirty(bool dirty)
+{
+    if (m_dirty == dirty)
+        return;
+    m_dirty = dirty;
+    emit dirtyChanged();
+}
+
+void AppController::setCurrentProjectPath(const QString &path)
+{
+    if (m_currentProjectPath == path)
+        return;
+    m_currentProjectPath = path;
+    emit currentProjectPathChanged();
+}
+
+QString AppController::recoveryFilePath()
+{
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    return dir + QStringLiteral("/recovery/autosave.drift.json");
+}
+
+void AppController::writeRecoveryFile()
+{
+    const QString path = recoveryFilePath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+
+    QJsonObject root = QJsonDocument::fromJson(serializeProjectJson()).object();
+    QJsonObject meta;
+    meta.insert(QStringLiteral("originalPath"), m_currentProjectPath);
+    meta.insert(QStringLiteral("projectName"), m_project.name());
+    meta.insert(QStringLiteral("savedAt"), QDateTime::currentDateTime().toString(Qt::ISODate));
+    root.insert(QStringLiteral("__recovery"), meta);
+
+    // Write to a temp sibling and rename so a crash mid-write can't corrupt the
+    // recovery file itself.
+    const QString tmpPath = path + QStringLiteral(".tmp");
+    QFile file(tmpPath);
+    if (!file.open(QIODevice::WriteOnly))
+        return;
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    file.close();
+    if (QFile::exists(path))
+        QFile::remove(path);
+    QFile::rename(tmpPath, path);
+}
+
+void AppController::deleteRecoveryFile()
+{
+    const QString path = recoveryFilePath();
+    if (QFile::exists(path))
+        QFile::remove(path);
+    if (m_recoveryAvailable) {
+        m_recoveryAvailable = false;
+        m_recoveryInfo.clear();
+        emit recoveryChanged();
+    }
+}
+
+void AppController::detectRecoveryFile()
+{
+    const QString path = recoveryFilePath();
+    QFile file(path);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly))
+        return;
+
+    const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
+    const QJsonObject meta = root.value(QStringLiteral("__recovery")).toObject();
+    m_recoveryInfo = QVariantMap{
+        {QStringLiteral("originalPath"), meta.value(QStringLiteral("originalPath")).toString()},
+        {QStringLiteral("projectName"), meta.value(QStringLiteral("projectName")).toString()},
+        {QStringLiteral("savedAt"), meta.value(QStringLiteral("savedAt")).toString()},
+    };
+    m_recoveryAvailable = true;
+    emit recoveryChanged();
+}
+
+void AppController::restoreAutosave()
+{
+    const QString path = recoveryFilePath();
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        setLastMessage(QStringLiteral("No recovery file found"));
+        return;
+    }
+
+    const QByteArray data = file.readAll();
+    file.close();
+
+    const QString originalPath = m_recoveryInfo.value(QStringLiteral("originalPath")).toString();
+    QString error;
+    if (!applyProjectJson(data, &error)) {
+        setLastMessage(error);
+        return;
+    }
+
+    // Restore the association with the original file (if any) and mark unsaved so
+    // the user is nudged to re-save; keep the recovery file until the next save.
+    setCurrentProjectPath(originalPath);
+    setDirty(true);
+    m_recoveryAvailable = false;
+    m_recoveryInfo.clear();
+    emit recoveryChanged();
+    setLastMessage(QStringLiteral("Recovered unsaved work"));
+}
+
+void AppController::discardAutosave()
+{
+    deleteRecoveryFile();
+    setLastMessage(QStringLiteral("Discarded recovered work"));
 }
 
 QVariantList AppController::exportPresets() const

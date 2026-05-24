@@ -16,6 +16,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+class QTimer;
+
 #include "playback/PlaybackEngine.h"
 
 // QML-facing controller over the core project model and undo stack.
@@ -53,6 +55,11 @@ class AppController : public QObject
     Q_PROPERTY(QString projectName READ projectName WRITE setProjectName NOTIFY projectNameChanged)
     Q_PROPERTY(QString lastMessage READ lastMessage NOTIFY lastMessageChanged)
     Q_PROPERTY(int draggingAssetIndex READ draggingAssetIndex WRITE setDraggingAssetIndex NOTIFY draggingAssetIndexChanged)
+    Q_PROPERTY(bool hasUnsavedChanges READ hasUnsavedChanges NOTIFY dirtyChanged)
+    Q_PROPERTY(QString currentProjectPath READ currentProjectPath NOTIFY currentProjectPathChanged)
+    Q_PROPERTY(bool recoveryAvailable READ recoveryAvailable NOTIFY recoveryChanged)
+    Q_PROPERTY(QVariantMap recoveryInfo READ recoveryInfo NOTIFY recoveryChanged)
+    Q_PROPERTY(QVariantList recentProjects READ recentProjects NOTIFY recentProjectsChanged)
 
 public:
     explicit AppController(AssetLibrary *assetLibrary, QObject *parent = nullptr);
@@ -91,6 +98,11 @@ public:
     QString lastMessage() const { return m_lastMessage; }
     int draggingAssetIndex() const { return m_draggingAssetIndex; }
     void setDraggingAssetIndex(int index);
+    bool hasUnsavedChanges() const { return m_dirty; }
+    QString currentProjectPath() const { return m_currentProjectPath; }
+    bool recoveryAvailable() const { return m_recoveryAvailable; }
+    QVariantMap recoveryInfo() const { return m_recoveryInfo; }
+    QVariantList recentProjects() const;
 
     void setPlayheadSeconds(double seconds);
     void setPlaying(bool playing);
@@ -207,6 +219,11 @@ public:
     Q_INVOKABLE QVariantList waveformPeaks(const QString &path) const;
     Q_INVOKABLE void saveProject(const QUrl &url);
     Q_INVOKABLE void loadProject(const QUrl &url);
+    Q_INVOKABLE void newProject();
+    Q_INVOKABLE void openRecentProject(const QString &path);
+    Q_INVOKABLE void clearRecentProjects();
+    Q_INVOKABLE void restoreAutosave();
+    Q_INVOKABLE void discardAutosave();
     Q_INVOKABLE QVariantList exportPresets() const;
     Q_INVOKABLE void exportProject(const QUrl &outputUrl);
     Q_INVOKABLE void exportWithPreset(const QUrl &outputUrl, const QString &presetId);
@@ -236,6 +253,10 @@ signals:
     void guidesChanged();
     void shortcutsChanged();
     void backgroundChanged();
+    void dirtyChanged();
+    void currentProjectPathChanged();
+    void recoveryChanged();
+    void recentProjectsChanged();
 
 protected:
     void pushProjectEdit(const drift::Project &before, const QString &text);
@@ -252,6 +273,16 @@ protected:
     void restoreFilmstripsAfterLoad();
     void normalizeSelection();
     bool isValidClipIndex(int trackIndex, int clipIndex) const;
+
+    QByteArray serializeProjectJson() const;
+    bool applyProjectJson(const QByteArray &data, QString *error);
+    void setDirty(bool dirty);
+    void setCurrentProjectPath(const QString &path);
+    void addRecentProject(const QString &path);
+    void writeRecoveryFile();
+    void deleteRecoveryFile();
+    void detectRecoveryFile();
+    static QString recoveryFilePath();
 
     AssetLibrary *m_assetLibrary = nullptr;
     TimelineModel m_timelineModel;
@@ -292,5 +323,14 @@ protected:
     mutable QHash<QString, QVariantList> m_waveformCache;
     mutable QSet<QString> m_waveformPending;
 
+    // Save state / autosave / crash recovery.
+    QString m_currentProjectPath;
+    bool m_dirty = false;
+    QTimer *m_autosaveTimer = nullptr;
+    bool m_recoveryAvailable = false;
+    QVariantMap m_recoveryInfo;
+
     static constexpr int kMaxUndoSteps = 50;
+    static constexpr int kAutosaveIntervalMs = 15000;
+    static constexpr int kMaxRecentProjects = 10;
 };
