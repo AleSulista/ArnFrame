@@ -1,7 +1,7 @@
 #include "EffectProcessor.h"
 
-#include "CompositorEffects.h"
 #include "EffectCatalog.h"
+#include "GpuEffectExecutor.h"
 
 #include <cstring>
 
@@ -152,32 +152,38 @@ QImage EffectProcessor::applyEffects(const QImage &input, const QList<drift::Eff
         return input;
 
     QImage result = input;
-    QList<drift::Effect> libavBatch;
+    QList<drift::Effect> legacyLibavBatch;
 
-    auto flushLibavBatch = [&]() {
-        if (libavBatch.isEmpty())
+    auto flushLegacy = [&]() {
+        if (legacyLibavBatch.isEmpty())
             return;
-        const QString filters = buildFilterGraph(libavBatch);
+        const QString filters = buildFilterGraph(legacyLibavBatch);
         if (!filters.isEmpty())
             result = applyLibavFilterGraph(result, filters);
-        libavBatch.clear();
+        legacyLibavBatch.clear();
     };
 
     for (const drift::Effect &effect : effects) {
-        const EffectPresetEntry *def = effect.catalogId.isEmpty() ? nullptr : effectDefForId(effect.catalogId);
-        if (def && def->meta.compositorOnly) {
-            // time_echo needs multi-frame clip history; handled in FrameCompositor::imageForClip.
-            if (def->meta.id == QStringLiteral("time_echo"))
-                continue;
-            flushLibavBatch();
-            result = CompositorEffects::apply(def->meta.id, result, resolvedEffectParameters(effect, *def),
-                                              timeUs);
+        const EffectPresetEntry *def =
+            effect.catalogId.isEmpty() ? nullptr : effectDefForId(effect.catalogId);
+
+        // Multi-frame trail is assembled in FrameCompositor before this call.
+        if (def && def->meta.id == QStringLiteral("time_echo"))
+            continue;
+
+        if (def && def->isGpu && def->gpu.valid) {
+            flushLegacy();
+            result = GpuEffectExecutor::instance().apply(*def, result,
+                                                        resolvedEffectParameters(effect, *def),
+                                                        timeUs);
             continue;
         }
 
-        libavBatch.append(effect);
+        // Legacy: uncataloged raw libavfilter graphs only.
+        if (!def)
+            legacyLibavBatch.append(effect);
     }
 
-    flushLibavBatch();
+    flushLegacy();
     return result;
 }

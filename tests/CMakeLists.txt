@@ -20,6 +20,7 @@ qt_add_executable(tst_editorstate
 target_include_directories(tst_editorstate PRIVATE ../src)
 target_link_libraries(tst_editorstate PRIVATE Qt6::Test Qt6::Gui Qt6::Multimedia Qt6::Concurrent driftcore driftengine)
 add_test(NAME EditorState COMMAND tst_editorstate)
+drift_copy_effects(tst_editorstate)
 
 qt_add_executable(tst_playback
     tst_playback.cpp
@@ -31,5 +32,9 @@ add_test(NAME Playback COMMAND tst_playback)
 
 qt_add_executable(tst_engine tst_engine.cpp)
 target_include_directories(tst_engine PRIVATE ../src)
-target_link_libraries(tst_engine PRIVATE Qt6::Test Qt6::Gui driftengine driftcore)
+target_link_libraries(tst_engine PRIVATE Qt6::Test Qt6::Gui Qt6::OpenGL driftengine driftcore)
+target_compile_definitions(tst_engine PRIVATE
+    DRIFT_TEST_EFFECTS_DIR="${CMAKE_SOURCE_DIR}/effects"
+)
 add_test(NAME Engine COMMAND tst_engine)
+drift_copy_effects(tst_engine)

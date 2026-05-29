@@ -10,7 +10,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 option(WITH_BGREMOVAL "Enable OpenCV-based background removal" OFF)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets OpenGL)
 find_package(FFmpeg REQUIRED)
 
 if(WITH_BGREMOVAL)
@@ -71,6 +71,11 @@ add_library(driftengine STATIC
     src/engine/EffectProcessor.cpp
     src/engine/EffectCatalog.h
     src/engine/EffectCatalog.cpp
+    src/engine/EffectPackageLoader.h
+    src/engine/EffectPackageLoader.cpp
+    src/engine/GpuEffectDefinition.h
+    src/engine/GpuEffectExecutor.h
+    src/engine/GpuEffectExecutor.cpp
     src/engine/CompositorEffects.h
     src/engine/CompositorEffects.cpp
     src/engine/CompositorFrameHistory.h
@@ -85,7 +90,7 @@ add_library(driftengine STATIC
     src/engine/AudioMixer.cpp
 )
 target_include_directories(driftengine PUBLIC src)
-target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui FFmpeg::FFmpeg driftcore)
+target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui Qt6::OpenGL FFmpeg::FFmpeg driftcore)
 
 if(WITH_BGREMOVAL)
     target_include_directories(driftengine PRIVATE ${OpenCV_INCLUDE_DIRS})
@@ -176,6 +181,18 @@ target_link_libraries(drift PRIVATE
     driftengine
 )
 target_include_directories(drift PRIVATE src src/preview)
+
+# Ship file-based effect packages next to binaries that load the catalog.
+function(drift_copy_effects target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_SOURCE_DIR}/effects"
+                "$<TARGET_FILE_DIR:${target}>/effects"
+        COMMENT "Copy effects packages next to ${target}"
+    )
+endfunction()
+
+drift_copy_effects(drift)
 
 # --- CLI tools (headless engine testing, no GUI) ----------------------------
 add_subdirectory(tools)

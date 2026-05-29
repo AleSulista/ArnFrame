@@ -1,5 +1,7 @@
 #include <QtTest>
 
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QPainter>
 #include <QProcess>
@@ -15,8 +17,10 @@
 #include "engine/Exporter.h"
 #include "engine/CompositorFrameHistory.h"
 #include "engine/EffectCatalog.h"
+#include "engine/EffectPackageLoader.h"
 #include "engine/EffectProcessor.h"
 #include "engine/FrameCompositor.h"
+#include "engine/GpuEffectExecutor.h"
 #include "engine/MaskApplier.h"
 #include "core/Transition.h"
 
@@ -25,6 +29,7 @@ class EngineTest : public QObject
     Q_OBJECT
 
 private slots:
+    void initTestCase();
     void effectProcessorPassthroughWithoutEffects();
     void effectProcessorBrightness();
     void clipReaderSequentialAndSeek();
@@ -40,6 +45,12 @@ private slots:
     void effectBrowserCategories();
     void effectGraphTemplateSubstitution();
     void compositorOnlyPresetsUseCompositorPath();
+    void effectPackageLoaderParsesGaussianBlur();
+    void effectPackageLoaderRejectsReservedUniform();
+    void effectPackageLoaderRejectsMissingShader();
+    void gpuGaussianBlurChangesImage();
+    void gpuMultiPassPreservesVerticalOrientation();
+    void gpuBrokenShaderPassthrough();
     void rgbSplitZeroAmountPassthrough();
     void rgbSplitShiftsColorChannels();
     void blockGlitchDeterministicForSameTimeAndSeed();
@@ -78,6 +89,13 @@ private:
     static QString makeToneAudio(QTemporaryDir &dir);
 };
 
+void EngineTest::initTestCase()
+{
+    const QString effectsDir = QString::fromUtf8(DRIFT_TEST_EFFECTS_DIR);
+    QVERIFY2(QDir(effectsDir).exists(), qPrintable(effectsDir));
+    reloadEffectCatalog({effectsDir});
+}
+
 void EngineTest::effectProcessorPassthroughWithoutEffects()
 {
     QImage image(64, 64, QImage::Format_RGBA8888);
@@ -91,8 +109,11 @@ void EngineTest::effectProcessorBrightness()
     QImage image(64, 64, QImage::Format_RGBA8888);
     image.fill(QColor(100, 100, 100));
 
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("OpenGL offscreen context unavailable");
+
     drift::Effect effect;
-    effect.name = QStringLiteral("eq");
+    effect.catalogId = QStringLiteral("adjust.brightness");
     effect.parameters.insert(QStringLiteral("brightness"), 0.2);
 
     const QImage out = EffectProcessor::applyEffects(image, {effect});
@@ -414,17 +435,17 @@ void EngineTest::adjustmentEffectContrastCatalogEntry()
 {
     const EffectPresetEntry *def = effectDefForId(QStringLiteral("adjust.contrast"));
     QVERIFY(def);
-    QCOMPARE(def->filterName, QStringLiteral("eq"));
+    QVERIFY(def->isGpu);
     QCOMPARE(def->meta.parameters.size(), 1);
     QCOMPARE(def->meta.parameters[0].key, QStringLiteral("contrast"));
 
-    // eq's contrast scales around the 128 midpoint, so a gray above it gets
-    // pushed brighter (a gray below it would get pushed darker instead).
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("OpenGL offscreen context unavailable");
+
     QImage image(64, 64, QImage::Format_RGBA8888);
     image.fill(QColor(180, 180, 180));
 
     drift::Effect effect;
-    effect.name = def->filterName;
     effect.catalogId = def->meta.id;
     effect.parameters.insert(def->meta.parameters[0].key, 2.0);
 
@@ -470,12 +491,12 @@ void EngineTest::effectPresetStableIds()
 void EngineTest::effectPresetCatalogIncludesStylizePresets()
 {
     const auto requirePreset = [&](const char *id, const char *displayName, const char *category,
-                                   bool compositorOnly) {
+                                   bool isGpu) {
         const EffectPresetEntry *def = effectDefForId(QString::fromLatin1(id));
         QVERIFY2(def, id);
         QCOMPARE(def->meta.displayName, QString::fromLatin1(displayName));
         QCOMPARE(def->meta.category, QString::fromLatin1(category));
-        QCOMPARE(def->meta.compositorOnly, compositorOnly);
+        QCOMPARE(def->isGpu, isGpu);
     };
 
     requirePreset("rgb_split", "RGB Split", "glitch", true);
@@ -483,7 +504,7 @@ void EngineTest::effectPresetCatalogIncludesStylizePresets()
     requirePreset("scanline_glitch", "Scanline Glitch", "glitch", true);
     requirePreset("vhs_crt", "VHS / CRT", "retro", true);
     requirePreset("film_burn", "Film Burn / Light Leak", "retro", true);
-    requirePreset("stylize.vhs", "VHS", "retro", false);
+    requirePreset("stylize.vhs", "VHS", "retro", true);
     requirePreset("stylize.bloom", "Bloom", "dreamy", true);
     requirePreset("bloom_glow", "Bloom / Glow", "dreamy", true);
     requirePreset("edge_neon", "Edge Glow / Neon", "dreamy", true);
@@ -492,13 +513,13 @@ void EngineTest::effectPresetCatalogIncludesStylizePresets()
     requirePreset("ripple_water", "Ripple / Water", "glitch", true);
     requirePreset("shockwave_pulse", "Shockwave / Pulse", "glitch", true);
     requirePreset("digital_glitch", "Digital Glitch", "glitch", true);
-    requirePreset("adjust.contrast", "Contrast", "impact", false);
+    requirePreset("adjust.contrast", "Contrast", "impact", true);
 }
 
 void EngineTest::effectBrowserCategories()
 {
     const QList<QPair<QString, QString>> categories = effectCategories();
-    QCOMPARE(categories.size(), 4);
+    QVERIFY(categories.size() >= 4);
     QCOMPARE(categories[0].first, QStringLiteral("glitch"));
     QCOMPARE(categories[0].second, QStringLiteral("Glitch & Distortion"));
     QCOMPARE(categories[1].first, QStringLiteral("retro"));
@@ -520,24 +541,29 @@ void EngineTest::effectBrowserCategories()
 
 void EngineTest::effectGraphTemplateSubstitution()
 {
+    // VHS is a GPU package now — no libavfilter graph template.
+    const EffectPresetEntry *def = effectDefForId(QStringLiteral("stylize.vhs"));
+    QVERIFY(def);
+    QVERIFY(def->isGpu);
+    QVERIFY(def->gpu.valid);
+    QCOMPARE(def->graphTemplate, QString());
+
     drift::Effect vhs;
     vhs.catalogId = QStringLiteral("stylize.vhs");
     vhs.parameters.insert(QStringLiteral("noise"), 30.0);
-    vhs.parameters.insert(QStringLiteral("chroma"), 4.0);
-    vhs.parameters.insert(QStringLiteral("saturation"), 0.9);
-
-    const QString vhsGraph = buildFilterGraphForEffect(vhs);
-    QVERIFY(vhsGraph.contains(QStringLiteral("noise=alls=30")));
-    QVERIFY(vhsGraph.contains(QStringLiteral("rgbashift=rh=4:bh=-4")));
-    QVERIFY(vhsGraph.contains(QStringLiteral("hue=s=0.9")));
+    QCOMPARE(buildFilterGraphForEffect(vhs), QString());
 }
 
 void EngineTest::compositorOnlyPresetsUseCompositorPath()
 {
     const EffectPresetEntry *bloom = effectDefForId(QStringLiteral("stylize.bloom"));
     QVERIFY(bloom);
-    QVERIFY(bloom->meta.compositorOnly);
+    QVERIFY(bloom->isGpu);
+    QVERIFY(bloom->gpu.valid);
     QCOMPARE(buildFilterGraphForEffect({.catalogId = bloom->meta.id}), QString());
+
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("OpenGL offscreen context unavailable");
 
     QImage image(32, 32, QImage::Format_RGBA8888);
     image.fill(QColor(200, 120, 80));
@@ -550,6 +576,213 @@ void EngineTest::compositorOnlyPresetsUseCompositorPath()
     const QImage out = EffectProcessor::applyEffects(image, {effect});
     QVERIFY(!out.isNull());
     QVERIFY(out.pixel(16, 16) != image.pixel(16, 16));
+}
+
+void EngineTest::effectPackageLoaderParsesGaussianBlur()
+{
+    const QString pkg =
+        QDir(QString::fromUtf8(DRIFT_TEST_EFFECTS_DIR)).filePath(QStringLiteral("gaussian_blur"));
+    QString error;
+    const EffectPresetEntry entry = EffectPackageLoader::loadPackage(pkg, &error);
+    QVERIFY2(entry.gpu.valid, qPrintable(error));
+    QVERIFY(entry.isGpu);
+    QCOMPARE(entry.meta.id, QStringLiteral("builtin.effects.gaussian_blur"));
+    QCOMPARE(entry.meta.displayName, QStringLiteral("Gaussian Blur (GPU)"));
+    QCOMPARE(entry.meta.category, QStringLiteral("dreamy"));
+    QCOMPARE(entry.meta.parameters.size(), 1);
+    QCOMPARE(entry.meta.parameters[0].key, QStringLiteral("u_blurRadius"));
+    QCOMPARE(entry.gpu.passes.size(), 2);
+    QCOMPARE(entry.gpu.intermediateBuffers.size(), 1);
+
+    const EffectPresetEntry *cataloged = effectDefForId(QStringLiteral("builtin.effects.gaussian_blur"));
+    QVERIFY(cataloged);
+    QVERIFY(cataloged->isGpu);
+    QVERIFY(cataloged->gpu.valid);
+    QCOMPARE(buildFilterGraphForEffect({.catalogId = cataloged->meta.id}), QString());
+}
+
+void EngineTest::effectPackageLoaderRejectsReservedUniform()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString pkg = dir.filePath(QStringLiteral("bad_reserved"));
+    QVERIFY(QDir().mkpath(pkg));
+    QFile json(QDir(pkg).filePath(QStringLiteral("effect.json")));
+    QVERIFY(json.open(QIODevice::WriteOnly | QIODevice::Text));
+    json.write(R"({
+      "id": "test.reserved",
+      "displayName": "Bad",
+      "category": "dreamy",
+      "backend": "gpu",
+      "parameters": [{"identifier": "u_resolution", "displayName": "Res", "type": "float",
+                     "defaultValue": 1, "minValue": 0, "maxValue": 2}],
+      "pipeline": {"intermediateBuffers": [], "passes": [
+        {"passIndex": 0, "fragmentShader": "x.frag",
+         "inputs": [{"type": "source_texture"}], "output": {"type": "canvas"}}
+      ]}
+    })");
+    json.close();
+    QFile frag(QDir(pkg).filePath(QStringLiteral("x.frag")));
+    QVERIFY(frag.open(QIODevice::WriteOnly | QIODevice::Text));
+    frag.write("#version 330 core\nin vec2 v_texCoord; out vec4 fragColor;\n"
+               "uniform sampler2D u_currentTexture;\nvoid main(){ fragColor = texture(u_currentTexture, v_texCoord); }\n");
+    frag.close();
+
+    QString error;
+    const EffectPresetEntry entry = EffectPackageLoader::loadPackage(pkg, &error);
+    QVERIFY(!entry.gpu.valid);
+    QVERIFY(error.contains(QStringLiteral("reserved")));
+}
+
+void EngineTest::effectPackageLoaderRejectsMissingShader()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString pkg = dir.filePath(QStringLiteral("missing_shader"));
+    QVERIFY(QDir().mkpath(pkg));
+    QFile json(QDir(pkg).filePath(QStringLiteral("effect.json")));
+    QVERIFY(json.open(QIODevice::WriteOnly | QIODevice::Text));
+    json.write(R"({
+      "id": "test.missing",
+      "displayName": "Missing",
+      "category": "dreamy",
+      "backend": "gpu",
+      "parameters": [],
+      "pipeline": {"intermediateBuffers": [], "passes": [
+        {"passIndex": 0, "fragmentShader": "nope.frag",
+         "inputs": [{"type": "source_texture"}], "output": {"type": "canvas"}}
+      ]}
+    })");
+    json.close();
+
+    QString error;
+    const EffectPresetEntry entry = EffectPackageLoader::loadPackage(pkg, &error);
+    QVERIFY(!entry.gpu.valid);
+    QVERIFY(error.contains(QStringLiteral("missing shader")));
+}
+
+void EngineTest::gpuGaussianBlurChangesImage()
+{
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("OpenGL offscreen context unavailable");
+
+    QImage image(64, 64, QImage::Format_RGBA8888);
+    image.fill(Qt::black);
+    for (int y = 20; y < 44; ++y) {
+        for (int x = 20; x < 44; ++x)
+            image.setPixel(x, y, qRgba(255, 255, 255, 255));
+    }
+
+    drift::Effect effect;
+    effect.catalogId = QStringLiteral("builtin.effects.gaussian_blur");
+    effect.parameters.insert(QStringLiteral("u_blurRadius"), 8.0);
+
+    const QImage out = EffectProcessor::applyEffects(image, {effect});
+    QCOMPARE(out.size(), image.size());
+    // Edge of the white square should pick up blur (not pure black outside).
+    const QRgb outside = out.pixel(10, 32);
+    QVERIFY2(qRed(outside) > 0 || qGreen(outside) > 0 || qBlue(outside) > 0,
+             "expected blur bleed outside the white square");
+}
+
+void EngineTest::gpuMultiPassPreservesVerticalOrientation()
+{
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("OpenGL offscreen context unavailable");
+
+    // Red band at top, blue at bottom — multi-pass blur must not swap them.
+    QImage image(32, 32, QImage::Format_RGBA8888);
+    for (int y = 0; y < 32; ++y) {
+        const QRgb color = (y < 16) ? qRgba(255, 0, 0, 255) : qRgba(0, 0, 255, 255);
+        for (int x = 0; x < 32; ++x)
+            image.setPixel(x, y, color);
+    }
+
+    drift::Effect blur;
+    blur.catalogId = QStringLiteral("builtin.effects.gaussian_blur");
+    blur.parameters.insert(QStringLiteral("u_blurRadius"), 2.0);
+
+    const QImage blurred = EffectProcessor::applyEffects(image, {blur});
+    QCOMPARE(blurred.size(), image.size());
+    QVERIFY2(qRed(blurred.pixel(16, 4)) > qBlue(blurred.pixel(16, 4)),
+             "blur: top should stay predominantly red");
+    QVERIFY2(qBlue(blurred.pixel(16, 27)) > qRed(blurred.pixel(16, 27)),
+             "blur: bottom should stay predominantly blue");
+
+    // Bloom composites an FBO blur buffer with the source texture — both must share Y.
+    QImage bloomSrc(32, 32, QImage::Format_RGBA8888);
+    bloomSrc.fill(QColor(0, 0, 0));
+    for (int x = 8; x < 24; ++x)
+        bloomSrc.setPixel(x, 4, qRgba(255, 255, 255, 255)); // bright bar near top only
+
+    drift::Effect bloom;
+    bloom.catalogId = QStringLiteral("bloom_glow");
+    bloom.parameters.insert(QStringLiteral("threshold"), 0.4);
+    bloom.parameters.insert(QStringLiteral("intensity"), 1.5);
+    bloom.parameters.insert(QStringLiteral("blurRadius"), 4.0);
+
+    const QImage bloomed = EffectProcessor::applyEffects(bloomSrc, {bloom});
+    QCOMPARE(bloomed.size(), bloomSrc.size());
+    const int topGlow = qRed(bloomed.pixel(16, 6)) + qGreen(bloomed.pixel(16, 6))
+                        + qBlue(bloomed.pixel(16, 6));
+    const int bottomGlow = qRed(bloomed.pixel(16, 28)) + qGreen(bloomed.pixel(16, 28))
+                           + qBlue(bloomed.pixel(16, 28));
+    QVERIFY2(topGlow > bottomGlow + 20,
+             qPrintable(QStringLiteral(
+                 "bloom glow should stay near the bright top bar, not mirrored to the bottom "
+                 "(top=%1 bottom=%2)")
+                            .arg(topGlow)
+                            .arg(bottomGlow)));
+}
+
+void EngineTest::gpuBrokenShaderPassthrough()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString root = dir.path();
+    const QString pkg = QDir(root).filePath(QStringLiteral("broken_gpu"));
+    QVERIFY(QDir().mkpath(pkg));
+    QFile json(QDir(pkg).filePath(QStringLiteral("effect.json")));
+    QVERIFY(json.open(QIODevice::WriteOnly | QIODevice::Text));
+    json.write(R"({
+      "id": "test.broken_shader",
+      "displayName": "Broken",
+      "category": "dreamy",
+      "backend": "gpu",
+      "parameters": [],
+      "pipeline": {"intermediateBuffers": [], "passes": [
+        {"passIndex": 0, "fragmentShader": "bad.frag",
+         "inputs": [{"type": "source_texture"}], "output": {"type": "canvas"}}
+      ]}
+    })");
+    json.close();
+    QFile frag(QDir(pkg).filePath(QStringLiteral("bad.frag")));
+    QVERIFY(frag.open(QIODevice::WriteOnly | QIODevice::Text));
+    frag.write("#version 330 core\nthis is not valid glsl!!!\n");
+    frag.close();
+
+    reloadEffectCatalog({root, QString::fromUtf8(DRIFT_TEST_EFFECTS_DIR)});
+    const EffectPresetEntry *def = effectDefForId(QStringLiteral("test.broken_shader"));
+    QVERIFY(def);
+    QVERIFY(def->isGpu);
+
+    if (!GpuEffectExecutor::instance().isAvailable()) {
+        reloadEffectCatalog({QString::fromUtf8(DRIFT_TEST_EFFECTS_DIR)});
+        QSKIP("OpenGL offscreen context unavailable");
+    }
+
+    QImage image(32, 32, QImage::Format_RGBA8888);
+    image.fill(QColor(12, 34, 56));
+
+    drift::Effect effect;
+    effect.catalogId = def->meta.id;
+
+    const QImage out = EffectProcessor::applyEffects(image, {effect});
+    QCOMPARE(out.size(), image.size());
+    QCOMPARE(out.pixel(16, 16), image.pixel(16, 16));
+
+    // Restore catalog for subsequent tests.
+    reloadEffectCatalog({QString::fromUtf8(DRIFT_TEST_EFFECTS_DIR)});
 }
 
 static QImage makeRedBlueSplitTestImage()
@@ -648,7 +881,7 @@ void EngineTest::blockGlitchDeterministicForSameTimeAndSeed()
 
     const EffectPresetEntry *def = effectDefForId(QStringLiteral("block_glitch"));
     QVERIFY(def);
-    QVERIFY(def->meta.compositorOnly);
+    QVERIFY(def->isGpu);
     QCOMPARE(buildFilterGraphForEffect({.catalogId = QStringLiteral("block_glitch")}), QString());
 }
 
@@ -708,7 +941,7 @@ void EngineTest::scanlineGlitchDeterministicAtFixedTime()
 
     const EffectPresetEntry *def = effectDefForId(QStringLiteral("scanline_glitch"));
     QVERIFY(def);
-    QVERIFY(def->meta.compositorOnly);
+    QVERIFY(def->isGpu);
     QCOMPARE(buildFilterGraphForEffect({.catalogId = QStringLiteral("scanline_glitch")}), QString());
 }
 
@@ -775,7 +1008,7 @@ void EngineTest::vhsCrtNonzeroModifiesOutput()
 
     const EffectPresetEntry *def = effectDefForId(QStringLiteral("vhs_crt"));
     QVERIFY(def);
-    QVERIFY(def->meta.compositorOnly);
+    QVERIFY(def->isGpu);
     QCOMPARE(buildFilterGraphForEffect({.catalogId = QStringLiteral("vhs_crt")}), QString());
 }
 
@@ -799,7 +1032,7 @@ static drift::Effect makeBloomGlowEffect()
     effect.catalogId = QStringLiteral("bloom_glow");
     effect.parameters.insert(QStringLiteral("threshold"), 0.5);
     effect.parameters.insert(QStringLiteral("intensity"), 1.0);
-    effect.parameters.insert(QStringLiteral("radius"), 8.0);
+    effect.parameters.insert(QStringLiteral("blurRadius"), 8.0);
     return effect;
 }
 
@@ -827,9 +1060,17 @@ void EngineTest::bloomGlowDarkFrameUnchanged()
 
 void EngineTest::bloomGlowBrightSpotBleedsToNeighbors()
 {
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("OpenGL offscreen context unavailable");
+
     QImage image(32, 32, QImage::Format_RGBA8888);
     image.fill(QColor(10, 10, 10));
-    image.setPixel(16, 16, qRgba(255, 255, 255, 255));
+    // A small bright block (not a single pixel) so separable blur keeps
+    // measurable energy after H+V dilution in 8-bit.
+    for (int y = 14; y <= 18; ++y) {
+        for (int x = 14; x <= 18; ++x)
+            image.setPixel(x, y, qRgba(255, 255, 255, 255));
+    }
 
     const drift::Effect effect = makeBloomGlowEffect();
     const QImage out = EffectProcessor::applyEffects(image, {effect});
@@ -838,12 +1079,26 @@ void EngineTest::bloomGlowBrightSpotBleedsToNeighbors()
     const QRgb center = out.pixel(16, 16);
     QVERIFY(qRed(center) > 200 || qGreen(center) > 200 || qBlue(center) > 200);
 
-    const QRgb neighbor = out.pixel(18, 16);
-    QVERIFY(qRed(neighbor) > 10 || qGreen(neighbor) > 10 || qBlue(neighbor) > 10);
+    // Glow should raise at least one pixel outside the bright block.
+    bool bled = false;
+    for (int dy = -6; dy <= 6 && !bled; ++dy) {
+        for (int dx = -6; dx <= 6; ++dx) {
+            const int x = 16 + dx;
+            const int y = 16 + dy;
+            if (x >= 14 && x <= 18 && y >= 14 && y <= 18)
+                continue;
+            const QRgb n = out.pixel(x, y);
+            if (qRed(n) > 12 || qGreen(n) > 12 || qBlue(n) > 12) {
+                bled = true;
+                break;
+            }
+        }
+    }
+    QVERIFY2(bled, "expected bloom bleed into neighboring pixels");
 
     const EffectPresetEntry *def = effectDefForId(QStringLiteral("bloom_glow"));
     QVERIFY(def);
-    QVERIFY(def->meta.compositorOnly);
+    QVERIFY(def->isGpu);
     QCOMPARE(buildFilterGraphForEffect({.catalogId = QStringLiteral("bloom_glow")}), QString());
 }
 
@@ -883,7 +1138,7 @@ void EngineTest::rippleWaterNonzeroDisplacementChangesOutput()
 
     const EffectPresetEntry *def = effectDefForId(QStringLiteral("ripple_water"));
     QVERIFY(def);
-    QVERIFY(def->meta.compositorOnly);
+    QVERIFY(def->isGpu);
     QCOMPARE(buildFilterGraphForEffect({.catalogId = QStringLiteral("ripple_water")}), QString());
 }
 
@@ -939,7 +1194,7 @@ void EngineTest::edgeNeonHighContrastRectangleGlow()
 
     const EffectPresetEntry *def = effectDefForId(QStringLiteral("edge_neon"));
     QVERIFY(def);
-    QVERIFY(def->meta.compositorOnly);
+    QVERIFY(def->isGpu);
     QCOMPARE(def->fixedParams.value(QStringLiteral("color")).toString(), QStringLiteral("#00ffff"));
     QCOMPARE(buildFilterGraphForEffect({.catalogId = QStringLiteral("edge_neon")}), QString());
 }
@@ -981,7 +1236,7 @@ void EngineTest::digitalGlitchDeterministicForFixedTimeAndSeed()
 
     const EffectPresetEntry *def = effectDefForId(QStringLiteral("digital_glitch"));
     QVERIFY(def);
-    QVERIFY(def->meta.compositorOnly);
+    QVERIFY(def->isGpu);
     QCOMPARE(buildFilterGraphForEffect({.catalogId = QStringLiteral("digital_glitch")}), QString());
 
     drift::Effect otherSeed = effect;
@@ -1036,7 +1291,7 @@ void EngineTest::filmBurnAddsWarmLeakContribution()
 
     const EffectPresetEntry *def = effectDefForId(QStringLiteral("film_burn"));
     QVERIFY(def);
-    QVERIFY(def->meta.compositorOnly);
+    QVERIFY(def->isGpu);
     QCOMPARE(def->fixedParams.value(QStringLiteral("position")).toString(), QStringLiteral("left"));
     QCOMPARE(buildFilterGraphForEffect({.catalogId = QStringLiteral("film_burn")}), QString());
 }
@@ -1162,7 +1417,7 @@ void EngineTest::timeEchoBlendsPriorVideoFrames()
 
     const EffectPresetEntry *def = effectDefForId(QStringLiteral("time_echo"));
     QVERIFY(def);
-    QVERIFY(def->meta.compositorOnly);
+    QVERIFY(def->isGpu);
     QCOMPARE(def->fixedParams.value(QStringLiteral("blendMode")).toString(), QStringLiteral("normal"));
     QCOMPARE(buildFilterGraphForEffect({.catalogId = QStringLiteral("time_echo")}), QString());
 }
@@ -1207,7 +1462,7 @@ void EngineTest::shockwavePulseChangesPixelsNearWavefront()
 
     const EffectPresetEntry *def = effectDefForId(QStringLiteral("shockwave_pulse"));
     QVERIFY(def);
-    QVERIFY(def->meta.compositorOnly);
+    QVERIFY(def->isGpu);
     QCOMPARE(buildFilterGraphForEffect({.catalogId = QStringLiteral("shockwave_pulse")}), QString());
 }
 

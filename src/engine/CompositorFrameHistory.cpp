@@ -1,5 +1,7 @@
 #include "CompositorFrameHistory.h"
 
+#include "GpuEffectExecutor.h"
+
 #include <QPainter>
 #include <QtMath>
 
@@ -39,6 +41,19 @@ void compositeEchoLayer(QImage &base, const QImage &overlay, double opacity, Ech
     painter.drawImage(0, 0, overlay);
 }
 
+int blendModeIndex(EchoBlendMode mode)
+{
+    switch (mode) {
+    case EchoBlendMode::Add:
+        return 1;
+    case EchoBlendMode::Screen:
+        return 2;
+    case EchoBlendMode::Normal:
+        break;
+    }
+    return 0;
+}
+
 } // namespace
 
 EchoBlendMode parseEchoBlendMode(const QString &value)
@@ -56,8 +71,15 @@ QImage applyTimeEcho(const QList<QImage> &framesNewestFirst, double decay, EchoB
     if (framesNewestFirst.isEmpty())
         return {};
 
-    const double clampedDecay = qBound(0.0, decay, 1.0);
+    if (GpuEffectExecutor::instance().isAvailable()) {
+        const QImage gpu =
+            GpuEffectExecutor::instance().blendTimeEcho(framesNewestFirst, decay,
+                                                        blendModeIndex(blendMode));
+        if (!gpu.isNull())
+            return gpu;
+    }
 
+    const double clampedDecay = qBound(0.0, decay, 1.0);
     QImage result;
     for (int age = framesNewestFirst.size() - 1; age >= 0; --age) {
         const QImage layer = framesNewestFirst.at(age).convertToFormat(QImage::Format_RGBA8888);
