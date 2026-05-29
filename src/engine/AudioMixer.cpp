@@ -2,6 +2,7 @@
 
 #include "AudioAtempo.h"
 #include "ClipReaderPool.h"
+#include "TransitionCatalog.h"
 #include "core/Clip.h"
 #include "core/Transition.h"
 
@@ -36,11 +37,13 @@ double transitionGainForClip(const drift::Track &track, const drift::Clip &clip,
         return 1.0;
 
     const double p = drift::transitionProgress(timelineUs, windowStart, windowEnd);
-    const drift::TransitionBlendOpacities blend = drift::transitionBlendOpacities(transition->kind, p);
+    const TransitionPresetEntry *def = transitionDefForId(transition->kindId);
+    const QString curve = def ? def->audioCurve : QStringLiteral("crossfade");
+    const drift::TransitionAudioGains gains = drift::transitionAudioGains(curve, p);
     if (clip.id == transition->fromClipId)
-        return blend.outgoing;
+        return gains.outgoing;
     if (clip.id == transition->toClipId)
-        return blend.incoming;
+        return gains.incoming;
     return 1.0;
 }
 

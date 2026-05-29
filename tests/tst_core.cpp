@@ -32,6 +32,9 @@ private slots:
     void clipSpeedSourceMapping();
     void maskAndTransitionSerialization();
     void allTransitionKindsRoundTrip();
+    void transitionParametersRoundTrip();
+    void legacyTransitionJsonStillLoads();
+    void transitionAudioCurves();
     void physicalOverlapTransitionWindow();
     void backgroundSerialization();
     void fadeSerializationAndMultiplier();
@@ -527,7 +530,7 @@ void CoreTest::maskAndTransitionSerialization()
     transition.id = QStringLiteral("tr-1");
     transition.fromClipId = clipA.id;
     transition.toClipId = clipB.id;
-    transition.kind = drift::TransitionKind::DipToBlack;
+    transition.kindId = QStringLiteral("dip");
     transition.durationUs = drift::secondsToUs(0.5);
     project.tracks()[0].transitions.append(transition);
 
@@ -539,58 +542,117 @@ void CoreTest::maskAndTransitionSerialization()
     QCOMPARE(loaded.tracks()[0].clips[0].speed, 2.0);
     QCOMPARE(loaded.tracks()[0].clips[0].mask.shape, drift::MaskShape::Ellipse);
     QCOMPARE(loaded.tracks()[0].transitions.size(), 1);
-    QCOMPARE(loaded.tracks()[0].transitions[0].kind, drift::TransitionKind::DipToBlack);
+    QCOMPARE(loaded.tracks()[0].transitions[0].kindId, QStringLiteral("dip"));
     QCOMPARE(loaded.tracks()[0].transitions[0].fromClipId, QStringLiteral("clip-a"));
+}
+
+// The pre-shader enum serialized exactly these strings, so a project written by an older build
+// must still resolve to the right transition package.
+static drift::Project projectWithTransition(const QString &kindId,
+                                            const QMap<QString, QVariant> &params = {})
+{
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clipA;
+    clipA.id = QStringLiteral("a");
+    clipA.type = drift::ClipType::Video;
+    clipA.timelineStart = 0;
+    clipA.timelineDuration = drift::secondsToUs(1.0);
+
+    drift::Clip clipB;
+    clipB.id = QStringLiteral("b");
+    clipB.type = drift::ClipType::Video;
+    clipB.timelineStart = drift::secondsToUs(1.0);
+    clipB.timelineDuration = drift::secondsToUs(1.0);
+
+    project.tracks()[0].clips.append(clipA);
+    project.tracks()[0].clips.append(clipB);
+
+    drift::Transition transition;
+    transition.id = QStringLiteral("tr");
+    transition.fromClipId = clipA.id;
+    transition.toClipId = clipB.id;
+    transition.kindId = kindId;
+    transition.parameters = params;
+    project.tracks()[0].transitions.append(transition);
+    return project;
 }
 
 void CoreTest::allTransitionKindsRoundTrip()
 {
-    const QList<drift::TransitionKind> kinds = {
-        drift::TransitionKind::Crossfade,
-        drift::TransitionKind::DipToBlack,
-        drift::TransitionKind::DipToWhite,
-        drift::TransitionKind::WipeLeft,
-        drift::TransitionKind::WipeRight,
-        drift::TransitionKind::WipeUp,
-        drift::TransitionKind::WipeDown,
-        drift::TransitionKind::PushLeft,
-        drift::TransitionKind::ZoomIn,
+    const QStringList kinds = {
+        QStringLiteral("crossfade"),  QStringLiteral("dip"),        QStringLiteral("dip_white"),
+        QStringLiteral("wipe_left"),  QStringLiteral("wipe_right"), QStringLiteral("wipe_up"),
+        QStringLiteral("wipe_down"),  QStringLiteral("push_left"),  QStringLiteral("zoom_in"),
     };
 
-    for (drift::TransitionKind kind : kinds) {
-        drift::Project project;
-        project.tracks().clear();
-        project.tracks().append(drift::Track{.type = drift::TrackType::Video});
-
-        drift::Clip clipA;
-        clipA.id = QStringLiteral("a");
-        clipA.type = drift::ClipType::Video;
-        clipA.timelineStart = 0;
-        clipA.timelineDuration = drift::secondsToUs(1.0);
-
-        drift::Clip clipB;
-        clipB.id = QStringLiteral("b");
-        clipB.type = drift::ClipType::Video;
-        clipB.timelineStart = drift::secondsToUs(1.0);
-        clipB.timelineDuration = drift::secondsToUs(1.0);
-
-        project.tracks()[0].clips.append(clipA);
-        project.tracks()[0].clips.append(clipB);
-
-        drift::Transition transition;
-        transition.id = QStringLiteral("tr");
-        transition.fromClipId = clipA.id;
-        transition.toClipId = clipB.id;
-        transition.kind = kind;
-        project.tracks()[0].transitions.append(transition);
-
+    for (const QString &kind : kinds) {
+        const drift::Project project = projectWithTransition(kind);
         QString error;
         const drift::Project loaded = drift::Project::fromJson(project.toJson(), &error);
         QVERIFY2(error.isEmpty(), qPrintable(error));
-        QCOMPARE(loaded.tracks()[0].transitions[0].kind, kind);
-        QCOMPARE(drift::transitionKindToString(kind),
-                 drift::transitionKindToString(loaded.tracks()[0].transitions[0].kind));
+        QCOMPARE(loaded.tracks()[0].transitions[0].kindId, kind);
     }
+}
+
+void CoreTest::transitionParametersRoundTrip()
+{
+    QMap<QString, QVariant> params;
+    params.insert(QStringLiteral("softness"), 0.25);
+    params.insert(QStringLiteral("invert"), true);
+
+    const drift::Project project = projectWithTransition(QStringLiteral("luma_fade"), params);
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(project.toJson(), &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+
+    const drift::Transition &t = loaded.tracks()[0].transitions[0];
+    QCOMPARE(t.kindId, QStringLiteral("luma_fade"));
+    QCOMPARE(t.parameters.value(QStringLiteral("softness")).toDouble(), 0.25);
+    QCOMPARE(t.parameters.value(QStringLiteral("invert")).toBool(), true);
+}
+
+// A project file written before transitions became packages has no "parameters" key at all.
+void CoreTest::legacyTransitionJsonStillLoads()
+{
+    QJsonObject legacy = projectWithTransition(QStringLiteral("wipe_up")).toJson();
+    QJsonArray tracks = legacy.value(QStringLiteral("tracks")).toArray();
+    QJsonObject track = tracks.at(0).toObject();
+    QJsonArray transitions = track.value(QStringLiteral("transitions")).toArray();
+    QJsonObject t = transitions.at(0).toObject();
+    t.remove(QStringLiteral("parameters"));
+    transitions.replace(0, t);
+    track.insert(QStringLiteral("transitions"), transitions);
+    tracks.replace(0, track);
+    legacy.insert(QStringLiteral("tracks"), tracks);
+
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(legacy, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(loaded.tracks()[0].transitions[0].kindId, QStringLiteral("wipe_up"));
+    QVERIFY(loaded.tracks()[0].transitions[0].parameters.isEmpty());
+}
+
+void CoreTest::transitionAudioCurves()
+{
+    // crossfade: linear, sums to 1 at every point.
+    const auto mid = drift::transitionAudioGains(QStringLiteral("crossfade"), 0.5);
+    QCOMPARE(mid.outgoing, 0.5);
+    QCOMPARE(mid.incoming, 0.5);
+
+    // dip: silent at the midpoint, matching the visual dip through black.
+    const auto dip = drift::transitionAudioGains(QStringLiteral("dip"), 0.5);
+    QCOMPARE(dip.outgoing, 0.0);
+    QCOMPARE(dip.incoming, 0.0);
+    QCOMPARE(drift::transitionAudioGains(QStringLiteral("dip"), 0.0).outgoing, 1.0);
+    QCOMPARE(drift::transitionAudioGains(QStringLiteral("dip"), 1.0).incoming, 1.0);
+
+    // hold: no ducking at all.
+    const auto hold = drift::transitionAudioGains(QStringLiteral("hold"), 0.5);
+    QCOMPARE(hold.outgoing, 1.0);
+    QCOMPARE(hold.incoming, 1.0);
 }
 
 void CoreTest::physicalOverlapTransitionWindow()

@@ -22,6 +22,7 @@
 #include "engine/FrameCompositor.h"
 #include "engine/GpuEffectExecutor.h"
 #include "engine/MaskApplier.h"
+#include "engine/TransitionCatalog.h"
 #include "core/Transition.h"
 
 class EngineTest : public QObject
@@ -81,6 +82,11 @@ private slots:
     void compositorCrossfadeBetweenShapeClips();
     void compositorDipToBlackMidpointIsBlack();
     void compositorWipeRightRevealsIncomingClip();
+    void transitionCatalogLoadsAllPackages();
+    void gpuTransitionBindsBothSources();
+    void brokenTransitionShaderFallsBackToCrossfade();
+    void transitionRenderingIsDeterministic();
+    void textClipRendersInsideTransition();
     void maskApplierEllipseMasksCorners();
     void exporterProducesPlayableFileWithBackground();
 
@@ -94,6 +100,10 @@ void EngineTest::initTestCase()
     const QString effectsDir = QString::fromUtf8(DRIFT_TEST_EFFECTS_DIR);
     QVERIFY2(QDir(effectsDir).exists(), qPrintable(effectsDir));
     reloadEffectCatalog({effectsDir});
+
+    const QString transitionsDir = QString::fromUtf8(DRIFT_TEST_TRANSITIONS_DIR);
+    QVERIFY2(QDir(transitionsDir).exists(), qPrintable(transitionsDir));
+    reloadTransitionCatalog({transitionsDir});
 }
 
 void EngineTest::effectProcessorPassthroughWithoutEffects()
@@ -1496,7 +1506,7 @@ void EngineTest::compositorCrossfadeBetweenShapeClips()
     transition.id = QStringLiteral("tr");
     transition.fromClipId = clipA.id;
     transition.toClipId = clipB.id;
-    transition.kind = drift::TransitionKind::Crossfade;
+    transition.kindId = QStringLiteral("crossfade");
     transition.durationUs = drift::secondsToUs(1.0);
     project.tracks()[0].transitions.append(transition);
 
@@ -1516,7 +1526,7 @@ void EngineTest::compositorCrossfadeBetweenShapeClips()
     QVERIFY(qBlue(center) > 0);
 }
 
-static void appendRedBlueShapeTransition(drift::Project &project, drift::TransitionKind kind)
+static void appendRedBlueShapeTransition(drift::Project &project, const QString &kindId)
 {
     project.setResolution(128, 128);
     project.tracks().clear();
@@ -1545,7 +1555,7 @@ static void appendRedBlueShapeTransition(drift::Project &project, drift::Transit
     transition.id = QStringLiteral("tr");
     transition.fromClipId = clipA.id;
     transition.toClipId = clipB.id;
-    transition.kind = kind;
+    transition.kindId = kindId;
     transition.durationUs = drift::secondsToUs(1.0);
     project.tracks()[0].transitions.append(transition);
 }
@@ -1553,7 +1563,7 @@ static void appendRedBlueShapeTransition(drift::Project &project, drift::Transit
 void EngineTest::compositorDipToBlackMidpointIsBlack()
 {
     drift::Project project;
-    appendRedBlueShapeTransition(project, drift::TransitionKind::DipToBlack);
+    appendRedBlueShapeTransition(project, QStringLiteral("dip"));
 
     FrameCompositor compositor;
     compositor.setProject(&project);
@@ -1569,7 +1579,7 @@ void EngineTest::compositorDipToBlackMidpointIsBlack()
 void EngineTest::compositorWipeRightRevealsIncomingClip()
 {
     drift::Project project;
-    appendRedBlueShapeTransition(project, drift::TransitionKind::WipeRight);
+    appendRedBlueShapeTransition(project, QStringLiteral("wipe_right"));
 
     FrameCompositor compositor;
     compositor.setProject(&project);
@@ -1581,6 +1591,187 @@ void EngineTest::compositorWipeRightRevealsIncomingClip()
     // Shape clips are small and centered; sample canvas center, not edges.
     QVERIFY(qRed(early.pixel(64, 64)) > qBlue(early.pixel(64, 64)));
     QVERIFY(qBlue(late.pixel(64, 64)) > qRed(late.pixel(64, 64)));
+}
+
+void EngineTest::transitionCatalogLoadsAllPackages()
+{
+    const QStringList ids = transitionPresetIds();
+    QCOMPARE(ids.size(), 28);
+
+    // The nine ids the pre-shader enum serialized must all still resolve.
+    for (const char *legacy : {"crossfade", "dip", "dip_white", "wipe_left", "wipe_right",
+                               "wipe_up", "wipe_down", "push_left", "zoom_in"}) {
+        const TransitionPresetEntry *def = transitionDefForId(QString::fromUtf8(legacy));
+        QVERIFY2(def, legacy);
+        QVERIFY2(def->gpu.valid, legacy);
+    }
+
+    QCOMPARE(transitionDefForId(QStringLiteral("dip"))->audioCurve, QStringLiteral("dip"));
+    QCOMPARE(transitionDefForId(QStringLiteral("crossfade"))->audioCurve,
+             QStringLiteral("crossfade"));
+
+    // matrix_rain is the one package with a static texture asset.
+    const TransitionPresetEntry *rain = transitionDefForId(QStringLiteral("matrix_rain"));
+    QVERIFY(rain);
+    QCOMPARE(rain->gpu.textures.size(), 1);
+    QVERIFY(QFileInfo::exists(rain->gpu.textures.first().path));
+}
+
+// Two solid layers through the real GPU path: the shader must actually receive source 1 as
+// u_toTexture, not a second copy of source 0.
+void EngineTest::gpuTransitionBindsBothSources()
+{
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("no OpenGL context available");
+
+    QImage red(64, 64, QImage::Format_RGBA8888);
+    red.fill(Qt::red);
+    QImage blue(64, 64, QImage::Format_RGBA8888);
+    blue.fill(Qt::blue);
+
+    const TransitionPresetEntry *def = transitionDefForId(QStringLiteral("crossfade"));
+    QVERIFY(def);
+
+    // Returns a null image if the pipeline reported failure, so the QVERIFYs stay in the test body.
+    auto run = [&](double p) -> QImage {
+        bool ok = false;
+        const QImage out = GpuEffectExecutor::instance().apply(
+            QLatin1String(kTransitionCacheKeyPrefix) + def->meta.id, def->gpu, {red, blue}, {}, 0, p,
+            &ok);
+        return ok ? out : QImage();
+    };
+
+    const QImage atStart = run(0.0);
+    const QImage atEnd = run(1.0);
+    const QImage atMid = run(0.5);
+    QVERIFY(!atStart.isNull() && !atEnd.isNull() && !atMid.isNull());
+
+    const QRgb start = atStart.pixel(32, 32);
+    QVERIFY(qRed(start) > 240 && qBlue(start) < 15);
+
+    const QRgb end = atEnd.pixel(32, 32);
+    QVERIFY(qBlue(end) > 240 && qRed(end) < 15);
+
+    const QRgb mid = atMid.pixel(32, 32);
+    QVERIFY(qRed(mid) > 100 && qRed(mid) < 155);
+    QVERIFY(qBlue(mid) > 100 && qBlue(mid) < 155);
+}
+
+// A broken shader must fall back to a CPU crossfade, never to a black frame or to clip A alone.
+void EngineTest::brokenTransitionShaderFallsBackToCrossfade()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString pkg = QDir(dir.path()).filePath(QStringLiteral("broken"));
+    QVERIFY(QDir().mkpath(pkg));
+
+    QFile frag(QDir(pkg).filePath(QStringLiteral("main.frag")));
+    QVERIFY(frag.open(QIODevice::WriteOnly));
+    frag.write("#version 330 core\nthis is not glsl\n");
+    frag.close();
+
+    QFile json(QDir(pkg).filePath(QStringLiteral("transition.json")));
+    QVERIFY(json.open(QIODevice::WriteOnly));
+    json.write(R"({"id":"broken","displayName":"Broken","pipeline":{"passes":[{"passIndex":0,
+        "fragmentShader":"main.frag","inputs":[{"type":"source_texture","index":0},
+        {"type":"source_texture","index":1}],"output":{"type":"canvas"}}]}})");
+    json.close();
+
+    reloadTransitionCatalog({dir.path()});
+
+    drift::Project project;
+    appendRedBlueShapeTransition(project, QStringLiteral("broken"));
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+
+    const QImage mid = compositor.compositeAt(drift::secondsToUs(2.0));
+    QVERIFY(!mid.isNull());
+    const QRgb center = mid.pixel(64, 64);
+    QVERIFY(qRed(center) > 0);
+    QVERIFY(qBlue(center) > 0);
+
+    reloadTransitionCatalog({QString::fromUtf8(DRIFT_TEST_TRANSITIONS_DIR)});
+}
+
+// The old CPU path never handled ClipType::Text inside drawTransitionFrame, and the main draw
+// loop skipped both transition clips — so a text clip in a transition simply disappeared.
+// Rendering each side into its own full-canvas layer routes text through the normal path.
+void EngineTest::textClipRendersInsideTransition()
+{
+    drift::Project project;
+    project.setResolution(128, 128);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip text;
+    text.id = QStringLiteral("a");
+    text.type = drift::ClipType::Text;
+    text.timelineStart = 0;
+    text.timelineDuration = drift::secondsToUs(2.0);
+    text.textContent = QStringLiteral("HELLO");
+    text.textStyle.color = Qt::white;
+    text.textStyle.pixelSize = 28;
+
+    drift::Clip shape;
+    shape.id = QStringLiteral("b");
+    shape.type = drift::ClipType::Shape;
+    shape.timelineStart = drift::secondsToUs(2.0);
+    shape.timelineDuration = drift::secondsToUs(2.0);
+    shape.shapeStyle.kind = drift::ShapeKind::Rectangle;
+    shape.shapeStyle.fill = Qt::blue;
+
+    project.tracks()[0].clips.append(text);
+    project.tracks()[0].clips.append(shape);
+
+    drift::Transition transition;
+    transition.id = QStringLiteral("tr");
+    transition.fromClipId = text.id;
+    transition.toClipId = shape.id;
+    transition.kindId = QStringLiteral("crossfade");
+    transition.durationUs = drift::secondsToUs(1.0);
+    project.tracks()[0].transitions.append(transition);
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+
+    // Early in the window the text still dominates: some pixel must be lit by the glyphs.
+    const QImage frame = compositor.compositeAt(drift::secondsToUs(1.6));
+    QVERIFY(!frame.isNull());
+
+    int lit = 0;
+    for (int y = 0; y < frame.height(); ++y) {
+        for (int x = 0; x < frame.width(); ++x) {
+            const QRgb px = frame.pixel(x, y);
+            if (qRed(px) > 150 && qGreen(px) > 150 && qBlue(px) > 150)
+                ++lit;
+        }
+    }
+    QVERIFY2(lit > 0, "text clip vanished inside the transition window");
+}
+
+// Transitions must be pure functions of (A, B, progress). If any shader smuggled in
+// frame-to-frame state, rendering a later frame first would change this frame's output —
+// which would also make the exporter disagree with the preview.
+void EngineTest::transitionRenderingIsDeterministic()
+{
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("no OpenGL context available");
+
+    for (const QString &kindId : transitionPresetIds()) {
+        drift::Project project;
+        appendRedBlueShapeTransition(project, kindId);
+
+        FrameCompositor compositor;
+        compositor.setProject(&project);
+
+        const QImage first = compositor.compositeAt(drift::secondsToUs(1.75));
+
+        // Jump forward, then scrub back to the same time.
+        compositor.compositeAt(drift::secondsToUs(2.4));
+        const QImage rescrubbed = compositor.compositeAt(drift::secondsToUs(1.75));
+
+        QVERIFY2(first == rescrubbed, qPrintable(kindId));
+    }
 }
 
 void EngineTest::maskApplierEllipseMasksCorners()

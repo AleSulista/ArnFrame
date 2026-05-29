@@ -522,15 +522,20 @@ PanelFrame {
 
             // Transitions browser
             Item {
+                id: transitionsBrowser
                 visible: tabsModel.get(activeTab).tabId === "transitions"
                 width: parent.width
                 height: parent.height - Theme.panelHeaderHeight
+
+                readonly property var categories: EditorState.transitionCategories()
+                property string activeCategory: categories.length > 0 ? categories[0].id : ""
 
                 Column {
                     anchors.fill: parent
                     spacing: 0
 
                     Text {
+                        id: transitionTip
                         width: parent.width - 24
                         leftPadding: 12
                         rightPadding: 12
@@ -545,8 +550,34 @@ PanelFrame {
                     }
 
                     Flickable {
+                        id: transitionCategoryFlick
                         width: parent.width
-                        height: Math.max(0, parent.height - 48)
+                        height: 34
+                        contentWidth: transitionCategoryRow.width + 24
+                        clip: true
+
+                        Row {
+                            id: transitionCategoryRow
+                            x: 12
+                            height: parent.height
+                            spacing: 6
+
+                            Repeater {
+                                model: transitionsBrowser.categories
+                                delegate: ThemedChip {
+                                    required property var modelData
+                                    text: modelData.label
+                                    variant: "secondary"
+                                    selected: modelData.id === transitionsBrowser.activeCategory
+                                    onClicked: transitionsBrowser.activeCategory = modelData.id
+                                }
+                            }
+                        }
+                    }
+
+                    Flickable {
+                        width: parent.width
+                        height: Math.max(0, parent.height - transitionTip.height - transitionCategoryFlick.height)
                         contentHeight: transitionGrid.height + 24
                         clip: true
                         ScrollBar.vertical: AppScrollBar { }
@@ -562,16 +593,39 @@ PanelFrame {
 
                             Repeater {
                                 model: EditorState.transitionKinds()
-                                delegate: Rectangle {
+                                delegate: Column {
                                     id: transitionCard
                                     required property var modelData
-                                    width: Theme.assetCardWidth
-                                    height: 72
-                                    radius: Theme.radiusSm
-                                    color: transitionHover.hovered ? Theme.panelSecondaryBg : Theme.panelAccent
-                                    border.width: transitionDrag.active ? 1 : 0
-                                    border.color: Theme.transitionOverlap
+                                    visible: transitionCard.modelData.category === transitionsBrowser.activeCategory
+                                    width: visible ? Theme.assetCardWidth : 0
+                                    spacing: 4
                                     opacity: transitionDrag.active ? 0.85 : 1
+
+                                    readonly property string strip: transitionCard.modelData.previewStripPath || ""
+                                    readonly property int frameCount: Math.max(1, transitionCard.modelData.previewFrames || 1)
+
+                                    // Cards rest on a frame partway through the transition; hovering
+                                    // scrubs the whole strip, which is the only way to tell many of
+                                    // these apart (a crossfade and a dip look the same at p = 0.5).
+                                    property real scrub: 0.45
+                                    readonly property int frameIndex:
+                                        Math.max(0, Math.min(frameCount - 1, Math.round(scrub * (frameCount - 1))))
+
+                                    NumberAnimation on scrub {
+                                        running: transitionHover.hovered && transitionCard.frameCount > 1
+                                        from: 0
+                                        to: 1
+                                        duration: 1400
+                                        loops: Animation.Infinite
+                                    }
+
+                                    Connections {
+                                        target: transitionHover
+                                        function onHoveredChanged() {
+                                            if (!transitionHover.hovered)
+                                                transitionCard.scrub = 0.45
+                                        }
+                                    }
 
                                     Drag.active: transitionDrag.active
                                     Drag.dragType: Drag.Automatic
@@ -579,42 +633,61 @@ PanelFrame {
                                     Drag.keys: ["application/x-drift-transition"]
                                     Drag.mimeData: ({ "application/x-drift-transition": transitionCard.modelData.kind })
                                     Drag.hotSpot.x: width / 2
-                                    Drag.hotSpot.y: height / 2
+                                    Drag.hotSpot.y: Theme.assetCardWidth / 2
 
-                                    HoverHandler { id: transitionHover }
+                                    Rectangle {
+                                        width: Theme.assetCardWidth
+                                        height: Theme.assetCardWidth
+                                        radius: Theme.radiusSm
+                                        color: transitionHover.hovered ? Theme.panelSecondaryBg : Theme.panelAccent
+                                        border.width: transitionDrag.active ? 1 : 0
+                                        border.color: Theme.transitionOverlap
+                                        clip: true
 
-                                    DragHandler {
-                                        id: transitionDrag
-                                        target: null
-                                        acceptedButtons: Qt.LeftButton
-                                    }
+                                        HoverHandler { id: transitionHover }
 
-                                    Column {
-                                        anchors.fill: parent
-                                        anchors.margins: 8
-                                        spacing: 4
+                                        DragHandler {
+                                            id: transitionDrag
+                                            target: null
+                                            acceptedButtons: Qt.LeftButton
+                                        }
+
+                                        // The strip is one row of square cells; slide it rather than
+                                        // re-decoding a sourceClipRect per frame.
+                                        Image {
+                                            visible: transitionCard.strip.length > 0
+                                            source: transitionCard.strip.length > 0
+                                                    ? EditorState.imageUrl(transitionCard.strip) : ""
+                                            height: parent.height
+                                            width: parent.height * transitionCard.frameCount
+                                            x: -transitionCard.frameIndex * parent.height
+                                            fillMode: Image.Stretch
+                                            asynchronous: true
+                                            smooth: true
+                                        }
 
                                         Text {
-                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            anchors.centerIn: parent
+                                            visible: transitionCard.strip.length === 0
                                             text: "≫"
                                             color: Theme.transitionOverlap
                                             font.family: Theme.fontFamily
-                                            font.pixelSize: 18
+                                            font.pixelSize: 22
                                             font.weight: Font.Bold
                                         }
+                                    }
 
-                                        Text {
-                                            width: parent.width
-                                            text: transitionCard.modelData.label
-                                            color: Theme.panelForeground
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: Theme.fontSizeCard
-                                            font.weight: Font.Medium
-                                            horizontalAlignment: Text.AlignHCenter
-                                            wrapMode: Text.WordWrap
-                                            maximumLineCount: 2
-                                            elide: Text.ElideRight
-                                        }
+                                    Text {
+                                        width: parent.width
+                                        text: transitionCard.modelData.label
+                                        color: Theme.panelForeground
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeCard
+                                        font.weight: Font.Medium
+                                        horizontalAlignment: Text.AlignHCenter
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 2
+                                        elide: Text.ElideRight
                                     }
                                 }
                             }

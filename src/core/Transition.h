@@ -2,47 +2,36 @@
 
 #include "Time.h"
 
+#include <QMap>
 #include <QString>
+#include <QVariant>
 
 namespace drift {
 
 struct Clip;
 struct Track;
 
-enum class TransitionKind {
-    Crossfade,
-    DipToBlack,
-    DipToWhite,
-    WipeLeft,
-    WipeRight,
-    WipeUp,
-    WipeDown,
-    PushLeft,
-    ZoomIn,
-};
-
-QString transitionKindToString(TransitionKind kind);
-TransitionKind transitionKindFromString(const QString &kind);
-QString transitionKindLabel(TransitionKind kind);
-
-struct TransitionBlendOpacities
+// Gains applied to the outgoing/incoming clip's audio across a transition. The video look is
+// entirely a shader (see transitions/<kindId>/), but audio still needs a curve, which each
+// transition package declares via "audioCurve".
+struct TransitionAudioGains
 {
     double outgoing = 1.0;
     double incoming = 0.0;
-    double blackOverlay = 0.0;
-    double whiteOverlay = 0.0;
 };
 
-TransitionBlendOpacities transitionBlendOpacities(TransitionKind kind, double progress);
-bool transitionUsesCrossfadeAudio(TransitionKind kind);
+// curve: "crossfade" (linear) | "dip" (out then in, silent at the midpoint) | "hold" (no ducking).
+TransitionAudioGains transitionAudioGains(const QString &curve, double progress);
 
 struct Transition
 {
     QString id;
     QString fromClipId; // outgoing
     QString toClipId;   // incoming
-    TransitionKind kind = TransitionKind::Crossfade;
-    TimeUs durationUs = 500'000; // 0.5s default
+    // Transition package id, e.g. "crossfade", "wipe_left", "plasma_burn".
+    QString kindId = QStringLiteral("crossfade");
+    QMap<QString, QVariant> parameters; // instance overrides of the package's parameter defaults
+    TimeUs durationUs = 500'000;        // 0.5s default
 };
 
 const Clip *clipById(const Track &track, const QString &clipId);

@@ -73,6 +73,12 @@ add_library(driftengine STATIC
     src/engine/EffectCatalog.cpp
     src/engine/EffectPackageLoader.h
     src/engine/EffectPackageLoader.cpp
+    src/engine/TransitionCatalog.h
+    src/engine/TransitionCatalog.cpp
+    src/engine/TransitionPackageLoader.h
+    src/engine/TransitionPackageLoader.cpp
+    src/engine/GpuPackageParse.h
+    src/engine/GpuPackageParse.cpp
     src/engine/GpuEffectDefinition.h
     src/engine/GpuEffectExecutor.h
     src/engine/GpuEffectExecutor.cpp
@@ -192,7 +198,18 @@ function(drift_copy_effects target)
     )
 endfunction()
 
+# Same, for file-based transition packages.
+function(drift_copy_transitions target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_SOURCE_DIR}/transitions"
+                "$<TARGET_FILE_DIR:${target}>/transitions"
+        COMMENT "Copy transition packages next to ${target}"
+    )
+endfunction()
+
 drift_copy_effects(drift)
+drift_copy_transitions(drift)
 
 # --- CLI tools (headless engine testing, no GUI) ----------------------------
 add_subdirectory(tools)

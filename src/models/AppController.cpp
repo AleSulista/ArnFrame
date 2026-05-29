@@ -9,6 +9,7 @@
 #include "engine/Exporter.h"
 #include "engine/MediaThumbnail.h"
 #include "engine/MediaWaveform.h"
+#include "engine/TransitionCatalog.h"
 
 #include <QColor>
 #include <QCoreApplication>
@@ -192,7 +193,7 @@ void syncOverlapTransitions(drift::Project &project)
             transition.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
             transition.fromClipId = fromClip.id;
             transition.toClipId = toClip.id;
-            transition.kind = drift::TransitionKind::Crossfade;
+            transition.kindId = QStringLiteral("crossfade");
             transition.durationUs = overlapUs;
             track.transitions.append(transition);
         }
@@ -316,16 +317,36 @@ QVariantMap transitionToMap(const drift::Track &track, const drift::Transition &
     const bool overlapping = fromClip && toClip && drift::clipsPhysicallyOverlap(*fromClip, *toClip);
     const drift::TimeUs durationUs = hasWindow ? (endUs - startUs) : t.durationUs;
 
+    const TransitionPresetEntry *def = transitionDefForId(t.kindId);
+
+    // Current value per parameter, so the properties panel can build its sliders.
+    QVariantList params;
+    if (def) {
+        const QMap<QString, QVariant> resolved = resolvedTransitionParameters(t, *def);
+        for (const drift::EffectParamSpec &p : def->meta.parameters) {
+            params.append(QVariantMap{
+                {QStringLiteral("key"), p.key},
+                {QStringLiteral("label"), p.label},
+                {QStringLiteral("min"), p.min},
+                {QStringLiteral("max"), p.max},
+                {QStringLiteral("default"), p.defaultValue},
+                {QStringLiteral("isBoolean"), p.isBoolean},
+                {QStringLiteral("value"), resolved.value(p.key, p.defaultValue)},
+            });
+        }
+    }
+
     return {
         {QStringLiteral("id"), t.id},
         {QStringLiteral("fromClipId"), t.fromClipId},
         {QStringLiteral("toClipId"), t.toClipId},
-        {QStringLiteral("kind"), drift::transitionKindToString(t.kind)},
+        {QStringLiteral("kind"), t.kindId},
         {QStringLiteral("duration"), drift::usToSeconds(durationUs)},
         {QStringLiteral("start"), hasWindow ? drift::usToSeconds(startUs) : 0.0},
         {QStringLiteral("end"), hasWindow ? drift::usToSeconds(endUs) : 0.0},
         {QStringLiteral("overlapping"), overlapping},
-        {QStringLiteral("label"), drift::transitionKindLabel(t.kind)},
+        {QStringLiteral("label"), def ? def->meta.displayName : t.kindId},
+        {QStringLiteral("params"), params},
     };
 }
 
@@ -2252,12 +2273,13 @@ void AppController::addTransition(int trackIndex, int clipIndex, const QString &
     const drift::TimeUs overlapUs = drift::physicalOverlapDurationUs(fromClip, toClip);
     const drift::TimeUs requestedUs = qMax<drift::TimeUs>(drift::secondsToUs(0.1), drift::secondsToUs(durationSeconds));
     const drift::TimeUs durationUs = overlapUs > 0 ? overlapUs : requestedUs;
-    const drift::TransitionKind transitionKind = drift::transitionKindFromString(kind);
+    const QString kindId = transitionDefForId(kind) ? kind : QStringLiteral("crossfade");
 
     for (drift::Transition &existing : track.transitions) {
         if (existing.fromClipId == fromClip.id && existing.toClipId == toClip.id) {
             const drift::Project before = m_project;
-            existing.kind = transitionKind;
+            existing.kindId = kindId;
+            existing.parameters.clear(); // overrides belong to the old package
             existing.durationUs = durationUs;
             pushProjectEdit(before, QStringLiteral("Replace transition"));
             finishEdit(QStringLiteral("Transition updated"));
@@ -2270,7 +2292,7 @@ void AppController::addTransition(int trackIndex, int clipIndex, const QString &
     transition.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     transition.fromClipId = fromClip.id;
     transition.toClipId = toClip.id;
-    transition.kind = transitionKind;
+    transition.kindId = kindId;
     transition.durationUs = durationUs;
 
     const drift::Project before = m_project;
@@ -2360,18 +2382,85 @@ void AppController::setTransitionKind(int trackIndex, const QString &transitionI
 {
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
         return;
+    if (!transitionDefForId(kind))
+        return;
 
     drift::Track &track = m_project.tracks()[trackIndex];
     const drift::Project before = m_project;
     for (drift::Transition &transition : track.transitions) {
         if (transition.id == transitionId) {
-            transition.kind = drift::transitionKindFromString(kind);
+            if (transition.kindId == kind)
+                return;
+            transition.kindId = kind;
+            transition.parameters.clear(); // overrides belong to the old package
             pushProjectEdit(before, QStringLiteral("Transition kind"));
             finishEdit(QStringLiteral("Transition kind updated"));
             emit selectedTransitionDataChanged();
             return;
         }
     }
+}
+
+namespace {
+
+// Transition parameters are declared floats or bools, matching the effect parameter UI.
+QVariant coerceTransitionParam(const TransitionPresetEntry *def, const QString &key, double value)
+{
+    if (def) {
+        for (const drift::EffectParamSpec &param : def->meta.parameters) {
+            if (param.key == key)
+                return param.isBoolean ? QVariant(value > 0.5) : QVariant(value);
+        }
+    }
+    return value;
+}
+
+drift::Transition *findTransition(drift::Track &track, const QString &transitionId)
+{
+    for (drift::Transition &transition : track.transitions) {
+        if (transition.id == transitionId)
+            return &transition;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+void AppController::previewSetTransitionParam(int trackIndex, const QString &transitionId,
+                                              const QString &key, double value)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size() || key.isEmpty())
+        return;
+
+    drift::Transition *transition = findTransition(m_project.tracks()[trackIndex], transitionId);
+    if (!transition)
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag(QStringLiteral("Edit transition"));
+
+    transition->parameters.insert(
+        key, coerceTransitionParam(transitionDefForId(transition->kindId), key, value));
+    emitPreviewFrame();
+}
+
+void AppController::setTransitionParam(int trackIndex, const QString &transitionId, const QString &key,
+                                       double value)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size() || key.isEmpty())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    drift::Transition *transition = findTransition(track, transitionId);
+    if (!transition)
+        return;
+
+    const drift::Project before = m_project;
+    transition->parameters.insert(
+        key, coerceTransitionParam(transitionDefForId(transition->kindId), key, value));
+    pushProjectEdit(before, QStringLiteral("Edit transition"));
+    finishEdit(QStringLiteral("Transition updated"));
+    emit selectedTransitionDataChanged();
 }
 
 QVariantMap AppController::transitionBetweenClips(int trackIndex, int clipIndex) const
@@ -2395,27 +2484,44 @@ QVariantMap AppController::transitionBetweenClips(int trackIndex, int clipIndex)
 
 QVariantList AppController::transitionKinds() const
 {
-    const QList<drift::TransitionKind> kinds = {
-        drift::TransitionKind::Crossfade,
-        drift::TransitionKind::DipToBlack,
-        drift::TransitionKind::DipToWhite,
-        drift::TransitionKind::WipeLeft,
-        drift::TransitionKind::WipeRight,
-        drift::TransitionKind::WipeUp,
-        drift::TransitionKind::WipeDown,
-        drift::TransitionKind::PushLeft,
-        drift::TransitionKind::ZoomIn,
-    };
+    const QList<TransitionPresetEntry> &catalog = transitionCatalog();
 
     QVariantList result;
-    result.reserve(kinds.size());
-    for (drift::TransitionKind kind : kinds) {
+    result.reserve(catalog.size());
+    for (const TransitionPresetEntry &def : catalog) {
+        QVariantList params;
+        for (const drift::EffectParamSpec &p : def.meta.parameters) {
+            params.append(QVariantMap{
+                {QStringLiteral("key"), p.key},
+                {QStringLiteral("label"), p.label},
+                {QStringLiteral("min"), p.min},
+                {QStringLiteral("max"), p.max},
+                {QStringLiteral("default"), p.defaultValue},
+                {QStringLiteral("isBoolean"), p.isBoolean},
+            });
+        }
         result.append(QVariantMap{
-            {QStringLiteral("kind"), drift::transitionKindToString(kind)},
-            {QStringLiteral("label"), drift::transitionKindLabel(kind)},
+            {QStringLiteral("kind"), def.meta.id},
+            {QStringLiteral("label"), def.meta.displayName},
+            {QStringLiteral("category"), def.meta.category},
+            {QStringLiteral("previewStripPath"), def.previewStripPath},
+            {QStringLiteral("previewFrames"), def.previewFrames},
+            {QStringLiteral("params"), params},
         });
     }
     return result;
+}
+
+QVariantList AppController::transitionCategories() const
+{
+    QVariantList out;
+    for (const auto &entry : ::transitionCategories()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), entry.first},
+            {QStringLiteral("label"), entry.second},
+        });
+    }
+    return out;
 }
 
 QVariantMap AppController::selectedTransitionData() const

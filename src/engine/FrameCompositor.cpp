@@ -4,7 +4,9 @@
 #include "CompositorFrameHistory.h"
 #include "EffectCatalog.h"
 #include "EffectProcessor.h"
+#include "GpuEffectExecutor.h"
 #include "MaskApplier.h"
+#include "TransitionCatalog.h"
 #include "core/Clip.h"
 #include "core/Time.h"
 #include "core/Transition.h"
@@ -284,16 +286,17 @@ void layoutRectForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
         *rotationOut = transformValue(clip.rotation, relative, 0.0);
 }
 
+// isolated: draw into a standalone transparent layer, where the clip's blend mode has nothing to
+// composite against. Used for transition sides, which the shader mixes itself.
 void drawClipFrame(QPainter &painter, const QImage &frame, const drift::Clip &clip, drift::TimeUs timelineUs,
-                   int projectWidth, int projectHeight, double renderScale, double opacityMultiplier = 1.0,
-                   const QRectF *canvasClipRect = nullptr, QPointF extraOffset = QPointF(), double extraScale = 1.0)
+                   int projectWidth, int projectHeight, double renderScale, bool isolated = false)
 {
     double x = 0.0;
     double y = 0.0;
     double w = 0.0;
     double h = 0.0;
     double rotation = 0.0;
-    layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, extraScale, &x, &y, &w, &h,
+    layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, 1.0, &x, &y, &w, &h,
                       &rotation);
     if (w <= 0.5 || h <= 0.5 || frame.isNull())
         return;
@@ -304,48 +307,74 @@ void drawClipFrame(QPainter &painter, const QImage &frame, const drift::Clip &cl
                                             Qt::SmoothTransformation);
 
     painter.save();
-    if (canvasClipRect)
-        painter.setClipRect(*canvasClipRect, Qt::IntersectClip);
-    painter.setOpacity(opacityForClip(clip, timelineUs) * qBound(0.0, opacityMultiplier, 1.0));
-    painter.setCompositionMode(toQtComposition(clip.blendMode));
-    painter.translate(x + w * 0.5 + extraOffset.x(), y + h * 0.5 + extraOffset.y());
+    painter.setOpacity(opacityForClip(clip, timelineUs));
+    painter.setCompositionMode(isolated ? QPainter::CompositionMode_SourceOver
+                                        : toQtComposition(clip.blendMode));
+    painter.translate(x + w * 0.5, y + h * 0.5);
     painter.rotate(rotation);
     painter.drawImage(QPointF(-w * 0.5, -h * 0.5), drawn);
     painter.restore();
 }
 
-QRectF incomingWipeClipRect(drift::TransitionKind kind, double progress, int width, int height)
+void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth,
+                  int projectHeight, double renderScale, bool isolated = false);
+
+// Render one clip into its own transparent, canvas-sized RGBA layer. Transitions need both sides in
+// the same UV space for the shader to mix them, which is also what lets text clips and transformed
+// clips take part in a transition at all.
+QImage renderClipLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth, int projectHeight,
+                       double renderScale, int canvasWidth, int canvasHeight, int projectFps,
+                       int maxTimeEchoHistoryFrames)
 {
-    const double p = qBound(0.0, progress, 1.0);
-    switch (kind) {
-    case drift::TransitionKind::WipeLeft:
-        return QRectF(0, 0, width * p, height);
-    case drift::TransitionKind::WipeRight: {
-        const double x = width * (1.0 - p);
-        return QRectF(x, 0, width - x, height);
+    QImage layer(canvasWidth, canvasHeight, QImage::Format_RGBA8888);
+    layer.fill(Qt::transparent);
+
+    QPainter p(&layer);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
+
+    if (clip.type == drift::ClipType::Text) {
+        drawTextClip(p, clip, timelineUs, projectWidth, projectHeight, renderScale, /*isolated=*/true);
+        p.end();
+        return layer;
     }
-    case drift::TransitionKind::WipeUp: {
-        const double y = height * (1.0 - p);
-        return QRectF(0, y, width, height - y);
+
+    double x = 0.0;
+    double y = 0.0;
+    double w = 0.0;
+    double h = 0.0;
+    layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, 1.0, &x, &y, &w, &h);
+    const int layoutW = qMax(1, qRound(w));
+    const int layoutH = qMax(1, qRound(h));
+
+    QImage frame;
+    if (clip.type == drift::ClipType::Shape) {
+        frame = shapeImageForClip(clip, layoutW, layoutH);
+        if (!frame.isNull() && clip.mask.shape != drift::MaskShape::None)
+            frame = drift::applyMask(frame, clip.mask, layoutW, layoutH);
+    } else {
+        frame = imageForClip(clip, timelineUs, layoutW, layoutH, projectFps, maxTimeEchoHistoryFrames);
     }
-    case drift::TransitionKind::WipeDown:
-        return QRectF(0, 0, width, height * p);
-    default:
-        return QRectF(0, 0, width, height);
-    }
+
+    // A null frame leaves the layer transparent, which is what a shader sampling that side sees.
+    if (!frame.isNull())
+        drawClipFrame(p, frame, clip, timelineUs, projectWidth, projectHeight, renderScale,
+                      /*isolated=*/true);
+    p.end();
+    return layer;
 }
 
-bool isWipeKind(drift::TransitionKind kind)
+QImage cpuCrossfade(const QImage &layerA, const QImage &layerB, double progress)
 {
-    switch (kind) {
-    case drift::TransitionKind::WipeLeft:
-    case drift::TransitionKind::WipeRight:
-    case drift::TransitionKind::WipeUp:
-    case drift::TransitionKind::WipeDown:
-        return true;
-    default:
-        return false;
-    }
+    const double p = qBound(0.0, progress, 1.0);
+    QImage out(layerA.size(), QImage::Format_RGBA8888);
+    out.fill(Qt::transparent);
+    QPainter painter(&out);
+    painter.setOpacity(1.0 - p);
+    painter.drawImage(0, 0, layerA);
+    painter.setOpacity(p);
+    painter.drawImage(0, 0, layerB);
+    painter.end();
+    return out;
 }
 
 void drawTransitionFrame(QPainter &painter, const drift::Transition &transition, const drift::Clip &fromClip,
@@ -353,78 +382,30 @@ void drawTransitionFrame(QPainter &painter, const drift::Transition &transition,
                          drift::TimeUs windowEnd, int projectWidth, int projectHeight, double renderScale,
                          int canvasWidth, int canvasHeight, int projectFps, int maxTimeEchoHistoryFrames)
 {
-    const double p = drift::transitionProgress(timelineUs, windowStart, windowEnd);
-    const drift::TransitionBlendOpacities blend = drift::transitionBlendOpacities(transition.kind, p);
+    const double progress = drift::transitionProgress(timelineUs, windowStart, windowEnd);
 
-    auto decodeLayout = [&](const drift::Clip &clip) {
-        double x = 0.0;
-        double y = 0.0;
-        double w = 0.0;
-        double h = 0.0;
-        layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, 1.0, &x, &y, &w, &h);
-        return imageForClip(clip, timelineUs, qMax(1, qRound(w)), qMax(1, qRound(h)), projectFps,
-                            maxTimeEchoHistoryFrames);
-    };
+    const QImage layerA = renderClipLayer(fromClip, timelineUs, projectWidth, projectHeight, renderScale,
+                                          canvasWidth, canvasHeight, projectFps, maxTimeEchoHistoryFrames);
+    const QImage layerB = renderClipLayer(toClip, timelineUs, projectWidth, projectHeight, renderScale,
+                                          canvasWidth, canvasHeight, projectFps, maxTimeEchoHistoryFrames);
 
-    const QImage frameA = decodeLayout(fromClip);
-    const QImage frameB = decodeLayout(toClip);
-    if (frameA.isNull() && frameB.isNull())
-        return;
-
-    if (transition.kind == drift::TransitionKind::PushLeft) {
-        const QPointF outOffset(-canvasWidth * p, 0);
-        const QPointF inOffset(canvasWidth * (1.0 - p), 0);
-        if (!frameA.isNull())
-            drawClipFrame(painter, frameA, fromClip, timelineUs, projectWidth, projectHeight, renderScale,
-                          blend.outgoing, nullptr, outOffset);
-        if (!frameB.isNull())
-            drawClipFrame(painter, frameB, toClip, timelineUs, projectWidth, projectHeight, renderScale,
-                          blend.incoming, nullptr, inOffset);
-        return;
+    QImage result;
+    bool ok = false;
+    if (const TransitionPresetEntry *def = transitionDefForId(transition.kindId); def && def->gpu.valid) {
+        // Time is measured from the start of the transition window so a shader's u_time is
+        // a pure function of the window position, like u_progress.
+        result = GpuEffectExecutor::instance().apply(
+            QLatin1String(kTransitionCacheKeyPrefix) + transition.kindId, def->gpu, {layerA, layerB},
+            resolvedTransitionParameters(transition, *def), timelineUs - windowStart, progress, &ok);
     }
+    if (!ok || result.isNull())
+        result = cpuCrossfade(layerA, layerB, progress);
 
-    if (transition.kind == drift::TransitionKind::ZoomIn) {
-        const double inScale = 0.82 + 0.18 * p;
-        if (!frameA.isNull())
-            drawClipFrame(painter, frameA, fromClip, timelineUs, projectWidth, projectHeight, renderScale,
-                          blend.outgoing);
-        if (!frameB.isNull())
-            drawClipFrame(painter, frameB, toClip, timelineUs, projectWidth, projectHeight, renderScale,
-                          blend.incoming, nullptr, QPointF(), inScale);
-        return;
-    }
-
-    if (isWipeKind(transition.kind)) {
-        if (!frameA.isNull())
-            drawClipFrame(painter, frameA, fromClip, timelineUs, projectWidth, projectHeight, renderScale,
-                          blend.outgoing);
-        if (!frameB.isNull()) {
-            const QRectF wipeClip = incomingWipeClipRect(transition.kind, p, canvasWidth, canvasHeight);
-            drawClipFrame(painter, frameB, toClip, timelineUs, projectWidth, projectHeight, renderScale,
-                          blend.incoming, &wipeClip);
-        }
-        return;
-    }
-
-    if (!frameA.isNull())
-        drawClipFrame(painter, frameA, fromClip, timelineUs, projectWidth, projectHeight, renderScale,
-                      blend.outgoing);
-    if (!frameB.isNull())
-        drawClipFrame(painter, frameB, toClip, timelineUs, projectWidth, projectHeight, renderScale,
-                      blend.incoming);
-
-    if (blend.blackOverlay > 0.0) {
-        painter.save();
-        painter.setOpacity(blend.blackOverlay);
-        painter.fillRect(0, 0, canvasWidth, canvasHeight, Qt::black);
-        painter.restore();
-    }
-    if (blend.whiteOverlay > 0.0) {
-        painter.save();
-        painter.setOpacity(blend.whiteOverlay);
-        painter.fillRect(0, 0, canvasWidth, canvasHeight, Qt::white);
-        painter.restore();
-    }
+    painter.save();
+    painter.setOpacity(1.0);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    painter.drawImage(0, 0, result);
+    painter.restore();
 }
 
 void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, int w, int h, double scale,
@@ -464,7 +445,7 @@ void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, i
 }
 
 void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth,
-                  int projectHeight, double renderScale)
+                  int projectHeight, double renderScale, bool isolated)
 {
     const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
     if (text.isEmpty())
@@ -481,7 +462,8 @@ void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs time
 
     painter.save();
     painter.setOpacity(opacityForClip(clip, timelineUs));
-    painter.setCompositionMode(toQtComposition(clip.blendMode));
+    painter.setCompositionMode(isolated ? QPainter::CompositionMode_SourceOver
+                                        : toQtComposition(clip.blendMode));
     painter.translate(x + w * 0.5, y + h * 0.5);
     painter.rotate(rotation);
     drawStyledText(painter, clip, text, qMax(1, qRound(w)), qMax(1, qRound(h)), 1.0, renderScale);

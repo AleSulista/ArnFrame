@@ -4,131 +4,23 @@
 
 namespace drift {
 
-QString transitionKindToString(TransitionKind kind)
-{
-    switch (kind) {
-    case TransitionKind::DipToBlack:
-        return QStringLiteral("dip");
-    case TransitionKind::DipToWhite:
-        return QStringLiteral("dip_white");
-    case TransitionKind::WipeLeft:
-        return QStringLiteral("wipe_left");
-    case TransitionKind::WipeRight:
-        return QStringLiteral("wipe_right");
-    case TransitionKind::WipeUp:
-        return QStringLiteral("wipe_up");
-    case TransitionKind::WipeDown:
-        return QStringLiteral("wipe_down");
-    case TransitionKind::PushLeft:
-        return QStringLiteral("push_left");
-    case TransitionKind::ZoomIn:
-        return QStringLiteral("zoom_in");
-    case TransitionKind::Crossfade:
-        break;
-    }
-    return QStringLiteral("crossfade");
-}
-
-QString transitionKindLabel(TransitionKind kind)
-{
-    switch (kind) {
-    case TransitionKind::DipToBlack:
-        return QStringLiteral("Dip to black");
-    case TransitionKind::DipToWhite:
-        return QStringLiteral("Dip to white");
-    case TransitionKind::WipeLeft:
-        return QStringLiteral("Wipe left");
-    case TransitionKind::WipeRight:
-        return QStringLiteral("Wipe right");
-    case TransitionKind::WipeUp:
-        return QStringLiteral("Wipe up");
-    case TransitionKind::WipeDown:
-        return QStringLiteral("Wipe down");
-    case TransitionKind::PushLeft:
-        return QStringLiteral("Push left");
-    case TransitionKind::ZoomIn:
-        return QStringLiteral("Zoom in");
-    case TransitionKind::Crossfade:
-        return QStringLiteral("Crossfade");
-    }
-    return QStringLiteral("Crossfade");
-}
-
-TransitionKind transitionKindFromString(const QString &kind)
-{
-    if (kind == QStringLiteral("dip"))
-        return TransitionKind::DipToBlack;
-    if (kind == QStringLiteral("dip_white"))
-        return TransitionKind::DipToWhite;
-    if (kind == QStringLiteral("wipe_left"))
-        return TransitionKind::WipeLeft;
-    if (kind == QStringLiteral("wipe_right"))
-        return TransitionKind::WipeRight;
-    if (kind == QStringLiteral("wipe_up"))
-        return TransitionKind::WipeUp;
-    if (kind == QStringLiteral("wipe_down"))
-        return TransitionKind::WipeDown;
-    if (kind == QStringLiteral("push_left"))
-        return TransitionKind::PushLeft;
-    if (kind == QStringLiteral("zoom_in"))
-        return TransitionKind::ZoomIn;
-    return TransitionKind::Crossfade;
-}
-
-TransitionBlendOpacities transitionBlendOpacities(TransitionKind kind, double progress)
+TransitionAudioGains transitionAudioGains(const QString &curve, double progress)
 {
     const double p = qBound(0.0, progress, 1.0);
-    TransitionBlendOpacities blend;
+    TransitionAudioGains gains;
 
-    switch (kind) {
-    case TransitionKind::Crossfade:
-        blend.outgoing = 1.0 - p;
-        blend.incoming = p;
-        break;
-    case TransitionKind::DipToBlack:
-    case TransitionKind::DipToWhite:
-        blend.outgoing = p < 0.5 ? 1.0 - p * 2.0 : 0.0;
-        blend.incoming = p >= 0.5 ? (p - 0.5) * 2.0 : 0.0;
-        if (kind == TransitionKind::DipToBlack)
-            blend.blackOverlay = p < 0.5 ? p * 2.0 : (1.0 - p) * 2.0;
-        else
-            blend.whiteOverlay = p < 0.5 ? p * 2.0 : (1.0 - p) * 2.0;
-        break;
-    case TransitionKind::WipeLeft:
-    case TransitionKind::WipeRight:
-    case TransitionKind::WipeUp:
-    case TransitionKind::WipeDown:
-        blend.outgoing = 1.0;
-        blend.incoming = 1.0;
-        break;
-    case TransitionKind::PushLeft:
-        blend.outgoing = 1.0 - p;
-        blend.incoming = p;
-        break;
-    case TransitionKind::ZoomIn:
-        blend.outgoing = 1.0 - p;
-        blend.incoming = p;
-        break;
+    if (curve == QLatin1String("hold")) {
+        gains.outgoing = 1.0;
+        gains.incoming = 1.0;
+    } else if (curve == QLatin1String("dip")) {
+        // Fully out by the midpoint, then in — matches the visual dip through black/white.
+        gains.outgoing = p < 0.5 ? 1.0 - p * 2.0 : 0.0;
+        gains.incoming = p >= 0.5 ? (p - 0.5) * 2.0 : 0.0;
+    } else { // "crossfade"
+        gains.outgoing = 1.0 - p;
+        gains.incoming = p;
     }
-    return blend;
-}
-
-bool transitionUsesCrossfadeAudio(TransitionKind kind)
-{
-    switch (kind) {
-    case TransitionKind::DipToBlack:
-    case TransitionKind::DipToWhite:
-        return false;
-    case TransitionKind::Crossfade:
-    case TransitionKind::WipeLeft:
-    case TransitionKind::WipeRight:
-    case TransitionKind::WipeUp:
-    case TransitionKind::WipeDown:
-    case TransitionKind::PushLeft:
-    case TransitionKind::ZoomIn:
-        return true;
-    }
-    return true;
+    return gains;
 }
 
 const Clip *clipById(const Track &track, const QString &clipId)

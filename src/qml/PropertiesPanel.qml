@@ -1318,6 +1318,70 @@ PanelFrame {
                                 }
                             }
 
+                            // Shader parameters declared by the active transition package.
+                            Repeater {
+                                model: root.activeTransition.params || []
+                                delegate: Column {
+                                    id: trParamRow
+                                    required property var modelData
+                                    width: tabColumn.width
+                                    spacing: 4
+
+                                    Row {
+                                        width: parent.width
+                                        spacing: 8
+                                        Text {
+                                            width: parent.width - 48
+                                            text: trParamRow.modelData.label
+                                            color: Theme.mutedForeground
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeXs
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                        Text {
+                                            width: 40
+                                            horizontalAlignment: Text.AlignRight
+                                            text: trParamRow.modelData.isBoolean
+                                                  ? (trParamRow.modelData.value ? qsTr("On") : qsTr("Off"))
+                                                  : Number(trParamSlider.value).toFixed(
+                                                        Math.abs(trParamRow.modelData.max - trParamRow.modelData.min) >= 10 ? 1 : 2)
+                                            color: Theme.panelForeground
+                                            font.family: Theme.monoFontFamily
+                                            font.pixelSize: Theme.fontSizeXs
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                    }
+
+                                    Switch {
+                                        visible: !!trParamRow.modelData.isBoolean
+                                        checked: !!trParamRow.modelData.value
+                                        onToggled: EditorState.setTransitionParam(
+                                                       root.transitionEditTrack, root.activeTransition.id,
+                                                       trParamRow.modelData.key, checked ? 1 : 0)
+                                    }
+
+                                    ThemedSlider {
+                                        id: trParamSlider
+                                        visible: !trParamRow.modelData.isBoolean
+                                        width: parent.width
+                                        from: trParamRow.modelData.min
+                                        to: trParamRow.modelData.max
+                                        value: trParamRow.modelData.value
+                                        onMoved: EditorState.previewSetTransitionParam(
+                                                     root.transitionEditTrack, root.activeTransition.id,
+                                                     trParamRow.modelData.key, value)
+                                        onPressedChanged: {
+                                            if (pressed) {
+                                                EditorState.beginPreviewDrag(qsTr("Edit transition"))
+                                            } else {
+                                                EditorState.commitPreviewDrag()
+                                                value = Qt.binding(() => trParamRow.modelData.value)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             ThemedButton {
                                 text: "Remove transition"
                                 variant: "destructive"

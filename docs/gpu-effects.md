@@ -25,13 +25,19 @@ Search order: `DRIFT_EFFECTS_DIR`, `<applicationDir>/effects`, `<AppDataLocation
 | `fixedParams` | Hidden uniforms (colors as `#rrggbb`, enums as strings) |
 | `pipeline` | `intermediateBuffers` + `passes` |
 
-Pass inputs: `source_texture` or `buffer` (+ `id`). Multiple inputs bind as `u_currentTexture` (unit 0) and `u_texture1`…  
+Pass inputs: `source_texture` (+ optional `index`), `buffer` (+ `id`), or `texture` (+ `id`). Multiple inputs bind as `u_currentTexture` (unit 0) and `u_texture1`…  
 Pass outputs: `buffer` or `canvas`.
+
+`pipeline.textures[]` declares static image assets loaded once from the package dir:
+
+```json
+"textures": [{ "id": "glyphs", "file": "glyphs.png" }]
+```
 
 ## GLSL
 
 - `#version 330 core`
-- Reserved: `u_currentTexture`, `u_textureN`, `u_resolution`, `u_time`, `u_timeUs`, `u_frameIndex`
+- Reserved: `u_currentTexture`, `u_textureN`, `u_resolution`, `u_time`, `u_timeUs`, `u_frameIndex`, `u_progress`, `u_fromTexture`, `u_toTexture`
 
 **Grace mode:** compile/GL failure → passthrough.
 

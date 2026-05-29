@@ -37,6 +37,7 @@ QString singleFilterGraph(const QString &filterName, const QMap<QString, QVarian
 }
 
 QList<EffectPresetEntry> g_mergedCatalog;
+QHash<QString, int> g_idIndex;
 QList<QPair<QString, QString>> g_extraCategories;
 QMutex g_catalogMutex;
 bool g_catalogInitialized = false;
@@ -44,11 +45,15 @@ bool g_catalogInitialized = false;
 void rebuildCatalogLocked(const QStringList &packageRoots)
 {
     g_mergedCatalog.clear();
+    g_idIndex.clear();
     g_extraCategories.clear();
 
     const QStringList roots =
         packageRoots.isEmpty() ? EffectPackageLoader::defaultSearchPaths() : packageRoots;
     g_mergedCatalog = EffectPackageLoader::scanDirectories(roots);
+
+    for (int i = 0; i < g_mergedCatalog.size(); ++i)
+        g_idIndex.insert(g_mergedCatalog.at(i).meta.id, i);
 
     QSet<QString> knownCats = {
         QStringLiteral("glitch"),
@@ -109,11 +114,10 @@ const EffectPresetEntry *effectDefForId(const QString &id)
 
     QMutexLocker lock(&g_catalogMutex);
     ensureCatalogLocked();
-    for (const EffectPresetEntry &def : g_mergedCatalog) {
-        if (def.meta.id == resolved)
-            return &def;
-    }
-    return nullptr;
+    const auto it = g_idIndex.constFind(resolved);
+    if (it == g_idIndex.constEnd())
+        return nullptr;
+    return &g_mergedCatalog.at(it.value());
 }
 
 QStringList effectPresetIds()

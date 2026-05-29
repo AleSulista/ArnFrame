@@ -176,11 +176,18 @@ Mask maskFromJson(const QJsonObject &o)
 
 QJsonObject transitionToJson(const Transition &t)
 {
+    QJsonObject params;
+    for (auto it = t.parameters.constBegin(); it != t.parameters.constEnd(); ++it)
+        params.insert(it.key(), QJsonValue::fromVariant(it.value()));
+
+    // "kind" holds the transition package id. The pre-shader enum serialized the same strings,
+    // so projects written by older builds keep loading.
     return QJsonObject{
         {QStringLiteral("id"), t.id},
         {QStringLiteral("fromClipId"), t.fromClipId},
         {QStringLiteral("toClipId"), t.toClipId},
-        {QStringLiteral("kind"), transitionKindToString(t.kind)},
+        {QStringLiteral("kind"), t.kindId},
+        {QStringLiteral("parameters"), params},
         {QStringLiteral("durationUs"), static_cast<double>(t.durationUs)},
     };
 }
@@ -193,7 +200,12 @@ Transition transitionFromJson(const QJsonObject &o)
     t.id = o.value(QStringLiteral("id")).toString();
     t.fromClipId = o.value(QStringLiteral("fromClipId")).toString();
     t.toClipId = o.value(QStringLiteral("toClipId")).toString();
-    t.kind = transitionKindFromString(o.value(QStringLiteral("kind")).toString());
+    const QString kind = o.value(QStringLiteral("kind")).toString();
+    if (!kind.isEmpty())
+        t.kindId = kind;
+    const QJsonObject params = o.value(QStringLiteral("parameters")).toObject();
+    for (auto it = params.constBegin(); it != params.constEnd(); ++it)
+        t.parameters.insert(it.key(), it.value().toVariant());
     t.durationUs = static_cast<TimeUs>(o.value(QStringLiteral("durationUs")).toDouble(t.durationUs));
     return t;
 }

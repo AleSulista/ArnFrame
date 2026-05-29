@@ -182,8 +182,13 @@ public:
     Q_INVOKABLE void removeTransition(int trackIndex, const QString &transitionId);
     Q_INVOKABLE void setTransitionDuration(int trackIndex, const QString &transitionId, double durationSeconds);
     Q_INVOKABLE void setTransitionKind(int trackIndex, const QString &transitionId, const QString &kind);
+    Q_INVOKABLE void setTransitionParam(int trackIndex, const QString &transitionId, const QString &key,
+                                        double value);
+    Q_INVOKABLE void previewSetTransitionParam(int trackIndex, const QString &transitionId,
+                                               const QString &key, double value);
     Q_INVOKABLE QVariantMap transitionBetweenClips(int trackIndex, int clipIndex) const;
     Q_INVOKABLE QVariantList transitionKinds() const;
+    Q_INVOKABLE QVariantList transitionCategories() const;
     Q_INVOKABLE void selectTransition(int trackIndex, int leftClipIndex);
     Q_INVOKABLE void clearTransitionSelection();
     Q_INVOKABLE void setClipKeyframe(int trackIndex, int clipIndex, const QString &prop, double atSeconds,

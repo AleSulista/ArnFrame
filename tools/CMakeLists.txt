@@ -9,3 +9,8 @@ add_executable(effectthumbs effectthumbs.cpp)
 target_include_directories(effectthumbs PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(effectthumbs PRIVATE Qt6::Core Qt6::Gui driftengine driftcore)
 drift_copy_effects(effectthumbs)
+
+add_executable(transitionthumbs transitionthumbs.cpp)
+target_include_directories(transitionthumbs PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(transitionthumbs PRIVATE Qt6::Core Qt6::Gui driftengine driftcore)
+drift_copy_transitions(transitionthumbs)

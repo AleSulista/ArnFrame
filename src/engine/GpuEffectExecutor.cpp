@@ -93,6 +93,7 @@ public:
     GLuint vbo = 0;
     std::unique_ptr<QOpenGLShaderProgram> copyProgram;
     std::map<QString, CompiledEffect> programs;
+    std::map<QString, GLuint> staticTextures; // absolute path -> GL texture
 
     bool init()
     {
@@ -187,6 +188,11 @@ public:
             programs.clear();
             copyProgram.reset();
             if (auto *gl = context->extraFunctions()) {
+                for (const auto &entry : staticTextures) {
+                    GLuint tex = entry.second;
+                    gl->glDeleteTextures(1, &tex);
+                }
+                staticTextures.clear();
                 if (vbo) {
                     gl->glDeleteBuffers(1, &vbo);
                     vbo = 0;
@@ -199,50 +205,51 @@ public:
             context->doneCurrent();
         } else {
             programs.clear();
+            staticTextures.clear();
         }
         context.reset();
         surface.reset();
         ready = false;
     }
 
-    CompiledEffect *compile(const EffectPresetEntry &def)
+    CompiledEffect *compile(const QString &cacheKey, const drift::GpuEffectDefinition &gpu)
     {
         QString sourceSig;
-        for (const drift::GpuEffectPass &pass : def.gpu.passes)
+        for (const drift::GpuEffectPass &pass : gpu.passes)
             sourceSig += pass.fragmentShaderSource;
         sourceSig += QLatin1Char('#');
-        sourceSig += QString::number(def.gpu.passes.size());
+        sourceSig += QString::number(gpu.passes.size());
 
-        CompiledEffect &cached = programs[def.meta.id];
-        if (cached.ok && cached.id == def.meta.id && cached.sourceSig == sourceSig)
+        CompiledEffect &cached = programs[cacheKey];
+        if (cached.ok && cached.id == cacheKey && cached.sourceSig == sourceSig)
             return &cached;
 
         cached = CompiledEffect{};
-        cached.id = def.meta.id;
+        cached.id = cacheKey;
         cached.sourceSig = sourceSig;
-        cached.passes.reserve(static_cast<size_t>(def.gpu.passes.size()));
+        cached.passes.reserve(static_cast<size_t>(gpu.passes.size()));
 
-        for (const drift::GpuEffectPass &pass : def.gpu.passes) {
+        for (const drift::GpuEffectPass &pass : gpu.passes) {
             CompiledPass cp;
             cp.program = std::make_unique<QOpenGLShaderProgram>();
             if (!cp.program->addShaderFromSourceCode(QOpenGLShader::Vertex, kVertexShader)) {
                 qWarning("GpuEffectExecutor: vertex shader compile failed for %s: %s",
-                         qPrintable(def.meta.id), qPrintable(cp.program->log()));
-                programs.erase(def.meta.id);
+                         qPrintable(cacheKey), qPrintable(cp.program->log()));
+                programs.erase(cacheKey);
                 return nullptr;
             }
             if (!cp.program->addShaderFromSourceCode(QOpenGLShader::Fragment,
                                                      pass.fragmentShaderSource)) {
                 qWarning("GpuEffectExecutor: fragment compile failed for %s pass %d (%s): %s",
-                         qPrintable(def.meta.id), pass.passIndex,
+                         qPrintable(cacheKey), pass.passIndex,
                          qPrintable(pass.fragmentShaderFile), qPrintable(cp.program->log()));
-                programs.erase(def.meta.id);
+                programs.erase(cacheKey);
                 return nullptr;
             }
             if (!cp.program->link()) {
                 qWarning("GpuEffectExecutor: link failed for %s pass %d: %s",
-                         qPrintable(def.meta.id), pass.passIndex, qPrintable(cp.program->log()));
-                programs.erase(def.meta.id);
+                         qPrintable(cacheKey), pass.passIndex, qPrintable(cp.program->log()));
+                programs.erase(cacheKey);
                 return nullptr;
             }
             cached.passes.push_back(std::move(cp));
@@ -275,9 +282,11 @@ GlRuntime &runtime()
     return *g_runtime;
 }
 
-GLuint uploadTexture(QOpenGLExtraFunctions *gl, const QImage &image)
+GLuint uploadTexture(QOpenGLExtraFunctions *gl, const QImage &image, bool flipVertically = false)
 {
-    const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
+    QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
+    if (flipVertically)
+        rgba = rgba.flipped(Qt::Vertical);
     GLuint tex = 0;
     gl->glGenTextures(1, &tex);
     gl->glBindTexture(GL_TEXTURE_2D, tex);
@@ -312,6 +321,28 @@ bool blitTextureToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, GLuint srcTex
     return true;
 }
 
+// Static package assets live for the process lifetime. They are plain uploads (not FBO-backed),
+// so they must be flipped to match the Y layout of the FBO-promoted source targets.
+GLuint staticTexture(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QString &path)
+{
+    const auto it = rt.staticTextures.find(path);
+    if (it != rt.staticTextures.end())
+        return it->second;
+
+    QImage image;
+    if (!image.load(path) || image.isNull()) {
+        qWarning("GpuEffectExecutor: failed to load texture '%s'", qPrintable(path));
+        rt.staticTextures[path] = 0;
+        return 0;
+    }
+    const GLuint tex = uploadTexture(gl, image, /*flipVertically=*/true);
+    gl->glBindTexture(GL_TEXTURE_2D, tex);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    rt.staticTextures[path] = tex;
+    return tex;
+}
+
 GlTarget makeTarget(int width, int height)
 {
     GlTarget t;
@@ -324,7 +355,7 @@ GlTarget makeTarget(int width, int height)
 }
 
 void setUniforms(QOpenGLShaderProgram *program, const QMap<QString, QVariant> &parameters,
-                 const QSize &resolution, drift::TimeUs timeUs)
+                 const QSize &resolution, drift::TimeUs timeUs, double progress)
 {
     program->setUniformValue("u_currentTexture", 0);
     program->setUniformValue("u_resolution", QVector2D(float(resolution.width()),
@@ -334,6 +365,7 @@ void setUniforms(QOpenGLShaderProgram *program, const QMap<QString, QVariant> &p
     program->setUniformValue("u_frameIndex", int(std::floor(timeSec * 30.f)));
     // Integer microseconds for hash-stable glitch effects that mirror CPU seeding.
     program->setUniformValue("u_timeUs", float(timeUs));
+    program->setUniformValue("u_progress", float(qBound(0.0, progress, 1.0)));
 
     for (auto it = parameters.constBegin(); it != parameters.constEnd(); ++it) {
         if (drift::isReservedGpuUniform(it.key()))
@@ -406,75 +438,106 @@ void GpuEffectExecutor::releaseGl()
 QImage GpuEffectExecutor::apply(const EffectPresetEntry &def, const QImage &input,
                                 const QMap<QString, QVariant> &parameters, drift::TimeUs timeUs)
 {
-    if (input.isNull() || !def.isGpu || !def.gpu.valid)
+    if (!def.isGpu)
         return input;
+    return apply(def.meta.id, def.gpu, {input}, parameters, timeUs, 0.0);
+}
+
+QImage GpuEffectExecutor::apply(const QString &cacheKey, const drift::GpuEffectDefinition &gpu,
+                                const QList<QImage> &sources,
+                                const QMap<QString, QVariant> &parameters, drift::TimeUs timeUs,
+                                double progress, bool *okOut)
+{
+    if (okOut)
+        *okOut = false;
+
+    const QImage fallback = sources.isEmpty() ? QImage() : sources.first();
+    if (fallback.isNull() || !gpu.valid)
+        return fallback;
     if (!ensureContext())
-        return input;
+        return fallback;
 
     GlRuntime &rt = runtime();
     QMutexLocker lock(&rt.mutex);
     if (!rt.makeCurrent()) {
-        qWarning("GpuEffectExecutor: makeCurrent failed for %s", qPrintable(def.meta.id));
-        return input;
+        qWarning("GpuEffectExecutor: makeCurrent failed for %s", qPrintable(cacheKey));
+        return fallback;
     }
 
-    CompiledEffect *compiled = rt.compile(def);
-    if (!compiled || !compiled->ok || compiled->passes.size() != def.gpu.passes.size()) {
+    CompiledEffect *compiled = rt.compile(cacheKey, gpu);
+    if (!compiled || !compiled->ok || compiled->passes.size() != gpu.passes.size()) {
         rt.doneCurrent();
-        return input;
+        return fallback;
     }
 
     auto *gl = rt.context->extraFunctions();
     if (!gl) {
         rt.doneCurrent();
-        return input;
+        return fallback;
     }
-    const QImage srcImage = input.convertToFormat(QImage::Format_RGBA8888);
-    const GLuint uploaded = uploadTexture(gl, srcImage);
 
-    // Promote the QImage upload into an FBO so source and intermediate buffers share
-    // one texture orientation (fixes bloom/glow compositing upside-down vs video).
-    GlTarget sourceTarget = makeTarget(srcImage.width(), srcImage.height());
-    if (!sourceTarget.fbo || !sourceTarget.fbo->isValid()
-        || !blitTextureToTarget(rt, gl, uploaded, sourceTarget)) {
-        qWarning("GpuEffectExecutor: source FBO promote failed for %s", qPrintable(def.meta.id));
+    // Every source is promoted into its own FBO so sources, intermediate buffers and the canvas
+    // all share one texture orientation (fixes compositing upside-down vs the video).
+    const QSize canvasSize = fallback.size();
+    std::vector<GlTarget> sourceTargets;
+    sourceTargets.reserve(sources.size());
+    for (const QImage &src : sources) {
+        // A null source (e.g. a transition side with no media) becomes transparent black,
+        // which is what a shader sampling it should see.
+        QImage rgba = src.isNull() ? QImage(canvasSize, QImage::Format_RGBA8888)
+                                   : src.convertToFormat(QImage::Format_RGBA8888);
+        if (src.isNull())
+            rgba.fill(Qt::transparent);
+
+        GlTarget target = makeTarget(rgba.width(), rgba.height());
+        const GLuint uploaded = uploadTexture(gl, rgba);
+        const bool ok = target.fbo && target.fbo->isValid()
+                        && blitTextureToTarget(rt, gl, uploaded, target);
         gl->glDeleteTextures(1, &uploaded);
-        rt.doneCurrent();
-        return input;
+        if (!ok) {
+            qWarning("GpuEffectExecutor: source FBO promote failed for %s", qPrintable(cacheKey));
+            rt.doneCurrent();
+            return fallback;
+        }
+        sourceTargets.push_back(std::move(target));
     }
-    gl->glDeleteTextures(1, &uploaded);
-    const GLuint sourceTex = sourceTarget.fbo->texture();
+
+    auto sourceTexAt = [&](int index) -> GLuint {
+        if (index < 0 || index >= int(sourceTargets.size()))
+            return sourceTargets.empty() ? 0 : sourceTargets[0].fbo->texture();
+        return sourceTargets[static_cast<size_t>(index)].fbo->texture();
+    };
 
     std::map<QString, GlTarget> buffers;
-    for (const drift::GpuEffectBufferSpec &spec : def.gpu.intermediateBuffers) {
-        const int w = qMax(1, int(std::lround(srcImage.width() * spec.scale)));
-        const int h = qMax(1, int(std::lround(srcImage.height() * spec.scale)));
+    for (const drift::GpuEffectBufferSpec &spec : gpu.intermediateBuffers) {
+        const int w = qMax(1, int(std::lround(canvasSize.width() * spec.scale)));
+        const int h = qMax(1, int(std::lround(canvasSize.height() * spec.scale)));
         buffers.emplace(spec.id, makeTarget(w, h));
         GlTarget &target = buffers.at(spec.id);
         if (!target.fbo || !target.fbo->isValid()) {
             qWarning("GpuEffectExecutor: FBO alloc failed for buffer %s", qPrintable(spec.id));
-            buffers.clear();
-            sourceTarget.fbo.reset();
             rt.doneCurrent();
-            return input;
+            return fallback;
         }
     }
 
-    GlTarget canvas = makeTarget(srcImage.width(), srcImage.height());
+    std::map<QString, GLuint> textures;
+    for (const drift::GpuEffectTextureSpec &spec : gpu.textures)
+        textures[spec.id] = staticTexture(rt, gl, spec.path);
+
+    GlTarget canvas = makeTarget(canvasSize.width(), canvasSize.height());
     if (!canvas.fbo || !canvas.fbo->isValid()) {
         qWarning("GpuEffectExecutor: canvas FBO alloc failed");
-        buffers.clear();
-        sourceTarget.fbo.reset();
         rt.doneCurrent();
-        return input;
+        return fallback;
     }
 
     bool failed = false;
-    for (int i = 0; i < def.gpu.passes.size(); ++i) {
-        const drift::GpuEffectPass &pass = def.gpu.passes[i];
+    for (int i = 0; i < gpu.passes.size(); ++i) {
+        const drift::GpuEffectPass &pass = gpu.passes[i];
         QOpenGLShaderProgram *program = compiled->passes[static_cast<size_t>(i)].program.get();
 
-        QSize inputSize = srcImage.size();
+        QSize inputSize = canvasSize;
 
         GlTarget *outTarget = nullptr;
         if (pass.output.type == drift::GpuEffectPassOutput::Type::Canvas) {
@@ -499,17 +562,27 @@ QImage GpuEffectExecutor::apply(const EffectPresetEntry &def, const QImage &inpu
         gl->glClear(GL_COLOR_BUFFER_BIT);
 
         program->bind();
-        setUniforms(program, parameters, inputSize, timeUs);
+        setUniforms(program, parameters, inputSize, timeUs, progress);
 
         // Bind all declared inputs: unit 0 → u_currentTexture, unit i → u_texture{i}.
         const QList<drift::GpuEffectPassInput> inputs =
             pass.inputs.isEmpty()
-                ? QList<drift::GpuEffectPassInput>{{drift::GpuEffectPassInput::Type::SourceTexture, {}}}
+                ? QList<drift::GpuEffectPassInput>{drift::GpuEffectPassInput{}}
                 : pass.inputs;
+        int fromUnit = -1;
+        int toUnit = -1;
         for (int texUnit = 0; texUnit < inputs.size(); ++texUnit) {
             const drift::GpuEffectPassInput &in = inputs[texUnit];
-            GLuint tex = sourceTex;
-            if (in.type == drift::GpuEffectPassInput::Type::Buffer) {
+            GLuint tex = 0;
+            switch (in.type) {
+            case drift::GpuEffectPassInput::Type::SourceTexture:
+                tex = sourceTexAt(in.sourceIndex);
+                if (in.sourceIndex == 0)
+                    fromUnit = texUnit;
+                else if (in.sourceIndex == 1)
+                    toUnit = texUnit;
+                break;
+            case drift::GpuEffectPassInput::Type::Buffer: {
                 const auto it = buffers.find(in.bufferId);
                 if (it == buffers.end() || !it->second.fbo) {
                     failed = true;
@@ -518,17 +591,33 @@ QImage GpuEffectExecutor::apply(const EffectPresetEntry &def, const QImage &inpu
                 tex = it->second.fbo->texture();
                 if (texUnit == 0)
                     inputSize = QSize(it->second.width, it->second.height);
+                break;
             }
+            case drift::GpuEffectPassInput::Type::Texture: {
+                const auto it = textures.find(in.textureId);
+                tex = it == textures.end() ? 0 : it->second;
+                break;
+            }
+            }
+            if (failed)
+                break;
+
             gl->glActiveTexture(GL_TEXTURE0 + texUnit);
             gl->glBindTexture(GL_TEXTURE_2D, tex);
-            if (texUnit == 0) {
+            if (texUnit == 0)
                 program->setUniformValue("u_currentTexture", 0);
-            } else {
+            else
                 program->setUniformValue(qPrintable(QStringLiteral("u_texture%1").arg(texUnit)), texUnit);
-            }
         }
         if (failed)
             break;
+
+        // Transition-friendly aliases pointing at whichever units hold source 0 and source 1.
+        // uniformLocation() returns -1 for names a shader does not declare, so this is free.
+        if (fromUnit >= 0)
+            program->setUniformValue("u_fromTexture", fromUnit);
+        if (toUnit >= 0)
+            program->setUniformValue("u_toTexture", toUnit);
 
         // Re-apply resolution after possible buffer-sized primary input.
         program->setUniformValue("u_resolution", QVector2D(float(inputSize.width()),
@@ -542,20 +631,23 @@ QImage GpuEffectExecutor::apply(const EffectPresetEntry &def, const QImage &inpu
         outTarget->fbo->release();
     }
 
-    QImage result = input;
+    QImage result = fallback;
     if (!failed) {
-        // Source was promoted into an FBO; all samples share that Y layout.
+        // Sources were promoted into FBOs; all samples share that Y layout.
         // toImage(false) keeps QImage top matching the original frame top.
         result = canvas.fbo->toImage(false).convertToFormat(QImage::Format_RGBA8888);
-        if (result.size() != srcImage.size())
-            result = result.scaled(srcImage.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        if (result.size() != canvasSize)
+            result = result.scaled(canvasSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        if (okOut)
+            *okOut = true;
     } else {
-        qWarning("GpuEffectExecutor: pass failed for %s — passthrough", qPrintable(def.meta.id));
+        qWarning("GpuEffectExecutor: pass failed for %s — passthrough", qPrintable(cacheKey));
     }
 
     // FBO textures are owned by QOpenGLFramebufferObject — do not glDelete them.
+    // Static textures are cached in GlRuntime and outlive this call.
     buffers.clear();
-    sourceTarget.fbo.reset();
+    sourceTargets.clear();
     canvas.fbo.reset();
     rt.doneCurrent();
     return result;
