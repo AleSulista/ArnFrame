@@ -2579,6 +2579,7 @@ QVariantList AppController::effectCatalog() const
             {QStringLiteral("category"), def.meta.category},
             {QStringLiteral("categoryLabel"), effectCategoryLabel(def.meta.category)},
             {QStringLiteral("compositorOnly"), def.meta.compositorOnly},
+            {QStringLiteral("thumbnailPath"), def.thumbnailPath},
             {QStringLiteral("params"), params},
         });
     }

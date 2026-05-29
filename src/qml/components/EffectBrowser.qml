@@ -78,17 +78,15 @@ Column {
 
             Repeater {
                 model: EditorState.effectCatalog()
-                delegate: Rectangle {
+                delegate: Column {
                     id: presetCard
                     required property var modelData
                     visible: presetCard.modelData.category === root.activeCategory
                     width: visible ? Theme.assetCardWidth : 0
-                    height: visible ? 64 : 0
-                    radius: Theme.radiusSm
-                    color: cardHover.hovered ? Theme.panelSecondaryBg : Theme.panelAccent
-                    border.width: presetDrag.active ? 1 : 0
-                    border.color: Theme.primary
+                    spacing: 4
                     opacity: presetDrag.active ? 0.85 : 1
+
+                    readonly property string thumb: presetCard.modelData.thumbnailPath || ""
 
                     Drag.active: presetDrag.active
                     Drag.dragType: Drag.Automatic
@@ -96,61 +94,91 @@ Column {
                     Drag.keys: ["application/x-drift-effect"]
                     Drag.mimeData: ({ "application/x-drift-effect": presetCard.modelData.id })
                     Drag.hotSpot.x: width / 2
-                    Drag.hotSpot.y: height / 2
+                    Drag.hotSpot.y: Theme.assetCardWidth / 2
 
-                    HoverHandler { id: cardHover }
+                    Rectangle {
+                        width: Theme.assetCardWidth
+                        height: Theme.assetCardWidth
+                        radius: Theme.radiusSm
+                        color: cardHover.hovered ? Theme.panelSecondaryBg : Theme.panelAccent
+                        border.width: presetDrag.active ? 1 : 0
+                        border.color: Theme.primary
+                        clip: true
 
-                    TapHandler {
-                        enabled: !presetDrag.active
-                        onTapped: root.applyPreset(presetCard.modelData.id)
-                    }
+                        HoverHandler { id: cardHover }
 
-                    DragHandler {
-                        id: presetDrag
-                        target: null
-                        acceptedButtons: Qt.LeftButton
-                    }
+                        Image {
+                            anchors.fill: parent
+                            visible: presetCard.thumb.length > 0
+                            source: presetCard.thumb.length > 0
+                                    ? EditorState.imageUrl(presetCard.thumb) : ""
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            smooth: true
+                        }
 
-                    Column {
-                        anchors.fill: parent
-                        anchors.margins: 6
-                        spacing: 2
-
+                        // Fallback when no thumbnail is present yet.
                         Text {
-                            width: parent.width
+                            anchors.centerIn: parent
+                            visible: presetCard.thumb.length === 0
+                            width: parent.width - 12
                             text: presetCard.modelData.label
-                            color: Theme.panelForeground
+                            color: Theme.mutedForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeCard
                             font.weight: Font.Medium
                             wrapMode: Text.WordWrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
                             horizontalAlignment: Text.AlignHCenter
+                            maximumLineCount: 3
+                            elide: Text.ElideRight
                         }
 
-                        Text {
-                            width: parent.width
-                            visible: presetCard.modelData.compositorOnly === true
-                            text: qsTr("Compositor")
-                            color: Theme.mutedForeground
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeXs - 1
-                            horizontalAlignment: Text.AlignHCenter
+                        TapHandler {
+                            enabled: !presetDrag.active
+                            onTapped: root.applyPreset(presetCard.modelData.id)
+                        }
+
+                        DragHandler {
+                            id: presetDrag
+                            target: null
+                            acceptedButtons: Qt.LeftButton
+                        }
+
+                        IconButton {
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 3
+                            icon: Theme.icons.plus
+                            variant: "ghost"
+                            buttonSize: 18
+                            iconSize: 12
+                            tooltip: qsTr("Apply to selected clip")
+                            buttonEnabled: EditorState.selectedClip >= 0
+                            onClicked: root.applyPreset(presetCard.modelData.id)
                         }
                     }
 
-                    IconButton {
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.margins: 3
-                        icon: Theme.icons.plus
-                        variant: "ghost"
-                        buttonSize: 18
-                        iconSize: 12
-                        tooltip: qsTr("Apply to selected clip")
-                        buttonEnabled: EditorState.selectedClip >= 0
-                        onClicked: root.applyPreset(presetCard.modelData.id)
+                    Text {
+                        width: parent.width
+                        text: presetCard.modelData.label
+                        color: Theme.panelForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeCard
+                        font.weight: Font.Medium
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                        maximumLineCount: 2
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Text {
+                        width: parent.width
+                        visible: presetCard.modelData.compositorOnly === true
+                        text: qsTr("Compositor")
+                        color: Theme.mutedForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeXs - 1
+                        horizontalAlignment: Text.AlignHCenter
                     }
                 }
             }

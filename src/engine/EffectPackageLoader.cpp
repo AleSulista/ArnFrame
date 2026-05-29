@@ -299,6 +299,16 @@ EffectPresetEntry EffectPackageLoader::loadPackage(const QString &packageDir, QS
         return entry;
     }
 
+    // Optional thumbnail: explicit relative/absolute path, else thumbnail.png in the package.
+    QString thumbRel = root.value(QStringLiteral("thumbnail")).toString();
+    if (thumbRel.isEmpty())
+        thumbRel = QStringLiteral("thumbnail.png");
+    const QString thumbPath = QFileInfo(thumbRel).isAbsolute()
+                                  ? QDir::cleanPath(thumbRel)
+                                  : QDir(packageDir).filePath(thumbRel);
+    if (QFileInfo::exists(thumbPath))
+        entry.thumbnailPath = thumbPath;
+
     if (!parseParameters(root.value(QStringLiteral("parameters")).toArray(), &entry, errorOut,
                          backend == QLatin1String("gpu"))) {
         return entry;

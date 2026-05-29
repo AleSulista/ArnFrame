@@ -19,6 +19,7 @@ struct EffectPresetEntry
     bool isGpu = false;                    // true for file-based GPU effect packages
     drift::GpuEffectDefinition gpu;        // valid when isGpu && gpu.valid
     int catalogOrder = 0;                  // lower sorts first in the browser catalog
+    QString thumbnailPath;                 // absolute path to package thumbnail (optional)
 };
 
 // Backward-compatible alias used across the codebase.

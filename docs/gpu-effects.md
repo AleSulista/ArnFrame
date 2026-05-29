@@ -8,6 +8,7 @@ All effect presets are GPU packages under `effects/` (`backend: "gpu"`). Preview
 effects/
 └── adjust_contrast/
     ├── effect.json
+    ├── thumbnail.png   # optional browser preview (auto-picked if present)
     └── main.frag
 ```
 
@@ -18,6 +19,7 @@ Search order: `DRIFT_EFFECTS_DIR`, `<applicationDir>/effects`, `<AppDataLocation
 | Field | Meaning |
 |---|---|
 | `id` / `displayName` / `category` / `order` | Catalog metadata |
+| `thumbnail` | Optional image path (relative to package, or absolute). Defaults to `thumbnail.png` when that file exists |
 | `backend` | `"gpu"` |
 | `parameters[]` | Slider/bool uniforms |
 | `fixedParams` | Hidden uniforms (colors as `#rrggbb`, enums as strings) |
