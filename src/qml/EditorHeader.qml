@@ -31,13 +31,28 @@ Rectangle {
         exportDialog.openDialog()
     }
 
+    // True once the user has dismissed the progress dialog while an export is
+    // still running; drives the circular-progress badge next to Export.
+    property bool exportProgressDismissed: false
+
     Connections {
         target: EditorState
         function onProjectNameChanged() { root.projectName = EditorState.projectName }
+        function onExportInProgressChanged() {
+            if (EditorState.exportInProgress) {
+                root.exportProgressDismissed = false
+                exportProgressDialog.openDialog()
+            }
+        }
     }
 
     ExportDialog {
         id: exportDialog
+    }
+
+    ExportProgressDialog {
+        id: exportProgressDialog
+        onClosed: if (EditorState.exportInProgress) root.exportProgressDismissed = true
     }
 
     Rectangle {
@@ -172,6 +187,39 @@ Rectangle {
             onClicked: EditorState.lastMessage = EditorState.lastMessage.length > 0
                         ? EditorState.lastMessage
                         : "No messages"
+        }
+
+        Rectangle {
+            id: exportProgressBadge
+            width: 28
+            height: 28
+            radius: 14
+            color: badgeMouse.containsMouse ? Theme.popoverHover : "transparent"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: EditorState.exportInProgress && root.exportProgressDismissed
+
+            CircularProgress {
+                anchors.centerIn: parent
+                size: 22
+                strokeWidth: 3
+                value: EditorState.exportProgress
+            }
+
+            ToolTip {
+                visible: badgeMouse.containsMouse
+                text: qsTr("Export in progress (%1%) — click to view").arg(Math.round(EditorState.exportProgress * 100))
+            }
+
+            MouseArea {
+                id: badgeMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    root.exportProgressDismissed = false
+                    exportProgressDialog.openDialog()
+                }
+            }
         }
 
         Rectangle {
