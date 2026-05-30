@@ -29,7 +29,7 @@ Dialog {
     }
 
     header: Item {
-        height: root.title.length > 0 ? 44 : 0
+        implicitHeight: root.title.length > 0 ? 44 : 0
         width: root.width
         visible: root.title.length > 0
 
@@ -55,7 +55,7 @@ Dialog {
 
     footer: Item {
         visible: root.showFooter
-        height: visible ? 56 : 0
+        implicitHeight: visible ? 56 : 0
         width: root.width
 
         Rectangle {
