@@ -142,4 +142,65 @@ TimeUs sourceDurationForClip(const Project &project, const Clip &clip)
     return qMax(clip.srcOut, clip.timelineDuration);
 }
 
+bool splitClipAtOffset(Clip &head, Clip &tail, TimeUs offset)
+{
+    if (offset < kMinClipDurationUs || head.timelineDuration - offset < kMinClipDurationUs)
+        return false;
+
+    const TimeUs sourceOffset = head.sourceDeltaForTimelineDelta(offset);
+    if (sourceOffset <= 0 || sourceOffset >= (head.srcOut - head.srcIn))
+        return false;
+
+    tail = head;
+    tail.timelineStart = head.timelineStart + offset;
+    tail.timelineDuration = head.timelineDuration - offset;
+
+    if (head.reverse) {
+        const TimeUs sourceAtSplit = head.srcOut - sourceOffset;
+        tail.srcIn = head.srcIn;
+        tail.srcOut = sourceAtSplit;
+        head.srcIn = sourceAtSplit;
+    } else {
+        tail.srcIn = head.srcIn + sourceOffset;
+        head.srcOut = head.srcIn + sourceOffset;
+    }
+
+    head.timelineDuration = offset;
+    return true;
+}
+
+bool clipsCanMerge(const Clip &left, const Clip &right)
+{
+    if (left.type != right.type)
+        return false;
+    if (left.assetId.isEmpty() || left.assetId != right.assetId)
+        return false;
+    if (left.path != right.path)
+        return false;
+    if (left.reverse != right.reverse)
+        return false;
+    if (!qFuzzyCompare(left.speed, right.speed))
+        return false;
+    if (left.timelineEnd() != right.timelineStart)
+        return false;
+
+    if (left.reverse)
+        return left.srcIn == right.srcOut;
+    return left.srcOut == right.srcIn;
+}
+
+Clip mergeClips(const Clip &left, const Clip &right)
+{
+    Clip out = left;
+    out.timelineDuration = left.timelineDuration + right.timelineDuration;
+    if (left.reverse) {
+        out.srcIn = right.srcIn;
+        out.srcOut = left.srcOut;
+    } else {
+        out.srcOut = right.srcOut;
+    }
+    out.fadeOutUs = right.fadeOutUs;
+    return out;
+}
+
 } // namespace drift

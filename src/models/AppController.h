@@ -175,6 +175,11 @@ public:
     Q_INVOKABLE void applyTextPreset(int trackIndex, int clipIndex, const QString &presetId);
     Q_INVOKABLE void setClipBlendMode(int trackIndex, int clipIndex, const QString &mode);
     Q_INVOKABLE void setClipSpeed(int trackIndex, int clipIndex, double speed);
+    Q_INVOKABLE void setClipReverse(int trackIndex, int clipIndex, bool reverse);
+    Q_INVOKABLE void setClipFlip(int trackIndex, int clipIndex, bool flipH, bool flipV);
+    Q_INVOKABLE void setClipRotationSnap(int trackIndex, int clipIndex, double degrees);
+    Q_INVOKABLE bool canMergeSelection() const;
+    Q_INVOKABLE void mergeSelectedClips();
     Q_INVOKABLE void setClipMask(int trackIndex, int clipIndex, const QVariantMap &mask);
     Q_INVOKABLE void setClipFade(int trackIndex, int clipIndex, double fadeInSeconds, double fadeOutSeconds);
     Q_INVOKABLE void setClipFadeCurve(int trackIndex, int clipIndex, const QString &curve);

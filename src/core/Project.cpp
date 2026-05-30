@@ -248,6 +248,9 @@ QJsonObject clipToJson(const Clip &clip)
         {QStringLiteral("filmstripPath"), clip.filmstripPath},
         {QStringLiteral("blendMode"), blendModeToString(clip.blendMode)},
         {QStringLiteral("speed"), clip.speed},
+        {QStringLiteral("reverse"), clip.reverse},
+        {QStringLiteral("flipH"), clip.flipH},
+        {QStringLiteral("flipV"), clip.flipV},
         {QStringLiteral("mask"), maskToJson(clip.mask)},
         {QStringLiteral("fadeInUs"), static_cast<double>(clip.fadeInUs)},
         {QStringLiteral("fadeOutUs"), static_cast<double>(clip.fadeOutUs)},
@@ -312,6 +315,9 @@ Clip clipFromJsonV2(const QJsonObject &object, int canvasW = 1920, int canvasH =
     clip.filmstripPath = object.value(QStringLiteral("filmstripPath")).toString();
     clip.blendMode = blendModeFromString(object.value(QStringLiteral("blendMode")).toString());
     clip.speed = object.value(QStringLiteral("speed")).toDouble(1.0);
+    clip.reverse = object.value(QStringLiteral("reverse")).toBool(false);
+    clip.flipH = object.value(QStringLiteral("flipH")).toBool(false);
+    clip.flipV = object.value(QStringLiteral("flipV")).toBool(false);
     clip.mask = maskFromJson(object.value(QStringLiteral("mask")).toObject());
     clip.fadeInUs = static_cast<TimeUs>(object.value(QStringLiteral("fadeInUs")).toDouble());
     clip.fadeOutUs = static_cast<TimeUs>(object.value(QStringLiteral("fadeOutUs")).toDouble());

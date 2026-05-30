@@ -55,6 +55,9 @@ struct Clip
 
     BlendMode blendMode = BlendMode::Normal;
     double speed = 1.0; // 1.0 = realtime; >1 faster, <1 slower
+    bool reverse = false; // play source range backward; speed still applies as magnitude
+    bool flipH = false;
+    bool flipV = false;
     Mask mask;
 
     // Fades are edge-relative ramps applied multiplicatively on top of opacity
@@ -83,10 +86,22 @@ struct Clip
         return static_cast<TimeUs>(llround(static_cast<double>(timelineDuration) * effectiveSpeed()));
     }
 
+    TimeUs sourceDeltaForTimelineDelta(TimeUs timelineDelta) const
+    {
+        return static_cast<TimeUs>(llround(static_cast<double>(timelineDelta) * effectiveSpeed()));
+    }
+
     TimeUs timelineToSourceUs(TimeUs timelineUs) const
     {
         const TimeUs rel = qBound(TimeUs{0}, timelineUs - timelineStart, timelineDuration);
-        return srcIn + static_cast<TimeUs>(static_cast<double>(rel) * effectiveSpeed());
+        const TimeUs offset = sourceDeltaForTimelineDelta(rel);
+        if (!reverse)
+            return srcIn + offset;
+
+        if (srcOut <= srcIn)
+            return srcIn;
+        const TimeUs range = srcOut - srcIn;
+        return srcOut - qMin(offset, range);
     }
 
     void syncSrcOutFromSpeed(TimeUs maxSourceUs)

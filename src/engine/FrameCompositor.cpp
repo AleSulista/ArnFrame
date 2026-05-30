@@ -312,6 +312,7 @@ void drawClipFrame(QPainter &painter, const QImage &frame, const drift::Clip &cl
                                         : toQtComposition(clip.blendMode));
     painter.translate(x + w * 0.5, y + h * 0.5);
     painter.rotate(rotation);
+    painter.scale(clip.flipH ? -1.0 : 1.0, clip.flipV ? -1.0 : 1.0);
     painter.drawImage(QPointF(-w * 0.5, -h * 0.5), drawn);
     painter.restore();
 }
@@ -466,6 +467,7 @@ void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs time
                                         : toQtComposition(clip.blendMode));
     painter.translate(x + w * 0.5, y + h * 0.5);
     painter.rotate(rotation);
+    painter.scale(clip.flipH ? -1.0 : 1.0, clip.flipV ? -1.0 : 1.0);
     drawStyledText(painter, clip, text, qMax(1, qRound(w)), qMax(1, qRound(h)), 1.0, renderScale);
     painter.restore();
 }

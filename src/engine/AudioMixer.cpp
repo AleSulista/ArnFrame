@@ -8,6 +8,7 @@
 
 #include <QtMath>
 #include <cstring>
+#include <utility>
 
 namespace {
 
@@ -64,14 +65,35 @@ void accumulateClipAudio(const drift::Clip &clip, const drift::Track &track, dri
 
     const double speed = clip.effectiveSpeed();
     const drift::TimeUs clipOffsetUs = qMax<drift::TimeUs>(0, timelineStartUs - clip.timelineStart);
-    const drift::TimeUs sourceStartUs = clip.srcIn + static_cast<drift::TimeUs>(clipOffsetUs * speed);
+    const drift::TimeUs bufferDurationUs =
+        static_cast<drift::TimeUs>((static_cast<int64_t>(sampleCount) * drift::kUsPerSecond) / sampleRate);
 
-    const int sourceSampleCount = qMax(1, static_cast<int>(std::llround(sampleCount * speed)));
+    drift::TimeUs sourceStartUs = 0;
+    int sourceSampleCount = qMax(1, static_cast<int>(std::llround(sampleCount * speed)));
+
+    if (clip.reverse) {
+        const drift::TimeUs sourceHigh = clip.timelineToSourceUs(timelineStartUs);
+        const drift::TimeUs sourceLow = clip.timelineToSourceUs(timelineStartUs + bufferDurationUs);
+        sourceStartUs = qMin(sourceLow, sourceHigh);
+        const drift::TimeUs sourceSpanUs = qMax<drift::TimeUs>(1, qAbs(sourceHigh - sourceLow));
+        sourceSampleCount =
+            qMax(1, static_cast<int>((sourceSpanUs * sampleRate) / drift::kUsPerSecond));
+    } else {
+        sourceStartUs = clip.srcIn + static_cast<drift::TimeUs>(clipOffsetUs * speed);
+    }
+
     QVector<float> sourceChunk(sourceSampleCount * 2);
     const int got = ClipReaderPool::instance().readAudioInterleaved(clip.path, sourceStartUs, sourceSampleCount,
                                                                     sampleRate, sourceChunk.data());
     if (got <= 0)
         return;
+
+    if (clip.reverse && got > 1) {
+        for (int i = 0, j = got - 1; i < j; ++i, --j) {
+            std::swap(sourceChunk[i * 2], sourceChunk[j * 2]);
+            std::swap(sourceChunk[i * 2 + 1], sourceChunk[j * 2 + 1]);
+        }
+    }
 
     QVector<float> chunk;
     if (qFuzzyCompare(speed, 1.0))

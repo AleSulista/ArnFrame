@@ -887,29 +887,25 @@ PanelFrame {
                                 font.weight: Font.Medium
                             }
 
-                            Row {
+                            PropertyKeyframeRow {
                                 width: parent.width
-                                spacing: 8
-                                PropertyKeyframeRow {
-                                    width: (parent.width - parent.spacing) / 2
-                                    propDef: root.propX
-                                    keyframeList: (clip.keyframes && clip.keyframes.x && clip.keyframes.x.points) || []
-                                    interpolationMode: (clip.keyframes && clip.keyframes.x && clip.keyframes.x.interpolation) || "linear"
-                                    useSlider: true
-                                    sliderFrom: -root.canvasW
-                                    sliderTo: root.canvasW * 2
-                                    unit: "px"
-                                }
-                                PropertyKeyframeRow {
-                                    width: (parent.width - parent.spacing) / 2
-                                    propDef: root.propY
-                                    keyframeList: (clip.keyframes && clip.keyframes.y && clip.keyframes.y.points) || []
-                                    interpolationMode: (clip.keyframes && clip.keyframes.y && clip.keyframes.y.interpolation) || "linear"
-                                    useSlider: true
-                                    sliderFrom: -root.canvasH
-                                    sliderTo: root.canvasH * 2
-                                    unit: "px"
-                                }
+                                propDef: root.propX
+                                keyframeList: (clip.keyframes && clip.keyframes.x && clip.keyframes.x.points) || []
+                                interpolationMode: (clip.keyframes && clip.keyframes.x && clip.keyframes.x.interpolation) || "linear"
+                                useSlider: true
+                                sliderFrom: -root.canvasW
+                                sliderTo: root.canvasW * 2
+                                unit: "px"
+                            }
+                            PropertyKeyframeRow {
+                                width: parent.width
+                                propDef: root.propY
+                                keyframeList: (clip.keyframes && clip.keyframes.y && clip.keyframes.y.points) || []
+                                interpolationMode: (clip.keyframes && clip.keyframes.y && clip.keyframes.y.interpolation) || "linear"
+                                useSlider: true
+                                sliderFrom: -root.canvasH
+                                sliderTo: root.canvasH * 2
+                                unit: "px"
                             }
 
                             Text {
@@ -920,29 +916,25 @@ PanelFrame {
                                 font.weight: Font.Medium
                             }
 
-                            Row {
+                            PropertyKeyframeRow {
                                 width: parent.width
-                                spacing: 8
-                                PropertyKeyframeRow {
-                                    width: (parent.width - parent.spacing) / 2
-                                    propDef: root.propWidth
-                                    keyframeList: (clip.keyframes && clip.keyframes.width && clip.keyframes.width.points) || []
-                                    interpolationMode: (clip.keyframes && clip.keyframes.width && clip.keyframes.width.interpolation) || "linear"
-                                    useSlider: true
-                                    sliderFrom: 1
-                                    sliderTo: Math.max(root.canvasW * 2, 2)
-                                    unit: "px"
-                                }
-                                PropertyKeyframeRow {
-                                    width: (parent.width - parent.spacing) / 2
-                                    propDef: root.propHeight
-                                    keyframeList: (clip.keyframes && clip.keyframes.height && clip.keyframes.height.points) || []
-                                    interpolationMode: (clip.keyframes && clip.keyframes.height && clip.keyframes.height.interpolation) || "linear"
-                                    useSlider: true
-                                    sliderFrom: 1
-                                    sliderTo: Math.max(root.canvasH * 2, 2)
-                                    unit: "px"
-                                }
+                                propDef: root.propWidth
+                                keyframeList: (clip.keyframes && clip.keyframes.width && clip.keyframes.width.points) || []
+                                interpolationMode: (clip.keyframes && clip.keyframes.width && clip.keyframes.width.interpolation) || "linear"
+                                useSlider: true
+                                sliderFrom: 1
+                                sliderTo: Math.max(root.canvasW * 2, 2)
+                                unit: "px"
+                            }
+                            PropertyKeyframeRow {
+                                width: parent.width
+                                propDef: root.propHeight
+                                keyframeList: (clip.keyframes && clip.keyframes.height && clip.keyframes.height.points) || []
+                                interpolationMode: (clip.keyframes && clip.keyframes.height && clip.keyframes.height.interpolation) || "linear"
+                                useSlider: true
+                                sliderFrom: 1
+                                sliderTo: Math.max(root.canvasH * 2, 2)
+                                unit: "px"
                             }
 
                             Text {
@@ -973,6 +965,69 @@ PanelFrame {
                                 sliderFrom: -180
                                 sliderTo: 180
                                 unit: "°"
+                            }
+
+                            Text {
+                                text: qsTr("Rotate 90°")
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                                font.weight: Font.Medium
+                            }
+
+                            Flow {
+                                width: parent.width
+                                spacing: 6
+                                Repeater {
+                                    // Plain ints avoid JS-object model role quirks (e.g. "value").
+                                    model: [0, 90, 180, -90]
+                                    delegate: ThemedChip {
+                                        required property int modelData
+                                        text: modelData + "°"
+                                        selected: {
+                                            void root.clipDataRevision
+                                            void EditorState.playheadSeconds
+                                            const cur = Number(clip.rotationAtPlayhead || 0)
+                                            return Math.abs(cur - modelData) < 0.5
+                                        }
+                                        onClicked: EditorState.setClipRotationSnap(
+                                                       EditorState.selectedTrack, EditorState.selectedClip,
+                                                       modelData)
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: qsTr("Flip")
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                                font.weight: Font.Medium
+                            }
+
+                            Flow {
+                                width: parent.width
+                                spacing: 6
+                                ThemedChip {
+                                    text: qsTr("Flip H")
+                                    selected: {
+                                        void root.clipDataRevision
+                                        return !!clip.flipH
+                                    }
+                                    onClicked: EditorState.setClipFlip(
+                                                   EditorState.selectedTrack, EditorState.selectedClip,
+                                                   !clip.flipH, !!clip.flipV)
+                                }
+                                ThemedChip {
+                                    text: qsTr("Flip V")
+                                    selected: {
+                                        void root.clipDataRevision
+                                        return !!clip.flipV
+                                    }
+                                    onClicked: EditorState.setClipFlip(
+                                                   EditorState.selectedTrack, EditorState.selectedClip,
+                                                   !!clip.flipH, !clip.flipV)
+                                }
                             }
 
                             ThemedButton {
@@ -1078,9 +1133,22 @@ PanelFrame {
                         Text {
                             visible: root.clipKind === "video" || root.clipKind === "audio"
                             text: (clip.speed || 1).toFixed(2) + "×"
+                                    + (clip.reverse ? qsTr(" (reversed)") : "")
                             color: Theme.mutedForeground
                             font.family: Theme.monoFontFamily
                             font.pixelSize: Theme.fontSizeSm
+                        }
+
+                        ThemedChip {
+                            visible: root.clipKind === "video" || root.clipKind === "audio"
+                            text: qsTr("Reverse")
+                            selected: {
+                                void root.clipDataRevision
+                                return !!clip.reverse
+                            }
+                            onClicked: EditorState.setClipReverse(
+                                           EditorState.selectedTrack, EditorState.selectedClip,
+                                           !clip.reverse)
                         }
 
                         Rectangle {

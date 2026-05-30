@@ -30,6 +30,8 @@ private slots:
     void rgbSplitEffectParametersSerialization();
     void blockGlitchEffectParametersSerialization();
     void clipSpeedSourceMapping();
+    void clipReverseAndFlipSerialization();
+    void clipSplitMergeRoundTrip();
     void maskAndTransitionSerialization();
     void allTransitionKindsRoundTrip();
     void transitionParametersRoundTrip();
@@ -499,6 +501,86 @@ void CoreTest::clipSpeedSourceMapping()
 
     clip.syncSrcOutFromSpeed(drift::secondsToUs(20.0));
     QCOMPARE(clip.srcOut, clip.srcIn + drift::secondsToUs(8.0));
+
+    clip.reverse = true;
+    // At timeline start → near srcOut; at +1s timeline with speed 2 → srcOut - 2s
+    QCOMPARE(clip.timelineToSourceUs(drift::secondsToUs(1.0)), clip.srcOut);
+    QCOMPARE(clip.timelineToSourceUs(drift::secondsToUs(2.0)), clip.srcOut - drift::secondsToUs(2.0));
+}
+
+void CoreTest::clipReverseAndFlipSerialization()
+{
+    drift::Project project;
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-flip");
+    clip.type = drift::ClipType::Video;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(2.0);
+    clip.srcIn = drift::secondsToUs(1.0);
+    clip.srcOut = drift::secondsToUs(3.0);
+    clip.reverse = true;
+    clip.flipH = true;
+    clip.flipV = true;
+    clip.speed = 1.5;
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+    QVERIFY(error.isEmpty());
+    const drift::Clip &out = loaded.tracks()[0].clips[0];
+    QCOMPARE(out.reverse, true);
+    QCOMPARE(out.flipH, true);
+    QCOMPARE(out.flipV, true);
+    QCOMPARE(out.speed, 1.5);
+}
+
+void CoreTest::clipSplitMergeRoundTrip()
+{
+    drift::Clip head;
+    head.id = QStringLiteral("head");
+    head.type = drift::ClipType::Video;
+    head.assetId = QStringLiteral("asset-a");
+    head.path = QStringLiteral("/tmp/a.mp4");
+    head.timelineStart = 0;
+    head.timelineDuration = drift::secondsToUs(4.0);
+    head.srcIn = drift::secondsToUs(1.0);
+    head.srcOut = drift::secondsToUs(5.0);
+    head.speed = 1.0;
+
+    drift::Clip tail;
+    QVERIFY(drift::splitClipAtOffset(head, tail, drift::secondsToUs(2.0)));
+    tail.id = QStringLiteral("tail");
+    QCOMPARE(head.timelineDuration, drift::secondsToUs(2.0));
+    QCOMPARE(tail.timelineStart, drift::secondsToUs(2.0));
+    QCOMPARE(head.srcOut, drift::secondsToUs(3.0));
+    QCOMPARE(tail.srcIn, drift::secondsToUs(3.0));
+    QVERIFY(drift::clipsCanMerge(head, tail));
+
+    const drift::Clip merged = drift::mergeClips(head, tail);
+    QCOMPARE(merged.timelineDuration, drift::secondsToUs(4.0));
+    QCOMPARE(merged.srcIn, drift::secondsToUs(1.0));
+    QCOMPARE(merged.srcOut, drift::secondsToUs(5.0));
+
+    // Reverse split: earlier half maps to higher source.
+    drift::Clip rev;
+    rev.id = QStringLiteral("rev");
+    rev.type = drift::ClipType::Video;
+    rev.assetId = QStringLiteral("asset-a");
+    rev.path = QStringLiteral("/tmp/a.mp4");
+    rev.timelineStart = 0;
+    rev.timelineDuration = drift::secondsToUs(4.0);
+    rev.srcIn = drift::secondsToUs(1.0);
+    rev.srcOut = drift::secondsToUs(5.0);
+    rev.reverse = true;
+    drift::Clip revTail;
+    QVERIFY(drift::splitClipAtOffset(rev, revTail, drift::secondsToUs(2.0)));
+    revTail.id = QStringLiteral("rev-tail");
+    QCOMPARE(rev.srcIn, drift::secondsToUs(3.0));
+    QCOMPARE(rev.srcOut, drift::secondsToUs(5.0));
+    QCOMPARE(revTail.srcIn, drift::secondsToUs(1.0));
+    QCOMPARE(revTail.srcOut, drift::secondsToUs(3.0));
+    QVERIFY(drift::clipsCanMerge(rev, revTail));
 }
 
 void CoreTest::maskAndTransitionSerialization()

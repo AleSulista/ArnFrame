@@ -154,6 +154,7 @@ Column {
         spacing: 6
 
         KeyframeDiamond {
+            id: diamond
             anchors.verticalCenter: parent.verticalCenter
             hasKey: root.activeKey !== null
             onToggled: {
@@ -168,18 +169,27 @@ Column {
         }
 
         Text {
+            id: labelText
             text: root.propDef.label
             color: Theme.mutedForeground
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeXs
             anchors.verticalCenter: parent.verticalCenter
             elide: Text.ElideRight
-            width: Math.max(40, parent.width - 90)
+            width: Math.min(implicitWidth + 2,
+                            Math.max(24, parent.width - diamond.width - linChip.width - holdChip.width
+                                           - parent.spacing * 4))
+        }
+
+        Item {
+            width: Math.max(0, parent.width - diamond.width - labelText.width
+                                   - linChip.width - holdChip.width - parent.spacing * 4)
+            height: 1
         }
 
         ThemedChip {
+            id: linChip
             text: "Lin"
-            variant: "secondary"
             selected: root.interpolationMode === "linear"
             chipHeight: 18
             horizontalPadding: 10
@@ -189,8 +199,8 @@ Column {
         }
 
         ThemedChip {
+            id: holdChip
             text: "Hold"
-            variant: "secondary"
             selected: root.interpolationMode === "hold"
             chipHeight: 18
             horizontalPadding: 10

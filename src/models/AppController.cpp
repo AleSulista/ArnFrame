@@ -570,6 +570,7 @@ QHash<QString, QString> defaultShortcuts()
         {QStringLiteral("clearSelection"), QStringLiteral("Escape")},
         {QStringLiteral("duplicate"), QStringLiteral("Ctrl+D")},
         {QStringLiteral("split"), QStringLiteral("S")},
+        {QStringLiteral("merge"), QStringLiteral("Ctrl+M")},
         {QStringLiteral("copy"), QStringLiteral("Ctrl+C")},
         {QStringLiteral("cut"), QStringLiteral("Ctrl+X")},
         {QStringLiteral("paste"), QStringLiteral("Ctrl+V")},
@@ -599,6 +600,9 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("shapeStyle"), shapeStyleToMap(clip.shapeStyle)},
         {QStringLiteral("blendMode"), drift::blendModeToString(clip.blendMode)},
         {QStringLiteral("speed"), clip.speed},
+        {QStringLiteral("reverse"), clip.reverse},
+        {QStringLiteral("flipH"), clip.flipH},
+        {QStringLiteral("flipV"), clip.flipV},
         {QStringLiteral("mask"), maskToMap(clip.mask)},
         {QStringLiteral("start"), drift::usToSeconds(clip.timelineStart)},
         {QStringLiteral("duration"), drift::usToSeconds(clip.timelineDuration)},
@@ -642,13 +646,23 @@ QVariantMap AppController::selectedClipData() const
     if (m_selectedTrack < 0 || m_selectedClip < 0)
         return {};
 
-    QVariantMap data = clipAt(m_selectedTrack, m_selectedClip);
+    auto enrich = [this](QVariantMap data, int trackIndex, int clipIndex) -> QVariantMap {
+        if (data.isEmpty() || !isValidClipIndex(trackIndex, clipIndex))
+            return data;
+        const drift::Clip &clip = m_project.tracks().at(trackIndex).clips.at(clipIndex);
+        const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
+        data.insert(QStringLiteral("rotationAtPlayhead"),
+                    clipTransformValue(clip.rotation, relative, 0.0));
+        return data;
+    };
+
+    QVariantMap data = enrich(clipAt(m_selectedTrack, m_selectedClip), m_selectedTrack, m_selectedClip);
     if (!data.isEmpty())
         return data;
 
     // Primary indices can lag m_selection after structural edits; fall back.
     for (const QPair<int, int> &pair : m_selection) {
-        data = clipAt(pair.first, pair.second);
+        data = enrich(clipAt(pair.first, pair.second), pair.first, pair.second);
         if (!data.isEmpty())
             return data;
     }
@@ -693,6 +707,7 @@ QVariantList AppController::actions() const
         action(QStringLiteral("paste"), QStringLiteral("Paste at playhead")),
         action(QStringLiteral("duplicate"), QStringLiteral("Duplicate selected clip")),
         action(QStringLiteral("split"), QStringLiteral("Split at playhead")),
+        action(QStringLiteral("merge"), QStringLiteral("Merge adjacent clips")),
         action(QStringLiteral("clearSelection"), QStringLiteral("Clear selection")),
         action(QStringLiteral("nudgeLeft"), QStringLiteral("Nudge selection left")),
         action(QStringLiteral("nudgeRight"), QStringLiteral("Nudge selection right")),
@@ -883,9 +898,13 @@ double AppController::sourceTimeForClip(const QVariantMap &clip) const
 
     const double start = clip.value(QStringLiteral("start")).toDouble();
     const double inPoint = clip.value(QStringLiteral("inPoint")).toDouble();
+    const double outPoint = clip.value(QStringLiteral("outPoint")).toDouble();
     const double speed = clip.value(QStringLiteral("speed"), 1.0).toDouble();
     const double effectiveSpeed = speed <= 0.0 ? 1.0 : speed;
-    return inPoint + (playheadSeconds() - start) * effectiveSpeed;
+    const double offset = (playheadSeconds() - start) * effectiveSpeed;
+    if (clip.value(QStringLiteral("reverse")).toBool())
+        return outPoint - offset;
+    return inPoint + offset;
 }
 
 double AppController::sourceTimeAtPlayhead() const
@@ -1216,23 +1235,11 @@ void AppController::splitAtPlayhead()
                 continue;
 
             const drift::TimeUs offset = m_playheadUs - clip.timelineStart;
-            if (clip.timelineDuration - offset < drift::kMinClipDurationUs)
-                continue;
-            if (offset < drift::kMinClipDurationUs)
+            drift::Clip tail;
+            if (!drift::splitClipAtOffset(clip, tail, offset))
                 continue;
 
-            const drift::TimeUs sourceOffset =
-                static_cast<drift::TimeUs>(static_cast<double>(offset) * clip.effectiveSpeed());
-
-            drift::Clip tail = clip;
             tail.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            tail.timelineStart = m_playheadUs;
-            tail.srcIn = clip.srcIn + sourceOffset;
-            tail.timelineDuration = clip.timelineDuration - offset;
-
-            clip.timelineDuration = offset;
-            clip.srcOut = clip.srcIn + sourceOffset;
-
             track.clips.insert(clipIndex + 1, tail);
             splitAny = true;
             ++clipIndex;
@@ -1266,24 +1273,40 @@ void AppController::trimClipLeft(int trackIndex, int clipIndex, double newStart)
     if (delta > 0) {
         if (clip.timelineDuration - delta < drift::kMinClipDurationUs)
             return;
-        const drift::TimeUs sourceDelta =
-            static_cast<drift::TimeUs>(static_cast<double>(delta) * clip.effectiveSpeed());
-        if (clip.srcIn + sourceDelta > clip.srcOut - drift::kMinClipDurationUs)
+        const drift::TimeUs sourceDelta = clip.sourceDeltaForTimelineDelta(delta);
+        if (sourceDelta <= 0)
             return;
+        if (clip.reverse) {
+            if (clip.srcOut <= clip.srcIn + sourceDelta + drift::kMinClipDurationUs)
+                return;
+        } else if (clip.srcIn + sourceDelta > clip.srcOut - drift::kMinClipDurationUs) {
+            return;
+        }
 
         clip.timelineStart += delta;
-        clip.srcIn += sourceDelta;
         clip.timelineDuration -= delta;
+        if (clip.reverse)
+            clip.srcOut -= sourceDelta;
+        else
+            clip.srcIn += sourceDelta;
     } else {
         const drift::TimeUs extendBy = -delta;
-        const drift::TimeUs sourceExtend =
-            static_cast<drift::TimeUs>(static_cast<double>(extendBy) * clip.effectiveSpeed());
-        if (sourceExtend > clip.srcIn)
-            return;
+        const drift::TimeUs sourceExtend = clip.sourceDeltaForTimelineDelta(extendBy);
+        if (clip.reverse) {
+            const drift::TimeUs maxSource = sourceDurationForClip(clip);
+            if (clip.srcOut + sourceExtend > maxSource)
+                return;
+            clip.timelineStart = snappedStart;
+            clip.srcOut += sourceExtend;
+            clip.timelineDuration += extendBy;
+        } else {
+            if (sourceExtend > clip.srcIn)
+                return;
 
-        clip.timelineStart = snappedStart;
-        clip.srcIn -= sourceExtend;
-        clip.timelineDuration += extendBy;
+            clip.timelineStart = snappedStart;
+            clip.srcIn -= sourceExtend;
+            clip.timelineDuration += extendBy;
+        }
     }
 
     syncOverlapTransitions(m_project);
@@ -1304,11 +1327,22 @@ void AppController::trimClipRight(int trackIndex, int clipIndex, double newEnd)
                                                      m_playheadUs);
     drift::TimeUs newDuration = snappedEnd - clip.timelineStart;
 
-    const drift::TimeUs maxDuration = sourceDurationForClip(clip) - clip.srcIn;
+    const drift::TimeUs maxSource = sourceDurationForClip(clip);
+    const drift::TimeUs maxSourceSpan =
+        clip.reverse ? clip.srcOut : (maxSource > clip.srcIn ? maxSource - clip.srcIn : 0);
+    const drift::TimeUs maxDuration =
+        clip.effectiveSpeed() > 0.0
+            ? static_cast<drift::TimeUs>(llround(static_cast<double>(maxSourceSpan) / clip.effectiveSpeed()))
+            : maxSourceSpan;
     newDuration = qBound(drift::kMinClipDurationUs, newDuration, maxDuration);
 
     clip.timelineDuration = newDuration;
-    clip.srcOut = qMin(clip.srcIn + clip.sourceSpanUs(), sourceDurationForClip(clip));
+    const drift::TimeUs span = clip.sourceSpanUs();
+    if (clip.reverse) {
+        clip.srcIn = qMax<drift::TimeUs>(0, clip.srcOut - span);
+    } else {
+        clip.srcOut = qMin(clip.srcIn + span, maxSource);
+    }
     syncOverlapTransitions(m_project);
     emit tracksChanged();
 }
@@ -1386,17 +1420,14 @@ void AppController::splitSelectedClipLeft()
         return;
 
     const drift::TimeUs offset = m_playheadUs - clip.timelineStart;
-    if (offset < drift::kMinClipDurationUs || clip.timelineDuration - offset < drift::kMinClipDurationUs)
-        return;
-
     const drift::Project before = m_project;
 
-    drift::Clip right = clip;
-    right.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    right.timelineStart = m_playheadUs;
-    right.srcIn = clip.srcIn + offset;
-    right.timelineDuration = clip.timelineDuration - offset;
+    drift::Clip right;
+    if (!drift::splitClipAtOffset(clip, right, offset))
+        return;
 
+    right.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    // Keep only the right half (discard left) — same as previous "split left" behavior.
     track.clips[m_selectedClip] = right;
 
     pushProjectEdit(before, QStringLiteral("Split left"));
@@ -1418,16 +1449,13 @@ void AppController::splitSelectedClipRight()
         return;
 
     const drift::TimeUs offset = m_playheadUs - clip.timelineStart;
-    if (offset < drift::kMinClipDurationUs || clip.timelineDuration - offset < drift::kMinClipDurationUs)
+    const drift::Project before = m_project;
+
+    drift::Clip discardedTail;
+    if (!drift::splitClipAtOffset(clip, discardedTail, offset))
         return;
 
-    const drift::Project before = m_project;
-    const drift::TimeUs sourceOffset =
-        static_cast<drift::TimeUs>(static_cast<double>(offset) * clip.effectiveSpeed());
-
-    clip.timelineDuration = offset;
-    clip.srcOut = clip.srcIn + sourceOffset;
-
+    // Keep only the left half (discard right) — same as previous "split right" behavior.
     pushProjectEdit(before, QStringLiteral("Split right"));
     finishEdit(QStringLiteral("Split right"));
     selectClip(m_selectedTrack, m_selectedClip);
@@ -2068,11 +2096,24 @@ void AppController::setClipDuration(int trackIndex, int clipIndex, double durati
 
     const drift::Project before = m_project;
     drift::Clip &clip = track.clips[clipIndex];
-    const drift::TimeUs maxDuration = clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Shape
-                                          ? drift::secondsToUs(300.0)
-                                          : sourceDurationForClip(clip) - clip.srcIn;
+    const drift::TimeUs maxSource = sourceDurationForClip(clip);
+    const drift::TimeUs maxSourceSpan =
+        (clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Shape)
+            ? drift::secondsToUs(300.0)
+            : (clip.reverse ? clip.srcOut : (maxSource > clip.srcIn ? maxSource - clip.srcIn : 0));
+    const drift::TimeUs maxDuration =
+        (clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Shape)
+            ? maxSourceSpan
+            : (clip.effectiveSpeed() > 0.0
+                   ? static_cast<drift::TimeUs>(
+                         llround(static_cast<double>(maxSourceSpan) / clip.effectiveSpeed()))
+                   : maxSourceSpan);
     clip.timelineDuration = qBound(drift::kMinClipDurationUs, drift::secondsToUs(duration), maxDuration);
-    clip.srcOut = qMin(clip.srcIn + clip.sourceSpanUs(), sourceDurationForClip(clip));
+    const drift::TimeUs span = clip.sourceSpanUs();
+    if (clip.reverse)
+        clip.srcIn = qMax<drift::TimeUs>(0, clip.srcOut - span);
+    else
+        clip.srcOut = qMin(clip.srcIn + span, maxSource);
     pushProjectEdit(before, QStringLiteral("Duration updated"));
     finishEdit(QStringLiteral("Duration updated"));
 }
@@ -2190,6 +2231,193 @@ void AppController::setClipSpeed(int trackIndex, int clipIndex, double speed)
     clip.syncSrcOutFromSpeed(sourceDurationForClip(clip));
     pushProjectEdit(before, QStringLiteral("Speed changed"));
     finishEdit(QStringLiteral("Clip speed updated"));
+}
+
+void AppController::setClipReverse(int trackIndex, int clipIndex, bool reverse)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Video && clip.type != drift::ClipType::Audio)
+        return;
+    if (clip.reverse == reverse)
+        return;
+
+    const drift::Project before = m_project;
+    clip.reverse = reverse;
+    pushProjectEdit(before, reverse ? QStringLiteral("Reverse on") : QStringLiteral("Reverse off"));
+    finishEdit(reverse ? QStringLiteral("Clip reversed") : QStringLiteral("Clip forward"));
+}
+
+void AppController::setClipFlip(int trackIndex, int clipIndex, bool flipH, bool flipV)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type == drift::ClipType::Audio)
+        return;
+    if (clip.flipH == flipH && clip.flipV == flipV)
+        return;
+
+    const drift::Project before = m_project;
+    clip.flipH = flipH;
+    clip.flipV = flipV;
+    pushProjectEdit(before, QStringLiteral("Flip changed"));
+    finishEdit(QStringLiteral("Clip flip updated"));
+}
+
+void AppController::setClipRotationSnap(int trackIndex, int clipIndex, double degrees)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type == drift::ClipType::Audio)
+        return;
+
+    // Normalize to (-180, 180]
+    double snapped = degrees;
+    while (snapped > 180.0)
+        snapped -= 360.0;
+    while (snapped <= -180.0)
+        snapped += 360.0;
+
+    const drift::Project before = m_project;
+    // Snap replaces the rotation curve with a single constant key so inspector
+    // chips and preview stay in lockstep (no leftover mid-curve keys).
+    clip.rotation = {};
+    clip.rotation.setKeyframe(0, snapped);
+    pushProjectEdit(before, QStringLiteral("Rotation snapped"));
+    finishEdit(QStringLiteral("Rotation set to %1°").arg(snapped, 0, 'f', 0));
+}
+
+bool AppController::canMergeSelection() const
+{
+    int leftTrack = -1;
+    int leftClip = -1;
+    int rightTrack = -1;
+    int rightClip = -1;
+
+    QList<QPair<int, int>> pairs = m_selection;
+    if (pairs.isEmpty() && m_selectedTrack >= 0 && m_selectedClip >= 0)
+        pairs.append(qMakePair(m_selectedTrack, m_selectedClip));
+
+    if (pairs.size() == 2) {
+        leftTrack = pairs[0].first;
+        leftClip = pairs[0].second;
+        rightTrack = pairs[1].first;
+        rightClip = pairs[1].second;
+        if (leftTrack != rightTrack || !isValidClipIndex(leftTrack, leftClip)
+            || !isValidClipIndex(rightTrack, rightClip))
+            return false;
+        const drift::Clip &a = m_project.tracks().at(leftTrack).clips.at(leftClip);
+        const drift::Clip &b = m_project.tracks().at(rightTrack).clips.at(rightClip);
+        if (a.timelineStart <= b.timelineStart)
+            return drift::clipsCanMerge(a, b);
+        return drift::clipsCanMerge(b, a);
+    }
+
+    if (pairs.size() == 1) {
+        const int trackIndex = pairs[0].first;
+        const int clipIndex = pairs[0].second;
+        if (!isValidClipIndex(trackIndex, clipIndex))
+            return false;
+        const drift::Track &track = m_project.tracks().at(trackIndex);
+        const drift::Clip &left = track.clips.at(clipIndex);
+        // Prefer merging with the clip that starts at this clip's end.
+        for (int i = 0; i < track.clips.size(); ++i) {
+            if (i == clipIndex)
+                continue;
+            if (drift::clipsCanMerge(left, track.clips.at(i)))
+                return true;
+        }
+        return false;
+    }
+
+    return false;
+}
+
+void AppController::mergeSelectedClips()
+{
+    int trackIndex = -1;
+    int leftIndex = -1;
+    int rightIndex = -1;
+
+    QList<QPair<int, int>> pairs = m_selection;
+    if (pairs.isEmpty() && m_selectedTrack >= 0 && m_selectedClip >= 0)
+        pairs.append(qMakePair(m_selectedTrack, m_selectedClip));
+
+    if (pairs.size() == 2) {
+        if (pairs[0].first != pairs[1].first)
+            return;
+        trackIndex = pairs[0].first;
+        if (!isValidClipIndex(trackIndex, pairs[0].second) || !isValidClipIndex(trackIndex, pairs[1].second))
+            return;
+        const drift::Clip &a = m_project.tracks().at(trackIndex).clips.at(pairs[0].second);
+        const drift::Clip &b = m_project.tracks().at(trackIndex).clips.at(pairs[1].second);
+        if (a.timelineStart <= b.timelineStart) {
+            leftIndex = pairs[0].second;
+            rightIndex = pairs[1].second;
+        } else {
+            leftIndex = pairs[1].second;
+            rightIndex = pairs[0].second;
+        }
+    } else if (pairs.size() == 1) {
+        trackIndex = pairs[0].first;
+        leftIndex = pairs[0].second;
+        if (!isValidClipIndex(trackIndex, leftIndex))
+            return;
+        const drift::Track &track = m_project.tracks().at(trackIndex);
+        const drift::Clip &left = track.clips.at(leftIndex);
+        for (int i = 0; i < track.clips.size(); ++i) {
+            if (i == leftIndex)
+                continue;
+            if (drift::clipsCanMerge(left, track.clips.at(i))) {
+                rightIndex = i;
+                break;
+            }
+        }
+        if (rightIndex < 0)
+            return;
+    } else {
+        return;
+    }
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    const drift::Clip &left = track.clips.at(leftIndex);
+    const drift::Clip &right = track.clips.at(rightIndex);
+    if (!drift::clipsCanMerge(left, right))
+        return;
+
+    const drift::Project before = m_project;
+    drift::Clip merged = drift::mergeClips(left, right);
+    // Remove right first if its index is higher so leftIndex stays valid.
+    if (rightIndex > leftIndex) {
+        track.clips.removeAt(rightIndex);
+        track.clips[leftIndex] = merged;
+    } else {
+        track.clips.removeAt(leftIndex);
+        track.clips[rightIndex] = merged;
+        leftIndex = rightIndex;
+    }
+
+    pushProjectEdit(before, QStringLiteral("Clips merged"));
+    finishEdit(QStringLiteral("Clips merged"));
+    selectClip(trackIndex, leftIndex);
 }
 
 void AppController::setClipFade(int trackIndex, int clipIndex, double fadeInSeconds, double fadeOutSeconds)
@@ -2658,6 +2886,8 @@ void AppController::resetClipTransform(int trackIndex, int clipIndex)
     clip.transformW = {};
     clip.transformH = {};
     clip.rotation = {};
+    clip.flipH = false;
+    clip.flipV = false;
     setClipLayoutPixels(clip, 0, 0, m_project.width(), m_project.height());
     pushProjectEdit(before, QStringLiteral("Reset transform"));
     finishEdit(QStringLiteral("Transform reset"));
@@ -3035,6 +3265,8 @@ void AppController::triggerAction(const QString &actionId)
         duplicateSelectedClip();
     else if (actionId == QStringLiteral("split"))
         splitAtPlayhead();
+    else if (actionId == QStringLiteral("merge"))
+        mergeSelectedClips();
     else if (actionId == QStringLiteral("copy"))
         copySelection();
     else if (actionId == QStringLiteral("cut"))

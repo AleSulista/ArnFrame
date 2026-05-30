@@ -28,4 +28,14 @@ TimeUs clipDurationForAsset(const MediaAsset *asset);
 
 TimeUs sourceDurationForClip(const Project &project, const Clip &clip);
 
+// Split `head` at `offset` from its timeline start into head + tail (same reverse/speed).
+// Caller assigns `tail.id`. Returns false if the offset is too close to either end.
+bool splitClipAtOffset(Clip &head, Clip &tail, TimeUs offset);
+
+// True when `left` ends where `right` begins, shares media + reverse/speed, and source ranges abut.
+bool clipsCanMerge(const Clip &left, const Clip &right);
+
+// Merge abutting clips. Keeps left transforms/effects; takes right's fade-out.
+Clip mergeClips(const Clip &left, const Clip &right);
+
 } // namespace drift
