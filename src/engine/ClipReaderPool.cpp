@@ -61,8 +61,27 @@ ClipReaderWorker *ClipReaderPool::ensureWorker(std::map<QString, std::unique_ptr
     return it->second->worker;
 }
 
-QImage ClipReaderPool::readVideoFrame(const QString &path, drift::TimeUs sourceUs, int targetWidth,
-                                      int targetHeight)
+void ClipReaderPool::warmVideoFrames(const QList<VideoRequest> &requests)
+{
+    for (const VideoRequest &request : requests) {
+        if (request.path.isEmpty())
+            continue;
+
+        ClipReaderWorker *worker = nullptr;
+        {
+            QMutexLocker lock(&m_mutex);
+            worker = ensureWorker(m_videoWorkers, request.path);
+        }
+        // Fire and forget: the worker decodes into its reader's cache on its own
+        // thread while we queue the next one.
+        QMetaObject::invokeMethod(worker, "decodeVideo", Qt::QueuedConnection,
+                                  Q_ARG(drift::TimeUs, request.sourceUs), Q_ARG(int, request.maxWidth),
+                                  Q_ARG(int, request.maxHeight));
+    }
+}
+
+QImage ClipReaderPool::readVideoFrame(const QString &path, drift::TimeUs sourceUs, int maxWidth,
+                                      int maxHeight)
 {
     if (path.isEmpty())
         return {};
@@ -78,11 +97,13 @@ QImage ClipReaderPool::readVideoFrame(const QString &path, drift::TimeUs sourceU
 
     QImage frame;
     QMetaObject::invokeMethod(worker, "decodeVideo", Qt::BlockingQueuedConnection, Q_RETURN_ARG(QImage, frame),
-                              Q_ARG(drift::TimeUs, sourceUs), Q_ARG(int, targetWidth), Q_ARG(int, targetHeight));
+                              Q_ARG(drift::TimeUs, sourceUs), Q_ARG(int, maxWidth), Q_ARG(int, maxHeight));
 
-    const drift::TimeUs nextUs = sourceUs + drift::kUsPerSecond / 30;
-    QMetaObject::invokeMethod(worker, "prefetchVideo", Qt::QueuedConnection, Q_ARG(drift::TimeUs, nextUs),
-                              Q_ARG(int, targetWidth), Q_ARG(int, targetHeight));
+    // Decode one frame beyond the current position while the caller composites
+    // this one. The reader knows the source frame duration; the old code guessed
+    // a hardcoded 1/30 s, which missed on every clip that isn't 30 fps.
+    QMetaObject::invokeMethod(worker, "prefetchNextVideo", Qt::QueuedConnection, Q_ARG(int, maxWidth),
+                              Q_ARG(int, maxHeight));
 
     return frame;
 }
@@ -104,20 +125,6 @@ int ClipReaderPool::readAudioInterleaved(const QString &path, drift::TimeUs sour
                               Q_ARG(drift::TimeUs, sourceStartUs), Q_ARG(int, sampleCount),
                               Q_ARG(int, outputSampleRate), Q_ARG(float *, interleavedStereoOut));
     return written;
-}
-
-void ClipReaderPool::prefetchVideo(const QString &path, drift::TimeUs sourceUs, int targetWidth, int targetHeight)
-{
-    if (path.isEmpty())
-        return;
-
-    ClipReaderWorker *worker = nullptr;
-    {
-        QMutexLocker lock(&m_mutex);
-        worker = ensureWorker(m_videoWorkers, path);
-    }
-    QMetaObject::invokeMethod(worker, "prefetchVideo", Qt::QueuedConnection, Q_ARG(drift::TimeUs, sourceUs),
-                              Q_ARG(int, targetWidth), Q_ARG(int, targetHeight));
 }
 
 void ClipReaderPool::retainActivePaths(const QSet<QString> &videoPaths, const QSet<QString> &audioPaths)

@@ -15,6 +15,20 @@ class GpuEffectExecutor
 public:
     static GpuEffectExecutor &instance();
 
+    // One effect in a chain. `gpu` must outlive the applyChain call (catalog entries do).
+    struct ChainStep
+    {
+        QString cacheKey;
+        const drift::GpuEffectDefinition *gpu = nullptr;
+        QMap<QString, QVariant> parameters;
+    };
+
+    // Run a whole effect chain with a single upload and a single readback, keeping
+    // intermediate results in GPU framebuffers. Applying effects one at a time
+    // costs an upload plus a blocking glReadPixels per effect, which is what made
+    // stacked effects collapse playback.
+    QImage applyChain(const QList<ChainStep> &steps, const QImage &input, drift::TimeUs timeUs);
+
     // Run a GPU pipeline over N source images. sources[i] is bound wherever a pass declares
     // a source_texture with index i; sources[0] is also u_currentTexture / u_fromTexture and
     // sources[1] is u_toTexture. cacheKey namespaces the compiled-program cache — callers must

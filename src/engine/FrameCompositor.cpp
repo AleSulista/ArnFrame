@@ -4,6 +4,7 @@
 #include "CompositorFrameHistory.h"
 #include "EffectCatalog.h"
 #include "EffectProcessor.h"
+#include "GpuCompositor.h"
 #include "GpuEffectExecutor.h"
 #include "MaskApplier.h"
 #include "TransitionCatalog.h"
@@ -12,37 +13,20 @@
 #include "core/Transition.h"
 
 #include <QColor>
+#include <QFileInfo>
 #include <QFont>
 #include <QFontMetrics>
 #include <QImageReader>
+#include <QMutex>
 #include <QPainter>
 #include <QPainterPath>
 #include <QSet>
 #include <cmath>
 #include <QtMath>
 
-namespace {
+#include <unordered_map>
 
-QPainter::CompositionMode toQtComposition(drift::BlendMode mode)
-{
-    switch (mode) {
-    case drift::BlendMode::Multiply:
-        return QPainter::CompositionMode_Multiply;
-    case drift::BlendMode::Screen:
-        return QPainter::CompositionMode_Screen;
-    case drift::BlendMode::Overlay:
-        return QPainter::CompositionMode_Overlay;
-    case drift::BlendMode::Add:
-        return QPainter::CompositionMode_Plus;
-    case drift::BlendMode::Darken:
-        return QPainter::CompositionMode_Darken;
-    case drift::BlendMode::Lighten:
-        return QPainter::CompositionMode_Lighten;
-    case drift::BlendMode::Normal:
-        break;
-    }
-    return QPainter::CompositionMode_SourceOver;
-}
+namespace {
 
 void collectActivePaths(const drift::Project *project, drift::TimeUs timelineUs, QSet<QString> &videoPaths,
                         QSet<QString> &audioPaths)
@@ -71,6 +55,33 @@ void collectActivePaths(const drift::Project *project, drift::TimeUs timelineUs,
     }
 }
 
+// Every video frame this composite will need, so the readers can decode them
+// concurrently on their own threads instead of one clip at a time on ours.
+QList<ClipReaderPool::VideoRequest> collectVideoRequests(const drift::Project *project,
+                                                         drift::TimeUs timelineUs, int maxWidth,
+                                                         int maxHeight)
+{
+    QList<ClipReaderPool::VideoRequest> requests;
+    if (!project)
+        return requests;
+
+    for (const drift::Track &track : project->tracks()) {
+        if (track.hidden || track.type == drift::TrackType::Audio)
+            continue;
+
+        for (const drift::Clip &clip : track.clips) {
+            if (clip.type != drift::ClipType::Video || clip.path.isEmpty())
+                continue;
+            if (!clip.containsTime(timelineUs))
+                continue;
+
+            requests.append(ClipReaderPool::VideoRequest{clip.path, clip.timelineToSourceUs(timelineUs),
+                                                         maxWidth, maxHeight});
+        }
+    }
+    return requests;
+}
+
 const drift::Effect *findTimeEchoEffect(const QList<drift::Effect> &effects)
 {
     for (const drift::Effect &effect : effects) {
@@ -91,23 +102,78 @@ QList<drift::Effect> effectsExcludingTimeEcho(const QList<drift::Effect> &effect
     return filtered;
 }
 
-QImage decodeClipMediaFrame(const drift::Clip &clip, drift::TimeUs timelineUs, int width, int height)
+// Still images never change frame to frame, but decodeClipMediaFrame used to
+// re-read and re-decode the file on every composited frame. Cache the scaled
+// result per (path, size).
+QImage decodedStillImage(const QString &path, int maxWidth, int maxHeight)
+{
+    // Keyed on mtime and size as well as path: the same path can hold different
+    // pixels over time, and serving a stale decode would silently render the old
+    // image.
+    struct Key
+    {
+        QString path;
+        qint64 mtimeMs = 0;
+        qint64 fileSize = 0;
+        int w = 0;
+        int h = 0;
+        bool operator==(const Key &other) const
+        {
+            return path == other.path && mtimeMs == other.mtimeMs && fileSize == other.fileSize
+                   && w == other.w && h == other.h;
+        }
+    };
+    struct KeyHash
+    {
+        size_t operator()(const Key &k) const
+        {
+            return qHash(k.path) ^ size_t(k.mtimeMs) ^ (size_t(k.fileSize) << 7)
+                   ^ (size_t(k.w) << 1) ^ (size_t(k.h) << 17);
+        }
+    };
+
+    static QMutex mutex;
+    static std::unordered_map<Key, QImage, KeyHash> cache;
+
+    const QFileInfo info(path);
+    const Key key{path, info.lastModified().toMSecsSinceEpoch(), info.size(), maxWidth, maxHeight};
+    {
+        QMutexLocker lock(&mutex);
+        const auto it = cache.find(key);
+        if (it != cache.end())
+            return it->second;
+    }
+
+    QImageReader reader(path);
+    QImage image = reader.read();
+    if (image.isNull())
+        return {};
+    image = image.convertToFormat(QImage::Format_RGBA8888)
+                .scaled(maxWidth, maxHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
+    QMutexLocker lock(&mutex);
+    if (cache.size() > 32)
+        cache.clear();
+    cache.emplace(key, image);
+    return image;
+}
+
+// maxWidth/maxHeight bound the decode buffer. They are deliberately *not* the
+// clip's layout rect: the layout rect moves every frame under a scale keyframe,
+// and a changing decode size invalidates the decoder's frame cache and forces a
+// keyframe seek per frame. Decoding to a stable, canvas-bounded size and letting
+// the draw step scale is both stable and cheaper.
+QImage decodeClipMediaFrame(const drift::Clip &clip, drift::TimeUs timelineUs, int maxWidth, int maxHeight)
 {
     if (clip.path.isEmpty())
         return {};
 
-    if (clip.type == drift::ClipType::Image) {
-        QImageReader reader(clip.path);
-        QImage image = reader.read();
-        if (image.isNull())
-            return {};
-        return image.convertToFormat(QImage::Format_RGBA8888)
-            .scaled(width, height, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    }
+    if (clip.type == drift::ClipType::Image)
+        return decodedStillImage(clip.path, maxWidth, maxHeight);
 
     if (clip.type == drift::ClipType::Video) {
         const drift::TimeUs sourceUs = clip.timelineToSourceUs(timelineUs);
-        return ClipReaderPool::instance().readVideoFrame(clip.path, sourceUs, width, height);
+        return ClipReaderPool::instance().readVideoFrame(clip.path, sourceUs, maxWidth, maxHeight);
     }
 
     return {};
@@ -115,11 +181,13 @@ QImage decodeClipMediaFrame(const drift::Clip &clip, drift::TimeUs timelineUs, i
 
 QImage shapeImageForClip(const drift::Clip &clip, int canvasWidth, int canvasHeight);
 
-QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int width, int height, int projectFps,
-                    int maxTimeEchoHistoryFrames)
+// maxWidth/maxHeight bound the decoded frame; the returned image may be smaller
+// (source-limited) and is scaled to the clip's layout rect at draw time.
+QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int maxWidth, int maxHeight,
+                    int projectFps, int maxTimeEchoHistoryFrames)
 {
     if (clip.type == drift::ClipType::Shape)
-        return shapeImageForClip(clip, width, height);
+        return shapeImageForClip(clip, maxWidth, maxHeight);
 
     if (clip.path.isEmpty())
         return {};
@@ -146,7 +214,7 @@ QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int width
         QList<QImage> samples;
         samples.reserve(frameCount + 1);
 
-        const QImage current = decodeClipMediaFrame(clip, timelineUs, width, height);
+        const QImage current = decodeClipMediaFrame(clip, timelineUs, maxWidth, maxHeight);
         if (current.isNull())
             return {};
         samples.append(current);
@@ -156,25 +224,25 @@ QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int width
             if (pastClipUs < 0)
                 break;
             const drift::TimeUs pastTimelineUs = clip.timelineStart + pastClipUs;
-            const QImage past = decodeClipMediaFrame(clip, pastTimelineUs, width, height);
+            const QImage past = decodeClipMediaFrame(clip, pastTimelineUs, maxWidth, maxHeight);
             if (!past.isNull())
                 samples.append(past);
         }
 
         image = CompositorFrameHistory::applyTimeEcho(samples, decay, blendMode);
     } else {
-        image = decodeClipMediaFrame(clip, timelineUs, width, height);
+        image = decodeClipMediaFrame(clip, timelineUs, maxWidth, maxHeight);
     }
 
-    if (image.isNull() || otherEffects.isEmpty()) {
-        if (!image.isNull() && clip.mask.shape != drift::MaskShape::None)
-            image = drift::applyMask(image, clip.mask, width, height);
+    if (image.isNull())
         return image;
-    }
 
-    image = EffectProcessor::applyEffects(image, otherEffects, clipTimeUs);
+    // Mask geometry is normalized, so it applies at whatever size the decode
+    // actually produced.
+    if (!otherEffects.isEmpty())
+        image = EffectProcessor::applyEffects(image, otherEffects, clipTimeUs);
     if (clip.mask.shape != drift::MaskShape::None)
-        image = drift::applyMask(image, clip.mask, width, height);
+        image = drift::applyMask(image, clip.mask, image.width(), image.height());
     return image;
 }
 
@@ -286,129 +354,6 @@ void layoutRectForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
         *rotationOut = transformValue(clip.rotation, relative, 0.0);
 }
 
-// isolated: draw into a standalone transparent layer, where the clip's blend mode has nothing to
-// composite against. Used for transition sides, which the shader mixes itself.
-void drawClipFrame(QPainter &painter, const QImage &frame, const drift::Clip &clip, drift::TimeUs timelineUs,
-                   int projectWidth, int projectHeight, double renderScale, bool isolated = false)
-{
-    double x = 0.0;
-    double y = 0.0;
-    double w = 0.0;
-    double h = 0.0;
-    double rotation = 0.0;
-    layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, 1.0, &x, &y, &w, &h,
-                      &rotation);
-    if (w <= 0.5 || h <= 0.5 || frame.isNull())
-        return;
-
-    const QImage drawn = (frame.width() == qRound(w) && frame.height() == qRound(h))
-                             ? frame
-                             : frame.scaled(qMax(1, qRound(w)), qMax(1, qRound(h)), Qt::IgnoreAspectRatio,
-                                            Qt::SmoothTransformation);
-
-    painter.save();
-    painter.setOpacity(opacityForClip(clip, timelineUs));
-    painter.setCompositionMode(isolated ? QPainter::CompositionMode_SourceOver
-                                        : toQtComposition(clip.blendMode));
-    painter.translate(x + w * 0.5, y + h * 0.5);
-    painter.rotate(rotation);
-    painter.scale(clip.flipH ? -1.0 : 1.0, clip.flipV ? -1.0 : 1.0);
-    painter.drawImage(QPointF(-w * 0.5, -h * 0.5), drawn);
-    painter.restore();
-}
-
-void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth,
-                  int projectHeight, double renderScale, bool isolated = false);
-
-// Render one clip into its own transparent, canvas-sized RGBA layer. Transitions need both sides in
-// the same UV space for the shader to mix them, which is also what lets text clips and transformed
-// clips take part in a transition at all.
-QImage renderClipLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth, int projectHeight,
-                       double renderScale, int canvasWidth, int canvasHeight, int projectFps,
-                       int maxTimeEchoHistoryFrames)
-{
-    QImage layer(canvasWidth, canvasHeight, QImage::Format_RGBA8888);
-    layer.fill(Qt::transparent);
-
-    QPainter p(&layer);
-    p.setRenderHint(QPainter::SmoothPixmapTransform);
-
-    if (clip.type == drift::ClipType::Text) {
-        drawTextClip(p, clip, timelineUs, projectWidth, projectHeight, renderScale, /*isolated=*/true);
-        p.end();
-        return layer;
-    }
-
-    double x = 0.0;
-    double y = 0.0;
-    double w = 0.0;
-    double h = 0.0;
-    layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, 1.0, &x, &y, &w, &h);
-    const int layoutW = qMax(1, qRound(w));
-    const int layoutH = qMax(1, qRound(h));
-
-    QImage frame;
-    if (clip.type == drift::ClipType::Shape) {
-        frame = shapeImageForClip(clip, layoutW, layoutH);
-        if (!frame.isNull() && clip.mask.shape != drift::MaskShape::None)
-            frame = drift::applyMask(frame, clip.mask, layoutW, layoutH);
-    } else {
-        frame = imageForClip(clip, timelineUs, layoutW, layoutH, projectFps, maxTimeEchoHistoryFrames);
-    }
-
-    // A null frame leaves the layer transparent, which is what a shader sampling that side sees.
-    if (!frame.isNull())
-        drawClipFrame(p, frame, clip, timelineUs, projectWidth, projectHeight, renderScale,
-                      /*isolated=*/true);
-    p.end();
-    return layer;
-}
-
-QImage cpuCrossfade(const QImage &layerA, const QImage &layerB, double progress)
-{
-    const double p = qBound(0.0, progress, 1.0);
-    QImage out(layerA.size(), QImage::Format_RGBA8888);
-    out.fill(Qt::transparent);
-    QPainter painter(&out);
-    painter.setOpacity(1.0 - p);
-    painter.drawImage(0, 0, layerA);
-    painter.setOpacity(p);
-    painter.drawImage(0, 0, layerB);
-    painter.end();
-    return out;
-}
-
-void drawTransitionFrame(QPainter &painter, const drift::Transition &transition, const drift::Clip &fromClip,
-                         const drift::Clip &toClip, drift::TimeUs timelineUs, drift::TimeUs windowStart,
-                         drift::TimeUs windowEnd, int projectWidth, int projectHeight, double renderScale,
-                         int canvasWidth, int canvasHeight, int projectFps, int maxTimeEchoHistoryFrames)
-{
-    const double progress = drift::transitionProgress(timelineUs, windowStart, windowEnd);
-
-    const QImage layerA = renderClipLayer(fromClip, timelineUs, projectWidth, projectHeight, renderScale,
-                                          canvasWidth, canvasHeight, projectFps, maxTimeEchoHistoryFrames);
-    const QImage layerB = renderClipLayer(toClip, timelineUs, projectWidth, projectHeight, renderScale,
-                                          canvasWidth, canvasHeight, projectFps, maxTimeEchoHistoryFrames);
-
-    QImage result;
-    bool ok = false;
-    if (const TransitionPresetEntry *def = transitionDefForId(transition.kindId); def && def->gpu.valid) {
-        // Time is measured from the start of the transition window so a shader's u_time is
-        // a pure function of the window position, like u_progress.
-        result = GpuEffectExecutor::instance().apply(
-            QLatin1String(kTransitionCacheKeyPrefix) + transition.kindId, def->gpu, {layerA, layerB},
-            resolvedTransitionParameters(transition, *def), timelineUs - windowStart, progress, &ok);
-    }
-    if (!ok || result.isNull())
-        result = cpuCrossfade(layerA, layerB, progress);
-
-    painter.save();
-    painter.setOpacity(1.0);
-    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
-    painter.drawImage(0, 0, result);
-    painter.restore();
-}
-
 void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, int w, int h, double scale,
                     double renderScale)
 {
@@ -445,90 +390,7 @@ void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, i
     }
 }
 
-void drawTextClip(QPainter &painter, const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth,
-                  int projectHeight, double renderScale, bool isolated)
-{
-    const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
-    if (text.isEmpty())
-        return;
-
-    double x = 0.0;
-    double y = 0.0;
-    double w = 0.0;
-    double h = 0.0;
-    double rotation = 0.0;
-    layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, 1.0, &x, &y, &w, &h, &rotation);
-    if (w <= 0.5 || h <= 0.5)
-        return;
-
-    painter.save();
-    painter.setOpacity(opacityForClip(clip, timelineUs));
-    painter.setCompositionMode(isolated ? QPainter::CompositionMode_SourceOver
-                                        : toQtComposition(clip.blendMode));
-    painter.translate(x + w * 0.5, y + h * 0.5);
-    painter.rotate(rotation);
-    painter.scale(clip.flipH ? -1.0 : 1.0, clip.flipV ? -1.0 : 1.0);
-    drawStyledText(painter, clip, text, qMax(1, qRound(w)), qMax(1, qRound(h)), 1.0, renderScale);
-    painter.restore();
-}
-
 // Fast separable box blur (two passes ≈ gaussian) over an RGBA8888 image.
-QImage boxBlurRgba(const QImage &src, int radius)
-{
-    if (src.isNull() || radius <= 0)
-        return src;
-
-    QImage image = src.convertToFormat(QImage::Format_RGBA8888);
-    const int w = image.width();
-    const int h = image.height();
-    const int r = qMin(radius, qMax(1, qMin(w, h) / 2));
-    const int window = r * 2 + 1;
-
-    auto blurPass = [&](const QImage &in, bool horizontal) {
-        QImage out(in.size(), QImage::Format_RGBA8888);
-        const int lines = horizontal ? h : w;
-        const int span = horizontal ? w : h;
-        for (int line = 0; line < lines; ++line) {
-            int sumR = 0, sumG = 0, sumB = 0, sumA = 0;
-            auto sample = [&](int i) -> const uchar * {
-                const int cx = horizontal ? i : line;
-                const int cy = horizontal ? line : i;
-                return in.constScanLine(cy) + cx * 4;
-            };
-            auto put = [&](int i, int rr, int gg, int bb, int aa) {
-                const int cx = horizontal ? i : line;
-                const int cy = horizontal ? line : i;
-                uchar *px = out.scanLine(cy) + cx * 4;
-                px[0] = static_cast<uchar>(rr / window);
-                px[1] = static_cast<uchar>(gg / window);
-                px[2] = static_cast<uchar>(bb / window);
-                px[3] = static_cast<uchar>(aa / window);
-            };
-            for (int k = -r; k <= r; ++k) {
-                const uchar *px = sample(qBound(0, k, span - 1));
-                sumR += px[0];
-                sumG += px[1];
-                sumB += px[2];
-                sumA += px[3];
-            }
-            for (int i = 0; i < span; ++i) {
-                put(i, sumR, sumG, sumB, sumA);
-                const uchar *addPx = sample(qBound(0, i + r + 1, span - 1));
-                const uchar *subPx = sample(qBound(0, i - r, span - 1));
-                sumR += addPx[0] - subPx[0];
-                sumG += addPx[1] - subPx[1];
-                sumB += addPx[2] - subPx[2];
-                sumA += addPx[3] - subPx[3];
-            }
-        }
-        return out;
-    };
-
-    image = blurPass(image, true);
-    image = blurPass(image, false);
-    return image;
-}
-
 // The topmost active video/image frame at this time, used to derive a blur fill.
 QImage topmostVisualFrame(const drift::Project &project, drift::TimeUs timelineUs, int width, int height)
 {
@@ -549,68 +411,146 @@ QImage topmostVisualFrame(const drift::Project &project, drift::TimeUs timelineU
     return {};
 }
 
-// Fills the canvas behind all clips from the project's background setting.
-void fillBackground(QPainter &painter, const drift::Project &project, drift::TimeUs timelineUs, int width,
-                    int height)
+// ---------------------------------------------------------------------------
+// GPU scene building
+//
+// The pixels a clip contributes before the GPU takes over: decode, plus the
+// time_echo trail (which needs several decoded frames). Effects and the mask are
+// deliberately left to the GPU.
+QImage gpuSourceForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int maxWidth, int maxHeight,
+                        int projectFps, int maxTimeEchoHistoryFrames)
 {
-    const drift::Background &bg = project.background();
+    if (clip.path.isEmpty())
+        return {};
 
-    if (bg.kind == drift::BackgroundKind::Blur) {
-        const QImage frame = topmostVisualFrame(project, timelineUs, width, height);
-        if (!frame.isNull()) {
-            const QImage cover = frame.convertToFormat(QImage::Format_RGBA8888)
-                                     .scaled(width, height, Qt::KeepAspectRatioByExpanding,
-                                             Qt::SmoothTransformation);
-            const QImage blurred = boxBlurRgba(cover, qMax(1, static_cast<int>(bg.blurStrength)));
-            const int dx = (blurred.width() - width) / 2;
-            const int dy = (blurred.height() - height) / 2;
-            painter.fillRect(0, 0, width, height, Qt::black);
-            painter.drawImage(QPoint(0, 0), blurred, QRect(dx, dy, width, height));
-            return;
-        }
-        painter.fillRect(0, 0, width, height, Qt::black);
-        return;
+    const drift::Effect *timeEcho = findTimeEchoEffect(clip.effects);
+    if (!timeEcho)
+        return decodeClipMediaFrame(clip, timelineUs, maxWidth, maxHeight);
+
+    const EffectPresetEntry *def = effectDefForId(timeEcho->catalogId);
+    if (!def)
+        return {};
+
+    const QMap<QString, QVariant> params = resolvedEffectParameters(*timeEcho, *def);
+    int frameCount = qBound(1, params.value(QStringLiteral("frames"), 4).toInt(), 10);
+    if (maxTimeEchoHistoryFrames >= 0)
+        frameCount = qMin(frameCount, maxTimeEchoHistoryFrames);
+    const double decay = qBound(0.0, params.value(QStringLiteral("decay"), 0.55).toDouble(), 1.0);
+    const auto blendMode =
+        CompositorFrameHistory::parseEchoBlendMode(params.value(QStringLiteral("blendMode")).toString());
+
+    const drift::TimeUs clipTimeUs = timelineUs - clip.timelineStart;
+    const drift::TimeUs frameStepUs = drift::frameDurationUs(projectFps);
+    QList<QImage> samples;
+    samples.reserve(frameCount + 1);
+
+    const QImage current = decodeClipMediaFrame(clip, timelineUs, maxWidth, maxHeight);
+    if (current.isNull())
+        return {};
+    samples.append(current);
+
+    for (int i = 1; i <= frameCount; ++i) {
+        const drift::TimeUs pastClipUs = clipTimeUs - static_cast<drift::TimeUs>(i) * frameStepUs;
+        if (pastClipUs < 0)
+            break;
+        const QImage past =
+            decodeClipMediaFrame(clip, clip.timelineStart + pastClipUs, maxWidth, maxHeight);
+        if (!past.isNull())
+            samples.append(past);
     }
 
-    painter.fillRect(0, 0, width, height, bg.color.isValid() ? bg.color : QColor(Qt::black));
+    return CompositorFrameHistory::applyTimeEcho(samples, decay, blendMode);
 }
 
-} // namespace
-
-QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs) const
+// Text is QPainter-rasterized into its own layer image; the GPU then rotates,
+// scales and blends it like any other layer.
+QImage textImageForClip(const drift::Clip &clip, int layoutW, int layoutH, double renderScale)
 {
-    return compositeAt(timelineUs, RenderOptions{});
+    const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
+    if (text.isEmpty())
+        return {};
+
+    QImage image(qMax(1, layoutW), qMax(1, layoutH), QImage::Format_RGBA8888);
+    image.fill(Qt::transparent);
+
+    QPainter p(&image);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setRenderHint(QPainter::TextAntialiasing);
+    // drawStyledText centres on the origin, so shift to the image centre.
+    p.translate(image.width() * 0.5, image.height() * 0.5);
+    drawStyledText(p, clip, text, image.width(), image.height(), 1.0, renderScale);
+    p.end();
+    return image;
 }
 
-QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs, const RenderOptions &options) const
+GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth,
+                       int projectHeight, double renderScale, int canvasWidth, int canvasHeight,
+                       int projectFps, int maxTimeEchoHistoryFrames)
 {
-    if (!m_project)
-        return {};
+    GpuLayer layer;
 
-    const int projectWidth = m_project->width();
-    const int projectHeight = m_project->height();
-    const double renderScale = qBound(0.1, options.previewScale, 1.0);
-    const int width = qMax(1, static_cast<int>(std::lround(projectWidth * renderScale)));
-    const int height = qMax(1, static_cast<int>(std::lround(projectHeight * renderScale)));
-    if (width <= 0 || height <= 0)
-        return {};
+    double x = 0.0;
+    double y = 0.0;
+    double w = 0.0;
+    double h = 0.0;
+    double rotation = 0.0;
+    layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, 1.0, &x, &y, &w, &h,
+                      &rotation);
+    if (w <= 0.5 || h <= 0.5)
+        return layer;
 
-    QSet<QString> videoPaths;
-    QSet<QString> audioPaths;
-    collectActivePaths(m_project, timelineUs, videoPaths, audioPaths);
-    ClipReaderPool::instance().retainActivePaths(videoPaths, audioPaths);
+    const int layoutW = qMax(1, qRound(w));
+    const int layoutH = qMax(1, qRound(h));
 
-    QImage canvas(width, height, QImage::Format_RGBA8888);
-    canvas.fill(Qt::transparent);
+    if (clip.type == drift::ClipType::Text) {
+        layer.source = textImageForClip(clip, layoutW, layoutH, renderScale);
+    } else if (clip.type == drift::ClipType::Shape) {
+        layer.source = shapeImageForClip(clip, layoutW, layoutH);
+    } else {
+        // Bounded by the canvas, not the layout rect — see decodeClipMediaFrame.
+        layer.source = gpuSourceForClip(clip, timelineUs, canvasWidth, canvasHeight, projectFps,
+                                        maxTimeEchoHistoryFrames);
+        layer.effects = effectsExcludingTimeEcho(clip.effects);
+    }
 
-    QPainter painter(&canvas);
-    painter.setRenderHint(QPainter::SmoothPixmapTransform);
-    fillBackground(painter, *m_project, timelineUs, width, height);
+    if (layer.source.isNull())
+        return layer;
 
-    // Tracks are ordered top-to-bottom in the timeline (index 0 is the topmost
-    // track), and the topmost track composites in front. Draw from the last
-    // track up to index 0 so index 0 lands on top.
-    const QList<drift::Track> &tracks = m_project->tracks();
+    layer.mask = clip.mask;
+    layer.rect = QRectF(x, y, w, h);
+    layer.rotation = rotation;
+    layer.flipH = clip.flipH;
+    layer.flipV = clip.flipV;
+    layer.opacity = opacityForClip(clip, timelineUs);
+    layer.clipTimeUs = timelineUs - clip.timelineStart;
+    layer.valid = true;
+    return layer;
+}
+
+GpuScene buildGpuScene(const drift::Project &project, drift::TimeUs timelineUs, int width, int height,
+                       double renderScale, const FrameCompositor::RenderOptions &options)
+{
+    GpuScene scene;
+    scene.canvasSize = QSize(width, height);
+
+    const int projectWidth = project.width();
+    const int projectHeight = project.height();
+    const int fps = project.fps();
+
+    const drift::Background &bg = project.background();
+    if (bg.kind == drift::BackgroundKind::Blur) {
+        scene.backgroundColor = Qt::black;
+        scene.backgroundBlur = true;
+        scene.blurStrengthPx = bg.blurStrength;
+        // The topmost visual frame, decoded once — the CPU path decoded it a
+        // second time here, effects and all.
+        scene.blurSource = topmostVisualFrame(project, timelineUs, width, height);
+    } else {
+        scene.backgroundColor = bg.color.isValid() ? bg.color : QColor(Qt::black);
+    }
+
+    // Track 0 is topmost and composites in front, so emit back-to-front.
+    const QList<drift::Track> &tracks = project.tracks();
     for (int ti = tracks.size() - 1; ti >= 0; --ti) {
         const drift::Track &track = tracks.at(ti);
         if (track.hidden || track.type == drift::TrackType::Audio)
@@ -625,51 +565,110 @@ QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs, const RenderOption
             const drift::Clip *fromClip = drift::clipById(track, activeTransition->fromClipId);
             const drift::Clip *toClip = drift::clipById(track, activeTransition->toClipId);
             if (fromClip && toClip) {
-                drawTransitionFrame(painter, *activeTransition, *fromClip, *toClip, timelineUs, transitionStart,
-                                    transitionEnd, projectWidth, projectHeight, renderScale, width, height,
-                                    m_project->fps(), options.maxTimeEchoHistoryFrames);
+                GpuItem item;
+                item.isTransition = true;
+                item.from = buildGpuLayer(*fromClip, timelineUs, projectWidth, projectHeight, renderScale,
+                                          width, height, fps, options.maxTimeEchoHistoryFrames);
+                item.to = buildGpuLayer(*toClip, timelineUs, projectWidth, projectHeight, renderScale,
+                                        width, height, fps, options.maxTimeEchoHistoryFrames);
+                item.progress = drift::transitionProgress(timelineUs, transitionStart, transitionEnd);
+                // Time is measured from the start of the transition window so a
+                // shader's u_time is a pure function of window position, like
+                // u_progress.
+                item.transitionTimeUs = timelineUs - transitionStart;
+                if (const TransitionPresetEntry *def = transitionDefForId(activeTransition->kindId);
+                    def && def->gpu.valid) {
+                    item.transitionKey = QLatin1String(kTransitionCacheKeyPrefix) + activeTransition->kindId;
+                    item.transitionGpu = &def->gpu;
+                    item.transitionParams = resolvedTransitionParameters(*activeTransition, *def);
+                }
+                scene.items.append(item);
+
                 transitionClipIds.insert(fromClip->id);
                 transitionClipIds.insert(toClip->id);
             }
         }
 
         for (const drift::Clip &clip : track.clips) {
-            if (transitionClipIds.contains(clip.id))
+            if (transitionClipIds.contains(clip.id) || !clip.containsTime(timelineUs))
                 continue;
 
-            if (!clip.containsTime(timelineUs))
-                continue;
-
-            if (clip.type == drift::ClipType::Text) {
-                drawTextClip(painter, clip, timelineUs, projectWidth, projectHeight, renderScale);
-                continue;
-            }
-
-            double layoutX = 0.0;
-            double layoutY = 0.0;
-            double layoutWd = 0.0;
-            double layoutHd = 0.0;
-            layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, 1.0, &layoutX, &layoutY,
-                              &layoutWd, &layoutHd);
-            const int layoutW = qMax(1, qRound(layoutWd));
-            const int layoutH = qMax(1, qRound(layoutHd));
-
-            QImage frame;
-            if (clip.type == drift::ClipType::Shape) {
-                frame = shapeImageForClip(clip, layoutW, layoutH);
-                if (!frame.isNull() && clip.mask.shape != drift::MaskShape::None)
-                    frame = drift::applyMask(frame, clip.mask, layoutW, layoutH);
-            } else {
-                frame = imageForClip(clip, timelineUs, layoutW, layoutH, m_project->fps(),
-                                     options.maxTimeEchoHistoryFrames);
-            }
-            if (frame.isNull())
-                continue;
-
-            drawClipFrame(painter, frame, clip, timelineUs, projectWidth, projectHeight, renderScale);
+            GpuItem item;
+            item.blend = clip.blendMode;
+            item.layer = buildGpuLayer(clip, timelineUs, projectWidth, projectHeight, renderScale, width,
+                                       height, fps, options.maxTimeEchoHistoryFrames);
+            if (item.layer.valid)
+                scene.items.append(item);
         }
     }
 
-    painter.end();
-    return canvas;
+    return scene;
 }
+
+} // namespace
+
+QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs) const
+{
+    return compositeAt(timelineUs, RenderOptions{});
+}
+
+bool FrameCompositor::prepare(drift::TimeUs timelineUs, const RenderOptions &options, GpuScene *sceneOut,
+                              int *widthOut, int *heightOut, double *renderScaleOut) const
+{
+    if (!m_project)
+        return false;
+
+    const int projectWidth = m_project->width();
+    const int projectHeight = m_project->height();
+    const double renderScale = qBound(0.1, options.previewScale, 1.0);
+    const int width = qMax(1, static_cast<int>(std::lround(projectWidth * renderScale)));
+    const int height = qMax(1, static_cast<int>(std::lround(projectHeight * renderScale)));
+    if (width <= 0 || height <= 0)
+        return false;
+
+    QSet<QString> videoPaths;
+    QSet<QString> audioPaths;
+    collectActivePaths(m_project, timelineUs, videoPaths, audioPaths);
+    ClipReaderPool::instance().retainActivePaths(videoPaths, audioPaths);
+
+    // Start every clip's decode before compositing anything, so they run in
+    // parallel across the per-path worker threads rather than serially below.
+    ClipReaderPool::instance().warmVideoFrames(
+        collectVideoRequests(m_project, timelineUs, width, height));
+
+    *widthOut = width;
+    *heightOut = height;
+    *renderScaleOut = renderScale;
+    if (sceneOut)
+        *sceneOut = buildGpuScene(*m_project, timelineUs, width, height, renderScale, options);
+    return true;
+}
+
+QImage FrameCompositor::compositeAt(drift::TimeUs timelineUs, const RenderOptions &options) const
+{
+    GpuScene scene;
+    int width = 0;
+    int height = 0;
+    double renderScale = 1.0;
+    if (!prepare(timelineUs, options, &scene, &width, &height, &renderScale))
+        return {};
+
+    return GpuCompositor::render(scene);
+}
+
+GpuFrameTexture FrameCompositor::compositeToTextureAt(drift::TimeUs timelineUs,
+                                                      const RenderOptions &options) const
+{
+    if (!GpuCompositor::isAvailable())
+        return {};
+
+    GpuScene scene;
+    int width = 0;
+    int height = 0;
+    double renderScale = 1.0;
+    if (!prepare(timelineUs, options, &scene, &width, &height, &renderScale))
+        return {};
+
+    return GpuCompositor::renderToTexture(scene);
+}
+

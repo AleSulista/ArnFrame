@@ -63,6 +63,7 @@ class AppController : public QObject
 
 public:
     explicit AppController(AssetLibrary *assetLibrary, QObject *parent = nullptr);
+    ~AppController() override;
 
     AssetLibrary *assetLibrary() const { return m_assetLibrary; }
     TimelineModel *timelineModel() { return &m_timelineModel; }
@@ -300,8 +301,12 @@ protected:
     AssetLibrary *m_assetLibrary = nullptr;
     TimelineModel m_timelineModel;
     ClipListModel m_clipListModel;
-    PlaybackEngine m_playback;
+    // m_project must outlive m_playback: the playback engine's compositor thread
+    // holds a bare pointer to it and may still be mid-composite at teardown.
+    // Members are destroyed in reverse declaration order, so the project is
+    // declared first and torn down last.
     drift::Project m_project;
+    PlaybackEngine m_playback;
     QUndoStack m_undoStack;
     drift::TimeUs m_playheadUs = 0;
     bool m_playing = false;

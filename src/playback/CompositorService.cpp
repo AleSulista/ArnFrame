@@ -7,24 +7,6 @@ namespace {
 constexpr drift::TimeUs kMaxPreviewFrameStalenessUs = 100'000;
 }
 
-void CompositorWorker::TripleBuffer::publish(QImage frame)
-{
-    QMutexLocker lock(&mutex);
-    const int idx = writeIndex.load(std::memory_order_relaxed) % 3;
-    buffers[idx] = std::move(frame);
-    latestIndex.store(idx, std::memory_order_release);
-    writeIndex.store((idx + 1) % 3, std::memory_order_relaxed);
-}
-
-QImage CompositorWorker::TripleBuffer::takeLatest() const
-{
-    QMutexLocker lock(&mutex);
-    const int idx = latestIndex.load(std::memory_order_acquire);
-    if (idx < 0 || idx > 2)
-        return {};
-    return buffers[idx];
-}
-
 CompositorWorker::CompositorWorker(QObject *parent)
     : QObject(parent)
 {
@@ -37,14 +19,9 @@ void CompositorWorker::setProject(const drift::Project *project)
 
 void CompositorWorker::composite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options)
 {
-    const QImage frame = m_compositor.compositeAt(timeUs, options);
-    m_buffer.publish(frame);
-    emit frameReady(frame, timeUs);
-}
-
-QImage CompositorWorker::takeLatestFrame() const
-{
-    return m_buffer.takeLatest();
+    const GpuFrameTexture frame = m_compositor.compositeToTextureAt(timeUs, options);
+    if (frame.isValid())
+        emit frameReady(frame, timeUs);
 }
 
 CompositorService::CompositorService(QObject *parent)
@@ -54,6 +31,7 @@ CompositorService::CompositorService(QObject *parent)
     qRegisterMetaType<drift::TimeUs>("drift::TimeUs");
     qRegisterMetaType<const drift::Project *>("const drift::Project*");
     qRegisterMetaType<FrameCompositor::RenderOptions>("FrameCompositor::RenderOptions");
+    qRegisterMetaType<GpuFrameTexture>("GpuFrameTexture");
     m_worker->moveToThread(&m_thread);
     connect(m_worker, &CompositorWorker::frameReady, this, &CompositorService::onWorkerFrameReady,
             Qt::QueuedConnection);
@@ -90,7 +68,7 @@ void CompositorService::requestComposite(drift::TimeUs timeUs, FrameCompositor::
                               Q_ARG(FrameCompositor::RenderOptions, options));
 }
 
-void CompositorService::onWorkerFrameReady(const QImage &frame, drift::TimeUs timeUs)
+void CompositorService::onWorkerFrameReady(const GpuFrameTexture &frame, drift::TimeUs timeUs)
 {
     const drift::TimeUs latest = m_pendingTimeUs.load(std::memory_order_acquire);
     FrameCompositor::RenderOptions latestOptions;
@@ -116,12 +94,4 @@ void CompositorService::onWorkerFrameReady(const QImage &frame, drift::TimeUs ti
 
     QMetaObject::invokeMethod(m_worker, "composite", Qt::QueuedConnection, Q_ARG(drift::TimeUs, latest),
                               Q_ARG(FrameCompositor::RenderOptions, latestOptions));
-}
-
-QImage CompositorService::latestFrame() const
-{
-    QImage frame;
-    QMetaObject::invokeMethod(m_worker, "takeLatestFrame", Qt::BlockingQueuedConnection,
-                              Q_RETURN_ARG(QImage, frame));
-    return frame;
 }

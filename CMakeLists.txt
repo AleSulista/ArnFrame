@@ -80,10 +80,12 @@ add_library(driftengine STATIC
     src/engine/GpuPackageParse.h
     src/engine/GpuPackageParse.cpp
     src/engine/GpuEffectDefinition.h
+    src/engine/GpuCompositor.h
+    src/engine/GpuCompositor.cpp
+    src/engine/GlRuntime.h
+    src/engine/GlRuntime.cpp
     src/engine/GpuEffectExecutor.h
     src/engine/GpuEffectExecutor.cpp
-    src/engine/CompositorEffects.h
-    src/engine/CompositorEffects.cpp
     src/engine/CompositorFrameHistory.h
     src/engine/CompositorFrameHistory.cpp
     src/engine/FrameCompositor.h

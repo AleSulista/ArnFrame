@@ -2,6 +2,7 @@
 
 #include <QQuickWindow>
 #include <QSGSimpleTextureNode>
+#include <QSGTexture>
 
 PreviewItem::PreviewItem(QQuickItem *parent)
     : QQuickItem(parent)
@@ -9,12 +10,20 @@ PreviewItem::PreviewItem(QQuickItem *parent)
     setFlag(ItemHasContents, true);
 }
 
-void PreviewItem::setFrame(const QImage &frame)
+void PreviewItem::setTextureId(int id)
 {
-    if (m_frame.cacheKey() == frame.cacheKey())
+    if (m_textureId == id)
         return;
+    m_textureId = id;
+    emit frameChanged();
+    update();
+}
 
-    m_frame = frame;
+void PreviewItem::setTextureSize(const QSize &size)
+{
+    if (m_textureSize == size)
+        return;
+    m_textureSize = size;
     emit frameChanged();
     update();
 }
@@ -25,22 +34,30 @@ QSGNode *PreviewItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
     if (!node)
         node = new QSGSimpleTextureNode();
 
-    if (m_frame.isNull() || !window()) {
+    if (m_textureId == 0 || m_textureSize.isEmpty() || !window()) {
         node->setTexture(nullptr);
         node->setRect(boundingRect());
         return node;
     }
 
-    QSGTexture *texture = window()->createTextureFromImage(m_frame, QQuickWindow::TextureCanUseAtlas);
+    // Wraps the compositor's framebuffer texture — no copy, no upload. The GL
+    // object stays owned by the engine's presentation ring, so the scene graph
+    // must not take ownership of it; setOwnsTexture only frees this wrapper.
+    QSGTexture *texture = QNativeInterface::QSGOpenGLTexture::fromNative(
+        static_cast<GLuint>(m_textureId), window(), m_textureSize);
     node->setTexture(texture);
     node->setOwnsTexture(true);
     node->setFiltering(QSGTexture::Linear);
 
-    const QSize frameSize = m_frame.size();
+    // No flip: the compositor promotes every source into its framebuffer such
+    // that row 0 holds the image's top row (which is why toImage(false) comes out
+    // upright), and the scene graph likewise samples v=0 at the top.
+
     const QRectF bounds = boundingRect();
-    const qreal scale = qMin(bounds.width() / frameSize.width(), bounds.height() / frameSize.height());
-    const qreal drawW = frameSize.width() * scale;
-    const qreal drawH = frameSize.height() * scale;
+    const qreal scale = qMin(bounds.width() / m_textureSize.width(),
+                             bounds.height() / m_textureSize.height());
+    const qreal drawW = m_textureSize.width() * scale;
+    const qreal drawH = m_textureSize.height() * scale;
     const qreal x = bounds.x() + (bounds.width() - drawW) / 2.0;
     const qreal y = bounds.y() + (bounds.height() - drawH) / 2.0;
     node->setRect(QRectF(x, y, drawW, drawH));

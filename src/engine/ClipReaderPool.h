@@ -9,6 +9,8 @@
 #include <QString>
 #include <QThread>
 
+#include <QList>
+
 #include <map>
 #include <memory>
 
@@ -20,10 +22,23 @@ class ClipReaderPool
 public:
     static ClipReaderPool &instance();
 
-    QImage readVideoFrame(const QString &path, drift::TimeUs sourceUs, int targetWidth, int targetHeight);
+    struct VideoRequest
+    {
+        QString path;
+        drift::TimeUs sourceUs = 0;
+        int maxWidth = 0;
+        int maxHeight = 0;
+    };
+
+    // Kick every request off on its own worker thread without waiting. Each path
+    // has its own thread, so the decodes run concurrently; the readVideoFrame
+    // calls that follow then hit each reader's cache instead of decoding one
+    // clip after another on the caller's thread.
+    void warmVideoFrames(const QList<VideoRequest> &requests);
+
+    QImage readVideoFrame(const QString &path, drift::TimeUs sourceUs, int maxWidth, int maxHeight);
     int readAudioInterleaved(const QString &path, drift::TimeUs sourceStartUs, int sampleCount,
                              int outputSampleRate, float *interleavedStereoOut);
-    void prefetchVideo(const QString &path, drift::TimeUs sourceUs, int targetWidth, int targetHeight);
     void retainActivePaths(const QSet<QString> &videoPaths, const QSet<QString> &audioPaths);
 
 private:

@@ -399,7 +399,8 @@ PanelFrame {
                     Connections {
                         target: EditorState.playback
                         function onCurrentFrameChanged() {
-                            preview.frame = EditorState.playback.currentFrame
+                            preview.textureSize = EditorState.playback.previewTextureSize
+                            preview.textureId = EditorState.playback.previewTextureId
                         }
                     }
 

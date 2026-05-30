@@ -363,10 +363,34 @@ PanelFrame {
                     spacing: 8
 
                     Text {
+                        text: "Preview quality"
+                        color: Theme.mutedForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeXs
+                    }
+
+                    ThemedComboBox {
+                        model: ["full", "half", "quarter"]
+                        currentIndex: Math.max(0, model.indexOf(EditorState.playback.previewQuality))
+                        onActivated: EditorState.playback.previewQuality = model[currentIndex]
+                    }
+
+                    Text {
+                        text: "Playback renders at half this scale, then snaps back on pause."
+                        color: Theme.mutedForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeXs
+                        opacity: 0.7
+                        width: settingsColumn.width
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Text {
                         text: "Preview guides"
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeXs
+                        topPadding: 6
                     }
 
                     Row {

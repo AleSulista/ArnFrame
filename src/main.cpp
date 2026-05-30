@@ -9,10 +9,18 @@
 // native platform file picker, which routes through xdg-desktop-portal.
 #include <QApplication>
 #include <QQmlApplicationEngine>
+#include <QQuickWindow>
 #include <QtQml/qqml.h>
 
 int main(int argc, char *argv[])
 {
+    // The compositor renders into an FBO on its own GL context and hands the
+    // texture to the scene graph without a readback. That requires both contexts
+    // to share objects, and the scene graph to actually be on OpenGL. Both must
+    // be set before the QApplication is constructed.
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+
     QApplication app(argc, argv);
     QApplication::setApplicationName("CutWire Drift");
     QApplication::setOrganizationName("CutWire Drift");

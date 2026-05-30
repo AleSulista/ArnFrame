@@ -118,10 +118,10 @@ QImage blurAlpha(const QImage &alpha, int radius)
 
 namespace drift {
 
-QImage applyMask(const QImage &frame, const Mask &mask, int canvasWidth, int canvasHeight)
+QImage maskAlphaMap(const Mask &mask, int canvasWidth, int canvasHeight)
 {
-    if (mask.shape == MaskShape::None || frame.isNull())
-        return frame;
+    if (mask.shape == MaskShape::None || canvasWidth <= 0 || canvasHeight <= 0)
+        return {};
 
     QImage alpha(canvasWidth, canvasHeight, QImage::Format_Grayscale8);
     alpha.fill(mask.invert ? 255 : 0);
@@ -147,6 +147,18 @@ QImage applyMask(const QImage &frame, const Mask &mask, int canvasWidth, int can
 
     if (mask.feather > 0.0)
         alpha = blurAlpha(alpha, qMax(1, static_cast<int>(mask.feather)));
+
+    return alpha;
+}
+
+QImage applyMask(const QImage &frame, const Mask &mask, int canvasWidth, int canvasHeight)
+{
+    if (mask.shape == MaskShape::None || frame.isNull())
+        return frame;
+
+    const QImage alpha = maskAlphaMap(mask, canvasWidth, canvasHeight);
+    if (alpha.isNull())
+        return frame;
 
   QImage rgba = frame.convertToFormat(QImage::Format_RGBA8888);
     if (rgba.size() != alpha.size())

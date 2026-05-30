@@ -40,7 +40,10 @@ class PlaybackEngine : public QObject
 {
     Q_OBJECT
 
-    Q_PROPERTY(QImage currentFrame READ currentFrame NOTIFY currentFrameChanged)
+    // The composited frame lives in GPU memory; the preview item wraps this
+    // texture directly rather than uploading a QImage every frame.
+    Q_PROPERTY(int previewTextureId READ previewTextureId NOTIFY currentFrameChanged)
+    Q_PROPERTY(QSize previewTextureSize READ previewTextureSize NOTIFY currentFrameChanged)
     Q_PROPERTY(bool hasFrame READ hasFrame NOTIFY currentFrameChanged)
     Q_PROPERTY(bool playing READ isPlaying NOTIFY playingChanged)
     Q_PROPERTY(QString previewQuality READ previewQuality WRITE setPreviewQuality NOTIFY previewQualityChanged)
@@ -53,7 +56,8 @@ public:
     void setPlayheadUs(drift::TimeUs us);
     drift::TimeUs playheadUs() const { return m_playheadUs; }
 
-    QImage currentFrame() const;
+    int previewTextureId() const;
+    QSize previewTextureSize() const;
     bool hasFrame() const;
     bool isPlaying() const { return m_playing; }
     QString previewQuality() const;
@@ -77,7 +81,7 @@ private:
     void ensureAudioSink();
     void onPlayheadTick();
     void onCompositeTick();
-    void onFrameReady(const QImage &frame);
+    void onFrameReady(const GpuFrameTexture &frame);
     void checkEndOfTimeline(drift::TimeUs timeUs);
     FrameCompositor::RenderOptions playbackRenderOptions() const;
 
@@ -93,7 +97,7 @@ private:
     AudioPlaybackIODevice *m_device = nullptr;
     QTimer m_playheadTimer;
     QTimer m_compositeTimer;
-    QImage m_currentFrame;
+    GpuFrameTexture m_currentFrame;
     mutable QMutex m_frameMutex;
     drift::TimeUs m_playheadUs = 0;
     std::atomic<bool> m_playing = false;

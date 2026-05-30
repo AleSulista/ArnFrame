@@ -1,10 +1,15 @@
 #include "PlaybackEngine.h"
 
+#include <QSettings>
+
 #include <cstring>
 
 namespace {
 
 constexpr int kPlayheadUpdateMs = 16; // ~60 Hz UI updates, independent of video decode
+
+// Extra downscale applied only while playing; pause returns to the chosen quality.
+constexpr double kPlaybackScaleFactor = 0.5;
 
 } // namespace
 
@@ -45,6 +50,12 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
     : QObject(parent)
     , m_device(new AudioPlaybackIODevice(this))
 {
+    const QString saved = QSettings().value(QStringLiteral("preview/quality")).toString().toLower();
+    if (saved == QStringLiteral("full") || saved == QStringLiteral("half")
+        || saved == QStringLiteral("quarter")) {
+        m_previewQuality = saved;
+    }
+
     // The pull device and sink run on a dedicated thread; the GUI thread stays
     // free while audio is decoded and mixed on refill.
     m_device->moveToThread(&m_audioThread);
@@ -125,10 +136,16 @@ void PlaybackEngine::setPlayheadUs(drift::TimeUs us)
         refreshFrame();
 }
 
-QImage PlaybackEngine::currentFrame() const
+int PlaybackEngine::previewTextureId() const
 {
     QMutexLocker lock(&m_frameMutex);
-    return m_currentFrame;
+    return static_cast<int>(m_currentFrame.textureId);
+}
+
+QSize PlaybackEngine::previewTextureSize() const
+{
+    QMutexLocker lock(&m_frameMutex);
+    return m_currentFrame.size;
 }
 
 QString PlaybackEngine::previewQuality() const
@@ -138,15 +155,19 @@ QString PlaybackEngine::previewQuality() const
 
 void PlaybackEngine::setPreviewQuality(const QString &quality)
 {
-    QString normalized = quality.toLower();
+    const QString normalized = quality.toLower();
+    // An unrecognized value used to silently become "half", which quietly changed
+    // what the user was looking at. Ignore it instead.
     if (normalized != QStringLiteral("full") && normalized != QStringLiteral("half")
         && normalized != QStringLiteral("quarter")) {
-        normalized = QStringLiteral("half");
+        qWarning("PlaybackEngine: ignoring unknown preview quality '%s'", qPrintable(quality));
+        return;
     }
     if (m_previewQuality == normalized)
         return;
 
     m_previewQuality = normalized;
+    QSettings().setValue(QStringLiteral("preview/quality"), m_previewQuality);
     emit previewQualityChanged();
     refreshFrame();
 }
@@ -169,7 +190,7 @@ void PlaybackEngine::setPreviewRenderSize(int width, int height)
 bool PlaybackEngine::hasFrame() const
 {
     QMutexLocker lock(&m_frameMutex);
-    return !m_currentFrame.isNull() && m_currentFrame.width() > 0;
+    return m_currentFrame.isValid();
 }
 
 void PlaybackEngine::play()
@@ -266,9 +287,9 @@ void PlaybackEngine::onCompositeTick()
     m_compositor.requestComposite(m_clock.currentTimeUs(), playbackRenderOptions());
 }
 
-void PlaybackEngine::onFrameReady(const QImage &frame)
+void PlaybackEngine::onFrameReady(const GpuFrameTexture &frame)
 {
-    if (frame.isNull())
+    if (!frame.isValid())
         return;
 
     {
@@ -298,6 +319,13 @@ FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
         const double heightScale = static_cast<double>(m_previewRenderHeight) / qMax(1, m_project->height());
         options.previewScale = qBound(0.1, qMin(widthScale, heightScale), 1.0);
     }
+
+    // Render at half scale while rolling, and snap back to the chosen quality on
+    // pause, where the frame is actually inspected. Halving the scale quarters
+    // the pixels the compositor touches.
+    if (m_playing)
+        options.previewScale = qMax(0.1, options.previewScale * kPlaybackScaleFactor);
+
     return options;
 }
 

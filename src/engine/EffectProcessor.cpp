@@ -153,6 +153,7 @@ QImage EffectProcessor::applyEffects(const QImage &input, const QList<drift::Eff
 
     QImage result = input;
     QList<drift::Effect> legacyLibavBatch;
+    QList<GpuEffectExecutor::ChainStep> gpuChain;
 
     auto flushLegacy = [&]() {
         if (legacyLibavBatch.isEmpty())
@@ -161,6 +162,15 @@ QImage EffectProcessor::applyEffects(const QImage &input, const QList<drift::Eff
         if (!filters.isEmpty())
             result = applyLibavFilterGraph(result, filters);
         legacyLibavBatch.clear();
+    };
+
+    // Consecutive GPU effects run as one chain: a single upload, FBO-to-FBO
+    // between effects, and a single readback — instead of a round trip each.
+    auto flushGpu = [&]() {
+        if (gpuChain.isEmpty())
+            return;
+        result = GpuEffectExecutor::instance().applyChain(gpuChain, result, timeUs);
+        gpuChain.clear();
     };
 
     for (const drift::Effect &effect : effects) {
@@ -173,17 +183,19 @@ QImage EffectProcessor::applyEffects(const QImage &input, const QList<drift::Eff
 
         if (def && def->isGpu && def->gpu.valid) {
             flushLegacy();
-            result = GpuEffectExecutor::instance().apply(*def, result,
-                                                        resolvedEffectParameters(effect, *def),
-                                                        timeUs);
+            gpuChain.append(GpuEffectExecutor::ChainStep{def->meta.id, &def->gpu,
+                                                         resolvedEffectParameters(effect, *def)});
             continue;
         }
 
         // Legacy: uncataloged raw libavfilter graphs only.
-        if (!def)
+        if (!def) {
+            flushGpu();
             legacyLibavBatch.append(effect);
+        }
     }
 
+    flushGpu();
     flushLegacy();
     return result;
 }

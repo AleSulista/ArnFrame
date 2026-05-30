@@ -34,6 +34,14 @@ namespace {
 QHash<QString, QString> defaultShortcuts();
 }
 
+AppController::~AppController()
+{
+    // ~QUndoStack clears the stack, which emits indexChanged into the lambda
+    // below — but by then the members it touches (m_selection, the models) are
+    // already gone. Cut the signals before any member is destroyed.
+    m_undoStack.disconnect(this);
+}
+
 AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     : QObject(parent)
     , m_assetLibrary(assetLibrary)

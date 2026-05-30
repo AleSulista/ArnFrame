@@ -1,7 +1,7 @@
 #include "core/Project.h"
 #include "engine/FrameCompositor.h"
 
-#include <QCoreApplication>
+#include <QGuiApplication>
 #include <QFile>
 #include <QImage>
 #include <QJsonDocument>
@@ -10,7 +10,9 @@
 
 int main(int argc, char *argv[])
 {
-    QCoreApplication app(argc, argv);
+    // QGuiApplication, not QCoreApplication: the compositor needs a GL surface,
+    // which cannot be created without a GUI application instance.
+    QGuiApplication app(argc, argv);
     QTextStream err(stderr);
 
     const QStringList args = app.arguments();

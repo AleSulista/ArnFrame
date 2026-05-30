@@ -10,6 +10,7 @@
 #include <QString>
 
 // Owns a ClipReader on a dedicated thread; all decode calls are serialized here.
+// The reader keeps its own frame cache, so this class holds no cache of its own.
 class ClipReaderWorker : public QObject
 {
     Q_OBJECT
@@ -20,16 +21,12 @@ public:
 public slots:
     void openPath(const QString &path);
     void closePath();
-    QImage decodeVideo(drift::TimeUs sourceUs, int targetWidth, int targetHeight);
+    QImage decodeVideo(drift::TimeUs sourceUs, int maxWidth, int maxHeight);
     int decodeAudio(drift::TimeUs sourceStartUs, int sampleCount, int outputSampleRate,
                     float *interleavedStereoOut);
-    void prefetchVideo(drift::TimeUs sourceUs, int targetWidth, int targetHeight);
+    void prefetchNextVideo(int maxWidth, int maxHeight);
 
 private:
     ClipReader m_reader;
     QMutex m_mutex;
-    drift::TimeUs m_cachedSourceUs = -1;
-    QImage m_cachedFrame;
-    int m_cachedWidth = 0;
-    int m_cachedHeight = 0;
 };

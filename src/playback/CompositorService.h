@@ -1,9 +1,8 @@
 #pragma once
 
 #include "engine/FrameCompositor.h"
+#include "engine/GpuCompositor.h"
 
-#include <QImage>
-#include <QMutex>
 #include <QObject>
 #include <QThread>
 #include <atomic>
@@ -18,28 +17,18 @@ public:
 public slots:
     void setProject(const drift::Project *project);
     void composite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options);
-    QImage takeLatestFrame() const;
 
 signals:
-    void frameReady(const QImage &frame, drift::TimeUs timeUs);
+    void frameReady(const GpuFrameTexture &frame, drift::TimeUs timeUs);
 
 private:
-    struct TripleBuffer
-    {
-        QImage buffers[3];
-        std::atomic<int> writeIndex{0};
-        std::atomic<int> latestIndex{-1};
-        mutable QMutex mutex;
-
-        void publish(QImage frame);
-        QImage takeLatest() const;
-    };
-
     FrameCompositor m_compositor;
-    TripleBuffer m_buffer;
 };
 
-// Background compositor thread with triple-buffered frame delivery to the GUI.
+// Background compositor thread. Frames are delivered to the GUI as live GL
+// textures out of the runtime's presentation ring — never read back to the CPU
+// and never re-uploaded. The ring is what keeps the scene graph from sampling a
+// target that is being drawn into, so there is no frame buffering here.
 class CompositorService : public QObject
 {
     Q_OBJECT
@@ -51,13 +40,12 @@ public:
     void setProject(const drift::Project *project);
     void requestComposite(drift::TimeUs timeUs,
                           FrameCompositor::RenderOptions options = FrameCompositor::RenderOptions{});
-    QImage latestFrame() const;
 
 signals:
-    void frameReady(const QImage &frame);
+    void frameReady(const GpuFrameTexture &frame);
 
 private slots:
-    void onWorkerFrameReady(const QImage &frame, drift::TimeUs timeUs);
+    void onWorkerFrameReady(const GpuFrameTexture &frame, drift::TimeUs timeUs);
 
 private:
     std::atomic<bool> m_requestPending{false};
@@ -69,3 +57,5 @@ private:
     QThread m_thread;
     CompositorWorker *m_worker = nullptr;
 };
+
+Q_DECLARE_METATYPE(GpuFrameTexture)

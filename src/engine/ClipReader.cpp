@@ -1,7 +1,9 @@
 #include "ClipReader.h"
 
+#include <QThread>
 #include <QtMath>
 
+#include <cmath>
 #include <cstring>
 
 extern "C" {
@@ -105,9 +107,89 @@ void ClipReader::teardownVideoDecoder()
     m_hwPixFmt = AV_PIX_FMT_NONE;
     m_videoPositioned = false;
     m_lastVideoPtsUs = 0;
-    m_lastVideoFrame = {};
-    m_lastVideoW = 0;
-    m_lastVideoH = 0;
+    m_decodeW = 0;
+    m_decodeH = 0;
+    m_videoCache.clear();
+}
+
+QSize ClipReader::decodeSizeFor(int maxWidth, int maxHeight) const
+{
+    const AVCodecParameters *par = m_fmt->streams[m_videoStream]->codecpar;
+    const int srcW = par->width;
+    const int srcH = par->height;
+    if (srcW <= 0 || srcH <= 0)
+        return {qMax(1, maxWidth), qMax(1, maxHeight)};
+    if (maxWidth <= 0 || maxHeight <= 0)
+        return {srcW, srcH};
+
+    // Never decode larger than the source; scaling up is the compositor's job.
+    const double fit = qMin(static_cast<double>(maxWidth) / srcW, static_cast<double>(maxHeight) / srcH);
+    if (fit >= 1.0)
+        return {srcW, srcH};
+
+    // Quantize up to 1/8 steps. A preview panel dragged a few pixels wider must
+    // not change the decode size, or every resize would drop the frame cache.
+    const double quantized = qMin(1.0, std::ceil(fit * 8.0) / 8.0);
+    const int w = qMax(2, static_cast<int>(std::lround(srcW * quantized)) & ~1);
+    const int h = qMax(2, static_cast<int>(std::lround(srcH * quantized)) & ~1);
+    return {w, h};
+}
+
+void ClipReader::applyDecodeSize(const QSize &size)
+{
+    if (m_decodeW == size.width() && m_decodeH == size.height())
+        return;
+
+    // A new decode size invalidates the cached images (they are the wrong size)
+    // but NOT the demux position — there is no reason to seek.
+    m_decodeW = size.width();
+    m_decodeH = size.height();
+    m_videoCache.clear();
+}
+
+drift::TimeUs ClipReader::frameToleranceUs() const
+{
+    // Half a source frame: the nearest-frame window. The old fixed 40 ms was
+    // longer than a frame above ~25 fps, so it returned stale frames.
+    if (m_sourceFrameDurationUs > 0)
+        return qMax<drift::TimeUs>(1, m_sourceFrameDurationUs / 2);
+    return 20'000;
+}
+
+bool ClipReader::lookupCachedFrame(drift::TimeUs sourceUs, QImage &out) const
+{
+    const drift::TimeUs tolerance = frameToleranceUs();
+    drift::TimeUs bestDelta = tolerance + 1;
+    int bestIndex = -1;
+    for (int i = 0; i < m_videoCache.size(); ++i) {
+        const drift::TimeUs delta = qAbs(m_videoCache.at(i).ptsUs - sourceUs);
+        if (delta <= tolerance && delta < bestDelta) {
+            bestDelta = delta;
+            bestIndex = i;
+        }
+    }
+    if (bestIndex < 0)
+        return false;
+
+    out = m_videoCache.at(bestIndex).image;
+    return true;
+}
+
+void ClipReader::storeCachedFrame(drift::TimeUs ptsUs, const QImage &image)
+{
+    if (image.isNull())
+        return;
+
+    for (int i = 0; i < m_videoCache.size(); ++i) {
+        if (m_videoCache.at(i).ptsUs == ptsUs) {
+            m_videoCache.move(i, 0);
+            return;
+        }
+    }
+
+    m_videoCache.prepend(CachedFrame{ptsUs, image});
+    while (m_videoCache.size() > kMaxCachedFrames)
+        m_videoCache.removeLast();
 }
 
 void ClipReader::close()
@@ -158,6 +240,14 @@ bool ClipReader::open(const QString &path)
             m_audioStream = static_cast<int>(i);
     }
 
+    if (m_videoStream >= 0) {
+        const AVRational rate = m_fmt->streams[m_videoStream]->avg_frame_rate;
+        if (rate.num > 0 && rate.den > 0) {
+            m_sourceFrameDurationUs =
+                static_cast<drift::TimeUs>(std::llround(drift::kUsPerSecond * double(rate.den) / rate.num));
+        }
+    }
+
     return hasVideo() || hasAudio();
 }
 
@@ -179,6 +269,11 @@ bool ClipReader::openSoftwareVideoDecoder()
         avcodec_free_context(&m_videoCtx);
         return false;
     }
+
+    // Left at defaults this decodes single-threaded on most builds. Each reader
+    // already owns a thread, so keep the fan-out modest rather than per-core.
+    m_videoCtx->thread_count = qBound(1, QThread::idealThreadCount() / 2, 4);
+    m_videoCtx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
 
     if (avcodec_open2(m_videoCtx, codec, nullptr) < 0) {
         avcodec_free_context(&m_videoCtx);
@@ -381,7 +476,7 @@ bool ClipReader::seekAudioStream(drift::TimeUs sourceUs)
     return true;
 }
 
-bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int targetWidth, int targetHeight,
+bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int maxWidth, int maxHeight,
                                         bool *hwFailure)
 {
     if (hwFailure)
@@ -389,31 +484,30 @@ bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int
     if (!ensureVideoDecoder())
         return false;
 
-    const bool dimsMatch = m_lastVideoW == targetWidth && m_lastVideoH == targetHeight;
+    applyDecodeSize(decodeSizeFor(maxWidth, maxHeight));
 
-    if (m_videoPositioned && dimsMatch && !m_lastVideoFrame.isNull()
-        && qAbs(sourceUs - m_lastVideoPtsUs) <= kFrameToleranceUs) {
-        out = m_lastVideoFrame;
+    if (lookupCachedFrame(sourceUs, out))
         return true;
-    }
 
-    const bool needSeek = !m_videoPositioned || !dimsMatch
-                          || sourceUs < m_lastVideoPtsUs - kFrameToleranceUs
+    const drift::TimeUs tolerance = frameToleranceUs();
+    const bool needSeek = !m_videoPositioned || sourceUs < m_lastVideoPtsUs - tolerance
                           || sourceUs - m_lastVideoPtsUs > kForwardSeekThresholdUs;
     if (needSeek && !seekVideoStream(sourceUs))
         return false;
 
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
-    if (!packet || !frame) {
+    AVFrame *best = av_frame_alloc();
+    if (!packet || !frame || !best) {
+        av_frame_free(&best);
         av_frame_free(&frame);
         av_packet_free(&packet);
         return false;
     }
 
     const AVRational timeBase = m_fmt->streams[m_videoStream]->time_base;
-    QImage best;
     drift::TimeUs bestDelta = INT64_MAX;
+    drift::TimeUs bestPtsUs = 0;
     bool found = false;
     bool done = false;
     bool sawHwFailure = false;
@@ -457,21 +551,21 @@ bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int
             const drift::TimeUs ptsUs = ptsToUs(frame, timeBase);
             m_lastVideoPtsUs = ptsUs;
             const drift::TimeUs delta = qAbs(ptsUs - sourceUs);
+            // Keep a reference to the best frame and convert only once, after the
+            // loop. Converting every frame between the keyframe and the target was
+            // an sws_scale + full copy per frame of the GOP, all but one discarded.
             if (delta < bestDelta) {
-                QImage image;
-                if (convertFrame(frame, image, targetWidth, targetHeight)) {
-                    bestDelta = delta;
-                    best = image;
-                    found = true;
-                } else if (m_hwAccelActive
-                           && (frame->format == m_hwPixFmt
-                               || isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format)))) {
-                    // Transfer from the VAAPI surface failed — abandon hwaccel.
+                bestDelta = delta;
+                bestPtsUs = ptsUs;
+                av_frame_unref(best);
+                if (av_frame_ref(best, frame) < 0) {
                     av_frame_unref(frame);
-                    markHwFailure();
+                    done = true;
                     break;
                 }
+                found = true;
             }
+            av_frame_unref(frame);
 
             if (ptsUs >= sourceUs) {
                 done = true;
@@ -480,6 +574,20 @@ bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int
         }
     }
 
+    QImage converted;
+    bool convertedOk = false;
+    if (found && !sawHwFailure) {
+        convertedOk = convertFrame(best, converted, m_decodeW, m_decodeH);
+        if (!convertedOk && m_hwAccelActive
+            && (best->format == m_hwPixFmt
+                || isHardwarePixelFormat(static_cast<AVPixelFormat>(best->format)))) {
+            // Transfer from the VAAPI surface failed — abandon hwaccel.
+            sawHwFailure = true;
+        }
+    }
+
+    av_frame_unref(best);
+    av_frame_free(&best);
     av_frame_unref(frame);
     av_frame_free(&frame);
     av_packet_free(&packet);
@@ -491,11 +599,9 @@ bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int
         return false;
     }
 
-    if (found) {
-        out = best;
-        m_lastVideoFrame = best;
-        m_lastVideoW = targetWidth;
-        m_lastVideoH = targetHeight;
+    if (convertedOk) {
+        out = converted;
+        storeCachedFrame(bestPtsUs, converted);
         m_videoPositioned = true;
         return true;
     }
@@ -504,10 +610,10 @@ bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int
     return false;
 }
 
-bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int targetWidth, int targetHeight)
+bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int maxWidth, int maxHeight)
 {
     bool hwFailure = false;
-    if (decodeVideoFrameAtOnce(sourceUs, out, targetWidth, targetHeight, &hwFailure))
+    if (decodeVideoFrameAtOnce(sourceUs, out, maxWidth, maxHeight, &hwFailure))
         return true;
 
     if (!hwFailure)
@@ -518,7 +624,18 @@ bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int targe
     if (!fallbackFromHardwareDecoder())
         return false;
 
-    return decodeVideoFrameAtOnce(sourceUs, out, targetWidth, targetHeight, nullptr);
+    return decodeVideoFrameAtOnce(sourceUs, out, maxWidth, maxHeight, nullptr);
+}
+
+void ClipReader::prefetchNextVideoFrame(int maxWidth, int maxHeight)
+{
+    if (!m_videoPositioned || m_sourceFrameDurationUs <= 0)
+        return;
+
+    // Decode the frame after the current position into the cache, so the next
+    // request hits while the caller is busy compositing this one.
+    QImage ignored;
+    readVideoFrameAt(m_lastVideoPtsUs + m_sourceFrameDurationUs, ignored, maxWidth, maxHeight);
 }
 
 int ClipReader::readAudioInterleaved(drift::TimeUs sourceStartUs, int sampleCount, int outputSampleRate,
