@@ -73,18 +73,70 @@ PanelFrame {
     readonly property string clipKind: hasSelection ? (clip.kind || "") : ""
     readonly property bool hasTextStyle: hasSelection && clipKind === "text" && !!clip.textStyle
     readonly property var textStyle: hasTextStyle ? clip.textStyle : ({
-                                                                       "fontFamily": "Sans Serif",
+                                                                       "fontFamily": "Inter",
                                                                        "pixelSize": 64,
-                                                                       "color": "#ffffffff",
-                                                                       "bold": true,
+                                                                       "fontWeight": 700,
                                                                        "italic": false,
+                                                                       "color": "#ffffffff",
                                                                        "align": "center",
+                                                                       "valign": "middle",
+                                                                       "wordWrap": true,
+                                                                       "lineHeight": 1.2,
+                                                                       "letterSpacing": 0,
                                                                        "outlineWidth": 0,
                                                                        "outlineColor": "#ff000000",
+                                                                       "shadowEnabled": false,
+                                                                       "shadowOffsetX": 0,
+                                                                       "shadowOffsetY": 4,
+                                                                       "shadowBlur": 8,
+                                                                       "shadowOpacity": 0.6,
+                                                                       "shadowColor": "#ff000000",
                                                                        "boxEnabled": false,
                                                                        "boxColor": "#80000000",
-                                                                       "boxPadding": 8
+                                                                       "boxPadding": 8,
+                                                                       "boxRadius": 0,
+                                                                       "animIn": { "kind": "none", "duration": 0.4, "ease": "easeOut" },
+                                                                       "animOut": { "kind": "none", "duration": 0.4, "ease": "easeOut" }
                                                                    })
+
+    // The selected family's real weight ladder — never an invented one. Single-weight display faces
+    // (Anton, Bebas Neue, Pacifico...) expose exactly one entry and no italic.
+    readonly property var fontFamilyInfo: {
+        void clipDataRevision
+        const catalog = EditorState.fontCatalog()
+        for (let i = 0; i < catalog.length; ++i) {
+            if (catalog[i].family === root.textStyle.fontFamily)
+                return catalog[i]
+        }
+        return null
+    }
+    readonly property var availableWeights: fontFamilyInfo ? fontFamilyInfo.weights
+                                                           : [100, 200, 300, 400, 500, 600, 700, 800, 900]
+    readonly property bool familyHasItalic: fontFamilyInfo ? fontFamilyInfo.hasItalic : true
+
+    readonly property var weightLabels: ({
+                                             100: "Thin", 200: "ExtraLight", 300: "Light",
+                                             400: "Regular", 500: "Medium", 600: "SemiBold",
+                                             700: "Bold", 800: "ExtraBold", 900: "Black"
+                                         })
+    readonly property var animKinds: ["none", "fade", "slideUp", "slideDown", "slideLeft", "slideRight", "pop", "blur"]
+    readonly property var animKindLabels: ["None", "Fade", "Slide up", "Slide down", "Slide left", "Slide right", "Pop", "Blur"]
+    readonly property var easeKinds: ["linear", "easeOut", "easeInOut", "back"]
+    readonly property var easeLabels: ["Linear", "Ease out", "Ease in-out", "Back"]
+
+    function setTextStyleKey(key, value) {
+        const patch = {}
+        patch[key] = value
+        EditorState.setTextStyle(EditorState.selectedTrack, EditorState.selectedClip, patch)
+    }
+
+    function setTextAnim(which, key, value) {
+        const anim = {}
+        anim[key] = value
+        const patch = {}
+        patch[which] = anim
+        EditorState.setTextStyle(EditorState.selectedTrack, EditorState.selectedClip, patch)
+    }
     property int activeTab: 0
     readonly property string currentTabId: tabsModel.get(activeTab).tabId
 
@@ -116,20 +168,39 @@ PanelFrame {
         if (blendModeBox)
             blendModeBox.currentIndex = Math.max(0, blendModeBox.model.indexOf(root.clip.blendMode || "normal"))
         if (root.hasTextStyle) {
-            if (fontFamilyBox)
-                fontFamilyBox.currentIndex = Math.max(0, fontFamilyBox.model.indexOf(root.textStyle.fontFamily))
+            const s = root.textStyle
             if (pixelSizeField && !pixelSizeField.activeFocus)
-                pixelSizeField.text = Number(root.textStyle.pixelSize).toString()
+                pixelSizeField.text = Number(s.pixelSize).toString()
             if (textColorField && !textColorField.activeFocus)
-                textColorField.text = root.textStyle.color
+                textColorField.text = s.color
+            if (lineHeightField && !lineHeightField.activeFocus)
+                lineHeightField.text = Number(s.lineHeight).toFixed(2)
+            if (letterSpacingField && !letterSpacingField.activeFocus)
+                letterSpacingField.text = Number(s.letterSpacing).toFixed(1)
             if (outlineWidthField && !outlineWidthField.activeFocus)
-                outlineWidthField.text = Number(root.textStyle.outlineWidth).toFixed(1)
+                outlineWidthField.text = Number(s.outlineWidth).toFixed(1)
             if (outlineColorField && !outlineColorField.activeFocus)
-                outlineColorField.text = root.textStyle.outlineColor
+                outlineColorField.text = s.outlineColor
+            if (shadowOffsetXField && !shadowOffsetXField.activeFocus)
+                shadowOffsetXField.text = Number(s.shadowOffsetX).toFixed(1)
+            if (shadowOffsetYField && !shadowOffsetYField.activeFocus)
+                shadowOffsetYField.text = Number(s.shadowOffsetY).toFixed(1)
+            if (shadowBlurField && !shadowBlurField.activeFocus)
+                shadowBlurField.text = Number(s.shadowBlur).toFixed(1)
+            if (shadowOpacityField && !shadowOpacityField.activeFocus)
+                shadowOpacityField.text = Number(s.shadowOpacity).toFixed(2)
+            if (shadowColorField && !shadowColorField.activeFocus)
+                shadowColorField.text = s.shadowColor
             if (boxColorField && !boxColorField.activeFocus)
-                boxColorField.text = root.textStyle.boxColor
+                boxColorField.text = s.boxColor
             if (boxPaddingField && !boxPaddingField.activeFocus)
-                boxPaddingField.text = Number(root.textStyle.boxPadding).toFixed(1)
+                boxPaddingField.text = Number(s.boxPadding).toFixed(1)
+            if (boxRadiusField && !boxRadiusField.activeFocus)
+                boxRadiusField.text = Number(s.boxRadius).toFixed(1)
+            if (animInDurationField && !animInDurationField.activeFocus)
+                animInDurationField.text = Number(s.animIn.duration).toFixed(2)
+            if (animOutDurationField && !animOutDurationField.activeFocus)
+                animOutDurationField.text = Number(s.animOut.duration).toFixed(2)
         }
     }
 
@@ -446,41 +517,64 @@ PanelFrame {
                             visible: root.hasTextStyle
 
                             Text {
-                                text: "Text style"
+                                text: "Presets"
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
                             }
 
-                            Row {
+                            Flow {
                                 width: parent.width
                                 spacing: 6
                                 Repeater {
-                                    model: ["Title", "Lower third", "Subtitle"]
+                                    model: EditorState.textPresets()
                                     delegate: ThemedChip {
-                                        required property string modelData
-                                        text: modelData
+                                        required property var modelData
+                                        text: modelData.label
                                         variant: "outline"
                                         onClicked: EditorState.applyTextPreset(
                                                        EditorState.selectedTrack, EditorState.selectedClip,
-                                                       modelData.toLowerCase())
+                                                       modelData.id)
                                     }
                                 }
                             }
 
-                            ThemedComboBox {
-                                id: fontFamilyBox
+                            Text {
+                                text: "Font"
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            FontPicker {
                                 width: parent.width
-                                model: Qt.fontFamilies()
-                                currentIndex: Math.max(0, model.indexOf(root.textStyle.fontFamily))
-                                onActivated: EditorState.setTextStyle(
-                                                 EditorState.selectedTrack, EditorState.selectedClip,
-                                                 { fontFamily: currentText })
+                                family: root.textStyle.fontFamily
+                                onFamilyPicked: family => root.setTextStyleKey("fontFamily", family)
                             }
 
                             Row {
                                 width: parent.width
                                 spacing: 8
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: "Weight"
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedComboBox {
+                                        id: fontWeightBox
+                                        width: parent.width
+                                        // Only the weights this family actually ships.
+                                        model: root.availableWeights.map(
+                                                   w => root.weightLabels[w] || String(w))
+                                        currentIndex: Math.max(0, root.availableWeights.indexOf(root.textStyle.fontWeight))
+                                        onActivated: root.setTextStyleKey("fontWeight", root.availableWeights[currentIndex])
+                                    }
+                                }
 
                                 Column {
                                     width: (parent.width - parent.spacing) / 2
@@ -501,11 +595,15 @@ PanelFrame {
                                         onEditingFinished: {
                                             const v = parseInt(text)
                                             if (!isNaN(v))
-                                                EditorState.setTextStyle(EditorState.selectedTrack, EditorState.selectedClip,
-                                                                         { pixelSize: v })
+                                                root.setTextStyleKey("pixelSize", v)
                                         }
                                     }
                                 }
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 8
 
                                 Column {
                                     width: (parent.width - parent.spacing) / 2
@@ -534,9 +632,48 @@ PanelFrame {
                                             color: Theme.panelForeground
                                             font.family: Theme.monoFontFamily
                                             font.pixelSize: Theme.fontSizeSm
-                                            onEditingFinished: EditorState.setTextStyle(
-                                                                   EditorState.selectedTrack, EditorState.selectedClip,
-                                                                   { color: text })
+                                            onEditingFinished: root.setTextStyleKey("color", text)
+                                        }
+                                    }
+                                }
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: "Style"
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    Rectangle {
+                                        width: 60
+                                        height: 26
+                                        radius: Theme.radiusSm
+                                        // Greyed out for the single-face display fonts, which have no italic.
+                                        opacity: root.familyHasItalic ? 1.0 : 0.4
+                                        color: root.textStyle.italic ? Theme.panelSecondaryBg : "transparent"
+                                        border.width: 1
+                                        border.color: Theme.panelBorder
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "Italic"
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeXs
+                                            font.italic: true
+                                            color: Theme.panelForeground
+                                        }
+                                        ToolTip {
+                                            visible: italicMouse.containsMouse && !root.familyHasItalic
+                                            text: qsTr("%1 has no italic face").arg(root.textStyle.fontFamily)
+                                        }
+                                        MouseArea {
+                                            id: italicMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            enabled: root.familyHasItalic
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: root.setTextStyleKey("italic", !root.textStyle.italic)
                                         }
                                     }
                                 }
@@ -546,57 +683,11 @@ PanelFrame {
                                 width: parent.width
                                 spacing: 6
 
-                                Rectangle {
-                                    width: 44
-                                    height: 26
-                                    radius: Theme.radiusSm
-                                    color: root.textStyle.bold ? Theme.panelSecondaryBg : "transparent"
-                                    border.width: 1
-                                    border.color: Theme.panelBorder
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "Bold"
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeXs
-                                        color: Theme.panelForeground
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: EditorState.setTextStyle(
-                                                       EditorState.selectedTrack, EditorState.selectedClip,
-                                                       { bold: !root.textStyle.bold })
-                                    }
-                                }
-
-                                Rectangle {
-                                    width: 44
-                                    height: 26
-                                    radius: Theme.radiusSm
-                                    color: root.textStyle.italic ? Theme.panelSecondaryBg : "transparent"
-                                    border.width: 1
-                                    border.color: Theme.panelBorder
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "Italic"
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeXs
-                                        color: Theme.panelForeground
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: EditorState.setTextStyle(
-                                                       EditorState.selectedTrack, EditorState.selectedClip,
-                                                       { italic: !root.textStyle.italic })
-                                    }
-                                }
-
                                 Repeater {
                                     model: ["left", "center", "right"]
                                     delegate: Rectangle {
                                         required property string modelData
-                                        width: 44
+                                        width: 34
                                         height: 26
                                         radius: Theme.radiusSm
                                         color: root.textStyle.align === modelData ? Theme.panelSecondaryBg : "transparent"
@@ -618,9 +709,44 @@ PanelFrame {
                                             anchors.fill: parent
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
-                                            onClicked: EditorState.setTextStyle(
-                                                           EditorState.selectedTrack, EditorState.selectedClip,
-                                                           { align: modelData })
+                                            onClicked: root.setTextStyleKey("align", modelData)
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 1
+                                    height: 26
+                                    color: Theme.panelBorder
+                                }
+
+                                Repeater {
+                                    model: ["top", "middle", "bottom"]
+                                    delegate: Rectangle {
+                                        required property string modelData
+                                        width: 34
+                                        height: 26
+                                        radius: Theme.radiusSm
+                                        color: root.textStyle.valign === modelData ? Theme.panelSecondaryBg : "transparent"
+                                        border.width: 1
+                                        border.color: Theme.panelBorder
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: modelData.charAt(0).toUpperCase()
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeXs
+                                            color: Theme.panelForeground
+                                        }
+                                        ToolTip {
+                                            visible: valignMouse.containsMouse
+                                            text: qsTr("Vertical align %1").arg(modelData)
+                                        }
+                                        MouseArea {
+                                            id: valignMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: root.setTextStyleKey("valign", modelData)
                                         }
                                     }
                                 }
@@ -634,7 +760,88 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Outline width"
+                                        text: "Line height"
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedTextField {
+                                        id: lineHeightField
+                                        width: parent.width
+                                        text: Number(root.textStyle.lineHeight).toFixed(2)
+                                        color: Theme.panelForeground
+                                        font.family: Theme.monoFontFamily
+                                        font.pixelSize: Theme.fontSizeSm
+                                        onEditingFinished: {
+                                            const v = parseFloat(text)
+                                            if (!isNaN(v))
+                                                root.setTextStyleKey("lineHeight", v)
+                                        }
+                                    }
+                                }
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: "Letter spacing"
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedTextField {
+                                        id: letterSpacingField
+                                        width: parent.width
+                                        text: Number(root.textStyle.letterSpacing).toFixed(1)
+                                        color: Theme.panelForeground
+                                        font.family: Theme.monoFontFamily
+                                        font.pixelSize: Theme.fontSizeSm
+                                        onEditingFinished: {
+                                            const v = parseFloat(text)
+                                            if (!isNaN(v))
+                                                root.setTextStyleKey("letterSpacing", v)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 96
+                                height: 26
+                                radius: Theme.radiusSm
+                                color: root.textStyle.wordWrap ? Theme.panelSecondaryBg : "transparent"
+                                border.width: 1
+                                border.color: Theme.panelBorder
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "Word wrap"
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    color: Theme.panelForeground
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.setTextStyleKey("wordWrap", !root.textStyle.wordWrap)
+                                }
+                            }
+
+                            Text {
+                                text: "Outline"
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 8
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: "Width"
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
@@ -649,8 +856,7 @@ PanelFrame {
                                         onEditingFinished: {
                                             const v = parseFloat(text)
                                             if (!isNaN(v))
-                                                EditorState.setTextStyle(EditorState.selectedTrack, EditorState.selectedClip,
-                                                                         { outlineWidth: v })
+                                                root.setTextStyleKey("outlineWidth", v)
                                         }
                                     }
                                 }
@@ -659,7 +865,7 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Outline color"
+                                        text: "Color"
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
@@ -682,9 +888,136 @@ PanelFrame {
                                             color: Theme.panelForeground
                                             font.family: Theme.monoFontFamily
                                             font.pixelSize: Theme.fontSizeSm
-                                            onEditingFinished: EditorState.setTextStyle(
-                                                                   EditorState.selectedTrack, EditorState.selectedClip,
-                                                                   { outlineColor: text })
+                                            onEditingFinished: root.setTextStyleKey("outlineColor", text)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 96
+                                height: 26
+                                radius: Theme.radiusSm
+                                color: root.textStyle.shadowEnabled ? Theme.panelSecondaryBg : "transparent"
+                                border.width: 1
+                                border.color: Theme.panelBorder
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "Shadow"
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    color: Theme.panelForeground
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.setTextStyleKey("shadowEnabled", !root.textStyle.shadowEnabled)
+                                }
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 8
+                                visible: root.textStyle.shadowEnabled
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: "Offset X"
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedTextField {
+                                        id: shadowOffsetXField
+                                        width: parent.width
+                                        text: Number(root.textStyle.shadowOffsetX).toFixed(1)
+                                        color: Theme.panelForeground
+                                        font.family: Theme.monoFontFamily
+                                        font.pixelSize: Theme.fontSizeSm
+                                        onEditingFinished: {
+                                            const v = parseFloat(text)
+                                            if (!isNaN(v))
+                                                root.setTextStyleKey("shadowOffsetX", v)
+                                        }
+                                    }
+                                }
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: "Offset Y"
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedTextField {
+                                        id: shadowOffsetYField
+                                        width: parent.width
+                                        text: Number(root.textStyle.shadowOffsetY).toFixed(1)
+                                        color: Theme.panelForeground
+                                        font.family: Theme.monoFontFamily
+                                        font.pixelSize: Theme.fontSizeSm
+                                        onEditingFinished: {
+                                            const v = parseFloat(text)
+                                            if (!isNaN(v))
+                                                root.setTextStyleKey("shadowOffsetY", v)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 8
+                                visible: root.textStyle.shadowEnabled
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: "Blur"
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedTextField {
+                                        id: shadowBlurField
+                                        width: parent.width
+                                        text: Number(root.textStyle.shadowBlur).toFixed(1)
+                                        color: Theme.panelForeground
+                                        font.family: Theme.monoFontFamily
+                                        font.pixelSize: Theme.fontSizeSm
+                                        onEditingFinished: {
+                                            const v = parseFloat(text)
+                                            if (!isNaN(v))
+                                                root.setTextStyleKey("shadowBlur", v)
+                                        }
+                                    }
+                                }
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: "Opacity"
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedTextField {
+                                        id: shadowOpacityField
+                                        width: parent.width
+                                        text: Number(root.textStyle.shadowOpacity).toFixed(2)
+                                        color: Theme.panelForeground
+                                        font.family: Theme.monoFontFamily
+                                        font.pixelSize: Theme.fontSizeSm
+                                        onEditingFinished: {
+                                            const v = parseFloat(text)
+                                            if (!isNaN(v))
+                                                root.setTextStyleKey("shadowOpacity", v)
                                         }
                                     }
                                 }
@@ -693,32 +1026,62 @@ PanelFrame {
                             Row {
                                 width: parent.width
                                 spacing: 6
+                                visible: root.textStyle.shadowEnabled
 
+                                Text {
+                                    text: "Shadow color"
+                                    color: Theme.mutedForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                                 Rectangle {
-                                    width: 96
-                                    height: 26
-                                    radius: Theme.radiusSm
-                                    color: root.textStyle.boxEnabled ? Theme.panelSecondaryBg : "transparent"
+                                    width: 24
+                                    height: 24
+                                    radius: 4
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: root.textStyle.shadowColor
                                     border.width: 1
                                     border.color: Theme.panelBorder
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "Background"
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeXs
-                                        color: Theme.panelForeground
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: EditorState.setTextStyle(
-                                                       EditorState.selectedTrack, EditorState.selectedClip,
-                                                       { boxEnabled: !root.textStyle.boxEnabled })
-                                    }
                                 }
+                                ThemedTextField {
+                                    id: shadowColorField
+                                    width: 92
+                                    text: root.textStyle.shadowColor
+                                    color: Theme.panelForeground
+                                    font.family: Theme.monoFontFamily
+                                    font.pixelSize: Theme.fontSizeSm
+                                    onEditingFinished: root.setTextStyleKey("shadowColor", text)
+                                }
+                            }
+
+                            Rectangle {
+                                width: 96
+                                height: 26
+                                radius: Theme.radiusSm
+                                color: root.textStyle.boxEnabled ? Theme.panelSecondaryBg : "transparent"
+                                border.width: 1
+                                border.color: Theme.panelBorder
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "Background"
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    color: Theme.panelForeground
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.setTextStyleKey("boxEnabled", !root.textStyle.boxEnabled)
+                                }
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 6
+                                visible: root.textStyle.boxEnabled
 
                                 Rectangle {
-                                    visible: root.textStyle.boxEnabled
                                     width: 24
                                     height: 24
                                     radius: 4
@@ -729,15 +1092,12 @@ PanelFrame {
                                 }
                                 ThemedTextField {
                                     id: boxColorField
-                                    visible: root.textStyle.boxEnabled
                                     width: 92
                                     text: root.textStyle.boxColor
                                     color: Theme.panelForeground
                                     font.family: Theme.monoFontFamily
                                     font.pixelSize: Theme.fontSizeSm
-                                    onEditingFinished: EditorState.setTextStyle(
-                                                           EditorState.selectedTrack, EditorState.selectedClip,
-                                                           { boxColor: text })
+                                    onEditingFinished: root.setTextStyleKey("boxColor", text)
                                 }
                             }
 
@@ -746,25 +1106,140 @@ PanelFrame {
                                 spacing: 8
                                 visible: root.textStyle.boxEnabled
 
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: "Padding"
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedTextField {
+                                        id: boxPaddingField
+                                        width: parent.width
+                                        text: Number(root.textStyle.boxPadding).toFixed(1)
+                                        color: Theme.panelForeground
+                                        font.family: Theme.monoFontFamily
+                                        font.pixelSize: Theme.fontSizeSm
+                                        onEditingFinished: {
+                                            const v = parseFloat(text)
+                                            if (!isNaN(v))
+                                                root.setTextStyleKey("boxPadding", v)
+                                        }
+                                    }
+                                }
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: "Corner radius"
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedTextField {
+                                        id: boxRadiusField
+                                        width: parent.width
+                                        text: Number(root.textStyle.boxRadius).toFixed(1)
+                                        color: Theme.panelForeground
+                                        font.family: Theme.monoFontFamily
+                                        font.pixelSize: Theme.fontSizeSm
+                                        onEditingFinished: {
+                                            const v = parseFloat(text)
+                                            if (!isNaN(v))
+                                                root.setTextStyleKey("boxRadius", v)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: "Animation"
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 6
+
                                 Text {
-                                    text: "Box padding"
+                                    text: "In"
+                                    width: 20
                                     color: Theme.mutedForeground
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeXs
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
+                                ThemedComboBox {
+                                    id: animInKindBox
+                                    width: (parent.width - 20 - parent.spacing * 3 - 56) / 2
+                                    model: root.animKindLabels
+                                    currentIndex: Math.max(0, root.animKinds.indexOf(root.textStyle.animIn.kind))
+                                    onActivated: root.setTextAnim("animIn", "kind", root.animKinds[currentIndex])
+                                }
+                                ThemedComboBox {
+                                    id: animInEaseBox
+                                    width: (parent.width - 20 - parent.spacing * 3 - 56) / 2
+                                    model: root.easeLabels
+                                    currentIndex: Math.max(0, root.easeKinds.indexOf(root.textStyle.animIn.ease))
+                                    onActivated: root.setTextAnim("animIn", "ease", root.easeKinds[currentIndex])
+                                }
                                 ThemedTextField {
-                                    id: boxPaddingField
-                                    width: 72
-                                    text: Number(root.textStyle.boxPadding).toFixed(1)
+                                    id: animInDurationField
+                                    width: 56
+                                    text: Number(root.textStyle.animIn.duration).toFixed(2)
                                     color: Theme.panelForeground
                                     font.family: Theme.monoFontFamily
                                     font.pixelSize: Theme.fontSizeSm
                                     onEditingFinished: {
                                         const v = parseFloat(text)
                                         if (!isNaN(v))
-                                            EditorState.setTextStyle(
-                                                EditorState.selectedTrack, EditorState.selectedClip, { boxPadding: v })
+                                            root.setTextAnim("animIn", "duration", v)
+                                    }
+                                }
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 6
+
+                                Text {
+                                    text: "Out"
+                                    width: 20
+                                    color: Theme.mutedForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                ThemedComboBox {
+                                    id: animOutKindBox
+                                    width: (parent.width - 20 - parent.spacing * 3 - 56) / 2
+                                    model: root.animKindLabels
+                                    currentIndex: Math.max(0, root.animKinds.indexOf(root.textStyle.animOut.kind))
+                                    onActivated: root.setTextAnim("animOut", "kind", root.animKinds[currentIndex])
+                                }
+                                ThemedComboBox {
+                                    id: animOutEaseBox
+                                    width: (parent.width - 20 - parent.spacing * 3 - 56) / 2
+                                    model: root.easeLabels
+                                    currentIndex: Math.max(0, root.easeKinds.indexOf(root.textStyle.animOut.ease))
+                                    onActivated: root.setTextAnim("animOut", "ease", root.easeKinds[currentIndex])
+                                }
+                                ThemedTextField {
+                                    id: animOutDurationField
+                                    width: 56
+                                    text: Number(root.textStyle.animOut.duration).toFixed(2)
+                                    color: Theme.panelForeground
+                                    font.family: Theme.monoFontFamily
+                                    font.pixelSize: Theme.fontSizeSm
+                                    onEditingFinished: {
+                                        const v = parseFloat(text)
+                                        if (!isNaN(v))
+                                            root.setTextAnim("animOut", "duration", v)
                                     }
                                 }
                             }

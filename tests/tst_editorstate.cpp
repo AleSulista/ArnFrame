@@ -23,6 +23,8 @@ private slots:
     void undoBookmarkAdd();
     void projectPersistenceRoundTrip();
     void textStyleBlendModeKeyframesAndEffects();
+    void previewSetTextRectScalesPixelSize();
+    void fontCatalogIsExposedToQml();
     void effectBrowserCategoriesAndApply();
     void multiSelectClipboardGuidesAndShortcuts();
     void addTransitionBetweenAdjacentClips();
@@ -119,17 +121,27 @@ void EditorStateTest::textStyleBlendModeKeyframesAndEffects()
 
     // Text style: partial update only touches the given keys.
     state.setTextStyle(track, clip,
-                       QVariantMap{{"pixelSize", 120}, {"bold", false}, {"color", QStringLiteral("#ffff0000")}});
+                       QVariantMap{{"pixelSize", 120}, {"fontWeight", 300},
+                                   {"color", QStringLiteral("#ffff0000")}});
     QVariantMap style = state.selectedClipData().value(QStringLiteral("textStyle")).toMap();
     QCOMPARE(style.value(QStringLiteral("pixelSize")).toInt(), 120);
-    QCOMPARE(style.value(QStringLiteral("bold")).toBool(), false);
+    QCOMPARE(style.value(QStringLiteral("fontWeight")).toInt(), 300);
     QCOMPARE(style.value(QStringLiteral("color")).toString(), QStringLiteral("#ffff0000"));
+
+    // Nested animation maps patch-merge like any other key.
+    state.setTextStyle(track, clip, QVariantMap{{"animIn", QVariantMap{{"kind", QStringLiteral("pop")},
+                                                                       {"duration", 0.25}}}});
+    style = state.selectedClipData().value(QStringLiteral("textStyle")).toMap();
+    const QVariantMap animIn = style.value(QStringLiteral("animIn")).toMap();
+    QCOMPARE(animIn.value(QStringLiteral("kind")).toString(), QStringLiteral("pop"));
+    QCOMPARE(animIn.value(QStringLiteral("duration")).toDouble(), 0.25);
+    QCOMPARE(style.value(QStringLiteral("pixelSize")).toInt(), 120); // untouched
 
     // Presets overwrite the whole style.
     state.applyTextPreset(track, clip, QStringLiteral("title"));
     style = state.selectedClipData().value(QStringLiteral("textStyle")).toMap();
     QCOMPARE(style.value(QStringLiteral("pixelSize")).toInt(), 96);
-    QCOMPARE(style.value(QStringLiteral("bold")).toBool(), true);
+    QCOMPARE(style.value(QStringLiteral("fontWeight")).toInt(), 800);
 
     // Blend mode.
     state.setClipBlendMode(track, clip, QStringLiteral("multiply"));
@@ -197,6 +209,74 @@ void EditorStateTest::textStyleBlendModeKeyframesAndEffects()
     state.removeEffect(track, clip, 0);
     QCOMPARE(state.selectedClipData().value(QStringLiteral("effects")).toList().size(), 0);
     QCOMPARE(state.selectedClipEffects().size(), 0);
+}
+
+void EditorStateTest::previewSetTextRectScalesPixelSize()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("Resize me"), 0.0);
+
+    const int track = state.selectedTrack();
+    const int clip = state.selectedClip();
+
+    const QVariantMap before = state.selectedClipData().value(QStringLiteral("textStyle")).toMap();
+    const int basePixelSize = before.value(QStringLiteral("pixelSize")).toInt();
+    QVERIFY(basePixelSize > 0);
+
+    // Dragging a corner handle scales the glyphs with the box, not just the wrap container.
+    state.beginPreviewDrag(QStringLiteral("Resize text"));
+    state.previewSetTextRect(track, clip, 10.0, 20.0, 800.0, 600.0, basePixelSize * 2);
+    state.commitPreviewDrag();
+
+    QVariantMap after = state.selectedClipData().value(QStringLiteral("textStyle")).toMap();
+    QCOMPARE(after.value(QStringLiteral("pixelSize")).toInt(), basePixelSize * 2);
+    const QVariantMap keys = state.selectedClipData().value(QStringLiteral("keyframes")).toMap();
+    const QVariantList widthKeys =
+        keys.value(QStringLiteral("width")).toMap().value(QStringLiteral("points")).toList();
+    QCOMPARE(widthKeys.first().toMap().value(QStringLiteral("value")).toDouble(), 800.0);
+
+    // The size and the rect land in one undo entry, so a single undo restores both.
+    state.undo();
+    after = state.selectedClipData().value(QStringLiteral("textStyle")).toMap();
+    QCOMPARE(after.value(QStringLiteral("pixelSize")).toInt(), basePixelSize);
+}
+
+void EditorStateTest::fontCatalogIsExposedToQml()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    const QVariantList catalog = state.fontCatalog();
+    if (catalog.isEmpty())
+        QSKIP("font bundle not present — run scripts/fetch-fonts.py");
+
+    // Every key the FontPicker delegate and the weight combo read must actually arrive.
+    for (const QVariant &entry : catalog) {
+        const QVariantMap family = entry.toMap();
+        QVERIFY(!family.value(QStringLiteral("family")).toString().isEmpty());
+        QVERIFY(!family.value(QStringLiteral("qtFamily")).toString().isEmpty());
+        QVERIFY(!family.value(QStringLiteral("categoryLabel")).toString().isEmpty());
+        QVERIFY(!family.value(QStringLiteral("weights")).toList().isEmpty());
+    }
+
+    const auto findFamily = [&](const QString &name) {
+        for (const QVariant &entry : catalog) {
+            if (entry.toMap().value(QStringLiteral("family")).toString() == name)
+                return entry.toMap();
+        }
+        return QVariantMap{};
+    };
+
+    const QVariantMap anton = findFamily(QStringLiteral("Anton"));
+    QCOMPARE(anton.value(QStringLiteral("weights")).toList().size(), 1);
+    QCOMPARE(anton.value(QStringLiteral("hasItalic")).toBool(), false);
+
+    const QVariantMap montserrat = findFamily(QStringLiteral("Montserrat"));
+    QVERIFY(montserrat.value(QStringLiteral("weights")).toList().size() >= 6);
+    QCOMPARE(montserrat.value(QStringLiteral("hasItalic")).toBool(), true);
+
+    QVERIFY(!state.fontCategories().isEmpty());
 }
 
 void EditorStateTest::effectBrowserCategoriesAndApply()

@@ -27,6 +27,8 @@ private slots:
     void trackAllowsClipTypes();
     void insertTrackAtTopAllowsDuplicateTypes();
     void textStyleAndBlendModeSerialization();
+    void legacyBoldMigratesToFontWeight();
+    void textPresetsAreWellFormed();
     void shapeStyleSerialization();
     void effectCatalogIdSerialization();
     void rgbSplitEffectParametersSerialization();
@@ -346,15 +348,29 @@ void CoreTest::textStyleAndBlendModeSerialization()
     clip.blendMode = drift::BlendMode::Multiply;
     clip.textStyle.fontFamily = QStringLiteral("Courier New");
     clip.textStyle.pixelSize = 88;
-    clip.textStyle.color = QColor(10, 20, 30, 200);
-    clip.textStyle.bold = false;
+    clip.textStyle.fontWeight = 300;
     clip.textStyle.italic = true;
+    clip.textStyle.color = QColor(10, 20, 30, 200);
     clip.textStyle.align = drift::TextAlign::Right;
+    clip.textStyle.valign = drift::TextVAlign::Bottom;
+    clip.textStyle.wordWrap = false;
+    clip.textStyle.lineHeight = 1.6;
+    clip.textStyle.letterSpacing = 3.5;
     clip.textStyle.outlineWidth = 2.5;
     clip.textStyle.outlineColor = QColor(255, 0, 0);
+    clip.textStyle.shadowEnabled = true;
+    clip.textStyle.shadowOffsetX = -3.0;
+    clip.textStyle.shadowOffsetY = 7.0;
+    clip.textStyle.shadowBlur = 11.0;
+    clip.textStyle.shadowOpacity = 0.42;
+    clip.textStyle.shadowColor = QColor(0, 128, 255);
     clip.textStyle.boxEnabled = true;
     clip.textStyle.boxColor = QColor(0, 0, 0, 100);
     clip.textStyle.boxPadding = 12.0;
+    clip.textStyle.boxRadius = 5.0;
+    clip.textStyle.animIn = {drift::TextAnimKind::Pop, drift::secondsToUs(0.3), drift::TextEase::Back};
+    clip.textStyle.animOut = {drift::TextAnimKind::SlideDown, drift::secondsToUs(0.25),
+                              drift::TextEase::EaseInOut};
     project.tracks()[0].clips.append(clip);
 
     const QJsonObject json = project.toJson();
@@ -363,18 +379,91 @@ void CoreTest::textStyleAndBlendModeSerialization()
 
     QVERIFY(error.isEmpty());
     const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
+    const drift::TextStyle &s = loadedClip.textStyle;
     QCOMPARE(loadedClip.blendMode, drift::BlendMode::Multiply);
-    QCOMPARE(loadedClip.textStyle.fontFamily, QStringLiteral("Courier New"));
-    QCOMPARE(loadedClip.textStyle.pixelSize, 88);
-    QCOMPARE(loadedClip.textStyle.color, QColor(10, 20, 30, 200));
-    QCOMPARE(loadedClip.textStyle.bold, false);
-    QCOMPARE(loadedClip.textStyle.italic, true);
-    QCOMPARE(loadedClip.textStyle.align, drift::TextAlign::Right);
-    QCOMPARE(loadedClip.textStyle.outlineWidth, 2.5);
-    QCOMPARE(loadedClip.textStyle.outlineColor, QColor(255, 0, 0));
-    QCOMPARE(loadedClip.textStyle.boxEnabled, true);
-    QCOMPARE(loadedClip.textStyle.boxColor, QColor(0, 0, 0, 100));
-    QCOMPARE(loadedClip.textStyle.boxPadding, 12.0);
+    QCOMPARE(s.fontFamily, QStringLiteral("Courier New"));
+    QCOMPARE(s.pixelSize, 88);
+    QCOMPARE(s.fontWeight, 300);
+    QCOMPARE(s.italic, true);
+    QCOMPARE(s.color, QColor(10, 20, 30, 200));
+    QCOMPARE(s.align, drift::TextAlign::Right);
+    QCOMPARE(s.valign, drift::TextVAlign::Bottom);
+    QCOMPARE(s.wordWrap, false);
+    QCOMPARE(s.lineHeight, 1.6);
+    QCOMPARE(s.letterSpacing, 3.5);
+    QCOMPARE(s.outlineWidth, 2.5);
+    QCOMPARE(s.outlineColor, QColor(255, 0, 0));
+    QCOMPARE(s.shadowEnabled, true);
+    QCOMPARE(s.shadowOffsetX, -3.0);
+    QCOMPARE(s.shadowOffsetY, 7.0);
+    QCOMPARE(s.shadowBlur, 11.0);
+    QCOMPARE(s.shadowOpacity, 0.42);
+    QCOMPARE(s.shadowColor, QColor(0, 128, 255));
+    QCOMPARE(s.boxEnabled, true);
+    QCOMPARE(s.boxColor, QColor(0, 0, 0, 100));
+    QCOMPARE(s.boxPadding, 12.0);
+    QCOMPARE(s.boxRadius, 5.0);
+    QCOMPARE(s.animIn.kind, drift::TextAnimKind::Pop);
+    QCOMPARE(s.animIn.durationUs, drift::secondsToUs(0.3));
+    QCOMPARE(s.animIn.ease, drift::TextEase::Back);
+    QCOMPARE(s.animOut.kind, drift::TextAnimKind::SlideDown);
+    QCOMPARE(s.animOut.durationUs, drift::secondsToUs(0.25));
+    QCOMPARE(s.animOut.ease, drift::TextEase::EaseInOut);
+}
+
+void CoreTest::legacyBoldMigratesToFontWeight()
+{
+    // Projects written before the weight ladder carried a bold flag instead.
+    const auto weightForLegacy = [](const QJsonObject &textStyle) {
+        QJsonObject clip{
+            {QStringLiteral("id"), QStringLiteral("c1")},
+            {QStringLiteral("type"), QStringLiteral("text")},
+            {QStringLiteral("textContent"), QStringLiteral("Hi")},
+            {QStringLiteral("timelineStart"), 0},
+            {QStringLiteral("timelineDuration"), 1000000},
+            {QStringLiteral("textStyle"), textStyle},
+        };
+        QJsonObject track{
+            {QStringLiteral("type"), QStringLiteral("text")},
+            {QStringLiteral("clips"), QJsonArray{clip}},
+        };
+        QJsonObject project{
+            {QStringLiteral("version"), 2},
+            {QStringLiteral("width"), 1920},
+            {QStringLiteral("height"), 1080},
+            {QStringLiteral("fps"), 30},
+            {QStringLiteral("tracks"), QJsonArray{track}},
+        };
+        QString error;
+        const drift::Project loaded = drift::Project::fromJson(project, &error);
+        return loaded.tracks().at(0).clips.at(0).textStyle.fontWeight;
+    };
+
+    QCOMPARE(weightForLegacy({{QStringLiteral("bold"), true}}), 700);
+    QCOMPARE(weightForLegacy({{QStringLiteral("bold"), false}}), 400);
+    // A style object with neither key keeps the struct default.
+    QCOMPARE(weightForLegacy({{QStringLiteral("pixelSize"), 40}}), 700);
+    // A new-format style wins over any stale bold flag.
+    QCOMPARE(weightForLegacy({{QStringLiteral("bold"), false}, {QStringLiteral("fontWeight"), 900}}), 900);
+}
+
+void CoreTest::textPresetsAreWellFormed()
+{
+    const QList<drift::TextPreset> &presets = drift::textPresets();
+    QVERIFY(!presets.isEmpty());
+
+    QSet<QString> ids;
+    for (const drift::TextPreset &preset : presets) {
+        QVERIFY(!preset.id.isEmpty());
+        QVERIFY(!preset.label.isEmpty());
+        QVERIFY(!ids.contains(preset.id));
+        ids.insert(preset.id);
+        QVERIFY(preset.style.pixelSize > 0);
+        QVERIFY(!preset.style.fontFamily.isEmpty());
+        QVERIFY(preset.style.fontWeight >= 100 && preset.style.fontWeight <= 900);
+        QCOMPARE(drift::textStyleForPresetId(preset.id)->fontFamily, preset.style.fontFamily);
+    }
+    QVERIFY(drift::textStyleForPresetId(QStringLiteral("nope")) == nullptr);
 }
 
 void CoreTest::shapeStyleSerialization()

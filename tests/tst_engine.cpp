@@ -19,7 +19,9 @@
 #include "engine/EffectCatalog.h"
 #include "engine/EffectPackageLoader.h"
 #include "engine/EffectProcessor.h"
+#include "engine/FontCatalog.h"
 #include "engine/FrameCompositor.h"
+#include "engine/TextRaster.h"
 #include "engine/GpuEffectExecutor.h"
 #include "engine/MaskApplier.h"
 #include "engine/TransitionCatalog.h"
@@ -87,6 +89,13 @@ private slots:
     void brokenTransitionShaderFallsBackToCrossfade();
     void transitionRenderingIsDeterministic();
     void textClipRendersInsideTransition();
+    void fontCatalogLoadsFamilies();
+    void fontForStyleResolvesRequestedFace();
+    void textRasterIsCached();
+    void textDecorationsAreNotCropped();
+    void heavyWeightsRenderSolidGlyphs();
+    void textClipCarriesGpuEffects();
+    void textAnimationFadesAndSlides();
     void maskApplierEllipseMasksCorners();
     void exporterProducesPlayableFileWithBackground();
 
@@ -104,6 +113,10 @@ void EngineTest::initTestCase()
     const QString transitionsDir = QString::fromUtf8(DRIFT_TEST_TRANSITIONS_DIR);
     QVERIFY2(QDir(transitionsDir).exists(), qPrintable(transitionsDir));
     reloadTransitionCatalog({transitionsDir});
+
+    // The font bundle is fetched rather than committed, so an offline checkout legitimately has
+    // none. The font tests skip in that case rather than fail.
+    reloadFontCatalog({QString::fromUtf8(DRIFT_TEST_FONTS_DIR)});
 }
 
 void EngineTest::effectProcessorPassthroughWithoutEffects()
@@ -1772,6 +1785,311 @@ void EngineTest::transitionRenderingIsDeterministic()
 
         QVERIFY2(first == rescrubbed, qPrintable(kindId));
     }
+}
+
+namespace {
+
+// The bundle is fetched, not committed, so an offline checkout legitimately has no fonts.
+#define SKIP_WITHOUT_FONTS()                                                                        \
+    do {                                                                                            \
+        if (fontCatalog().isEmpty())                                                                \
+            QSKIP("font bundle not present — run scripts/fetch-fonts.py");                          \
+    } while (false)
+
+drift::Clip makeTextClip(const QString &text, const QRectF &rect)
+{
+    drift::Clip clip;
+    clip.id = QStringLiteral("text");
+    clip.type = drift::ClipType::Text;
+    clip.textContent = text;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(4.0);
+    clip.transformX.setKeyframe(0, rect.x());
+    clip.transformY.setKeyframe(0, rect.y());
+    clip.transformW.setKeyframe(0, rect.width());
+    clip.transformH.setKeyframe(0, rect.height());
+    return clip;
+}
+
+int litPixels(const QImage &image)
+{
+    int lit = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            if (qAlpha(image.pixel(x, y)) > 8)
+                ++lit;
+        }
+    }
+    return lit;
+}
+
+double meanLuminance(const QImage &image)
+{
+    double sum = 0.0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QRgb px = image.pixel(x, y);
+            sum += 0.2126 * qRed(px) + 0.7152 * qGreen(px) + 0.0722 * qBlue(px);
+        }
+    }
+    return sum / (image.width() * image.height());
+}
+
+// Vertical centre of mass of the lit pixels — how the slide is observed.
+double litCentroidY(const QImage &image)
+{
+    double weighted = 0.0;
+    double total = 0.0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QRgb px = image.pixel(x, y);
+            const double lum = 0.2126 * qRed(px) + 0.7152 * qGreen(px) + 0.0722 * qBlue(px);
+            weighted += lum * y;
+            total += lum;
+        }
+    }
+    return total > 0.0 ? weighted / total : 0.0;
+}
+
+} // namespace
+
+void EngineTest::fontCatalogLoadsFamilies()
+{
+    SKIP_WITHOUT_FONTS();
+
+    const QList<FontFamilyEntry> &families = fontCatalog();
+    QVERIFY2(families.size() >= 20, qPrintable(QString::number(families.size())));
+
+    for (const FontFamilyEntry &entry : families) {
+        QVERIFY2(!entry.qtFamily.isEmpty(), qPrintable(entry.family));
+        QVERIFY2(!entry.faces.isEmpty(), qPrintable(entry.family));
+        QVERIFY2(!entry.category.isEmpty(), qPrintable(entry.family));
+    }
+
+    const FontFamilyEntry *montserrat = fontFamilyForName(QStringLiteral("Montserrat"));
+    QVERIFY(montserrat);
+    QVERIFY(montserrat->weights().size() >= 6);
+    QVERIFY(montserrat->hasItalic());
+
+    // Display faces really do ship a single weight — the picker must not invent more.
+    const FontFamilyEntry *anton = fontFamilyForName(QStringLiteral("Anton"));
+    QVERIFY(anton);
+    QCOMPARE(anton->weights().size(), 1);
+    QVERIFY(!anton->hasItalic());
+
+    QVERIFY(fontFamilyForName(QStringLiteral("Pacifico")));
+    QVERIFY(!fontFamilyForName(QStringLiteral("No Such Family")));
+}
+
+void EngineTest::fontForStyleResolvesRequestedFace()
+{
+    SKIP_WITHOUT_FONTS();
+
+    drift::TextStyle style;
+    style.fontFamily = QStringLiteral("Montserrat");
+    style.fontWeight = 900;
+    QCOMPARE(fontForStyle(style, 40).styleName(), QStringLiteral("Black"));
+
+    style.fontWeight = 400;
+    QCOMPARE(fontForStyle(style, 40).styleName(), QStringLiteral("Regular"));
+
+    // 250 is not a real face; the nearest one in the requested direction wins.
+    style.fontWeight = 250;
+    QCOMPARE(fontForStyle(style, 40).styleName(), QStringLiteral("ExtraLight"));
+
+    // Anton has no italic, so the upright face stands in rather than Qt faking an oblique.
+    style.fontFamily = QStringLiteral("Anton");
+    style.fontWeight = 400;
+    style.italic = true;
+    QVERIFY(!fontForStyle(style, 40).italic());
+
+    // Families outside the bundle still resolve through the system database.
+    style.fontFamily = QStringLiteral("Sans Serif");
+    QCOMPARE(fontForStyle(style, 40).pixelSize(), 40);
+}
+
+void EngineTest::textRasterIsCached()
+{
+    SKIP_WITHOUT_FONTS();
+
+    const QRectF rect(0, 0, 400, 200);
+    drift::Clip clip = makeTextClip(QStringLiteral("Cache me"), rect);
+    clip.textStyle.fontFamily = QStringLiteral("Inter");
+
+    const TextRasterResult first = rasterizeText(clip, rect, 1.0);
+    const TextRasterResult second = rasterizeText(clip, rect, 1.0);
+    QVERIFY(!first.image.isNull());
+    // Same underlying QImage, so the second frame did no rasterization at all.
+    QCOMPARE(first.image.cacheKey(), second.image.cacheKey());
+
+    // The animation is applied to the layer, never to the pixels, so it must not evict the raster.
+    clip.textStyle.animIn = {drift::TextAnimKind::Fade, drift::secondsToUs(1.0), drift::TextEase::EaseOut};
+    const TextRasterResult animated = rasterizeText(clip, rect, 1.0);
+    QCOMPARE(animated.image.cacheKey(), first.image.cacheKey());
+
+    clip.textStyle.color = Qt::red;
+    QVERIFY(rasterizeText(clip, rect, 1.0).image.cacheKey() != first.image.cacheKey());
+}
+
+void EngineTest::textDecorationsAreNotCropped()
+{
+    SKIP_WITHOUT_FONTS();
+
+    const QRectF rect(100, 100, 300, 80);
+    drift::Clip clip = makeTextClip(QStringLiteral("Edge"), rect);
+    clip.textStyle.fontFamily = QStringLiteral("Anton");
+    clip.textStyle.pixelSize = 64;
+
+    const TextRasterResult plain = rasterizeText(clip, rect, 1.0);
+    QVERIFY(!plain.image.isNull());
+
+    clip.textStyle.outlineWidth = 12.0;
+    clip.textStyle.shadowEnabled = true;
+    clip.textStyle.shadowBlur = 10.0;
+    clip.textStyle.shadowOffsetY = 8.0;
+    const TextRasterResult decorated = rasterizeText(clip, rect, 1.0);
+
+    // The raster grows past the layout rect on every side, so nothing is clipped at the edge...
+    QVERIFY(decorated.rect.width() > rect.width());
+    QVERIFY(decorated.rect.height() > rect.height());
+    QVERIFY(decorated.rect.left() < rect.left());
+    QVERIFY(decorated.rect.top() < rect.top());
+    // ...and the destination rect follows the image, so it still lands where the user put it.
+    QCOMPARE(decorated.rect.center(), rect.center());
+    QCOMPARE(decorated.image.width(), qRound(decorated.rect.width()));
+    QCOMPARE(decorated.image.height(), qRound(decorated.rect.height()));
+
+    // The stroke and shadow really do add ink.
+    QVERIFY(litPixels(decorated.image) > litPixels(plain.image));
+}
+
+void EngineTest::heavyWeightsRenderSolidGlyphs()
+{
+    SKIP_WITHOUT_FONTS();
+
+    // Where two glyph contours overlap — which heavy weights and tight spacing make common —
+    // QPainterPath's odd-even default punches the overlap out into a transparent hole.
+    // "W" has no counter, so in "WWWW" *any* enclosed transparent region is such a hole.
+    const QRectF rect(0, 0, 900, 200);
+    drift::Clip clip = makeTextClip(QStringLiteral("WWWW"), rect);
+    clip.textStyle.fontFamily = QStringLiteral("Montserrat");
+    clip.textStyle.fontWeight = 900;
+    clip.textStyle.pixelSize = 80;
+    clip.textStyle.letterSpacing = -30.0; // force the glyphs to overlap each other
+
+    const QImage image = rasterizeText(clip, rect, 1.0).image;
+    QVERIFY(!image.isNull());
+
+    // Flood the transparent background inward from the border; whatever transparent pixels it
+    // cannot reach are enclosed by ink, i.e. holes.
+    const int w = image.width();
+    const int h = image.height();
+    const auto transparent = [&](int x, int y) { return qAlpha(image.pixel(x, y)) < 128; };
+
+    QVector<bool> reached(w * h, false);
+    QVector<QPoint> stack;
+    for (int x = 0; x < w; ++x) {
+        stack.append({x, 0});
+        stack.append({x, h - 1});
+    }
+    for (int y = 0; y < h; ++y) {
+        stack.append({0, y});
+        stack.append({w - 1, y});
+    }
+    while (!stack.isEmpty()) {
+        const QPoint p = stack.takeLast();
+        if (p.x() < 0 || p.y() < 0 || p.x() >= w || p.y() >= h)
+            continue;
+        const int i = p.y() * w + p.x();
+        if (reached[i] || !transparent(p.x(), p.y()))
+            continue;
+        reached[i] = true;
+        stack.append({p.x() + 1, p.y()});
+        stack.append({p.x() - 1, p.y()});
+        stack.append({p.x(), p.y() + 1});
+        stack.append({p.x(), p.y() - 1});
+    }
+
+    int enclosed = 0;
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            if (transparent(x, y) && !reached[y * w + x])
+                ++enclosed;
+        }
+    }
+
+    // Winding fill leaves exactly zero here; odd-even leaves hundreds.
+    QVERIFY2(enclosed < 20,
+             qPrintable(QStringLiteral("%1 enclosed transparent px — overlapping glyph contours "
+                                       "are being punched out (fill rule regression)")
+                            .arg(enclosed)));
+}
+
+void EngineTest::textClipCarriesGpuEffects()
+{
+    SKIP_WITHOUT_FONTS();
+
+    drift::Project project;
+    project.setResolution(128, 128);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Text});
+
+    drift::Clip clip = makeTextClip(QStringLiteral("FX"), QRectF(0, 0, 128, 128));
+    clip.textStyle.fontFamily = QStringLiteral("Anton");
+    clip.textStyle.pixelSize = 48;
+    clip.textStyle.color = QColor(120, 120, 120);
+    project.tracks()[0].clips.append(clip);
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+    const QImage plain = compositor.compositeAt(drift::secondsToUs(1.0));
+    QVERIFY(!plain.isNull());
+
+    drift::Effect brightness;
+    brightness.catalogId = QStringLiteral("adjust.brightness");
+    brightness.parameters.insert(QStringLiteral("brightness"), 0.9);
+    project.tracks()[0].clips[0].effects.append(brightness);
+
+    const QImage brightened = compositor.compositeAt(drift::secondsToUs(1.0));
+    QVERIFY(!brightened.isNull());
+    // Effects used to be dropped for text clips: the layer only got them in the video branch.
+    QVERIFY2(meanLuminance(brightened) > meanLuminance(plain) + 1.0,
+             "GPU effect had no visible effect on a text clip");
+}
+
+void EngineTest::textAnimationFadesAndSlides()
+{
+    SKIP_WITHOUT_FONTS();
+
+    drift::Project project;
+    project.setResolution(128, 128);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Text});
+
+    drift::Clip clip = makeTextClip(QStringLiteral("IN"), QRectF(0, 0, 128, 128));
+    clip.textStyle.fontFamily = QStringLiteral("Anton");
+    clip.textStyle.pixelSize = 48;
+    clip.textStyle.animIn = {drift::TextAnimKind::Fade, drift::secondsToUs(1.0), drift::TextEase::Linear};
+    project.tracks()[0].clips.append(clip);
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+
+    const double early = meanLuminance(compositor.compositeAt(drift::secondsToUs(0.05)));
+    const double mid = meanLuminance(compositor.compositeAt(drift::secondsToUs(0.5)));
+    const double settled = meanLuminance(compositor.compositeAt(drift::secondsToUs(2.0)));
+    QVERIFY2(early < mid && mid < settled, "fade-in did not ramp up");
+
+    // Once past the entrance the text holds steady rather than continuing to change.
+    const double later = meanLuminance(compositor.compositeAt(drift::secondsToUs(3.0)));
+    QVERIFY(qAbs(later - settled) < 0.5);
+
+    // A slide-up entrance arrives from below, so the glyphs start lower than they finish.
+    project.tracks()[0].clips[0].textStyle.animIn = {drift::TextAnimKind::SlideUp,
+                                                     drift::secondsToUs(1.0), drift::TextEase::Linear};
+    const double startY = litCentroidY(compositor.compositeAt(drift::secondsToUs(0.1)));
+    const double endY = litCentroidY(compositor.compositeAt(drift::secondsToUs(2.0)));
+    QVERIFY2(startY > endY + 1.0, "slide-up entrance did not travel upward");
 }
 
 void EngineTest::maskApplierEllipseMasksCorners()

@@ -6,6 +6,7 @@
 #include "core/Project.h"
 #include "core/Track.h"
 #include "core/Transition.h"
+#include "engine/FontCatalog.h"
 #include "engine/FrameCompositor.h"
 
 #include <QElapsedTimer>
@@ -45,6 +46,7 @@ drift::Clip makeVideoClip(const QString &id, const QString &path, drift::TimeUs 
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    reloadFontCatalog();
     QTextStream out(stdout);
     QTextStream err(stderr);
 

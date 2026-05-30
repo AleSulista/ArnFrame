@@ -7,6 +7,7 @@
 #include "GpuCompositor.h"
 #include "GpuEffectExecutor.h"
 #include "MaskApplier.h"
+#include "TextRaster.h"
 #include "TransitionCatalog.h"
 #include "core/Clip.h"
 #include "core/Time.h"
@@ -354,43 +355,6 @@ void layoutRectForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
         *rotationOut = transformValue(clip.rotation, relative, 0.0);
 }
 
-void drawStyledText(QPainter &p, const drift::Clip &clip, const QString &text, int w, int h, double scale,
-                    double renderScale)
-{
-    const drift::TextStyle &s = clip.textStyle;
-    QFont font(s.fontFamily);
-    font.setPixelSize(qMax(8, static_cast<int>(s.pixelSize * scale * renderScale)));
-    font.setBold(s.bold);
-    font.setItalic(s.italic);
-    p.setFont(font);
-
-    const int flag = s.align == drift::TextAlign::Left    ? Qt::AlignLeft
-                     : s.align == drift::TextAlign::Right ? Qt::AlignRight
-                                                           : Qt::AlignHCenter;
-    const QRect box(-w / 2, -h / 2, w, h);
-    const QFontMetrics fm(font);
-
-    if (s.boxEnabled) {
-        QRect tb = fm.boundingRect(box, flag | Qt::AlignVCenter, text);
-        const int padding = qMax(0, static_cast<int>(s.boxPadding * renderScale));
-        tb.adjust(-padding, -padding, padding, padding);
-        p.fillRect(tb, s.boxColor);
-    }
-
-    if (s.outlineWidth > 0.0) { // stroke via QPainterPath
-        const QRect textBounds = fm.boundingRect(box, flag | Qt::AlignVCenter, text);
-        QPainterPath path;
-        path.addText(textBounds.left(), textBounds.top() + fm.ascent(), font, text);
-        p.setPen(QPen(s.outlineColor, s.outlineWidth * scale * renderScale));
-        p.setBrush(s.color);
-        p.drawPath(path);
-    } else {
-        p.setPen(s.color);
-        p.drawText(box, flag | Qt::AlignVCenter, text);
-    }
-}
-
-// Fast separable box blur (two passes ≈ gaussian) over an RGBA8888 image.
 // The topmost active video/image frame at this time, used to derive a blur fill.
 QImage topmostVisualFrame(const drift::Project &project, drift::TimeUs timelineUs, int width, int height)
 {
@@ -462,27 +426,6 @@ QImage gpuSourceForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int m
     return CompositorFrameHistory::applyTimeEcho(samples, decay, blendMode);
 }
 
-// Text is QPainter-rasterized into its own layer image; the GPU then rotates,
-// scales and blends it like any other layer.
-QImage textImageForClip(const drift::Clip &clip, int layoutW, int layoutH, double renderScale)
-{
-    const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
-    if (text.isEmpty())
-        return {};
-
-    QImage image(qMax(1, layoutW), qMax(1, layoutH), QImage::Format_RGBA8888);
-    image.fill(Qt::transparent);
-
-    QPainter p(&image);
-    p.setRenderHint(QPainter::Antialiasing);
-    p.setRenderHint(QPainter::TextAntialiasing);
-    // drawStyledText centres on the origin, so shift to the image centre.
-    p.translate(image.width() * 0.5, image.height() * 0.5);
-    drawStyledText(p, clip, text, image.width(), image.height(), 1.0, renderScale);
-    p.end();
-    return image;
-}
-
 GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth,
                        int projectHeight, double renderScale, int canvasWidth, int canvasHeight,
                        int projectFps, int maxTimeEchoHistoryFrames)
@@ -502,10 +445,36 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
     const int layoutW = qMax(1, qRound(w));
     const int layoutH = qMax(1, qRound(h));
 
+    const QRectF layoutRect(x, y, w, h);
+    QRectF destRect = layoutRect;
+    double opacity = opacityForClip(clip, timelineUs);
+
     if (clip.type == drift::ClipType::Text) {
-        layer.source = textImageForClip(clip, layoutW, layoutH, renderScale);
+        // The raster carries a bleed margin for the stroke, shadow and box, so its destination rect
+        // is wider than the layout rect. Entrance/exit motion rides on the layer, not the pixels.
+        const TextRasterResult raster = rasterizeText(clip, layoutRect, renderScale);
+        const TextAnimSample anim = sampleTextAnimation(clip, timelineUs, layoutRect, renderScale);
+
+        layer.source = raster.image;
+        layer.effects = effectsExcludingTimeEcho(clip.effects);
+
+        destRect = raster.rect.translated(anim.dx, anim.dy);
+        if (!qFuzzyCompare(anim.scale, 1.0)) {
+            const QPointF centre = destRect.center();
+            destRect.setSize(destRect.size() * anim.scale);
+            destRect.moveCenter(centre);
+        }
+        opacity *= anim.opacity;
+
+        if (anim.blurPx > 0.5) {
+            drift::Effect blur;
+            blur.catalogId = QStringLiteral("builtin.effects.gaussian_blur");
+            blur.parameters.insert(QStringLiteral("u_blurRadius"), anim.blurPx);
+            layer.effects.append(blur);
+        }
     } else if (clip.type == drift::ClipType::Shape) {
         layer.source = shapeImageForClip(clip, layoutW, layoutH);
+        layer.effects = effectsExcludingTimeEcho(clip.effects);
     } else {
         // Bounded by the canvas, not the layout rect — see decodeClipMediaFrame.
         layer.source = gpuSourceForClip(clip, timelineUs, canvasWidth, canvasHeight, projectFps,
@@ -517,11 +486,11 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
         return layer;
 
     layer.mask = clip.mask;
-    layer.rect = QRectF(x, y, w, h);
+    layer.rect = destRect;
     layer.rotation = rotation;
     layer.flipH = clip.flipH;
     layer.flipV = clip.flipV;
-    layer.opacity = opacityForClip(clip, timelineUs);
+    layer.opacity = opacity;
     layer.clipTimeUs = timelineUs - clip.timelineStart;
     layer.valid = true;
     return layer;

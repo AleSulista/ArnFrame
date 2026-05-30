@@ -142,6 +142,7 @@ PanelFrame {
                                 property real dragStartY: 0
                                 property real dragStartW: 1
                                 property real dragStartH: 1
+                                property int dragStartPixelSize: 64
 
                                 Rectangle {
                                     anchors.fill: parent
@@ -220,6 +221,7 @@ PanelFrame {
                                                     handle.dragStartY = handle.layoutY
                                                     handle.dragStartW = handle.layoutW
                                                     handle.dragStartH = handle.layoutH
+                                                    handle.dragStartPixelSize = handle.modelData.pixelSize || 64
                                                     handle.liveX = handle.dragStartX
                                                     handle.liveY = handle.dragStartY
                                                     handle.liveW = handle.dragStartW
@@ -269,10 +271,21 @@ PanelFrame {
                                                 handle.liveY = y
                                                 handle.liveW = w
                                                 handle.liveH = h
-                                                EditorState.previewSetClipRect(
-                                                    handle.modelData.track,
-                                                    handle.modelData.clip,
-                                                    x, y, w, h)
+                                                if (handle.modelData.kind === "text") {
+                                                    // Height drives the glyph scale; a width-only drag
+                                                    // just re-wraps, since the box is the wrap width.
+                                                    const px = Math.round(handle.dragStartPixelSize
+                                                                          * h / Math.max(1, handle.dragStartH))
+                                                    EditorState.previewSetTextRect(
+                                                        handle.modelData.track,
+                                                        handle.modelData.clip,
+                                                        x, y, w, h, px)
+                                                } else {
+                                                    EditorState.previewSetClipRect(
+                                                        handle.modelData.track,
+                                                        handle.modelData.clip,
+                                                        x, y, w, h)
+                                                }
                                             }
                                         }
                                     }

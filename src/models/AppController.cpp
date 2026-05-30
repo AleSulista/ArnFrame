@@ -7,6 +7,7 @@
 #include "core/commands/ProjectCommands.h"
 #include "engine/EffectCatalog.h"
 #include "engine/Exporter.h"
+#include "engine/FontCatalog.h"
 #include "engine/MediaThumbnail.h"
 #include "engine/MediaWaveform.h"
 #include "engine/TransitionCatalog.h"
@@ -250,20 +251,54 @@ QVariantList AppController::tracks() const
 
 namespace {
 
+void applyTextAnimationPatch(drift::TextAnimation *anim, const QVariantMap &m)
+{
+    if (m.isEmpty())
+        return;
+    if (m.contains(QStringLiteral("kind")))
+        anim->kind = drift::textAnimKindFromString(m.value(QStringLiteral("kind")).toString());
+    if (m.contains(QStringLiteral("duration")))
+        anim->durationUs = drift::secondsToUs(qBound(0.0, m.value(QStringLiteral("duration")).toDouble(), 10.0));
+    if (m.contains(QStringLiteral("ease")))
+        anim->ease = drift::textEaseFromString(m.value(QStringLiteral("ease")).toString());
+}
+
+QVariantMap textAnimationToMap(const drift::TextAnimation &a)
+{
+    return {
+        {QStringLiteral("kind"), drift::textAnimKindToString(a.kind)},
+        {QStringLiteral("duration"), drift::usToSeconds(a.durationUs)},
+        {QStringLiteral("ease"), drift::textEaseToString(a.ease)},
+    };
+}
+
 QVariantMap textStyleToMap(const drift::TextStyle &s)
 {
     return {
         {QStringLiteral("fontFamily"), s.fontFamily},
         {QStringLiteral("pixelSize"), s.pixelSize},
-        {QStringLiteral("color"), s.color.name(QColor::HexArgb)},
-        {QStringLiteral("bold"), s.bold},
+        {QStringLiteral("fontWeight"), s.fontWeight},
         {QStringLiteral("italic"), s.italic},
+        {QStringLiteral("color"), s.color.name(QColor::HexArgb)},
         {QStringLiteral("align"), drift::textAlignToString(s.align)},
+        {QStringLiteral("valign"), drift::textVAlignToString(s.valign)},
+        {QStringLiteral("wordWrap"), s.wordWrap},
+        {QStringLiteral("lineHeight"), s.lineHeight},
+        {QStringLiteral("letterSpacing"), s.letterSpacing},
         {QStringLiteral("outlineWidth"), s.outlineWidth},
         {QStringLiteral("outlineColor"), s.outlineColor.name(QColor::HexArgb)},
+        {QStringLiteral("shadowEnabled"), s.shadowEnabled},
+        {QStringLiteral("shadowOffsetX"), s.shadowOffsetX},
+        {QStringLiteral("shadowOffsetY"), s.shadowOffsetY},
+        {QStringLiteral("shadowBlur"), s.shadowBlur},
+        {QStringLiteral("shadowOpacity"), s.shadowOpacity},
+        {QStringLiteral("shadowColor"), s.shadowColor.name(QColor::HexArgb)},
         {QStringLiteral("boxEnabled"), s.boxEnabled},
         {QStringLiteral("boxColor"), s.boxColor.name(QColor::HexArgb)},
         {QStringLiteral("boxPadding"), s.boxPadding},
+        {QStringLiteral("boxRadius"), s.boxRadius},
+        {QStringLiteral("animIn"), textAnimationToMap(s.animIn)},
+        {QStringLiteral("animOut"), textAnimationToMap(s.animOut)},
     };
 }
 
@@ -446,33 +481,6 @@ bool writeKeyframeValue(drift::KeyframeTrack<double> &track, drift::TimeUs relat
         return false;
     track.setKeyframe(nearest, value);
     return true;
-}
-
-drift::TextStyle textStyleForPreset(const QString &presetId)
-{
-    drift::TextStyle s;
-    if (presetId == QStringLiteral("title")) {
-        s.pixelSize = 96;
-        s.bold = true;
-        s.align = drift::TextAlign::Center;
-        s.outlineWidth = 2.0;
-        s.outlineColor = Qt::black;
-    } else if (presetId == QStringLiteral("lower third")) {
-        s.pixelSize = 48;
-        s.bold = true;
-        s.align = drift::TextAlign::Left;
-        s.boxEnabled = true;
-        s.boxColor = QColor(0, 0, 0, 160);
-        s.boxPadding = 12.0;
-    } else if (presetId == QStringLiteral("subtitle")) {
-        s.pixelSize = 40;
-        s.bold = false;
-        s.align = drift::TextAlign::Center;
-        s.boxEnabled = true;
-        s.boxColor = QColor(0, 0, 0, 140);
-        s.boxPadding = 8.0;
-    }
-    return s;
 }
 
 QVariantMap effectToMap(const drift::Effect &effect)
@@ -1729,6 +1737,7 @@ QVariantList AppController::previewClipsAtPlayhead() const
                 {QStringLiteral("clip"), clipIndex},
                 {QStringLiteral("kind"), drift::clipTypeToString(clip.type)},
                 {QStringLiteral("name"), clip.name},
+                {QStringLiteral("pixelSize"), clip.textStyle.pixelSize},
                 {QStringLiteral("x"), x},
                 {QStringLiteral("y"), y},
                 {QStringLiteral("width"), w},
@@ -2225,25 +2234,49 @@ void AppController::setTextStyle(int trackIndex, int clipIndex, const QVariantMa
     if (m.contains(QStringLiteral("fontFamily")))
         s.fontFamily = m.value(QStringLiteral("fontFamily")).toString();
     if (m.contains(QStringLiteral("pixelSize")))
-        s.pixelSize = m.value(QStringLiteral("pixelSize")).toInt();
-    if (m.contains(QStringLiteral("color")))
-        s.color = QColor(m.value(QStringLiteral("color")).toString());
-    if (m.contains(QStringLiteral("bold")))
-        s.bold = m.value(QStringLiteral("bold")).toBool();
+        s.pixelSize = qBound(8, m.value(QStringLiteral("pixelSize")).toInt(), 800);
+    if (m.contains(QStringLiteral("fontWeight")))
+        s.fontWeight = qBound(100, m.value(QStringLiteral("fontWeight")).toInt(), 900);
     if (m.contains(QStringLiteral("italic")))
         s.italic = m.value(QStringLiteral("italic")).toBool();
+    if (m.contains(QStringLiteral("color")))
+        s.color = QColor(m.value(QStringLiteral("color")).toString());
     if (m.contains(QStringLiteral("align")))
         s.align = drift::textAlignFromString(m.value(QStringLiteral("align")).toString());
+    if (m.contains(QStringLiteral("valign")))
+        s.valign = drift::textVAlignFromString(m.value(QStringLiteral("valign")).toString());
+    if (m.contains(QStringLiteral("wordWrap")))
+        s.wordWrap = m.value(QStringLiteral("wordWrap")).toBool();
+    if (m.contains(QStringLiteral("lineHeight")))
+        s.lineHeight = qBound(0.5, m.value(QStringLiteral("lineHeight")).toDouble(), 4.0);
+    if (m.contains(QStringLiteral("letterSpacing")))
+        s.letterSpacing = m.value(QStringLiteral("letterSpacing")).toDouble();
     if (m.contains(QStringLiteral("outlineWidth")))
-        s.outlineWidth = m.value(QStringLiteral("outlineWidth")).toDouble();
+        s.outlineWidth = qMax(0.0, m.value(QStringLiteral("outlineWidth")).toDouble());
     if (m.contains(QStringLiteral("outlineColor")))
         s.outlineColor = QColor(m.value(QStringLiteral("outlineColor")).toString());
+    if (m.contains(QStringLiteral("shadowEnabled")))
+        s.shadowEnabled = m.value(QStringLiteral("shadowEnabled")).toBool();
+    if (m.contains(QStringLiteral("shadowOffsetX")))
+        s.shadowOffsetX = m.value(QStringLiteral("shadowOffsetX")).toDouble();
+    if (m.contains(QStringLiteral("shadowOffsetY")))
+        s.shadowOffsetY = m.value(QStringLiteral("shadowOffsetY")).toDouble();
+    if (m.contains(QStringLiteral("shadowBlur")))
+        s.shadowBlur = qMax(0.0, m.value(QStringLiteral("shadowBlur")).toDouble());
+    if (m.contains(QStringLiteral("shadowOpacity")))
+        s.shadowOpacity = qBound(0.0, m.value(QStringLiteral("shadowOpacity")).toDouble(), 1.0);
+    if (m.contains(QStringLiteral("shadowColor")))
+        s.shadowColor = QColor(m.value(QStringLiteral("shadowColor")).toString());
     if (m.contains(QStringLiteral("boxEnabled")))
         s.boxEnabled = m.value(QStringLiteral("boxEnabled")).toBool();
     if (m.contains(QStringLiteral("boxColor")))
         s.boxColor = QColor(m.value(QStringLiteral("boxColor")).toString());
     if (m.contains(QStringLiteral("boxPadding")))
-        s.boxPadding = m.value(QStringLiteral("boxPadding")).toDouble();
+        s.boxPadding = qMax(0.0, m.value(QStringLiteral("boxPadding")).toDouble());
+    if (m.contains(QStringLiteral("boxRadius")))
+        s.boxRadius = qMax(0.0, m.value(QStringLiteral("boxRadius")).toDouble());
+    applyTextAnimationPatch(&s.animIn, m.value(QStringLiteral("animIn")).toMap());
+    applyTextAnimationPatch(&s.animOut, m.value(QStringLiteral("animOut")).toMap());
     pushProjectEdit(before, QStringLiteral("Edit text style"));
     finishEdit(QStringLiteral("Text style updated"));
 }
@@ -2261,10 +2294,105 @@ void AppController::applyTextPreset(int trackIndex, int clipIndex, const QString
     if (clip.type != drift::ClipType::Text)
         return;
 
+    const drift::TextStyle *preset = drift::textStyleForPresetId(presetId);
+    if (!preset)
+        return;
+
     const drift::Project before = m_project;
-    clip.textStyle = textStyleForPreset(presetId);
+    clip.textStyle = *preset;
     pushProjectEdit(before, QStringLiteral("Apply text preset"));
     finishEdit(QStringLiteral("Text preset applied"));
+}
+
+QVariantList AppController::textPresets() const
+{
+    QVariantList out;
+    for (const drift::TextPreset &preset : drift::textPresets()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), preset.id},
+            {QStringLiteral("label"), preset.label},
+            {QStringLiteral("style"), textStyleToMap(preset.style)},
+        });
+    }
+    return out;
+}
+
+QVariantList AppController::fontCategories() const
+{
+    QVariantList out;
+    for (const auto &category : ::fontCategories()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), category.first},
+            {QStringLiteral("label"), category.second},
+        });
+    }
+    return out;
+}
+
+QVariantList AppController::fontCatalog() const
+{
+    QVariantList out;
+    QMap<QString, QString> labels;
+    for (const auto &category : ::fontCategories())
+        labels.insert(category.first, category.second);
+
+    for (const FontFamilyEntry &entry : ::fontCatalog()) {
+        QVariantList weights;
+        for (int weight : entry.weights())
+            weights.append(weight);
+
+        out.append(QVariantMap{
+            {QStringLiteral("id"), entry.id},
+            {QStringLiteral("family"), entry.family},
+            {QStringLiteral("qtFamily"), entry.qtFamily},
+            {QStringLiteral("category"), entry.category},
+            {QStringLiteral("categoryLabel"), labels.value(entry.category, entry.category)},
+            {QStringLiteral("weights"), weights},
+            {QStringLiteral("hasItalic"), entry.hasItalic()},
+        });
+    }
+    return out;
+}
+
+void AppController::previewSetTextRect(int trackIndex, int clipIndex, double xPixels, double yPixels,
+                                       double widthPixels, double heightPixels, int pixelSize)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Text)
+        return;
+
+    // The rect follows the same auto-key rules as previewSetClipRect. The glyph size is a plain
+    // style field rather than a keyframed track, so it is always applied — the two move together
+    // under one undo entry, because resizing a text clip should scale what you see, not just the
+    // invisible wrap container.
+    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
+    bool wrote = false;
+    wrote = writeKeyframeValue(clip.transformX, relative, xPixels, m_autoKeyEnabled, false) || wrote;
+    wrote = writeKeyframeValue(clip.transformY, relative, yPixels, m_autoKeyEnabled, false) || wrote;
+    wrote = writeKeyframeValue(clip.transformW, relative, qMax(1.0, widthPixels), m_autoKeyEnabled, false)
+            || wrote;
+    wrote = writeKeyframeValue(clip.transformH, relative, qMax(1.0, heightPixels), m_autoKeyEnabled, false)
+            || wrote;
+
+    const int clamped = qBound(8, pixelSize, 800);
+    if (clip.textStyle.pixelSize != clamped) {
+        clip.textStyle.pixelSize = clamped;
+        wrote = true;
+    }
+    if (!wrote)
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag(QStringLiteral("Resize text"));
+
+    emitPreviewFrame();
 }
 
 void AppController::setClipBlendMode(int trackIndex, int clipIndex, const QString &mode)

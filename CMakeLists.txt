@@ -9,6 +9,35 @@ set(CMAKE_AUTORCC ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 option(WITH_BGREMOVAL "Enable OpenCV-based background removal" OFF)
+option(DRIFT_FETCH_FONTS "Download the bundled font packages into fonts/ when absent" ON)
+
+# The font bundle is ~17 MB of TTFs, so it is fetched rather than committed. A failure here is
+# only a warning: the app falls back to system fonts and the font tests skip, so an offline
+# clone still builds.
+if(DRIFT_FETCH_FONTS AND NOT EXISTS "${CMAKE_SOURCE_DIR}/fonts/inter/family.json")
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_FOUND)
+        message(STATUS "Fetching bundled fonts (scripts/fetch-fonts.py)...")
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/fetch-fonts.py"
+            RESULT_VARIABLE drift_fetch_fonts_result
+            OUTPUT_VARIABLE drift_fetch_fonts_output
+            ERROR_VARIABLE drift_fetch_fonts_output
+        )
+        if(NOT drift_fetch_fonts_result EQUAL 0)
+            message(WARNING "Font fetch failed; Drift will fall back to system fonts.\n"
+                            "Re-run later with: cmake --build <dir> --target fonts\n"
+                            "${drift_fetch_fonts_output}")
+        endif()
+    else()
+        message(WARNING "python3 not found — skipping font fetch. Drift will fall back to system fonts.")
+    endif()
+endif()
+
+add_custom_target(fonts
+    COMMAND ${CMAKE_COMMAND} -E env python3 "${CMAKE_SOURCE_DIR}/scripts/fetch-fonts.py"
+    COMMENT "Fetch the bundled font packages into fonts/"
+)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets OpenGL)
 find_package(FFmpeg REQUIRED)
@@ -71,6 +100,10 @@ add_library(driftengine STATIC
     src/engine/EffectProcessor.cpp
     src/engine/EffectCatalog.h
     src/engine/EffectCatalog.cpp
+    src/engine/FontCatalog.h
+    src/engine/FontCatalog.cpp
+    src/engine/TextRaster.h
+    src/engine/TextRaster.cpp
     src/engine/EffectPackageLoader.h
     src/engine/EffectPackageLoader.cpp
     src/engine/TransitionCatalog.h
@@ -160,6 +193,7 @@ qt_add_qml_module(drift
         src/qml/components/ThemedTextField.qml
         src/qml/components/ThemedTextArea.qml
         src/qml/components/ThemedComboBox.qml
+        src/qml/components/FontPicker.qml
         src/qml/components/ThemedButton.qml
         src/qml/components/ThemedChip.qml
         src/qml/components/ThemedLabel.qml
@@ -213,8 +247,21 @@ function(drift_copy_transitions target)
     )
 endfunction()
 
+# Same, for the font packages. Unlike effects/ and transitions/ these are not committed —
+# they are fetched below — so tolerate the directory being absent.
+function(drift_copy_fonts target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/fonts"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_SOURCE_DIR}/fonts"
+                "$<TARGET_FILE_DIR:${target}>/fonts"
+        COMMENT "Copy font packages next to ${target}"
+    )
+endfunction()
+
 drift_copy_effects(drift)
 drift_copy_transitions(drift)
+drift_copy_fonts(drift)
 
 # --- CLI tools (headless engine testing, no GUI) ----------------------------
 add_subdirectory(tools)

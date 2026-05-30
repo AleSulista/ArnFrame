@@ -10,6 +10,9 @@ CMakeLists.txt.user
 .idea/
 *.swp
 
+# Bundled font packages — fetched by scripts/fetch-fonts.py, not committed
+fonts/
+
 # Sample media (kept out of the repo)
 *.mp4
 *.mov

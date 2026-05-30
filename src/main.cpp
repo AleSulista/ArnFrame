@@ -1,3 +1,4 @@
+#include "engine/FontCatalog.h"
 #include "models/AppController.h"
 #include "models/AssetLibrary.h"
 #include "models/EditorState.h"
@@ -24,6 +25,10 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QApplication::setApplicationName("CutWire Drift");
     QApplication::setOrganizationName("CutWire Drift");
+
+    // Registering the bundled fonts needs a QGuiApplication, and must happen before the compositor
+    // thread starts touching QFontDatabase.
+    reloadFontCatalog();
 
     qmlRegisterType<PreviewItem>("Drift", 1, 0, "PreviewItem");
 

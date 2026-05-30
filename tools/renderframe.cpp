@@ -1,4 +1,5 @@
 #include "core/Project.h"
+#include "engine/FontCatalog.h"
 #include "engine/FrameCompositor.h"
 
 #include <QGuiApplication>
@@ -13,6 +14,7 @@ int main(int argc, char *argv[])
     // QGuiApplication, not QCoreApplication: the compositor needs a GL surface,
     // which cannot be created without a GUI application instance.
     QGuiApplication app(argc, argv);
+    reloadFontCatalog();
     QTextStream err(stderr);
 
     const QStringList args = app.arguments();

@@ -137,6 +137,9 @@ public:
     Q_INVOKABLE void previewSetClipSize(int trackIndex, int clipIndex, double widthPixels, double heightPixels);
     Q_INVOKABLE void previewSetClipRect(int trackIndex, int clipIndex, double xPixels, double yPixels,
                                         double widthPixels, double heightPixels);
+    // Text resizes scale the glyphs along with the box, so the size rides with the rect.
+    Q_INVOKABLE void previewSetTextRect(int trackIndex, int clipIndex, double xPixels, double yPixels,
+                                        double widthPixels, double heightPixels, int pixelSize);
     Q_INVOKABLE void previewSetClipRotation(int trackIndex, int clipIndex, double degrees);
     Q_INVOKABLE void previewSetClipKeyframe(int trackIndex, int clipIndex, const QString &prop,
                                             double atSeconds, double value);
@@ -181,6 +184,9 @@ public:
     Q_INVOKABLE void setClipTextContent(int trackIndex, int clipIndex, const QString &text);
     Q_INVOKABLE void setTextStyle(int trackIndex, int clipIndex, const QVariantMap &style);
     Q_INVOKABLE void applyTextPreset(int trackIndex, int clipIndex, const QString &presetId);
+    Q_INVOKABLE QVariantList textPresets() const;
+    Q_INVOKABLE QVariantList fontCatalog() const;
+    Q_INVOKABLE QVariantList fontCategories() const;
     Q_INVOKABLE void setClipBlendMode(int trackIndex, int clipIndex, const QString &mode);
     Q_INVOKABLE void setClipSpeed(int trackIndex, int clipIndex, double speed);
     Q_INVOKABLE void setClipReverse(int trackIndex, int clipIndex, bool reverse);

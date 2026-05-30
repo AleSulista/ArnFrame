@@ -77,15 +77,32 @@ QJsonObject textStyleToJson(const TextStyle &s)
     return QJsonObject{
         {QStringLiteral("fontFamily"), s.fontFamily},
         {QStringLiteral("pixelSize"), s.pixelSize},
-        {QStringLiteral("color"), s.color.name(QColor::HexArgb)},
-        {QStringLiteral("bold"), s.bold},
+        {QStringLiteral("fontWeight"), s.fontWeight},
         {QStringLiteral("italic"), s.italic},
+        {QStringLiteral("color"), s.color.name(QColor::HexArgb)},
         {QStringLiteral("align"), textAlignToString(s.align)},
+        {QStringLiteral("valign"), textVAlignToString(s.valign)},
+        {QStringLiteral("wordWrap"), s.wordWrap},
+        {QStringLiteral("lineHeight"), s.lineHeight},
+        {QStringLiteral("letterSpacing"), s.letterSpacing},
         {QStringLiteral("outlineWidth"), s.outlineWidth},
         {QStringLiteral("outlineColor"), s.outlineColor.name(QColor::HexArgb)},
+        {QStringLiteral("shadowEnabled"), s.shadowEnabled},
+        {QStringLiteral("shadowOffsetX"), s.shadowOffsetX},
+        {QStringLiteral("shadowOffsetY"), s.shadowOffsetY},
+        {QStringLiteral("shadowBlur"), s.shadowBlur},
+        {QStringLiteral("shadowOpacity"), s.shadowOpacity},
+        {QStringLiteral("shadowColor"), s.shadowColor.name(QColor::HexArgb)},
         {QStringLiteral("boxEnabled"), s.boxEnabled},
         {QStringLiteral("boxColor"), s.boxColor.name(QColor::HexArgb)},
         {QStringLiteral("boxPadding"), s.boxPadding},
+        {QStringLiteral("boxRadius"), s.boxRadius},
+        {QStringLiteral("animInKind"), textAnimKindToString(s.animIn.kind)},
+        {QStringLiteral("animInDurationUs"), static_cast<qint64>(s.animIn.durationUs)},
+        {QStringLiteral("animInEase"), textEaseToString(s.animIn.ease)},
+        {QStringLiteral("animOutKind"), textAnimKindToString(s.animOut.kind)},
+        {QStringLiteral("animOutDurationUs"), static_cast<qint64>(s.animOut.durationUs)},
+        {QStringLiteral("animOutEase"), textEaseToString(s.animOut.ease)},
     };
 }
 
@@ -96,15 +113,36 @@ TextStyle textStyleFromJson(const QJsonObject &o)
         return s; // old projects: keep defaults
     s.fontFamily = o.value(QStringLiteral("fontFamily")).toString(s.fontFamily);
     s.pixelSize = o.value(QStringLiteral("pixelSize")).toInt(s.pixelSize);
-    s.color = QColor(o.value(QStringLiteral("color")).toString(s.color.name(QColor::HexArgb)));
-    s.bold = o.value(QStringLiteral("bold")).toBool(s.bold);
+    // Projects written before the weight ladder only had a bold flag.
+    if (o.contains(QStringLiteral("fontWeight")))
+        s.fontWeight = qBound(100, o.value(QStringLiteral("fontWeight")).toInt(s.fontWeight), 900);
+    else
+        s.fontWeight = o.value(QStringLiteral("bold")).toBool(true) ? 700 : 400;
     s.italic = o.value(QStringLiteral("italic")).toBool(s.italic);
+    s.color = QColor(o.value(QStringLiteral("color")).toString(s.color.name(QColor::HexArgb)));
     s.align = textAlignFromString(o.value(QStringLiteral("align")).toString());
+    s.valign = textVAlignFromString(o.value(QStringLiteral("valign")).toString());
+    s.wordWrap = o.value(QStringLiteral("wordWrap")).toBool(s.wordWrap);
+    s.lineHeight = o.value(QStringLiteral("lineHeight")).toDouble(s.lineHeight);
+    s.letterSpacing = o.value(QStringLiteral("letterSpacing")).toDouble(s.letterSpacing);
     s.outlineWidth = o.value(QStringLiteral("outlineWidth")).toDouble(s.outlineWidth);
     s.outlineColor = QColor(o.value(QStringLiteral("outlineColor")).toString(s.outlineColor.name(QColor::HexArgb)));
+    s.shadowEnabled = o.value(QStringLiteral("shadowEnabled")).toBool(s.shadowEnabled);
+    s.shadowOffsetX = o.value(QStringLiteral("shadowOffsetX")).toDouble(s.shadowOffsetX);
+    s.shadowOffsetY = o.value(QStringLiteral("shadowOffsetY")).toDouble(s.shadowOffsetY);
+    s.shadowBlur = o.value(QStringLiteral("shadowBlur")).toDouble(s.shadowBlur);
+    s.shadowOpacity = o.value(QStringLiteral("shadowOpacity")).toDouble(s.shadowOpacity);
+    s.shadowColor = QColor(o.value(QStringLiteral("shadowColor")).toString(s.shadowColor.name(QColor::HexArgb)));
     s.boxEnabled = o.value(QStringLiteral("boxEnabled")).toBool(s.boxEnabled);
     s.boxColor = QColor(o.value(QStringLiteral("boxColor")).toString(s.boxColor.name(QColor::HexArgb)));
     s.boxPadding = o.value(QStringLiteral("boxPadding")).toDouble(s.boxPadding);
+    s.boxRadius = o.value(QStringLiteral("boxRadius")).toDouble(s.boxRadius);
+    s.animIn.kind = textAnimKindFromString(o.value(QStringLiteral("animInKind")).toString());
+    s.animIn.durationUs = o.value(QStringLiteral("animInDurationUs")).toInteger(s.animIn.durationUs);
+    s.animIn.ease = textEaseFromString(o.value(QStringLiteral("animInEase")).toString());
+    s.animOut.kind = textAnimKindFromString(o.value(QStringLiteral("animOutKind")).toString());
+    s.animOut.durationUs = o.value(QStringLiteral("animOutDurationUs")).toInteger(s.animOut.durationUs);
+    s.animOut.ease = textEaseFromString(o.value(QStringLiteral("animOutEase")).toString());
     return s;
 }
 
