@@ -111,6 +111,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     settings.endGroup();
     m_guidesEnabled = settings.value(QStringLiteral("preview/guidesEnabled"), false).toBool();
     m_guideType = settings.value(QStringLiteral("preview/guideType"), QStringLiteral("thirds")).toString();
+    m_autoKeyEnabled = settings.value(QStringLiteral("editor/autoKeyEnabled"), true).toBool();
 
     // Periodically snapshot unsaved work to a recovery file so a crash doesn't
     // lose progress. The file is deleted on save and on a clean quit; if it is
@@ -404,11 +405,11 @@ drift::KeyframeTrack<double> *trackForProp(drift::Clip &clip, const QString &pro
 {
     if (prop == QStringLiteral("opacity"))
         return &clip.opacity;
-    if (prop == QStringLiteral("x"))
+    if (prop == QStringLiteral("x") || prop == QStringLiteral("posX"))
         return &clip.transformX;
-    if (prop == QStringLiteral("y"))
+    if (prop == QStringLiteral("y") || prop == QStringLiteral("posY"))
         return &clip.transformY;
-    if (prop == QStringLiteral("width"))
+    if (prop == QStringLiteral("width") || prop == QStringLiteral("scale"))
         return &clip.transformW;
     if (prop == QStringLiteral("height"))
         return &clip.transformH;
@@ -422,6 +423,29 @@ drift::KeyframeTrack<double> *trackForProp(drift::Clip &clip, const QString &pro
 const drift::KeyframeTrack<double> *trackForProp(const drift::Clip &clip, const QString &prop)
 {
     return trackForProp(const_cast<drift::Clip &>(clip), prop);
+}
+
+constexpr drift::TimeUs kKeyframeToleranceUs = drift::kUsPerSecond / 30;
+
+// force=true (diamond click) always writes. Otherwise auto-key or an existing
+// key at/near the playhead is required. Empty tracks get a constant key at 0
+// when auto-key is off so static layout edits still work.
+bool writeKeyframeValue(drift::KeyframeTrack<double> &track, drift::TimeUs relative, double value,
+                        bool autoKey, bool force)
+{
+    if (force || autoKey) {
+        track.setKeyframe(relative, value);
+        return true;
+    }
+    if (track.isEmpty()) {
+        track.setKeyframe(0, value);
+        return true;
+    }
+    const drift::TimeUs nearest = track.nearestKeyframe(relative, kKeyframeToleranceUs);
+    if (nearest < 0)
+        return false;
+    track.setKeyframe(nearest, value);
+    return true;
 }
 
 drift::TextStyle textStyleForPreset(const QString &presetId)
@@ -495,9 +519,7 @@ QVariantList keyframeListToVariant(const drift::KeyframeTrack<double> &track, dr
 QVariantMap keyframeTrackToMap(const drift::KeyframeTrack<double> &track, drift::TimeUs timelineStart)
 {
     return {
-        {QStringLiteral("interpolation"),
-         track.interpolation() == drift::Interpolation::Hold ? QStringLiteral("hold")
-                                                            : QStringLiteral("linear")},
+        {QStringLiteral("interpolation"), drift::interpolationToString(track.interpolation())},
         {QStringLiteral("points"), keyframeListToVariant(track, timelineStart)},
     };
 }
@@ -776,6 +798,27 @@ void AppController::setRippleEnabled(bool enabled)
         return;
     m_rippleEnabled = enabled;
     emit rippleEnabledChanged();
+}
+
+void AppController::setAutoKeyEnabled(bool enabled)
+{
+    if (m_autoKeyEnabled == enabled)
+        return;
+    m_autoKeyEnabled = enabled;
+    QSettings settings;
+    settings.setValue(QStringLiteral("editor/autoKeyEnabled"), m_autoKeyEnabled);
+    emit autoKeyEnabledChanged();
+}
+
+void AppController::setKeyframeGraphProperty(const QString &prop)
+{
+    const QString normalized = prop.trimmed().toLower();
+    if (normalized.isEmpty() || m_keyframeGraphProperty == normalized)
+        return;
+    if (!trackForProp(drift::Clip{}, normalized)) // only allow known prop keys
+        return;
+    m_keyframeGraphProperty = normalized;
+    emit keyframeGraphPropertyChanged();
 }
 
 void AppController::setDraggingAssetIndex(int index)
@@ -1876,13 +1919,16 @@ void AppController::previewSetClipPosition(int trackIndex, int clipIndex, double
     if (clipIndex < 0 || clipIndex >= track.clips.size())
         return;
 
+    drift::Clip &clip = track.clips[clipIndex];
+    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
+    const bool wroteX = writeKeyframeValue(clip.transformX, relative, xPixels, m_autoKeyEnabled, false);
+    const bool wroteY = writeKeyframeValue(clip.transformY, relative, yPixels, m_autoKeyEnabled, false);
+    if (!wroteX && !wroteY)
+        return;
+
     if (!m_previewDragActive)
         beginPreviewDrag(QStringLiteral("Move clip"));
 
-    drift::Clip &clip = track.clips[clipIndex];
-    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
-    clip.transformX.setKeyframe(relative, xPixels);
-    clip.transformY.setKeyframe(relative, yPixels);
     emitPreviewFrame();
 }
 
@@ -1895,13 +1941,18 @@ void AppController::previewSetClipSize(int trackIndex, int clipIndex, double wid
     if (clipIndex < 0 || clipIndex >= track.clips.size())
         return;
 
+    drift::Clip &clip = track.clips[clipIndex];
+    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
+    const bool wroteW =
+        writeKeyframeValue(clip.transformW, relative, qMax(1.0, widthPixels), m_autoKeyEnabled, false);
+    const bool wroteH =
+        writeKeyframeValue(clip.transformH, relative, qMax(1.0, heightPixels), m_autoKeyEnabled, false);
+    if (!wroteW && !wroteH)
+        return;
+
     if (!m_previewDragActive)
         beginPreviewDrag(QStringLiteral("Resize clip"));
 
-    drift::Clip &clip = track.clips[clipIndex];
-    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
-    clip.transformW.setKeyframe(relative, qMax(1.0, widthPixels));
-    clip.transformH.setKeyframe(relative, qMax(1.0, heightPixels));
     emitPreviewFrame();
 }
 
@@ -1915,15 +1966,21 @@ void AppController::previewSetClipRect(int trackIndex, int clipIndex, double xPi
     if (clipIndex < 0 || clipIndex >= track.clips.size())
         return;
 
+    drift::Clip &clip = track.clips[clipIndex];
+    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
+    bool wrote = false;
+    wrote = writeKeyframeValue(clip.transformX, relative, xPixels, m_autoKeyEnabled, false) || wrote;
+    wrote = writeKeyframeValue(clip.transformY, relative, yPixels, m_autoKeyEnabled, false) || wrote;
+    wrote = writeKeyframeValue(clip.transformW, relative, qMax(1.0, widthPixels), m_autoKeyEnabled, false)
+            || wrote;
+    wrote = writeKeyframeValue(clip.transformH, relative, qMax(1.0, heightPixels), m_autoKeyEnabled, false)
+            || wrote;
+    if (!wrote)
+        return;
+
     if (!m_previewDragActive)
         beginPreviewDrag(QStringLiteral("Transform clip"));
 
-    drift::Clip &clip = track.clips[clipIndex];
-    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
-    clip.transformX.setKeyframe(relative, xPixels);
-    clip.transformY.setKeyframe(relative, yPixels);
-    clip.transformW.setKeyframe(relative, qMax(1.0, widthPixels));
-    clip.transformH.setKeyframe(relative, qMax(1.0, heightPixels));
     emitPreviewFrame();
 }
 
@@ -1936,12 +1993,14 @@ void AppController::previewSetClipRotation(int trackIndex, int clipIndex, double
     if (clipIndex < 0 || clipIndex >= track.clips.size())
         return;
 
+    drift::Clip &clip = track.clips[clipIndex];
+    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
+    if (!writeKeyframeValue(clip.rotation, relative, degrees, m_autoKeyEnabled, false))
+        return;
+
     if (!m_previewDragActive)
         beginPreviewDrag(QStringLiteral("Rotate clip"));
 
-    drift::Clip &clip = track.clips[clipIndex];
-    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
-    clip.rotation.setKeyframe(relative, degrees);
     emitPreviewFrame();
 }
 
@@ -1960,11 +2019,13 @@ void AppController::previewSetClipKeyframe(int trackIndex, int clipIndex, const 
     if (!kt)
         return;
 
+    const drift::TimeUs rel = qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds) - clip.timelineStart);
+    if (!writeKeyframeValue(*kt, rel, value, m_autoKeyEnabled, false))
+        return;
+
     if (!m_previewDragActive)
         beginPreviewDrag(QStringLiteral("Edit keyframe"));
 
-    const drift::TimeUs rel = qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds) - clip.timelineStart);
-    kt->setKeyframe(rel, value);
     emitPreviewFrame();
 }
 
@@ -2808,7 +2869,7 @@ void AppController::setClipKeyframe(int trackIndex, int clipIndex, const QString
 
     const drift::Project before = m_project;
     const drift::TimeUs rel = qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds) - clip.timelineStart);
-    kt->setKeyframe(rel, value);
+    writeKeyframeValue(*kt, rel, value, m_autoKeyEnabled, /*force=*/true);
     pushProjectEdit(before, QStringLiteral("Add keyframe"));
     finishEdit(QStringLiteral("Keyframe set"));
 }
@@ -2829,9 +2890,39 @@ void AppController::removeClipKeyframe(int trackIndex, int clipIndex, const QStr
 
     const drift::Project before = m_project;
     const drift::TimeUs rel = qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds) - clip.timelineStart);
-    kt->removeKeyframe(rel);
+    const drift::TimeUs nearest = kt->nearestKeyframe(rel, kKeyframeToleranceUs);
+    if (nearest < 0)
+        return;
+    kt->removeKeyframe(nearest);
     pushProjectEdit(before, QStringLiteral("Remove keyframe"));
     finishEdit(QStringLiteral("Keyframe removed"));
+}
+
+void AppController::previewMoveClipKeyframe(int trackIndex, int clipIndex, const QString &prop,
+                                            double fromSeconds, double toSeconds, double value)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    drift::KeyframeTrack<double> *kt = trackForProp(clip, prop);
+    if (!kt)
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag(QStringLiteral("Move keyframe"));
+
+    const drift::TimeUs fromRel = qMax<drift::TimeUs>(0, drift::secondsToUs(fromSeconds) - clip.timelineStart);
+    const drift::TimeUs toRel = qMax<drift::TimeUs>(0, drift::secondsToUs(toSeconds) - clip.timelineStart);
+    const drift::TimeUs nearest = kt->nearestKeyframe(fromRel, kKeyframeToleranceUs);
+    if (nearest >= 0)
+        kt->removeKeyframe(nearest);
+    kt->setKeyframe(toRel, value);
+    emitPreviewFrame();
 }
 
 QVariantList AppController::clipKeyframes(int trackIndex, int clipIndex, const QString &prop) const
@@ -2868,8 +2959,7 @@ void AppController::setKeyframeInterpolation(int trackIndex, int clipIndex, cons
         return;
 
     const drift::Project before = m_project;
-    kt->setInterpolation(mode == QStringLiteral("hold") ? drift::Interpolation::Hold
-                                                        : drift::Interpolation::Linear);
+    kt->setInterpolation(drift::interpolationFromString(mode));
     pushProjectEdit(before, QStringLiteral("Keyframe interpolation changed"));
     finishEdit(QStringLiteral("Keyframe interpolation updated"));
 }

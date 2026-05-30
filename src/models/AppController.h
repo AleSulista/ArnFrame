@@ -35,6 +35,9 @@ class AppController : public QObject
     Q_PROPERTY(bool playing READ playing WRITE setPlaying NOTIFY playingChanged)
     Q_PROPERTY(bool snapEnabled READ snapEnabled WRITE setSnapEnabled NOTIFY snapEnabledChanged)
     Q_PROPERTY(bool rippleEnabled READ rippleEnabled WRITE setRippleEnabled NOTIFY rippleEnabledChanged)
+    Q_PROPERTY(bool autoKeyEnabled READ autoKeyEnabled WRITE setAutoKeyEnabled NOTIFY autoKeyEnabledChanged)
+    Q_PROPERTY(QString keyframeGraphProperty READ keyframeGraphProperty WRITE setKeyframeGraphProperty
+                   NOTIFY keyframeGraphPropertyChanged)
     Q_PROPERTY(bool undoAvailable READ undoAvailable NOTIFY undoStackChanged)
     Q_PROPERTY(bool redoAvailable READ redoAvailable NOTIFY undoStackChanged)
     Q_PROPERTY(bool exportInProgress READ exportInProgress NOTIFY exportInProgressChanged)
@@ -78,6 +81,8 @@ public:
     bool playing() const { return m_playing; }
     bool snapEnabled() const { return m_snapEnabled; }
     bool rippleEnabled() const { return m_rippleEnabled; }
+    bool autoKeyEnabled() const { return m_autoKeyEnabled; }
+    QString keyframeGraphProperty() const { return m_keyframeGraphProperty; }
     bool undoAvailable() const { return m_undoStack.canUndo(); }
     bool redoAvailable() const { return m_undoStack.canRedo(); }
     bool exportInProgress() const { return m_exportInProgress; }
@@ -109,6 +114,8 @@ public:
     void setPlaying(bool playing);
     void setSnapEnabled(bool enabled);
     void setRippleEnabled(bool enabled);
+    void setAutoKeyEnabled(bool enabled);
+    void setKeyframeGraphProperty(const QString &prop);
     void setProjectName(const QString &name);
     void setGuidesEnabled(bool enabled);
     void setGuideType(const QString &type);
@@ -200,6 +207,8 @@ public:
     Q_INVOKABLE void setClipKeyframe(int trackIndex, int clipIndex, const QString &prop, double atSeconds,
                                      double value);
     Q_INVOKABLE void removeClipKeyframe(int trackIndex, int clipIndex, const QString &prop, double atSeconds);
+    Q_INVOKABLE void previewMoveClipKeyframe(int trackIndex, int clipIndex, const QString &prop,
+                                             double fromSeconds, double toSeconds, double value);
     Q_INVOKABLE QVariantList clipKeyframes(int trackIndex, int clipIndex, const QString &prop) const;
     Q_INVOKABLE void setKeyframeInterpolation(int trackIndex, int clipIndex, const QString &prop,
                                               const QString &mode);
@@ -251,6 +260,8 @@ signals:
     void playingChanged();
     void snapEnabledChanged();
     void rippleEnabledChanged();
+    void autoKeyEnabledChanged();
+    void keyframeGraphPropertyChanged();
     void undoStackChanged();
     void exportInProgressChanged();
     void exportProgressChanged();
@@ -312,6 +323,8 @@ protected:
     bool m_playing = false;
     bool m_snapEnabled = true;
     bool m_rippleEnabled = false;
+    bool m_autoKeyEnabled = true;
+    QString m_keyframeGraphProperty = QStringLiteral("x");
     bool m_exportInProgress = false;
     double m_exportProgress = 0.0;
     QAtomicInt m_exportCancel = 0;

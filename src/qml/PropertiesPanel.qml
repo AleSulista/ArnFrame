@@ -873,10 +873,16 @@ PanelFrame {
                             Text {
                                 width: parent.width
                                 wrapMode: Text.WordWrap
-                                text: qsTr("Layout in project pixels (top-left origin). Values follow the playhead; drag in the preview to edit live.")
+                                text: qsTr("Scrub the playhead, set a value, then click the diamond to key it. With Auto-key on, dragging a slider or the preview also writes keys.")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            ThemedChip {
+                                text: qsTr("Auto-key")
+                                selected: EditorState.autoKeyEnabled
+                                onClicked: EditorState.autoKeyEnabled = !EditorState.autoKeyEnabled
                             }
 
                             Text {

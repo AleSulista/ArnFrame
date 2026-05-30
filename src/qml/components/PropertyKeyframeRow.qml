@@ -87,6 +87,7 @@ Column {
 
         const t = EditorState.playheadSeconds
         const hold = interpolationMode === "hold"
+        const ease = interpolationMode === "ease"
         let prev = null
         let next = null
         for (let i = 0; i < keyframeList.length; ++i) {
@@ -99,7 +100,9 @@ Column {
         if (prev && next) {
             if (next.seconds === prev.seconds || hold)
                 return prev.value
-            const frac = (t - prev.seconds) / (next.seconds - prev.seconds)
+            let frac = (t - prev.seconds) / (next.seconds - prev.seconds)
+            if (ease)
+                frac = frac * frac * (3 - 2 * frac)
             return prev.value + (next.value - prev.value) * frac
         }
         if (prev)
@@ -128,12 +131,14 @@ Column {
     function commitValue(v) {
         if (isNaN(v))
             return
+        EditorState.keyframeGraphProperty = root.propDef.key
         EditorState.setClipKeyframe(
             EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
             EditorState.playheadSeconds, v)
     }
 
     function setInterpolation(mode) {
+        EditorState.keyframeGraphProperty = root.propDef.key
         EditorState.setKeyframeInterpolation(
             EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key, mode)
     }
@@ -158,6 +163,7 @@ Column {
             anchors.verticalCenter: parent.verticalCenter
             hasKey: root.activeKey !== null
             onToggled: {
+                EditorState.keyframeGraphProperty = root.propDef.key
                 if (root.activeKey) {
                     EditorState.removeClipKeyframe(
                         EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
@@ -177,13 +183,14 @@ Column {
             anchors.verticalCenter: parent.verticalCenter
             elide: Text.ElideRight
             width: Math.min(implicitWidth + 2,
-                            Math.max(24, parent.width - diamond.width - linChip.width - holdChip.width
-                                           - parent.spacing * 4))
+                            Math.max(24, parent.width - diamond.width - linChip.width - easeChip.width
+                                           - holdChip.width - parent.spacing * 5))
         }
 
         Item {
             width: Math.max(0, parent.width - diamond.width - labelText.width
-                                   - linChip.width - holdChip.width - parent.spacing * 4)
+                                   - linChip.width - easeChip.width - holdChip.width
+                                   - parent.spacing * 5)
             height: 1
         }
 
@@ -192,10 +199,21 @@ Column {
             text: "Lin"
             selected: root.interpolationMode === "linear"
             chipHeight: 18
-            horizontalPadding: 10
-            width: 30
+            horizontalPadding: 8
+            width: 28
             anchors.verticalCenter: parent.verticalCenter
             onClicked: root.setInterpolation("linear")
+        }
+
+        ThemedChip {
+            id: easeChip
+            text: "Ease"
+            selected: root.interpolationMode === "ease"
+            chipHeight: 18
+            horizontalPadding: 8
+            width: 36
+            anchors.verticalCenter: parent.verticalCenter
+            onClicked: root.setInterpolation("ease")
         }
 
         ThemedChip {
@@ -203,7 +221,7 @@ Column {
             text: "Hold"
             selected: root.interpolationMode === "hold"
             chipHeight: 18
-            horizontalPadding: 10
+            horizontalPadding: 8
             width: 34
             anchors.verticalCenter: parent.verticalCenter
             onClicked: root.setInterpolation("hold")
@@ -273,6 +291,7 @@ Column {
             value: root.currentValue
             onMoved: {
                 root.liveValue = value
+                EditorState.keyframeGraphProperty = root.propDef.key
                 EditorState.previewSetClipKeyframe(
                     EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
                     EditorState.playheadSeconds, value)

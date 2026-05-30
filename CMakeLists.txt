@@ -152,6 +152,7 @@ qt_add_qml_module(drift
         src/qml/components/AppScrollBar.qml
         src/qml/components/KeyframeDiamond.qml
         src/qml/components/PropertyKeyframeRow.qml
+        src/qml/components/KeyframeGraph.qml
         src/qml/components/ShortcutCaptureField.qml
         src/qml/components/ShapePreview.qml
         src/qml/components/EffectBrowser.qml

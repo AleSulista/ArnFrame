@@ -507,9 +507,23 @@ PanelFrame {
         }
 
         // === ruler + track labels + tracks ================================================
-        Row {
+        Column {
             width: parent.width
             height: parent.height - toolbar.height
+
+            KeyframeGraph {
+                id: keyframesBar
+                width: parent.width
+                pxPerSecond: root.pxPerSecond
+                labelsWidth: Theme.trackLabelsWidth
+                // Keep keys/playhead lined up with the track scroll view below.
+                contentX: flick.contentX
+                contentWidth: flick.contentWidth
+            }
+
+            Row {
+                width: parent.width
+                height: parent.height - keyframesBar.height
 
             // --- fixed left label column --------------------------------------------
             Column {
@@ -1580,6 +1594,7 @@ PanelFrame {
                 }
             }
         }
+        } // Column (keyframes + tracks)
     }
 
     Connections {

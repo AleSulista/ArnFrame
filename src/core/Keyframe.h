@@ -3,10 +3,34 @@
 #include "Time.h"
 
 #include <QMap>
+#include <QString>
+#include <QtMath>
 
 namespace drift {
 
-enum class Interpolation { Linear, Hold };
+enum class Interpolation { Linear, Hold, Ease };
+
+inline QString interpolationToString(Interpolation mode)
+{
+    switch (mode) {
+    case Interpolation::Hold:
+        return QStringLiteral("hold");
+    case Interpolation::Ease:
+        return QStringLiteral("ease");
+    case Interpolation::Linear:
+    default:
+        return QStringLiteral("linear");
+    }
+}
+
+inline Interpolation interpolationFromString(const QString &mode)
+{
+    if (mode == QLatin1String("hold"))
+        return Interpolation::Hold;
+    if (mode == QLatin1String("ease"))
+        return Interpolation::Ease;
+    return Interpolation::Linear;
+}
 
 template<typename T>
 class KeyframeTrack
@@ -19,6 +43,21 @@ public:
     void removeKeyframe(TimeUs time) { m_values.remove(time); }
 
     const QMap<TimeUs, T> &keyframes() const { return m_values; }
+
+    // Returns the key time within tolerance, or -1 if none.
+    TimeUs nearestKeyframe(TimeUs time, TimeUs tolerance) const
+    {
+        TimeUs best = -1;
+        TimeUs bestDist = tolerance + 1;
+        for (auto it = m_values.constBegin(); it != m_values.constEnd(); ++it) {
+            const TimeUs d = qAbs(it.key() - time);
+            if (d < bestDist) {
+                bestDist = d;
+                best = it.key();
+            }
+        }
+        return bestDist <= tolerance ? best : TimeUs{-1};
+    }
 
     T evaluateAt(TimeUs time) const
     {
@@ -36,8 +75,10 @@ public:
         if (m_interpolation == Interpolation::Hold)
             return prev.value();
 
-        const double t = static_cast<double>(time - prev.key())
-                         / static_cast<double>(it.key() - prev.key());
+        double t = static_cast<double>(time - prev.key())
+                   / static_cast<double>(it.key() - prev.key());
+        if (m_interpolation == Interpolation::Ease)
+            t = t * t * (3.0 - 2.0 * t); // smoothstep
         return lerp(prev.value(), it.value(), t);
     }
 

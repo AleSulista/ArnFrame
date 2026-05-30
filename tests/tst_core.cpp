@@ -17,6 +17,8 @@ private slots:
     void timeConversion();
     void keyframeHoldInterpolation();
     void keyframeLinearInterpolation();
+    void keyframeEaseInterpolation();
+    void keyframeNearestQuery();
     void projectSerializationRoundTrip();
     void clipTransformSerialization();
     void legacyFractionalTransformMigration();
@@ -65,6 +67,29 @@ void CoreTest::keyframeLinearInterpolation()
     track.setKeyframe(0, 0.0);
     track.setKeyframe(drift::secondsToUs(2.0), 1.0);
     QCOMPARE(track.evaluateAt(drift::secondsToUs(1.0)), 0.5);
+}
+
+void CoreTest::keyframeEaseInterpolation()
+{
+    drift::KeyframeTrack<double> track;
+    track.setInterpolation(drift::Interpolation::Ease);
+    track.setKeyframe(0, 0.0);
+    track.setKeyframe(drift::secondsToUs(1.0), 10.0);
+    // smoothstep(0.25) = 0.15625 → 1.5625, vs linear 2.5
+    const double eased = track.evaluateAt(drift::secondsToUs(0.25));
+    QVERIFY(eased < 2.4);
+    QVERIFY(eased > 1.0);
+    QCOMPARE(drift::interpolationToString(drift::Interpolation::Ease), QStringLiteral("ease"));
+    QCOMPARE(drift::interpolationFromString(QStringLiteral("ease")), drift::Interpolation::Ease);
+}
+
+void CoreTest::keyframeNearestQuery()
+{
+    drift::KeyframeTrack<double> track;
+    track.setKeyframe(drift::secondsToUs(1.0), 5.0);
+    QCOMPARE(track.nearestKeyframe(drift::secondsToUs(1.01), drift::secondsToUs(0.05)),
+             drift::secondsToUs(1.0));
+    QCOMPARE(track.nearestKeyframe(drift::secondsToUs(2.0), drift::secondsToUs(0.05)), drift::TimeUs{-1});
 }
 
 void CoreTest::projectSerializationRoundTrip()

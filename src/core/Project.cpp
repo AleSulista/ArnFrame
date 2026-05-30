@@ -21,9 +21,7 @@ QJsonObject keyframesToJson(const KeyframeTrack<double> &track)
         });
     }
     return QJsonObject{
-        {QStringLiteral("interpolation"),
-         track.interpolation() == Interpolation::Hold ? QStringLiteral("hold")
-                                                      : QStringLiteral("linear")},
+        {QStringLiteral("interpolation"), interpolationToString(track.interpolation())},
         {QStringLiteral("keyframes"), keyframes},
     };
 }
@@ -31,9 +29,8 @@ QJsonObject keyframesToJson(const KeyframeTrack<double> &track)
 KeyframeTrack<double> keyframesFromJson(const QJsonObject &object)
 {
     KeyframeTrack<double> track;
-    const QString mode = object.value(QStringLiteral("interpolation")).toString();
-    track.setInterpolation(mode == QStringLiteral("hold") ? Interpolation::Hold
-                                                          : Interpolation::Linear);
+    track.setInterpolation(
+        interpolationFromString(object.value(QStringLiteral("interpolation")).toString()));
 
     for (const QJsonValue &value : object.value(QStringLiteral("keyframes")).toArray()) {
         const QJsonObject keyframe = value.toObject();
