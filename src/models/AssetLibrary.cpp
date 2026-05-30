@@ -6,6 +6,7 @@
 #include "engine/MediaThumbnail.h"
 
 #include <QFileInfo>
+#include <QImageReader>
 #include <QJsonObject>
 #include <QUrl>
 #include <QUuid>
@@ -220,6 +221,10 @@ QVariantMap AssetLibrary::assetAt(int index) const
         {QStringLiteral("duration"), asset->durationLabel},
         {QStringLiteral("durationSeconds"), drift::usToSeconds(asset->durationUs)},
         {QStringLiteral("path"), asset->path},
+        {QStringLiteral("width"), asset->width},
+        {QStringLiteral("height"), asset->height},
+        {QStringLiteral("fps"), asset->fps},
+        {QStringLiteral("rotationDegrees"), asset->rotationDegrees},
         {QStringLiteral("thumbnailPath"), asset->thumbnailPath},
         {QStringLiteral("filmstripPath"), asset->filmstripPath},
         {QStringLiteral("assetIndex"), index},
@@ -409,10 +414,17 @@ void AssetLibrary::importFiles(const QStringList &paths)
         if (isImagePath(path)) {
             const QString kind = drift::mediaKindToString(drift::MediaKind::Image);
             const QString thumb = MediaThumbnail::generate(absolutePath, kind);
+            QImageReader reader(absolutePath);
+            reader.setAutoTransform(true);
+            QSize size = reader.size();
+            if (reader.transformation() & QImageIOHandler::TransformationRotate90)
+                size.transpose();
             drift::MediaAsset asset;
             asset.name = fileInfo.fileName();
             asset.kind = drift::MediaKind::Image;
             asset.path = absolutePath;
+            asset.width = size.width();
+            asset.height = size.height();
             asset.thumbnailPath = thumb;
             asset.filmstripPath = thumb;
             const int row = m_project->assetOrder().size();

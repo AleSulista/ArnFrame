@@ -789,7 +789,7 @@ PanelFrame {
                                     anchors.fill: parent
                                     visible: thumbnailPath.length > 0
                                     source: thumbnailPath.length > 0 ? EditorState.imageUrl(thumbnailPath) : ""
-                                    fillMode: Image.PreserveAspectCrop
+                                    fillMode: Image.PreserveAspectFit
                                     asynchronous: true
                                 }
 
@@ -875,7 +875,7 @@ PanelFrame {
                                         anchors.fill: parent
                                         visible: thumbnailPath.length > 0
                                         source: thumbnailPath.length > 0 ? EditorState.imageUrl(thumbnailPath) : ""
-                                        fillMode: Image.PreserveAspectCrop
+                                        fillMode: Image.PreserveAspectFit
                                     }
                                     IconGlyph {
                                         anchors.centerIn: parent

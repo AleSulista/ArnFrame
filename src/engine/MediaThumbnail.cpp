@@ -6,7 +6,11 @@
 #include <QImage>
 #include <QImageReader>
 #include <QPainter>
+#include <QSize>
 #include <QStandardPaths>
+
+#include <algorithm>
+#include <cmath>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -25,9 +29,32 @@ QString cacheDir()
     return dir;
 }
 
+// Bumped when the thumbnail geometry changes, so stale squashed caches are ignored.
+constexpr int kThumbnailCacheVersion = 2;
+constexpr int kThumbnailMaxEdge = 320;
+
 QString cacheKeyFor(const QString &sourcePath)
 {
-    return QString::number(qHash(QFileInfo(sourcePath).absoluteFilePath()));
+    return QString::number(qHash(QFileInfo(sourcePath).absoluteFilePath()))
+           + QStringLiteral("_v") + QString::number(kThumbnailCacheVersion);
+}
+
+// Thumbnails keep the source display aspect (pixel aspect included) so the media
+// library can letterbox them instead of stretching portrait clips into a 16:9 box.
+QSize thumbnailSizeFor(int codedWidth, int codedHeight, AVRational sampleAspect)
+{
+    if (codedWidth <= 0 || codedHeight <= 0)
+        return {kThumbnailMaxEdge, kThumbnailMaxEdge * 9 / 16};
+
+    double displayWidth = codedWidth;
+    if (sampleAspect.num > 0 && sampleAspect.den > 0)
+        displayWidth *= static_cast<double>(sampleAspect.num) / sampleAspect.den;
+
+    const double scale = std::min({1.0,
+                                   kThumbnailMaxEdge / displayWidth,
+                                   kThumbnailMaxEdge / static_cast<double>(codedHeight)});
+    return {std::max(2, static_cast<int>(std::lround(displayWidth * scale))),
+            std::max(2, static_cast<int>(std::lround(codedHeight * scale)))};
 }
 
 QString cachePathFor(const QString &sourcePath)
@@ -214,7 +241,10 @@ QString MediaThumbnail::generate(const QString &sourcePath, const QString &kind)
         QImage image = reader.read();
         if (image.isNull())
             return {};
-        image = image.scaled(320, 180, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        if (image.width() > kThumbnailMaxEdge || image.height() > kThumbnailMaxEdge) {
+            image = image.scaled(kThumbnailMaxEdge, kThumbnailMaxEdge,
+                                 Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
         if (!image.save(outPath, "JPG", 85))
             return {};
         return outPath;
@@ -229,7 +259,10 @@ QString MediaThumbnail::generate(const QString &sourcePath, const QString &kind)
     if (!openVideoDecoder(absolutePath, &fmt, &videoStreamIndex, &codecCtx))
         return {};
 
-    const bool saved = decodeFirstVideoFrame(fmt, videoStreamIndex, codecCtx, outPath, 320, 180);
+    const AVCodecParameters *par = fmt->streams[videoStreamIndex]->codecpar;
+    const QSize target = thumbnailSizeFor(par->width, par->height, par->sample_aspect_ratio);
+    const bool saved = decodeFirstVideoFrame(fmt, videoStreamIndex, codecCtx, outPath,
+                                             target.width(), target.height());
 
     avcodec_free_context(&codecCtx);
     avformat_close_input(&fmt);
