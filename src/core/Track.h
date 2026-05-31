@@ -8,7 +8,7 @@
 
 namespace drift {
 
-enum class TrackType { Video, Audio, Text, Shape };
+enum class TrackType { Video, Audio, Text, Subtitle, Shape };
 
 QString trackTypeToString(TrackType type);
 TrackType trackTypeFromString(const QString &type);

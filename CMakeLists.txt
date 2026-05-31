@@ -60,6 +60,8 @@ add_library(driftcore STATIC
     src/core/MediaAsset.cpp
     src/core/Clip.h
     src/core/Clip.cpp
+    src/core/SubtitleCue.h
+    src/core/SubtitleCue.cpp
     src/core/Mask.h
     src/core/Mask.cpp
     src/core/Transition.h
@@ -192,6 +194,7 @@ qt_add_qml_module(drift
         src/qml/components/ThemedSlider.qml
         src/qml/components/ThemedTextField.qml
         src/qml/components/ThemedTextArea.qml
+        src/qml/components/SubtitleEditor.qml
         src/qml/components/ThemedComboBox.qml
         src/qml/components/FontPicker.qml
         src/qml/components/ThemedButton.qml

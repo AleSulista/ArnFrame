@@ -5,6 +5,7 @@
 #include "Mask.h"
 #include "MediaAsset.h"
 #include "ShapeStyle.h"
+#include "SubtitleCue.h"
 #include "TextStyle.h"
 #include "Time.h"
 
@@ -15,7 +16,7 @@
 
 namespace drift {
 
-enum class ClipType { Video, Audio, Image, Text, Shape };
+enum class ClipType { Video, Audio, Image, Text, Subtitle, Shape };
 
 QString clipTypeToString(ClipType type);
 ClipType clipTypeFromString(const QString &type);
@@ -46,7 +47,8 @@ struct Clip
 
     QString name;
     QString textContent;
-    TextStyle textStyle; // only meaningful when type == Text
+    TextStyle textStyle; // meaningful when type == Text or Subtitle
+    QList<SubtitleCue> subtitleCues; // only meaningful when type == Subtitle
     ShapeStyle shapeStyle; // only meaningful when type == Shape
 
     QString path;

@@ -6,6 +6,7 @@
 
 #include "core/Keyframe.h"
 #include "core/Project.h"
+#include "core/SubtitleCue.h"
 #include "core/TimelineOps.h"
 #include "core/Transition.h"
 
@@ -25,6 +26,8 @@ private slots:
     void volumeKeyframeSerialization();
     void projectLoadsLegacyV1Format();
     void trackAllowsClipTypes();
+    void subtitleCueSerialization();
+    void subtitleCueLookup();
     void insertTrackAtTopAllowsDuplicateTypes();
     void textStyleAndBlendModeSerialization();
     void legacyBoldMigratesToFontWeight();
@@ -312,6 +315,54 @@ void CoreTest::trackAllowsClipTypes()
     QVERIFY(shapeTrack.allowsClipType(drift::ClipType::Image));
     QVERIFY(shapeTrack.allowsClipType(drift::ClipType::Shape));
     QVERIFY(!shapeTrack.allowsClipType(drift::ClipType::Video));
+
+    drift::Track subtitleTrack{.type = drift::TrackType::Subtitle};
+    QVERIFY(subtitleTrack.allowsClipType(drift::ClipType::Subtitle));
+    QVERIFY(!subtitleTrack.allowsClipType(drift::ClipType::Text));
+}
+
+void CoreTest::subtitleCueSerialization()
+{
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Subtitle});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-subtitle");
+    clip.type = drift::ClipType::Subtitle;
+    clip.name = QStringLiteral("Subtitles (2)");
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(30.0);
+    clip.subtitleCues = {
+        {drift::secondsToUs(1.0), drift::secondsToUs(4.0), QStringLiteral("Hello")},
+        {drift::secondsToUs(5.0), drift::secondsToUs(8.0), QStringLiteral("World")},
+    };
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
+    QCOMPARE(loadedClip.type, drift::ClipType::Subtitle);
+    QCOMPARE(loadedClip.subtitleCues.size(), 2);
+    QCOMPARE(loadedClip.subtitleCues[0].text, QStringLiteral("Hello"));
+    QCOMPARE(loadedClip.subtitleCues[1].startUs, drift::secondsToUs(5.0));
+}
+
+void CoreTest::subtitleCueLookup()
+{
+    QList<drift::SubtitleCue> cues;
+    cues.append({drift::secondsToUs(1.0), drift::secondsToUs(3.0), QStringLiteral("A")});
+    cues.append({drift::secondsToUs(4.0), drift::secondsToUs(6.0), QStringLiteral("B")});
+
+    const drift::SubtitleCue *active =
+        drift::activeSubtitleCueAt(cues, drift::secondsToUs(2.5));
+    QVERIFY(active);
+    QCOMPARE(active->text, QStringLiteral("A"));
+    QVERIFY(!drift::activeSubtitleCueAt(cues, drift::secondsToUs(3.5)));
+    QCOMPARE(drift::subtitleCueIndexAt(cues, drift::secondsToUs(5.0)), 1);
 }
 
 void CoreTest::insertTrackAtTopAllowsDuplicateTypes()

@@ -73,6 +73,8 @@ TrackType trackTypeForClipType(ClipType type)
         return TrackType::Audio;
     case ClipType::Text:
         return TrackType::Text;
+    case ClipType::Subtitle:
+        return TrackType::Subtitle;
     case ClipType::Image:
     case ClipType::Shape:
         return TrackType::Shape;

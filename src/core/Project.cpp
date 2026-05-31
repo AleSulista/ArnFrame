@@ -1,6 +1,7 @@
 #include "Project.h"
 
 #include "Clip.h"
+#include "SubtitleCue.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -268,6 +269,34 @@ Background backgroundFromJson(const QJsonObject &o)
     return bg;
 }
 
+QJsonArray subtitleCuesToJson(const QList<SubtitleCue> &cues)
+{
+    QJsonArray array;
+    for (const SubtitleCue &cue : cues) {
+        array.append(QJsonObject{
+            {QStringLiteral("startUs"), static_cast<double>(cue.startUs)},
+            {QStringLiteral("endUs"), static_cast<double>(cue.endUs)},
+            {QStringLiteral("text"), cue.text},
+        });
+    }
+    return array;
+}
+
+QList<SubtitleCue> subtitleCuesFromJson(const QJsonArray &array)
+{
+    QList<SubtitleCue> cues;
+    for (const QJsonValue &value : array) {
+        const QJsonObject object = value.toObject();
+        SubtitleCue cue;
+        cue.startUs = static_cast<TimeUs>(object.value(QStringLiteral("startUs")).toDouble());
+        cue.endUs = static_cast<TimeUs>(object.value(QStringLiteral("endUs")).toDouble());
+        cue.text = object.value(QStringLiteral("text")).toString();
+        cues.append(cue);
+    }
+    sortSubtitleCues(cues);
+    return cues;
+}
+
 QJsonObject clipToJson(const Clip &clip)
 {
     return QJsonObject{
@@ -277,6 +306,7 @@ QJsonObject clipToJson(const Clip &clip)
         {QStringLiteral("name"), clip.name},
         {QStringLiteral("textContent"), clip.textContent},
         {QStringLiteral("textStyle"), textStyleToJson(clip.textStyle)},
+        {QStringLiteral("subtitleCues"), subtitleCuesToJson(clip.subtitleCues)},
         {QStringLiteral("shapeStyle"), shapeStyleToJson(clip.shapeStyle)},
         {QStringLiteral("path"), clip.path},
         {QStringLiteral("thumbnailPath"), clip.thumbnailPath},
@@ -344,6 +374,7 @@ Clip clipFromJsonV2(const QJsonObject &object, int canvasW = 1920, int canvasH =
     clip.name = object.value(QStringLiteral("name")).toString();
     clip.textContent = object.value(QStringLiteral("textContent")).toString();
     clip.textStyle = textStyleFromJson(object.value(QStringLiteral("textStyle")).toObject());
+    clip.subtitleCues = subtitleCuesFromJson(object.value(QStringLiteral("subtitleCues")).toArray());
     clip.shapeStyle = shapeStyleFromJson(object.value(QStringLiteral("shapeStyle")).toObject());
     clip.path = object.value(QStringLiteral("path")).toString();
     clip.thumbnailPath = object.value(QStringLiteral("thumbnailPath")).toString();

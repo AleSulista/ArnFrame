@@ -243,9 +243,9 @@ double bleedFor(const drift::TextStyle &style)
 
 } // namespace
 
-TextRasterResult rasterizeText(const drift::Clip &clip, const QRectF &layoutRect, double renderScale)
+TextRasterResult rasterizeText(const drift::Clip &clip, const QString &text, const QRectF &layoutRect,
+                               double renderScale)
 {
-    const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
     if (text.isEmpty() || layoutRect.width() < 1.0 || layoutRect.height() < 1.0)
         return {};
 
@@ -339,6 +339,12 @@ TextRasterResult rasterizeText(const drift::Clip &clip, const QRectF &layoutRect
 
     result.image = image;
     return result;
+}
+
+TextRasterResult rasterizeText(const drift::Clip &clip, const QRectF &layoutRect, double renderScale)
+{
+    const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
+    return rasterizeText(clip, text, layoutRect, renderScale);
 }
 
 TextAnimSample sampleTextAnimation(const drift::Clip &clip, drift::TimeUs timelineUs,

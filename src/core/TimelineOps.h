@@ -7,6 +7,7 @@ namespace drift {
 
 constexpr TimeUs kImageClipDurationUs = 5 * kUsPerSecond;
 constexpr TimeUs kTextClipDurationUs = 5 * kUsPerSecond;
+constexpr TimeUs kSubtitleClipDurationUs = 30 * kUsPerSecond;
 constexpr TimeUs kMinClipDurationUs = kUsPerSecond / 10;
 constexpr TimeUs kSnapThresholdUs = 150'000;
 

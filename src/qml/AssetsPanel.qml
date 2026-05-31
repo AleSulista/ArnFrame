@@ -196,6 +196,28 @@ PanelFrame {
                         textClipInput.clear()
                     }
                 }
+
+                Rectangle {
+                    width: parent.width - 24
+                    height: 1
+                    color: Theme.panelBorder
+                }
+
+                Text {
+                    width: parent.width - 24
+                    wrapMode: Text.WordWrap
+                    text: qsTr("Subtitle track — one clip holds many timed captions. Place it on the timeline, trim its duration, then type cues at each moment in the inspector.")
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                }
+
+                ThemedButton {
+                    text: qsTr("Add subtitle clip")
+                    variant: "secondary"
+                    glyph: Theme.icons.messageSquare
+                    onClicked: EditorState.addSubtitleClip(-1)
+                }
             }
 
             // Sounds tab panel

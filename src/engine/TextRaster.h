@@ -17,6 +17,8 @@ struct TextRasterResult
 
 // Rasterize (or return a cached copy of) the styled text. layoutRect is the clip's layout rect in
 // canvas pixels; renderScale maps project pixels to canvas pixels.
+TextRasterResult rasterizeText(const drift::Clip &clip, const QString &text, const QRectF &layoutRect,
+                               double renderScale);
 TextRasterResult rasterizeText(const drift::Clip &clip, const QRectF &layoutRect, double renderScale);
 
 // Entrance/exit motion, sampled at a timeline instant. Applied to the *layer* — never to the

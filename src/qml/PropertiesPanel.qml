@@ -71,7 +71,9 @@ PanelFrame {
     readonly property int transitionTabIndex: 5
     readonly property var selectedEffects: EditorState.selectedClipEffects
     readonly property string clipKind: hasSelection ? (clip.kind || "") : ""
-    readonly property bool hasTextStyle: hasSelection && clipKind === "text" && !!clip.textStyle
+    readonly property bool hasTextStyle: hasSelection
+                                         && (clipKind === "text" || clipKind === "subtitle")
+                                         && !!clip.textStyle
     readonly property var textStyle: hasTextStyle ? clip.textStyle : ({
                                                                        "fontFamily": "Inter",
                                                                        "pixelSize": 64,
@@ -1247,8 +1249,20 @@ PanelFrame {
 
                         Column {
                             width: tabColumn.width
+                            spacing: 4
+                            visible: root.clipKind === "subtitle"
+
+                            SubtitleEditor {
+                                width: parent.width
+                                clip: root.clip
+                                formatSeconds: root.formatSeconds
+                            }
+                        }
+
+                        Column {
+                            width: tabColumn.width
                             spacing: 8
-                            visible: root.clipKind !== "text"
+                            visible: root.clipKind !== "text" && root.clipKind !== "subtitle"
 
                             Text {
                                 text: "Trim"
@@ -1980,6 +1994,7 @@ PanelFrame {
 
                         Text {
                             visible: root.clipKind === "audio" || root.clipKind === "text"
+                                     || root.clipKind === "subtitle"
                             text: "Masks apply to visual clips"
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
@@ -1989,6 +2004,7 @@ PanelFrame {
                         ThemedComboBox {
                             id: maskShapeBox
                             visible: root.clipKind !== "audio" && root.clipKind !== "text"
+                                     && root.clipKind !== "subtitle"
                             width: parent.width
                             model: ["none", "rectangle", "ellipse", "star", "heart", "bars", "freeform"]
                             currentIndex: Math.max(0, model.indexOf((clip.mask && clip.mask.shape) || "none"))
@@ -2013,6 +2029,7 @@ PanelFrame {
                                 width: parent.width
                                 spacing: 4
                                 visible: root.clipKind !== "audio" && root.clipKind !== "text"
+                                     && root.clipKind !== "subtitle"
                                          && clip.mask && clip.mask.shape !== "none"
                                          && (modelData.key !== "rotation" || clip.mask.shape !== "bars")
 
@@ -2050,6 +2067,7 @@ PanelFrame {
                             width: parent.width
                             spacing: 8
                             visible: root.clipKind !== "audio" && root.clipKind !== "text"
+                                     && root.clipKind !== "subtitle"
                                      && clip.mask && clip.mask.shape !== "none"
                             Text {
                                 text: "Invert"

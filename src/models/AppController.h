@@ -126,6 +126,7 @@ public:
     Q_INVOKABLE bool trackAcceptsAsset(int trackIndex, int assetIndex) const;
     Q_INVOKABLE QString trackTypeForAsset(int assetIndex) const;
     Q_INVOKABLE void addTextClip(const QString &text, double atSeconds);
+    Q_INVOKABLE void addSubtitleClip(double atSeconds);
     Q_INVOKABLE void addShapeClip(const QString &shapeKind, double atSeconds);
     Q_INVOKABLE void addShapeClipAt(const QString &shapeKind, int trackIndex, double atSeconds);
     Q_INVOKABLE void addStickerClip(const QString &stickerId, double atSeconds);
@@ -182,6 +183,10 @@ public:
     Q_INVOKABLE void setClipStart(int trackIndex, int clipIndex, double start);
     Q_INVOKABLE void setClipDuration(int trackIndex, int clipIndex, double duration);
     Q_INVOKABLE void setClipTextContent(int trackIndex, int clipIndex, const QString &text);
+    Q_INVOKABLE void setSubtitleCues(int trackIndex, int clipIndex, const QVariantList &cues);
+    Q_INVOKABLE double subtitleLocalPlayheadSeconds(int trackIndex, int clipIndex) const;
+    Q_INVOKABLE void upsertSubtitleCueAtPlayhead(int trackIndex, int clipIndex, const QString &text);
+    Q_INVOKABLE void seekToSubtitleCue(int trackIndex, int clipIndex, int cueIndex);
     Q_INVOKABLE void setTextStyle(int trackIndex, int clipIndex, const QVariantMap &style);
     Q_INVOKABLE void applyTextPreset(int trackIndex, int clipIndex, const QString &presetId);
     Q_INVOKABLE QVariantList textPresets() const;

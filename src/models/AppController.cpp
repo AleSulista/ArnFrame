@@ -2,6 +2,7 @@
 
 #include "AssetLibrary.h"
 #include "core/Clip.h"
+#include "core/SubtitleCue.h"
 #include "core/TimelineOps.h"
 #include "core/Transition.h"
 #include "core/commands/ProjectCommands.h"
@@ -302,6 +303,44 @@ QVariantMap textStyleToMap(const drift::TextStyle &s)
     };
 }
 
+QVariantList subtitleCuesToMap(const QList<drift::SubtitleCue> &cues)
+{
+    QVariantList out;
+    for (const drift::SubtitleCue &cue : cues) {
+        out.append(QVariantMap{
+            {QStringLiteral("start"), drift::usToSeconds(cue.startUs)},
+            {QStringLiteral("end"), drift::usToSeconds(cue.endUs)},
+            {QStringLiteral("text"), cue.text},
+        });
+    }
+    return out;
+}
+
+QList<drift::SubtitleCue> subtitleCuesFromMap(const QVariantList &list)
+{
+    QList<drift::SubtitleCue> cues;
+    cues.reserve(list.size());
+    for (const QVariant &value : list) {
+        const QVariantMap map = value.toMap();
+        drift::SubtitleCue cue;
+        cue.startUs = drift::secondsToUs(map.value(QStringLiteral("start")).toDouble());
+        cue.endUs = drift::secondsToUs(map.value(QStringLiteral("end")).toDouble());
+        cue.text = map.value(QStringLiteral("text")).toString();
+        cues.append(cue);
+    }
+    drift::sortSubtitleCues(cues);
+    return cues;
+}
+
+QString subtitleClipName(const QList<drift::SubtitleCue> &cues)
+{
+    if (cues.isEmpty())
+        return QStringLiteral("Subtitles");
+    return QStringLiteral("Subtitles (%1)").arg(cues.size());
+}
+
+constexpr drift::TimeUs kDefaultSubtitleCueDurationUs = 3 * drift::kUsPerSecond;
+
 QVariantMap shapeStyleToMap(const drift::ShapeStyle &s)
 {
     return {
@@ -402,7 +441,8 @@ QString stickerResourcePath(const QString &id)
 bool clipAcceptsPreviewTransform(const drift::Clip &clip)
 {
     return clip.type == drift::ClipType::Shape || clip.type == drift::ClipType::Image
-           || clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Video;
+           || clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Subtitle
+           || clip.type == drift::ClipType::Video;
 }
 
 double clipTransformValue(const drift::KeyframeTrack<double> &track, drift::TimeUs relative, double defaultValue)
@@ -593,6 +633,10 @@ void applyDefaultVisualLayout(drift::Clip &clip, int canvasW, int canvasH)
         setClipLayoutPixels(clip, 0, canvasH * 0.35, canvasW, canvasH * 0.30);
         return;
     }
+    if (clip.type == drift::ClipType::Subtitle) {
+        setClipLayoutPixels(clip, 0, canvasH * 0.78, canvasW, canvasH * 0.18);
+        return;
+    }
     // Stickers / generic images without metadata: modest top-left box.
     const double side = qMin(canvasW, canvasH) * 0.25;
     setClipLayoutPixels(clip, 0, 0, side, side);
@@ -635,6 +679,7 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("filmstripPath"), clip.filmstripPath},
         {QStringLiteral("textContent"), clip.textContent},
         {QStringLiteral("textStyle"), textStyleToMap(clip.textStyle)},
+        {QStringLiteral("subtitleCues"), subtitleCuesToMap(clip.subtitleCues)},
         {QStringLiteral("shapeStyle"), shapeStyleToMap(clip.shapeStyle)},
         {QStringLiteral("blendMode"), drift::blendModeToString(clip.blendMode)},
         {QStringLiteral("speed"), clip.speed},
@@ -1386,21 +1431,27 @@ void AppController::trimClipRight(int trackIndex, int clipIndex, double newEnd)
                                                      m_playheadUs);
     drift::TimeUs newDuration = snappedEnd - clip.timelineStart;
 
+    const bool syntheticVisual = clip.type == drift::ClipType::Text
+                                 || clip.type == drift::ClipType::Subtitle
+                                 || clip.type == drift::ClipType::Shape;
     const drift::TimeUs maxSource = sourceDurationForClip(clip);
     const drift::TimeUs maxSourceSpan =
         clip.reverse ? clip.srcOut : (maxSource > clip.srcIn ? maxSource - clip.srcIn : 0);
-    const drift::TimeUs maxDuration =
+    const drift::TimeUs mediaMaxDuration =
         clip.effectiveSpeed() > 0.0
             ? static_cast<drift::TimeUs>(llround(static_cast<double>(maxSourceSpan) / clip.effectiveSpeed()))
             : maxSourceSpan;
+    const drift::TimeUs maxDuration =
+        syntheticVisual ? drift::secondsToUs(300.0) : mediaMaxDuration;
     newDuration = qBound(drift::kMinClipDurationUs, newDuration, maxDuration);
 
     clip.timelineDuration = newDuration;
     const drift::TimeUs span = clip.sourceSpanUs();
+    const drift::TimeUs maxSrcOut = syntheticVisual ? drift::secondsToUs(300.0) : maxSource;
     if (clip.reverse) {
         clip.srcIn = qMax<drift::TimeUs>(0, clip.srcOut - span);
     } else {
-        clip.srcOut = qMin(clip.srcIn + span, maxSource);
+        clip.srcOut = qMin(clip.srcIn + span, maxSrcOut);
     }
     syncOverlapTransitions(m_project);
     emit tracksChanged();
@@ -1581,6 +1632,38 @@ void AppController::addTextClip(const QString &text, double atSeconds)
     selectClip(trackIndex, track.clips.size() - 1);
 }
 
+void AppController::addSubtitleClip(double atSeconds)
+{
+    const drift::Project before = m_project;
+    const int trackIndex =
+        drift::ensureTrackForClipType(m_project, drift::ClipType::Subtitle, true);
+    if (trackIndex < 0)
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    const drift::TimeUs startSeconds = atSeconds < 0.0 ? m_playheadUs : drift::secondsToUs(atSeconds);
+    const drift::TimeUs start = drift::resolveClipStart(m_project, track, -1, startSeconds,
+                                                        drift::kSubtitleClipDurationUs, m_snapEnabled,
+                                                        m_playheadUs);
+
+    drift::Clip clip;
+    clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    clip.type = drift::ClipType::Subtitle;
+    clip.name = QStringLiteral("Subtitles");
+    clip.timelineStart = start;
+    clip.timelineDuration = drift::kSubtitleClipDurationUs;
+    clip.srcIn = 0;
+    clip.srcOut = drift::kSubtitleClipDurationUs;
+    if (const drift::TextStyle *preset = drift::textStyleForPresetId(QStringLiteral("subtitle")))
+        clip.textStyle = *preset;
+    applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
+
+    track.clips.append(clip);
+    pushProjectEdit(before, QStringLiteral("Subtitle clip added"));
+    finishEdit(QStringLiteral("Subtitle clip added"));
+    selectClip(trackIndex, track.clips.size() - 1);
+}
+
 QVariantList AppController::builtinStickers() const
 {
     return {
@@ -1717,7 +1800,7 @@ QVariantList AppController::previewClipsAtPlayhead() const
         if (track.hidden)
             continue;
         if (track.type != drift::TrackType::Video && track.type != drift::TrackType::Shape
-            && track.type != drift::TrackType::Text)
+            && track.type != drift::TrackType::Text && track.type != drift::TrackType::Subtitle)
             continue;
 
         for (int clipIndex = 0; clipIndex < track.clips.size(); ++clipIndex) {
@@ -1831,7 +1914,8 @@ bool AppController::timelineHasVisualClips() const
     for (const drift::Track &track : m_project.tracks()) {
         for (const drift::Clip &clip : track.clips) {
             if (clip.type == drift::ClipType::Video || clip.type == drift::ClipType::Image
-                || clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Shape) {
+                || clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Subtitle
+                || clip.type == drift::ClipType::Shape) {
                 return true;
             }
         }
@@ -2176,11 +2260,13 @@ void AppController::setClipDuration(int trackIndex, int clipIndex, double durati
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs maxSource = sourceDurationForClip(clip);
     const drift::TimeUs maxSourceSpan =
-        (clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Shape)
+        (clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Subtitle
+         || clip.type == drift::ClipType::Shape)
             ? drift::secondsToUs(300.0)
             : (clip.reverse ? clip.srcOut : (maxSource > clip.srcIn ? maxSource - clip.srcIn : 0));
     const drift::TimeUs maxDuration =
-        (clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Shape)
+        (clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Subtitle
+         || clip.type == drift::ClipType::Shape)
             ? maxSourceSpan
             : (clip.effectiveSpeed() > 0.0
                    ? static_cast<drift::TimeUs>(
@@ -2216,6 +2302,105 @@ void AppController::setClipTextContent(int trackIndex, int clipIndex, const QStr
     finishEdit(QStringLiteral("Text updated"));
 }
 
+void AppController::setSubtitleCues(int trackIndex, int clipIndex, const QVariantList &cues)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Subtitle)
+        return;
+
+    const drift::Project before = m_project;
+    clip.subtitleCues = subtitleCuesFromMap(cues);
+    clip.name = subtitleClipName(clip.subtitleCues);
+    pushProjectEdit(before, QStringLiteral("Subtitles updated"));
+    finishEdit(QStringLiteral("Subtitles updated"));
+}
+
+double AppController::subtitleLocalPlayheadSeconds(int trackIndex, int clipIndex) const
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return -1.0;
+
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return -1.0;
+
+    const drift::Clip &clip = track.clips.at(clipIndex);
+    if (clip.type != drift::ClipType::Subtitle || !clip.containsTime(m_playheadUs))
+        return -1.0;
+
+    return drift::usToSeconds(m_playheadUs - clip.timelineStart);
+}
+
+void AppController::upsertSubtitleCueAtPlayhead(int trackIndex, int clipIndex, const QString &text)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Subtitle)
+        return;
+
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty())
+        return;
+
+    const drift::TimeUs localUs =
+        qBound(drift::TimeUs{0}, m_playheadUs - clip.timelineStart, clip.timelineDuration);
+    const int existingIndex = drift::subtitleCueIndexAt(clip.subtitleCues, localUs);
+
+    const drift::Project before = m_project;
+    if (existingIndex >= 0) {
+        clip.subtitleCues[existingIndex].text = trimmed;
+    } else {
+        drift::SubtitleCue cue;
+        cue.startUs = localUs;
+
+        drift::TimeUs nextStart = clip.timelineDuration;
+        for (const drift::SubtitleCue &existing : clip.subtitleCues) {
+            if (existing.startUs > localUs)
+                nextStart = qMin(nextStart, existing.startUs);
+        }
+        cue.endUs = qMin(clip.timelineDuration, qMax(localUs + kDefaultSubtitleCueDurationUs, localUs + 1));
+        cue.endUs = qMin(cue.endUs, nextStart);
+        if (cue.endUs <= cue.startUs)
+            cue.endUs = qMin(clip.timelineDuration, cue.startUs + 1);
+        cue.text = trimmed;
+        clip.subtitleCues.append(cue);
+        drift::sortSubtitleCues(clip.subtitleCues);
+    }
+
+    clip.name = subtitleClipName(clip.subtitleCues);
+    pushProjectEdit(before, QStringLiteral("Subtitle cue updated"));
+    finishEdit(QStringLiteral("Subtitle cue updated"));
+}
+
+void AppController::seekToSubtitleCue(int trackIndex, int clipIndex, int cueIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Clip &clip = track.clips.at(clipIndex);
+    if (clip.type != drift::ClipType::Subtitle || cueIndex < 0 || cueIndex >= clip.subtitleCues.size())
+        return;
+
+    setPlayheadSeconds(drift::usToSeconds(clip.timelineStart + clip.subtitleCues.at(cueIndex).startUs));
+}
+
 void AppController::setTextStyle(int trackIndex, int clipIndex, const QVariantMap &m)
 {
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
@@ -2226,7 +2411,7 @@ void AppController::setTextStyle(int trackIndex, int clipIndex, const QVariantMa
         return;
 
     drift::Clip &clip = track.clips[clipIndex];
-    if (clip.type != drift::ClipType::Text)
+    if (clip.type != drift::ClipType::Text && clip.type != drift::ClipType::Subtitle)
         return;
 
     const drift::Project before = m_project;
@@ -2291,7 +2476,7 @@ void AppController::applyTextPreset(int trackIndex, int clipIndex, const QString
         return;
 
     drift::Clip &clip = track.clips[clipIndex];
-    if (clip.type != drift::ClipType::Text)
+    if (clip.type != drift::ClipType::Text && clip.type != drift::ClipType::Subtitle)
         return;
 
     const drift::TextStyle *preset = drift::textStyleForPresetId(presetId);
@@ -2365,7 +2550,7 @@ void AppController::previewSetTextRect(int trackIndex, int clipIndex, double xPi
         return;
 
     drift::Clip &clip = track.clips[clipIndex];
-    if (clip.type != drift::ClipType::Text)
+    if (clip.type != drift::ClipType::Text && clip.type != drift::ClipType::Subtitle)
         return;
 
     // The rect follows the same auto-key rules as previewSetClipRect. The glyph size is a plain

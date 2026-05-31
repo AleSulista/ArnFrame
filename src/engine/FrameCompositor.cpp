@@ -10,6 +10,7 @@
 #include "TextRaster.h"
 #include "TransitionCatalog.h"
 #include "core/Clip.h"
+#include "core/SubtitleCue.h"
 #include "core/Time.h"
 #include "core/Transition.h"
 
@@ -472,6 +473,19 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
             blur.parameters.insert(QStringLiteral("u_blurRadius"), anim.blurPx);
             layer.effects.append(blur);
         }
+    } else if (clip.type == drift::ClipType::Subtitle) {
+        const drift::TimeUs localUs = timelineUs - clip.timelineStart;
+        const drift::SubtitleCue *cue = activeSubtitleCueAt(clip.subtitleCues, localUs);
+        if (!cue || cue->text.trimmed().isEmpty())
+            return layer;
+
+        const TextRasterResult raster = rasterizeText(clip, cue->text, layoutRect, renderScale);
+        if (raster.image.isNull())
+            return layer;
+
+        layer.source = raster.image;
+        layer.effects = effectsExcludingTimeEcho(clip.effects);
+        destRect = raster.rect;
     } else if (clip.type == drift::ClipType::Shape) {
         layer.source = shapeImageForClip(clip, layoutW, layoutH);
         layer.effects = effectsExcludingTimeEcho(clip.effects);

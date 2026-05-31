@@ -95,6 +95,7 @@ QtObject {
 
     // --- Colors: timeline clip types (fixed regardless of app theme) ---------------
     readonly property color clipText: "#5DBAA0"
+    readonly property color clipSubtitle: "#4A9FD4"
     readonly property color clipAudio: "#8F5DBA"
     readonly property color clipGraphic: "#BA5D7A"
     readonly property color clipEffect: "#5d93ba"
@@ -140,6 +141,7 @@ QtObject {
     readonly property real trackHeightVideo: 65
     readonly property real trackHeightAudio: 50
     readonly property real trackHeightText: 25
+    readonly property real trackHeightSubtitle: 25
     readonly property real trackHeightShape: 50
     readonly property real trackGap: 6
     // Invisible hit area above tracks (no visible UI) for new-track drops when timeline has clips.

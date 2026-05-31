@@ -164,18 +164,21 @@ PanelFrame {
         if (type === "video") return Theme.trackHeightVideo;
         if (type === "audio") return Theme.trackHeightAudio;
         if (type === "shape") return Theme.trackHeightShape;
+        if (type === "subtitle") return Theme.trackHeightSubtitle;
         return Theme.trackHeightText;
     }
 
     function trackTypeIcon(type) {
         if (type === "audio") return Theme.icons.music;
         if (type === "text") return Theme.icons.type;
+        if (type === "subtitle") return Theme.icons.messageSquare;
         if (type === "shape") return Theme.icons.shapes;
         return Theme.icons.film;
     }
 
     function clipColor(type) {
         if (type === "text") return Theme.clipText;
+        if (type === "subtitle") return Theme.clipSubtitle;
         if (type === "audio") return Theme.clipAudio;
         if (type === "graphic") return Theme.clipGraphic;
         if (type === "effect") return Theme.clipEffect;
@@ -579,6 +582,7 @@ PanelFrame {
                             IconGlyph {
                                 visible: root.tracks[index].type === "video"
                                          || root.tracks[index].type === "text"
+                                         || root.tracks[index].type === "subtitle"
                                          || root.tracks[index].type === "shape"
                                 glyph: EditorState.trackHidden(index) ? Theme.icons.eyeOff : Theme.icons.eye
                                 iconSize: 16
@@ -927,6 +931,8 @@ PanelFrame {
                                         property var clipEffects: clipData.effects || []
                                         property bool effectDropTarget: root.effectDropTrackIndex === trackRow.trackIndex
                                                                         && root.effectDropClipIndex === modelData
+                                        readonly property bool timelineFadeHandles: trackType !== "text"
+                                                                                    && trackType !== "subtitle"
 
                                         y: Theme.clipSelectionRingWidth
                                         width: clipData.duration * root.pxPerSecond - 2 * Theme.clipSelectionRingWidth
@@ -976,68 +982,6 @@ PanelFrame {
                                                 visible: clipItem.effectDropTarget
                                                 color: Qt.rgba(Theme.clipEffect.r, Theme.clipEffect.g, Theme.clipEffect.b, 0.28)
                                                 z: 4
-                                            }
-
-                                            Rectangle {
-                                                id: leftTrimHandle
-                                                width: 12
-                                                anchors.left: parent.left
-                                                anchors.top: parent.top
-                                                anchors.bottom: parent.bottom
-                                                visible: clipItem.selected
-                                                color: Theme.primary
-                                                opacity: leftTrimMouse.pressed ? 1.0 : 0.75
-                                                z: 3
-
-                                                MouseArea {
-                                                    id: leftTrimMouse
-                                                    anchors.fill: parent
-                                                    anchors.leftMargin: -10
-                                                    anchors.rightMargin: -4
-                                                    anchors.topMargin: -6
-                                                    anchors.bottomMargin: -6
-                                                    preventStealing: true
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.SizeHorCursor
-                                                    onPositionChanged: (mouse) => {
-                                                        if (!pressed)
-                                                            return
-                                                        const timelineX = mapToItem(trackRow, mouse.x, mouse.y).x
-                                                        EditorState.trimClipLeft(trackRow.trackIndex, modelData,
-                                                                               timelineX / root.pxPerSecond)
-                                                    }
-                                                }
-                                            }
-
-                                            Rectangle {
-                                                id: rightTrimHandle
-                                                width: 12
-                                                anchors.right: parent.right
-                                                anchors.top: parent.top
-                                                anchors.bottom: parent.bottom
-                                                visible: clipItem.selected
-                                                color: Theme.primary
-                                                opacity: rightTrimMouse.pressed ? 1.0 : 0.75
-                                                z: 3
-
-                                                MouseArea {
-                                                    id: rightTrimMouse
-                                                    anchors.fill: parent
-                                                    anchors.leftMargin: -4
-                                                    anchors.rightMargin: -10
-                                                    anchors.topMargin: -6
-                                                    anchors.bottomMargin: -6
-                                                    preventStealing: true
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.SizeHorCursor
-                                                    onPositionChanged: (mouse) => {
-                                                        if (!pressed)
-                                                            return
-                                                        const timelineX = mapToItem(trackRow, mouse.x, mouse.y).x
-                                                        EditorState.trimClipRight(trackRow.trackIndex, modelData,
-                                                                                timelineX / root.pxPerSecond)
-                                                    }
-                                                }
                                             }
 
                                             // Fade ramp overlay (always visible so fades read at a glance).
@@ -1148,6 +1092,7 @@ PanelFrame {
 
                                             Column {
                                                 visible: clipItem.trackType === "text"
+                                                         || clipItem.trackType === "subtitle"
                                                 anchors.left: parent.left
                                                 anchors.right: parent.right
                                                 anchors.verticalCenter: parent.verticalCenter
@@ -1157,7 +1102,11 @@ PanelFrame {
 
                                                 Text {
                                                     width: parent.width
-                                                    text: clipItem.clipData.textContent || clipItem.clipData.name
+                                                    text: clipItem.trackType === "subtitle"
+                                                          ? (clipItem.clipData.name
+                                                             || qsTr("Subtitles"))
+                                                          : (clipItem.clipData.textContent
+                                                             || clipItem.clipData.name)
                                                     color: "white"
                                                     font.pixelSize: Theme.fontSizeXs
                                                     font.family: Theme.fontFamily
@@ -1229,6 +1178,7 @@ PanelFrame {
                                             anchors.leftMargin: clipItem.selected ? 14 : 0
                                             anchors.rightMargin: clipItem.selected ? 14 : 0
                                             enabled: !leftTrimMouse.pressed && !rightTrimMouse.pressed
+                                                         && !fadeInMouse.pressed && !fadeOutMouse.pressed
                                             cursorShape: Qt.PointingHandCursor
                                             drag.target: clipItem
                                             drag.axis: Drag.XAndYAxis
@@ -1275,7 +1225,7 @@ PanelFrame {
                                             radius: 6.5
                                             y: 2
                                             z: 20
-                                            visible: clipItem.selected && clipItem.width > 26
+                                            visible: clipItem.timelineFadeHandles && clipItem.selected && clipItem.width > 26
                                             color: Theme.primary
                                             border.color: "white"
                                             border.width: 2
@@ -1321,7 +1271,7 @@ PanelFrame {
                                             radius: 6.5
                                             y: 2
                                             z: 20
-                                            visible: clipItem.selected && clipItem.width > 26
+                                            visible: clipItem.timelineFadeHandles && clipItem.selected && clipItem.width > 26
                                             color: Theme.primary
                                             border.color: "white"
                                             border.width: 2
@@ -1356,6 +1306,69 @@ PanelFrame {
                                                 ToolTip {
                                                     visible: fadeOutMouse.pressed
                                                     text: qsTr("Fade out %1s").arg((clipItem.clipData.fadeOut || 0).toFixed(2))
+                                                }
+                                            }
+                                        }
+
+                                        // Trim handles sit above fade dots so edge drags resize the clip.
+                                        Rectangle {
+                                            id: leftTrimHandle
+                                            width: 12
+                                            anchors.left: clipBackground.left
+                                            anchors.top: clipBackground.top
+                                            anchors.bottom: clipBackground.bottom
+                                            visible: clipItem.selected
+                                            color: Theme.primary
+                                            opacity: leftTrimMouse.pressed ? 1.0 : 0.75
+                                            z: 30
+
+                                            MouseArea {
+                                                id: leftTrimMouse
+                                                anchors.fill: parent
+                                                anchors.leftMargin: -10
+                                                anchors.rightMargin: -4
+                                                anchors.topMargin: -6
+                                                anchors.bottomMargin: -6
+                                                preventStealing: true
+                                                hoverEnabled: true
+                                                cursorShape: Qt.SizeHorCursor
+                                                onPositionChanged: (mouse) => {
+                                                    if (!pressed)
+                                                        return
+                                                    const timelineX = mapToItem(trackRow, mouse.x, mouse.y).x
+                                                    EditorState.trimClipLeft(trackRow.trackIndex, modelData,
+                                                                           timelineX / root.pxPerSecond)
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            id: rightTrimHandle
+                                            width: 12
+                                            anchors.right: clipBackground.right
+                                            anchors.top: clipBackground.top
+                                            anchors.bottom: clipBackground.bottom
+                                            visible: clipItem.selected
+                                            color: Theme.primary
+                                            opacity: rightTrimMouse.pressed ? 1.0 : 0.75
+                                            z: 30
+
+                                            MouseArea {
+                                                id: rightTrimMouse
+                                                anchors.fill: parent
+                                                anchors.leftMargin: -4
+                                                anchors.rightMargin: -10
+                                                anchors.topMargin: -6
+                                                anchors.bottomMargin: -6
+                                                preventStealing: true
+                                                hoverEnabled: true
+                                                cursorShape: Qt.SizeHorCursor
+                                                onPositionChanged: (mouse) => {
+                                                    if (!pressed)
+                                                        return
+                                                    const timelineX = mapToItem(trackRow, mouse.x, mouse.y).x
+                                                    EditorState.trimClipRight(trackRow.trackIndex, modelData,
+                                                                            timelineX / root.pxPerSecond)
                                                 }
                                             }
                                         }
