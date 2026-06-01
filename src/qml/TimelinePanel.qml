@@ -8,6 +8,7 @@ PanelFrame {
     id: root
 
     property real zoom: 1.0
+    property string propertiesTab: ""
     readonly property real minZoom: 0.05
     readonly property real maxZoom: 40.0
     readonly property real pxPerSecond: Theme.pixelsPerSecondBase * zoom
@@ -519,6 +520,7 @@ PanelFrame {
                 width: parent.width
                 pxPerSecond: root.pxPerSecond
                 labelsWidth: Theme.trackLabelsWidth
+                propertiesTab: root.propertiesTab
                 // Keep keys/playhead lined up with the track scroll view below.
                 contentX: flick.contentX
                 contentWidth: flick.contentWidth

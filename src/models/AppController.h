@@ -303,6 +303,7 @@ signals:
     void currentProjectPathChanged();
     void recoveryChanged();
     void recentProjectsChanged();
+    void transformBlocked(const QString &reason);
 
 protected:
     void pushProjectEdit(const drift::Project &before, const QString &text);

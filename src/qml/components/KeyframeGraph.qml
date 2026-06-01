@@ -11,6 +11,7 @@ Item {
     property real contentX: 0
     property real contentWidth: 800
     property real labelsWidth: Theme.trackLabelsWidth
+    property string propertiesTab: ""
 
     readonly property bool hasClip: EditorState.selectedTrack >= 0 && EditorState.selectedClip >= 0
     readonly property var clip: {
@@ -58,6 +59,8 @@ Item {
 
     height: visible ? 88 : 0
     visible: {
+        if (propertiesTab !== "transform")
+            return false
         if (!hasClip || !clip)
             return false
         if (prop === "volume")

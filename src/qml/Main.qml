@@ -142,6 +142,7 @@ ApplicationWindow {
                     }
 
                     PropertiesPanel {
+                        id: propertiesPanel
                         SplitView.preferredWidth: parent.width * 0.25
                         SplitView.minimumWidth: 220
                         SplitView.maximumWidth: parent.width * 0.4
@@ -149,6 +150,7 @@ ApplicationWindow {
                 }
 
                 TimelinePanel {
+                    propertiesTab: propertiesPanel.currentTabId
                     SplitView.preferredHeight: parent.height * 0.5
                     SplitView.minimumHeight: 140
                     SplitView.maximumHeight: parent.height * 0.7

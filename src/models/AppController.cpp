@@ -508,7 +508,8 @@ constexpr drift::TimeUs kKeyframeToleranceUs = drift::kUsPerSecond / 30;
 
 // force=true (diamond click) always writes. Otherwise auto-key or an existing
 // key at/near the playhead is required. Empty tracks get a constant key at 0
-// when auto-key is off so static layout edits still work.
+// when auto-key is off so static layout edits still work; a track with a single
+// key retargets that key from anywhere so single-keyframe clips still edit freely.
 bool writeKeyframeValue(drift::KeyframeTrack<double> &track, drift::TimeUs relative, double value,
                         bool autoKey, bool force)
 {
@@ -518,6 +519,10 @@ bool writeKeyframeValue(drift::KeyframeTrack<double> &track, drift::TimeUs relat
     }
     if (track.isEmpty()) {
         track.setKeyframe(0, value);
+        return true;
+    }
+    if (track.keyframes().size() == 1) {
+        track.setKeyframe(track.keyframes().firstKey(), value);
         return true;
     }
     const drift::TimeUs nearest = track.nearestKeyframe(relative, kKeyframeToleranceUs);
@@ -2036,8 +2041,10 @@ void AppController::previewSetClipPosition(int trackIndex, int clipIndex, double
     const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
     const bool wroteX = writeKeyframeValue(clip.transformX, relative, xPixels, m_autoKeyEnabled, false);
     const bool wroteY = writeKeyframeValue(clip.transformY, relative, yPixels, m_autoKeyEnabled, false);
-    if (!wroteX && !wroteY)
+    if (!wroteX && !wroteY) {
+        emit transformBlocked(tr("Can't move — auto-key is off"));
         return;
+    }
 
     if (!m_previewDragActive)
         beginPreviewDrag(QStringLiteral("Move clip"));
@@ -2060,8 +2067,10 @@ void AppController::previewSetClipSize(int trackIndex, int clipIndex, double wid
         writeKeyframeValue(clip.transformW, relative, qMax(1.0, widthPixels), m_autoKeyEnabled, false);
     const bool wroteH =
         writeKeyframeValue(clip.transformH, relative, qMax(1.0, heightPixels), m_autoKeyEnabled, false);
-    if (!wroteW && !wroteH)
+    if (!wroteW && !wroteH) {
+        emit transformBlocked(tr("Can't resize — auto-key is off"));
         return;
+    }
 
     if (!m_previewDragActive)
         beginPreviewDrag(QStringLiteral("Resize clip"));
@@ -2088,8 +2097,10 @@ void AppController::previewSetClipRect(int trackIndex, int clipIndex, double xPi
             || wrote;
     wrote = writeKeyframeValue(clip.transformH, relative, qMax(1.0, heightPixels), m_autoKeyEnabled, false)
             || wrote;
-    if (!wrote)
+    if (!wrote) {
+        emit transformBlocked(tr("Can't transform — auto-key is off"));
         return;
+    }
 
     if (!m_previewDragActive)
         beginPreviewDrag(QStringLiteral("Transform clip"));
@@ -2108,8 +2119,10 @@ void AppController::previewSetClipRotation(int trackIndex, int clipIndex, double
 
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
-    if (!writeKeyframeValue(clip.rotation, relative, degrees, m_autoKeyEnabled, false))
+    if (!writeKeyframeValue(clip.rotation, relative, degrees, m_autoKeyEnabled, false)) {
+        emit transformBlocked(tr("Can't rotate — auto-key is off"));
         return;
+    }
 
     if (!m_previewDragActive)
         beginPreviewDrag(QStringLiteral("Rotate clip"));
@@ -2133,8 +2146,10 @@ void AppController::previewSetClipKeyframe(int trackIndex, int clipIndex, const 
         return;
 
     const drift::TimeUs rel = qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds) - clip.timelineStart);
-    if (!writeKeyframeValue(*kt, rel, value, m_autoKeyEnabled, false))
+    if (!writeKeyframeValue(*kt, rel, value, m_autoKeyEnabled, false)) {
+        emit transformBlocked(tr("Can't edit — auto-key is off"));
         return;
+    }
 
     if (!m_previewDragActive)
         beginPreviewDrag(QStringLiteral("Edit keyframe"));

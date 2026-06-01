@@ -29,6 +29,39 @@ PanelFrame {
             height: parent.height - toolbar.height
             clip: true
 
+            Connections {
+                target: EditorState
+                function onTransformBlocked(reason) { blockToast.show(reason) }
+            }
+
+            Rectangle {
+                id: blockToast
+                z: 10
+                property string message: ""
+                function show(msg) { message = msg; opacity = 1; hideTimer.restart() }
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 16
+                visible: opacity > 0
+                opacity: 0
+                radius: Theme.radiusMd
+                color: Theme.panelBackground
+                border.width: 1
+                border.color: Theme.panelBorder
+                implicitWidth: toastLabel.implicitWidth + 24
+                implicitHeight: toastLabel.implicitHeight + 14
+                Behavior on opacity { NumberAnimation { duration: 200 } }
+                Text {
+                    id: toastLabel
+                    anchors.centerIn: parent
+                    text: blockToast.message
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                }
+                Timer { id: hideTimer; interval: 2000; onTriggered: blockToast.opacity = 0 }
+            }
+
             Item {
                 id: viewport
                 anchors.fill: parent
