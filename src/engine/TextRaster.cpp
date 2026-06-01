@@ -347,14 +347,17 @@ TextRasterResult rasterizeText(const drift::Clip &clip, const QRectF &layoutRect
     return rasterizeText(clip, text, layoutRect, renderScale);
 }
 
-TextAnimSample sampleTextAnimation(const drift::Clip &clip, drift::TimeUs timelineUs,
-                                   const QRectF &layoutRect, double renderScale)
+// Sample entrance/exit motion for a text span occupying [windowStartUs, windowStartUs +
+// windowDurationUs). Text clips pass the clip's span; subtitles pass the active cue's span
+// so every cue animates in and out on its own.
+static TextAnimSample sampleTextAnimationWindow(const drift::TextStyle &style, drift::TimeUs timelineUs,
+                                                drift::TimeUs windowStartUs, drift::TimeUs windowDurationUs,
+                                                const QRectF &layoutRect, double renderScale)
 {
-    const drift::TextStyle &style = clip.textStyle;
     TextAnimSample sample;
 
-    const drift::TimeUs elapsed = timelineUs - clip.timelineStart;
-    const drift::TimeUs remaining = clip.timelineDuration - elapsed;
+    const drift::TimeUs elapsed = timelineUs - windowStartUs;
+    const drift::TimeUs remaining = windowDurationUs - elapsed;
 
     if (style.animIn.kind != drift::TextAnimKind::None && style.animIn.durationUs > 0) {
         const double settled = static_cast<double>(elapsed) / static_cast<double>(style.animIn.durationUs);
@@ -367,4 +370,19 @@ TextAnimSample sampleTextAnimation(const drift::Clip &clip, drift::TimeUs timeli
 
     sample.opacity = qBound(0.0, sample.opacity, 1.0);
     return sample;
+}
+
+TextAnimSample sampleTextAnimation(const drift::Clip &clip, drift::TimeUs timelineUs,
+                                   const QRectF &layoutRect, double renderScale)
+{
+    return sampleTextAnimationWindow(clip.textStyle, timelineUs, clip.timelineStart,
+                                     clip.timelineDuration, layoutRect, renderScale);
+}
+
+TextAnimSample sampleSubtitleCueAnimation(const drift::Clip &clip, const drift::SubtitleCue &cue,
+                                          drift::TimeUs timelineUs, const QRectF &layoutRect,
+                                          double renderScale)
+{
+    return sampleTextAnimationWindow(clip.textStyle, timelineUs, clip.timelineStart + cue.startUs,
+                                     cue.endUs - cue.startUs, layoutRect, renderScale);
 }

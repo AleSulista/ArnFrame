@@ -483,9 +483,27 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
         if (raster.image.isNull())
             return layer;
 
+        // Each cue animates in and out on its own window, so cues play one after another.
+        const TextAnimSample anim = sampleSubtitleCueAnimation(clip, *cue, timelineUs, layoutRect,
+                                                               renderScale);
+
         layer.source = raster.image;
         layer.effects = effectsExcludingTimeEcho(clip.effects);
-        destRect = raster.rect;
+
+        destRect = raster.rect.translated(anim.dx, anim.dy);
+        if (!qFuzzyCompare(anim.scale, 1.0)) {
+            const QPointF centre = destRect.center();
+            destRect.setSize(destRect.size() * anim.scale);
+            destRect.moveCenter(centre);
+        }
+        opacity *= anim.opacity;
+
+        if (anim.blurPx > 0.5) {
+            drift::Effect blur;
+            blur.catalogId = QStringLiteral("builtin.effects.gaussian_blur");
+            blur.parameters.insert(QStringLiteral("u_blurRadius"), anim.blurPx);
+            layer.effects.append(blur);
+        }
     } else if (clip.type == drift::ClipType::Shape) {
         layer.source = shapeImageForClip(clip, layoutW, layoutH);
         layer.effects = effectsExcludingTimeEcho(clip.effects);

@@ -35,6 +35,12 @@ struct TextAnimSample
 TextAnimSample sampleTextAnimation(const drift::Clip &clip, drift::TimeUs timelineUs,
                                    const QRectF &layoutRect, double renderScale);
 
+// Same, but scoped to a single subtitle cue's [start, end) window so each cue on a subtitle
+// clip plays its own entrance and exit, one after another.
+TextAnimSample sampleSubtitleCueAnimation(const drift::Clip &clip, const drift::SubtitleCue &cue,
+                                          drift::TimeUs timelineUs, const QRectF &layoutRect,
+                                          double renderScale);
+
 // Widest blur an entrance/exit can ask for, in project px. Reserved in the bleed margin up front so
 // the image size — and therefore the cache key — does not change as the animation plays.
 constexpr double kTextBlurMaxPx = 24.0;
