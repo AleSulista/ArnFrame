@@ -158,13 +158,13 @@ PanelFrame {
         if (!root.hasSelection)
             return
         if (startField && !startField.activeFocus)
-            startField.text = root.formatSeconds(root.clip.start)
+            startField.value = root.clip.start
         if (durationField && !durationField.activeFocus)
-            durationField.text = root.formatSeconds(root.clip.duration)
+            durationField.value = root.clip.duration
         if (inPointField && !inPointField.activeFocus)
-            inPointField.text = root.formatSeconds(root.clip.inPoint)
+            inPointField.value = root.clip.inPoint
         if (outPointField && !outPointField.activeFocus)
-            outPointField.text = root.formatSeconds(root.clip.outPoint)
+            outPointField.value = root.clip.outPoint
         if (textContentField && !textContentField.activeFocus)
             textContentField.text = root.clip.textContent || ""
         if (blendModeBox)
@@ -172,37 +172,37 @@ PanelFrame {
         if (root.hasTextStyle) {
             const s = root.textStyle
             if (pixelSizeField && !pixelSizeField.activeFocus)
-                pixelSizeField.text = Number(s.pixelSize).toString()
+                pixelSizeField.value = s.pixelSize
             if (textColorField && !textColorField.activeFocus)
                 textColorField.text = s.color
             if (lineHeightField && !lineHeightField.activeFocus)
-                lineHeightField.text = Number(s.lineHeight).toFixed(2)
+                lineHeightField.value = s.lineHeight
             if (letterSpacingField && !letterSpacingField.activeFocus)
-                letterSpacingField.text = Number(s.letterSpacing).toFixed(1)
+                letterSpacingField.value = s.letterSpacing
             if (outlineWidthField && !outlineWidthField.activeFocus)
-                outlineWidthField.text = Number(s.outlineWidth).toFixed(1)
+                outlineWidthField.value = s.outlineWidth
             if (outlineColorField && !outlineColorField.activeFocus)
                 outlineColorField.text = s.outlineColor
             if (shadowOffsetXField && !shadowOffsetXField.activeFocus)
-                shadowOffsetXField.text = Number(s.shadowOffsetX).toFixed(1)
+                shadowOffsetXField.value = s.shadowOffsetX
             if (shadowOffsetYField && !shadowOffsetYField.activeFocus)
-                shadowOffsetYField.text = Number(s.shadowOffsetY).toFixed(1)
+                shadowOffsetYField.value = s.shadowOffsetY
             if (shadowBlurField && !shadowBlurField.activeFocus)
-                shadowBlurField.text = Number(s.shadowBlur).toFixed(1)
+                shadowBlurField.value = s.shadowBlur
             if (shadowOpacityField && !shadowOpacityField.activeFocus)
-                shadowOpacityField.text = Number(s.shadowOpacity).toFixed(2)
+                shadowOpacityField.value = s.shadowOpacity
             if (shadowColorField && !shadowColorField.activeFocus)
                 shadowColorField.text = s.shadowColor
             if (boxColorField && !boxColorField.activeFocus)
                 boxColorField.text = s.boxColor
             if (boxPaddingField && !boxPaddingField.activeFocus)
-                boxPaddingField.text = Number(s.boxPadding).toFixed(1)
+                boxPaddingField.value = s.boxPadding
             if (boxRadiusField && !boxRadiusField.activeFocus)
-                boxRadiusField.text = Number(s.boxRadius).toFixed(1)
+                boxRadiusField.value = s.boxRadius
             if (animInDurationField && !animInDurationField.activeFocus)
-                animInDurationField.text = Number(s.animIn.duration).toFixed(2)
+                animInDurationField.value = s.animIn.duration
             if (animOutDurationField && !animOutDurationField.activeFocus)
-                animOutDurationField.text = Number(s.animOut.duration).toFixed(2)
+                animOutDurationField.value = s.animOut.duration
         }
     }
 
@@ -210,7 +210,7 @@ PanelFrame {
         if (!root.hasActiveTransition)
             return
         if (transitionDurationField && !transitionDurationField.activeFocus)
-            transitionDurationField.text = Number(root.activeTransition.duration || 0.5).toFixed(2)
+            transitionDurationField.value = root.activeTransition.duration || 0.5
         if (transitionKindBox) {
             const kinds = EditorState.transitionKinds()
             const active = root.activeTransition.kind || "crossfade"
@@ -234,13 +234,11 @@ PanelFrame {
         if (!transitionId)
             return
         if (transitionDurationField) {
-            const v = parseFloat(transitionDurationField.text)
-            if (!isNaN(v)) {
-                const current = Number(root.activeTransition.duration || 0.5)
-                if (Math.abs(v - current) > 0.0001)
-                    EditorState.setTransitionDuration(
-                        root.transitionEditTrack, transitionId, v)
-            }
+            const v = transitionDurationField.value
+            const current = Number(root.activeTransition.duration || 0.5)
+            if (Math.abs(v - current) > 0.0001)
+                EditorState.setTransitionDuration(
+                    root.transitionEditTrack, transitionId, v)
         }
         if (transitionKindBox && transitionKindBox.currentIndex >= 0) {
             const kinds = EditorState.transitionKinds()
@@ -484,18 +482,14 @@ PanelFrame {
                                     font.pixelSize: Theme.fontSizeXs
                                     font.family: Theme.fontFamily
                                 }
-                                ThemedTextField {
+                                ThemedNumberField {
                                     id: startField
                                     width: parent.width
-                                    text: root.formatSeconds(clip.start)
-                                    color: Theme.panelForeground
-                                    font.family: Theme.monoFontFamily
-                                    font.pixelSize: Theme.fontSizeSm
-                                    onEditingFinished: {
-                                        const v = parseFloat(text)
-                                        if (!isNaN(v))
-                                            EditorState.setClipStart(EditorState.selectedTrack, EditorState.selectedClip, v)
-                                    }
+                                    decimals: 2
+                                    step: 0.1
+                                    from: 0
+                                    onEdited: v => EditorState.setClipStart(
+                                                      EditorState.selectedTrack, EditorState.selectedClip, v)
                                 }
                             }
 
@@ -508,18 +502,14 @@ PanelFrame {
                                     font.pixelSize: Theme.fontSizeXs
                                     font.family: Theme.fontFamily
                                 }
-                                ThemedTextField {
+                                ThemedNumberField {
                                     id: durationField
                                     width: parent.width
-                                    text: root.formatSeconds(clip.duration)
-                                    color: Theme.panelForeground
-                                    font.family: Theme.monoFontFamily
-                                    font.pixelSize: Theme.fontSizeSm
-                                    onEditingFinished: {
-                                        const v = parseFloat(text)
-                                        if (!isNaN(v))
-                                            EditorState.setClipDuration(EditorState.selectedTrack, EditorState.selectedClip, v)
-                                    }
+                                    decimals: 2
+                                    step: 0.1
+                                    from: 0.1
+                                    onEdited: v => EditorState.setClipDuration(
+                                                        EditorState.selectedTrack, EditorState.selectedClip, v)
                                 }
                             }
                         }
@@ -617,18 +607,14 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    ThemedTextField {
+                                    ThemedNumberField {
                                         id: pixelSizeField
                                         width: parent.width
-                                        text: Number(root.textStyle.pixelSize).toString()
-                                        color: Theme.panelForeground
-                                        font.family: Theme.monoFontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        onEditingFinished: {
-                                            const v = parseInt(text)
-                                            if (!isNaN(v))
-                                                root.setTextStyleKey("pixelSize", v)
-                                        }
+                                        decimals: 0
+                                        step: 1
+                                        from: 1
+                                        to: 500
+                                        onEdited: v => root.setTextStyleKey("pixelSize", v)
                                     }
                                 }
                             }
@@ -797,18 +783,14 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    ThemedTextField {
+                                    ThemedNumberField {
                                         id: lineHeightField
                                         width: parent.width
-                                        text: Number(root.textStyle.lineHeight).toFixed(2)
-                                        color: Theme.panelForeground
-                                        font.family: Theme.monoFontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        onEditingFinished: {
-                                            const v = parseFloat(text)
-                                            if (!isNaN(v))
-                                                root.setTextStyleKey("lineHeight", v)
-                                        }
+                                        decimals: 2
+                                        step: 0.05
+                                        from: 0.5
+                                        to: 4
+                                        onEdited: v => root.setTextStyleKey("lineHeight", v)
                                     }
                                 }
 
@@ -821,18 +803,12 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    ThemedTextField {
+                                    ThemedNumberField {
                                         id: letterSpacingField
                                         width: parent.width
-                                        text: Number(root.textStyle.letterSpacing).toFixed(1)
-                                        color: Theme.panelForeground
-                                        font.family: Theme.monoFontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        onEditingFinished: {
-                                            const v = parseFloat(text)
-                                            if (!isNaN(v))
-                                                root.setTextStyleKey("letterSpacing", v)
-                                        }
+                                        decimals: 1
+                                        step: 0.5
+                                        onEdited: v => root.setTextStyleKey("letterSpacing", v)
                                     }
                                 }
                             }
@@ -878,18 +854,13 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    ThemedTextField {
+                                    ThemedNumberField {
                                         id: outlineWidthField
                                         width: parent.width
-                                        text: Number(root.textStyle.outlineWidth).toFixed(1)
-                                        color: Theme.panelForeground
-                                        font.family: Theme.monoFontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        onEditingFinished: {
-                                            const v = parseFloat(text)
-                                            if (!isNaN(v))
-                                                root.setTextStyleKey("outlineWidth", v)
-                                        }
+                                        decimals: 1
+                                        step: 0.5
+                                        from: 0
+                                        onEdited: v => root.setTextStyleKey("outlineWidth", v)
                                     }
                                 }
 
@@ -961,18 +932,12 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    ThemedTextField {
+                                    ThemedNumberField {
                                         id: shadowOffsetXField
                                         width: parent.width
-                                        text: Number(root.textStyle.shadowOffsetX).toFixed(1)
-                                        color: Theme.panelForeground
-                                        font.family: Theme.monoFontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        onEditingFinished: {
-                                            const v = parseFloat(text)
-                                            if (!isNaN(v))
-                                                root.setTextStyleKey("shadowOffsetX", v)
-                                        }
+                                        decimals: 1
+                                        step: 1
+                                        onEdited: v => root.setTextStyleKey("shadowOffsetX", v)
                                     }
                                 }
 
@@ -985,18 +950,12 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    ThemedTextField {
+                                    ThemedNumberField {
                                         id: shadowOffsetYField
                                         width: parent.width
-                                        text: Number(root.textStyle.shadowOffsetY).toFixed(1)
-                                        color: Theme.panelForeground
-                                        font.family: Theme.monoFontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        onEditingFinished: {
-                                            const v = parseFloat(text)
-                                            if (!isNaN(v))
-                                                root.setTextStyleKey("shadowOffsetY", v)
-                                        }
+                                        decimals: 1
+                                        step: 1
+                                        onEdited: v => root.setTextStyleKey("shadowOffsetY", v)
                                     }
                                 }
                             }
@@ -1015,18 +974,13 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    ThemedTextField {
+                                    ThemedNumberField {
                                         id: shadowBlurField
                                         width: parent.width
-                                        text: Number(root.textStyle.shadowBlur).toFixed(1)
-                                        color: Theme.panelForeground
-                                        font.family: Theme.monoFontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        onEditingFinished: {
-                                            const v = parseFloat(text)
-                                            if (!isNaN(v))
-                                                root.setTextStyleKey("shadowBlur", v)
-                                        }
+                                        decimals: 1
+                                        step: 1
+                                        from: 0
+                                        onEdited: v => root.setTextStyleKey("shadowBlur", v)
                                     }
                                 }
 
@@ -1039,18 +993,14 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    ThemedTextField {
+                                    ThemedNumberField {
                                         id: shadowOpacityField
                                         width: parent.width
-                                        text: Number(root.textStyle.shadowOpacity).toFixed(2)
-                                        color: Theme.panelForeground
-                                        font.family: Theme.monoFontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        onEditingFinished: {
-                                            const v = parseFloat(text)
-                                            if (!isNaN(v))
-                                                root.setTextStyleKey("shadowOpacity", v)
-                                        }
+                                        decimals: 2
+                                        step: 0.05
+                                        from: 0
+                                        to: 1
+                                        onEdited: v => root.setTextStyleKey("shadowOpacity", v)
                                     }
                                 }
                             }
@@ -1147,18 +1097,13 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    ThemedTextField {
+                                    ThemedNumberField {
                                         id: boxPaddingField
                                         width: parent.width
-                                        text: Number(root.textStyle.boxPadding).toFixed(1)
-                                        color: Theme.panelForeground
-                                        font.family: Theme.monoFontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        onEditingFinished: {
-                                            const v = parseFloat(text)
-                                            if (!isNaN(v))
-                                                root.setTextStyleKey("boxPadding", v)
-                                        }
+                                        decimals: 1
+                                        step: 1
+                                        from: 0
+                                        onEdited: v => root.setTextStyleKey("boxPadding", v)
                                     }
                                 }
 
@@ -1171,18 +1116,13 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    ThemedTextField {
+                                    ThemedNumberField {
                                         id: boxRadiusField
                                         width: parent.width
-                                        text: Number(root.textStyle.boxRadius).toFixed(1)
-                                        color: Theme.panelForeground
-                                        font.family: Theme.monoFontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        onEditingFinished: {
-                                            const v = parseFloat(text)
-                                            if (!isNaN(v))
-                                                root.setTextStyleKey("boxRadius", v)
-                                        }
+                                        decimals: 1
+                                        step: 1
+                                        from: 0
+                                        onEdited: v => root.setTextStyleKey("boxRadius", v)
                                     }
                                 }
                             }
@@ -1220,18 +1160,13 @@ PanelFrame {
                                     currentIndex: Math.max(0, root.easeKinds.indexOf(root.textStyle.animIn.ease))
                                     onActivated: root.setTextAnim("animIn", "ease", root.easeKinds[currentIndex])
                                 }
-                                ThemedTextField {
+                                ThemedNumberField {
                                     id: animInDurationField
                                     width: 56
-                                    text: Number(root.textStyle.animIn.duration).toFixed(2)
-                                    color: Theme.panelForeground
-                                    font.family: Theme.monoFontFamily
-                                    font.pixelSize: Theme.fontSizeSm
-                                    onEditingFinished: {
-                                        const v = parseFloat(text)
-                                        if (!isNaN(v))
-                                            root.setTextAnim("animIn", "duration", v)
-                                    }
+                                    decimals: 2
+                                    step: 0.05
+                                    from: 0
+                                    onEdited: v => root.setTextAnim("animIn", "duration", v)
                                 }
                             }
 
@@ -1261,18 +1196,13 @@ PanelFrame {
                                     currentIndex: Math.max(0, root.easeKinds.indexOf(root.textStyle.animOut.ease))
                                     onActivated: root.setTextAnim("animOut", "ease", root.easeKinds[currentIndex])
                                 }
-                                ThemedTextField {
+                                ThemedNumberField {
                                     id: animOutDurationField
                                     width: 56
-                                    text: Number(root.textStyle.animOut.duration).toFixed(2)
-                                    color: Theme.panelForeground
-                                    font.family: Theme.monoFontFamily
-                                    font.pixelSize: Theme.fontSizeSm
-                                    onEditingFinished: {
-                                        const v = parseFloat(text)
-                                        if (!isNaN(v))
-                                            root.setTextAnim("animOut", "duration", v)
-                                    }
+                                    decimals: 2
+                                    step: 0.05
+                                    from: 0
+                                    onEdited: v => root.setTextAnim("animOut", "duration", v)
                                 }
                             }
                         }
@@ -1302,14 +1232,13 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    ThemedTextField {
+                                    ThemedNumberField {
                                         id: inPointField
                                         width: parent.width
-                                        text: root.formatSeconds(clip.inPoint)
-                                        color: Theme.panelForeground
-                                        font.family: Theme.monoFontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        onEditingFinished: applyTrim(parseFloat(text), clip.outPoint)
+                                        decimals: 2
+                                        step: 0.1
+                                        from: 0
+                                        onEdited: v => applyTrim(v, root.clip.outPoint)
                                     }
                                 }
 
@@ -1322,14 +1251,13 @@ PanelFrame {
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    ThemedTextField {
+                                    ThemedNumberField {
                                         id: outPointField
                                         width: parent.width
-                                        text: root.formatSeconds(clip.outPoint)
-                                        color: Theme.panelForeground
-                                        font.family: Theme.monoFontFamily
-                                        font.pixelSize: Theme.fontSizeSm
-                                        onEditingFinished: applyTrim(clip.inPoint, parseFloat(text))
+                                        decimals: 2
+                                        step: 0.1
+                                        from: 0
+                                        onEdited: v => applyTrim(root.clip.inPoint, v)
                                     }
                                 }
                             }
@@ -1879,22 +1807,17 @@ PanelFrame {
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeXs
                                 }
-                                ThemedTextField {
+                                ThemedNumberField {
                                     id: transitionDurationField
                                     width: parent.width
-                                    text: "0.50"
-                                    color: Theme.panelForeground
-                                    font.family: Theme.monoFontFamily
-                                    font.pixelSize: Theme.fontSizeSm
-                                    onEditingFinished: root.commitTransitionDuration()
-
-                                    function commitTransitionDuration() {
+                                    decimals: 2
+                                    step: 0.05
+                                    from: 0.05
+                                    onEdited: v => {
                                         if (!root.hasActiveTransition)
                                             return
-                                        const v = parseFloat(text)
-                                        if (!isNaN(v))
-                                            EditorState.setTransitionDuration(
-                                                root.transitionEditTrack, root.activeTransition.id, v)
+                                        EditorState.setTransitionDuration(
+                                            root.transitionEditTrack, root.activeTransition.id, v)
                                     }
                                 }
                             }
