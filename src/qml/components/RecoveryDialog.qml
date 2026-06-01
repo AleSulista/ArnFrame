@@ -2,15 +2,16 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Drift
 
-// Offered at startup when a recovery file from a previous (crashed) session is
-// found. Restore loads the unsaved work; Discard deletes the recovery file.
+// Shown on every launch while an autosave snapshot from the previous session
+// exists (crash or normal close with unsaved work). Restore reloads it; New
+// session starts fresh and clears the snapshot.
 ThemedDialog {
     id: root
 
-    title: qsTr("Recover unsaved work?")
+    title: qsTr("Unsaved work from last session")
     acceptText: qsTr("Restore")
-    rejectText: qsTr("Discard")
-    rejectVariant: "destructive"
+    rejectText: qsTr("New session")
+    rejectVariant: "secondary"
     width: 440
     closePolicy: Popup.NoAutoClose
 
@@ -27,7 +28,7 @@ ThemedDialog {
             width: parent.width
             size: "sm"
             wrapMode: Text.WordWrap
-            text: qsTr("Drift didn't shut down cleanly last time. Unsaved changes were auto-saved and can be restored.")
+            text: qsTr("Your last session had unsaved changes. You can restore them or start a new empty session.")
         }
 
         Rectangle {

@@ -29,14 +29,48 @@ ApplicationWindow {
         id: recoveryDialog
     }
 
-    // Offer to recover unsaved work if the previous session crashed. Deferred so
-    // the window is up before the modal appears.
-    Component.onCompleted: if (EditorState.recoveryAvailable) recoveryTimer.start()
+    function promptRecoveryIfNeeded() {
+        if (!EditorState.recoveryAvailable || recoveryDialog.visible)
+            return
+        recoveryDialog.open()
+    }
 
+    // Ask every launch while the previous session left an autosave snapshot
+    // (unsaved work — whether the app crashed or was closed normally).
     Timer {
-        id: recoveryTimer
-        interval: 300
-        onTriggered: if (EditorState.recoveryAvailable) recoveryDialog.open()
+        id: recoveryOpenTimer
+        interval: 150
+        repeat: true
+        triggeredOnStart: false
+        property int attempts: 0
+        onTriggered: {
+            if (!EditorState.recoveryAvailable) {
+                stop()
+                attempts = 0
+                return
+            }
+            promptRecoveryIfNeeded()
+            if (recoveryDialog.visible || ++attempts >= 20)
+                stop()
+        }
+    }
+
+    Component.onCompleted: {
+        if (EditorState.recoveryAvailable)
+            recoveryOpenTimer.start()
+    }
+
+    onVisibilityChanged: {
+        if (visible && EditorState.recoveryAvailable)
+            recoveryOpenTimer.start()
+    }
+
+    Connections {
+        target: EditorState
+        function onRecoveryChanged() {
+            if (EditorState.recoveryAvailable)
+                recoveryOpenTimer.start()
+        }
     }
 
     // Shortcut is not an Item, so wrap each binding in a zero-size host.

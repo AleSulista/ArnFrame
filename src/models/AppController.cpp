@@ -116,8 +116,9 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     m_autoKeyEnabled = settings.value(QStringLiteral("editor/autoKeyEnabled"), true).toBool();
 
     // Periodically snapshot unsaved work to a recovery file so a crash doesn't
-    // lose progress. The file is deleted on save and on a clean quit; if it is
-    // still present at the next startup we know the previous session crashed.
+    // lose progress. The file is removed only when the user saves, loads another
+    // project, starts fresh, or discards recovery — not on a clean quit, so the
+    // next launch can always ask whether to restore.
     m_autosaveTimer = new QTimer(this);
     m_autosaveTimer->setInterval(kAutosaveIntervalMs);
     connect(m_autosaveTimer, &QTimer::timeout, this, [this] {
@@ -125,7 +126,10 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
             writeRecoveryFile();
     });
     m_autosaveTimer->start();
-    connect(qApp, &QCoreApplication::aboutToQuit, this, [this] { deleteRecoveryFile(); });
+    connect(qApp, &QCoreApplication::aboutToQuit, this, [this] {
+        if (m_dirty)
+            writeRecoveryFile();
+    });
 
     detectRecoveryFile();
 }
@@ -4093,8 +4097,9 @@ void AppController::restoreAutosave()
 
 void AppController::discardAutosave()
 {
-    deleteRecoveryFile();
-    setLastMessage(QStringLiteral("Discarded recovered work"));
+    // Fresh timeline and clear the autosave snapshot from the previous session.
+    newProject();
+    setLastMessage(QStringLiteral("Started new session"));
 }
 
 QVariantList AppController::exportPresets() const
