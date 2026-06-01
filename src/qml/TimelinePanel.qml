@@ -524,9 +524,18 @@ PanelFrame {
                 contentWidth: flick.contentWidth
             }
 
+            SubtitleCueLane {
+                id: subtitleLane
+                width: parent.width
+                pxPerSecond: root.pxPerSecond
+                labelsWidth: Theme.trackLabelsWidth
+                contentX: flick.contentX
+                contentWidth: flick.contentWidth
+            }
+
             Row {
                 width: parent.width
-                height: parent.height - keyframesBar.height
+                height: parent.height - keyframesBar.height - subtitleLane.height
 
             // --- fixed left label column --------------------------------------------
             Column {

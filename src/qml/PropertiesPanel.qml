@@ -258,10 +258,12 @@ PanelFrame {
             root.transitionDataRevision++
             root.refreshInspectorFields()
             root.refreshTransitionFields()
+            root.syncSubtitlesTab()
         }
         function onSelectedClipDataChanged() {
             root.clipDataRevision++
             root.refreshInspectorFields()
+            root.syncSubtitlesTab()
         }
         function onSelectedTransitionDataChanged() {
             root.transitionDataRevision++
@@ -280,6 +282,7 @@ PanelFrame {
     Component.onCompleted: {
         root.refreshInspectorFields()
         root.refreshTransitionFields()
+        root.syncSubtitlesTab()
     }
 
     ListModel {
@@ -292,6 +295,7 @@ PanelFrame {
         ListElement { tabId: "transition"; icon: 5; label: "Transition" }
         ListElement { tabId: "masks"; icon: 6; label: "Masks" }
         ListElement { tabId: "effects"; icon: 7; label: "Effects" }
+        ListElement { tabId: "subtitles"; icon: 8; label: "Subtitles" }
     }
     property var tabIcons: [
         Theme.icons.folder,
@@ -301,8 +305,32 @@ PanelFrame {
         Theme.icons.layers,
         Theme.icons.linkTwo,
         Theme.icons.grid,
-        Theme.icons.wand
+        Theme.icons.wand,
+        Theme.icons.messageSquare
     ]
+    readonly property int subtitlesTabIndex: {
+        for (let i = 0; i < tabsModel.count; i++) {
+            if (tabsModel.get(i).tabId === "subtitles")
+                return i
+        }
+        return -1
+    }
+
+    function syncSubtitlesTab() {
+        if (root.subtitlesTabIndex < 0)
+            return
+        if (root.clipKind === "subtitle")
+            root.activeTab = root.subtitlesTabIndex
+        else if (root.activeTab === root.subtitlesTabIndex)
+            root.activeTab = 0
+    }
+
+    // Tell the timeline to show its subtitle-cue lane only while the Subtitles tab is open.
+    Binding {
+        target: EditorState
+        property: "subtitleEditing"
+        value: root.currentTabId === "subtitles" && root.clipKind === "subtitle"
+    }
 
     Column {
         anchors.centerIn: parent
@@ -369,6 +397,7 @@ PanelFrame {
                     model: tabsModel
                     delegate: IconButton {
                         anchors.horizontalCenter: parent.horizontalCenter
+                        visible: model.tabId !== "subtitles" || root.clipKind === "subtitle"
                         icon: root.tabIcons[model.icon]
                         variant: "ghost"
                         tooltip: model.label
@@ -388,6 +417,7 @@ PanelFrame {
                 id: tabFlick
                 width: parent.width - Theme.tabRailWidth - 1
                 height: parent.height
+                visible: root.currentTabId !== "subtitles"
                 contentWidth: width
                 contentHeight: tabColumn.height + 24
                 clip: true
@@ -1244,18 +1274,6 @@ PanelFrame {
                                             root.setTextAnim("animOut", "duration", v)
                                     }
                                 }
-                            }
-                        }
-
-                        Column {
-                            width: tabColumn.width
-                            spacing: 4
-                            visible: root.clipKind === "subtitle"
-
-                            SubtitleEditor {
-                                width: parent.width
-                                clip: root.clip
-                                formatSeconds: root.formatSeconds
                             }
                         }
 
@@ -2213,6 +2231,14 @@ PanelFrame {
                         }
                     }
                 }
+            }
+
+            SubtitleEditor {
+                width: parent.width - Theme.tabRailWidth - 1
+                height: parent.height
+                visible: root.currentTabId === "subtitles"
+                clip: root.hasSelection ? root.clip : null
+                formatSeconds: root.formatSeconds
             }
         }
     }

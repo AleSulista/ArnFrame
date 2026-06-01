@@ -38,6 +38,9 @@ class AppController : public QObject
     Q_PROPERTY(bool autoKeyEnabled READ autoKeyEnabled WRITE setAutoKeyEnabled NOTIFY autoKeyEnabledChanged)
     Q_PROPERTY(QString keyframeGraphProperty READ keyframeGraphProperty WRITE setKeyframeGraphProperty
                    NOTIFY keyframeGraphPropertyChanged)
+    Q_PROPERTY(bool subtitleEditing READ subtitleEditing WRITE setSubtitleEditing NOTIFY subtitleEditingChanged)
+    Q_PROPERTY(int selectedSubtitleCue READ selectedSubtitleCue WRITE setSelectedSubtitleCue
+                   NOTIFY selectedSubtitleCueChanged)
     Q_PROPERTY(bool undoAvailable READ undoAvailable NOTIFY undoStackChanged)
     Q_PROPERTY(bool redoAvailable READ redoAvailable NOTIFY undoStackChanged)
     Q_PROPERTY(bool exportInProgress READ exportInProgress NOTIFY exportInProgressChanged)
@@ -83,6 +86,8 @@ public:
     bool rippleEnabled() const { return m_rippleEnabled; }
     bool autoKeyEnabled() const { return m_autoKeyEnabled; }
     QString keyframeGraphProperty() const { return m_keyframeGraphProperty; }
+    bool subtitleEditing() const { return m_subtitleEditing; }
+    int selectedSubtitleCue() const { return m_selectedSubtitleCue; }
     bool undoAvailable() const { return m_undoStack.canUndo(); }
     bool redoAvailable() const { return m_undoStack.canRedo(); }
     bool exportInProgress() const { return m_exportInProgress; }
@@ -116,6 +121,8 @@ public:
     void setRippleEnabled(bool enabled);
     void setAutoKeyEnabled(bool enabled);
     void setKeyframeGraphProperty(const QString &prop);
+    void setSubtitleEditing(bool editing);
+    void setSelectedSubtitleCue(int index);
     void setProjectName(const QString &name);
     void setGuidesEnabled(bool enabled);
     void setGuideType(const QString &type);
@@ -184,6 +191,7 @@ public:
     Q_INVOKABLE void setClipDuration(int trackIndex, int clipIndex, double duration);
     Q_INVOKABLE void setClipTextContent(int trackIndex, int clipIndex, const QString &text);
     Q_INVOKABLE void setSubtitleCues(int trackIndex, int clipIndex, const QVariantList &cues);
+    Q_INVOKABLE void previewSetSubtitleCues(int trackIndex, int clipIndex, const QVariantList &cues);
     Q_INVOKABLE double subtitleLocalPlayheadSeconds(int trackIndex, int clipIndex) const;
     Q_INVOKABLE void upsertSubtitleCueAtPlayhead(int trackIndex, int clipIndex, const QString &text);
     Q_INVOKABLE void seekToSubtitleCue(int trackIndex, int clipIndex, int cueIndex);
@@ -273,6 +281,8 @@ signals:
     void rippleEnabledChanged();
     void autoKeyEnabledChanged();
     void keyframeGraphPropertyChanged();
+    void subtitleEditingChanged();
+    void selectedSubtitleCueChanged();
     void undoStackChanged();
     void exportInProgressChanged();
     void exportProgressChanged();
@@ -336,6 +346,8 @@ protected:
     bool m_rippleEnabled = false;
     bool m_autoKeyEnabled = true;
     QString m_keyframeGraphProperty = QStringLiteral("x");
+    bool m_subtitleEditing = false;
+    int m_selectedSubtitleCue = -1;
     bool m_exportInProgress = false;
     double m_exportProgress = 0.0;
     QAtomicInt m_exportCancel = 0;

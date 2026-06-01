@@ -874,6 +874,22 @@ void AppController::setKeyframeGraphProperty(const QString &prop)
     emit keyframeGraphPropertyChanged();
 }
 
+void AppController::setSubtitleEditing(bool editing)
+{
+    if (m_subtitleEditing == editing)
+        return;
+    m_subtitleEditing = editing;
+    emit subtitleEditingChanged();
+}
+
+void AppController::setSelectedSubtitleCue(int index)
+{
+    if (m_selectedSubtitleCue == index)
+        return;
+    m_selectedSubtitleCue = index;
+    emit selectedSubtitleCueChanged();
+}
+
 void AppController::setDraggingAssetIndex(int index)
 {
     if (m_draggingAssetIndex == index)
@@ -2320,6 +2336,27 @@ void AppController::setSubtitleCues(int trackIndex, int clipIndex, const QVarian
     clip.name = subtitleClipName(clip.subtitleCues);
     pushProjectEdit(before, QStringLiteral("Subtitles updated"));
     finishEdit(QStringLiteral("Subtitles updated"));
+}
+
+void AppController::previewSetSubtitleCues(int trackIndex, int clipIndex, const QVariantList &cues)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Subtitle)
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag(QStringLiteral("Adjust subtitle timing"));
+
+    clip.subtitleCues = subtitleCuesFromMap(cues);
+    clip.name = subtitleClipName(clip.subtitleCues);
+    emitPreviewFrame();
 }
 
 double AppController::subtitleLocalPlayheadSeconds(int trackIndex, int clipIndex) const
