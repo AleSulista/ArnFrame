@@ -615,6 +615,30 @@ PanelFrame {
                                 }
                             }
 
+                            // Toggle the whole track between filmstrip previews and audio waveforms.
+                            IconGlyph {
+                                visible: root.tracks[index].type === "video"
+                                glyph: EditorState.trackShowWaveform(index) ? Theme.icons.music : Theme.icons.film
+                                iconSize: 16
+                                iconColor: EditorState.trackShowWaveform(index) ? Theme.primary : Theme.mutedForeground
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                ToolTip {
+                                    visible: waveMouse.containsMouse
+                                    text: EditorState.trackShowWaveform(index) ? qsTr("Show filmstrip")
+                                                                               : qsTr("Show waveform")
+                                }
+
+                                MouseArea {
+                                    id: waveMouse
+                                    anchors.fill: parent
+                                    anchors.margins: -4
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: EditorState.setTrackShowWaveform(index, !EditorState.trackShowWaveform(index))
+                                }
+                            }
+
                             IconGlyph {
                                 glyph: root.trackTypeIcon(root.tracks[index].type)
                                 iconSize: 16
@@ -939,6 +963,7 @@ PanelFrame {
                                         property bool selected: (EditorState.selection,
                                                                  EditorState.selectionContains(trackRow.trackIndex, modelData))
                                         property string trackType: root.tracks[trackRow.trackIndex].type
+                                        property bool showWaveform: root.tracks[trackRow.trackIndex].showWaveform === true
                                         property var clipEffects: clipData.effects || []
                                         property bool effectDropTarget: root.effectDropTrackIndex === trackRow.trackIndex
                                                                         && root.effectDropClipIndex === modelData
@@ -1051,6 +1076,7 @@ PanelFrame {
                                                                    : 0
                                                 visible: clipItem.clipData.filmstripPath
                                                          && clipItem.clipData.filmstripPath.length > 0
+                                                         && !clipItem.showWaveform
                                                          && (clipItem.trackType === "video"
                                                              || clipItem.trackType === "shape"
                                                              || clipItem.clipData.kind === "image")
@@ -1143,6 +1169,8 @@ PanelFrame {
                                             Canvas {
                                                 id: waveformCanvas
                                                 visible: clipItem.trackType === "audio"
+                                                         || (clipItem.trackType === "video"
+                                                             && clipItem.showWaveform)
                                                 property var peaks: clipItem.clipData.path
                                                               ? EditorState.waveformPeaks(clipItem.clipData.path)
                                                               : []
@@ -1152,6 +1180,8 @@ PanelFrame {
                                                 anchors.topMargin: clipItem.clipEffects.length > 0 ? 32 : 20
                                                 anchors.bottom: parent.bottom
                                                 onPeaksChanged: requestPaint()
+                                                onWidthChanged: requestPaint()
+                                                onHeightChanged: requestPaint()
 
                                                 Connections {
                                                     target: EditorState
@@ -1166,18 +1196,27 @@ PanelFrame {
                                                     ctx.clearRect(0, 0, width, height);
                                                     if (!peaks || peaks.length === 0)
                                                         return;
-                                                    ctx.strokeStyle = Theme.waveformColor;
-                                                    ctx.lineWidth = 1;
-                                                    ctx.beginPath();
+                                                    // One filled column per screen pixel: zoomed-out columns
+                                                    // take the max of covered peaks; zoomed-in columns
+                                                    // reuse peaks so there are never gaps between bars.
+                                                    ctx.fillStyle = Theme.waveformColor;
                                                     var mid = height / 2;
-                                                    var step = width / peaks.length;
-                                                    for (var i = 0; i < peaks.length; i++) {
-                                                        var amp = peaks[i] * mid * 0.9;
-                                                        var px = i * step;
-                                                        ctx.moveTo(px, mid - amp);
-                                                        ctx.lineTo(px, mid + amp);
+                                                    var w = Math.max(1, Math.floor(width));
+                                                    var n = peaks.length;
+                                                    for (var x = 0; x < w; x++) {
+                                                        var i0 = Math.floor(x * n / w);
+                                                        var i1 = Math.floor((x + 1) * n / w);
+                                                        if (i1 <= i0)
+                                                            i1 = Math.min(n, i0 + 1);
+                                                        var peak = 0;
+                                                        for (var i = i0; i < i1; i++) {
+                                                            if (peaks[i] > peak)
+                                                                peak = peaks[i];
+                                                        }
+                                                        var amp = peak * mid * 0.9;
+                                                        if (amp > 0.5)
+                                                            ctx.fillRect(x, mid - amp, 1, amp * 2);
                                                     }
-                                                    ctx.stroke();
                                                 }
                                             }
                                         }

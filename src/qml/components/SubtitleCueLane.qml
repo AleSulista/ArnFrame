@@ -27,6 +27,32 @@ Item {
     readonly property real clipStart: clip ? (clip.start || 0) : 0
     readonly property real clipDuration: clip ? (clip.duration || 0) : 0
 
+    // Voice waveform is locked to video/audio clips on the timeline — never to the
+    // selected subtitle clip's start/duration (resizing subtitles must not stretch it).
+    readonly property var mediaWaveformRange: {
+        void EditorState.tracks
+        var start = Number.POSITIVE_INFINITY
+        var end = 0
+        var tracks = EditorState.tracks
+        for (var t = 0; t < tracks.length; t++) {
+            var type = tracks[t].type
+            if (type !== "video" && type !== "audio")
+                continue
+            var clips = tracks[t].clips || []
+            for (var c = 0; c < clips.length; c++) {
+                var s = clips[c].start || 0
+                var d = clips[c].duration || 0
+                if (d <= 0)
+                    continue
+                start = Math.min(start, s)
+                end = Math.max(end, s + d)
+            }
+        }
+        if (!isFinite(start) || end <= start)
+            return { start: 0, duration: 0 }
+        return { start: start, duration: end - start }
+    }
+
     // The Repeater always renders `displayCues` (a stable snapshot). We refresh it from the
     // live cues only while NOT dragging, so live preview updates during a drag don't swap
     // the model reference and rebuild the delegates (which would interrupt the drag).
@@ -179,6 +205,76 @@ Item {
                     height: parent.height
                     color: Theme.panelAccent
                     opacity: 0.4
+                }
+
+                // Voice waveform of mixed video/audio timeline audio — positioned and
+                // scaled from A/V clips only, so subtitle trim/move does not reshape it.
+                Canvas {
+                    id: voiceWaveform
+                    x: root.mediaWaveformRange.start * root.pxPerSecond
+                    width: Math.max(2, root.mediaWaveformRange.duration * root.pxPerSecond)
+                    height: parent.height
+                    visible: root.mediaWaveformRange.duration > 0
+                    opacity: 0.75
+                    z: 1
+
+                    readonly property real waveStart: root.mediaWaveformRange.start
+                    readonly property real waveDuration: root.mediaWaveformRange.duration
+                    // One peak bucket per screen pixel (rounded to 64) so zoom keeps
+                    // column resolution instead of stretching a fixed 240-peak list.
+                    readonly property int peakCount: {
+                        var w = Math.max(1, Math.ceil(width))
+                        return Math.min(8192, Math.max(64, Math.ceil(w / 64) * 64))
+                    }
+
+                    property var peaks: {
+                        void EditorState.tracks
+                        return (waveDuration > 0)
+                            ? EditorState.subtitleWaveformPeaks(waveStart, waveDuration, peakCount)
+                            : []
+                    }
+                    onPeaksChanged: requestPaint()
+                    onWidthChanged: requestPaint()
+                    onHeightChanged: requestPaint()
+                    onWaveStartChanged: requestPaint()
+                    onWaveDurationChanged: requestPaint()
+                    onPeakCountChanged: requestPaint()
+
+                    Connections {
+                        target: EditorState
+                        function onSubtitleWaveformReady(s, d, n) {
+                            if (Math.abs(s - voiceWaveform.waveStart) < 1e-6
+                                && Math.abs(d - voiceWaveform.waveDuration) < 1e-6
+                                && n === voiceWaveform.peakCount)
+                                voiceWaveform.peaks = EditorState.subtitleWaveformPeaks(s, d, n)
+                        }
+                    }
+
+                    onPaint: {
+                        var ctx = getContext("2d");
+                        ctx.clearRect(0, 0, width, height);
+                        if (!peaks || peaks.length === 0)
+                            return;
+                        // One filled column per screen pixel so bars stay contiguous at any zoom.
+                        ctx.fillStyle = Theme.panelWaveformColor;
+                        var mid = height / 2;
+                        var w = Math.max(1, Math.floor(width));
+                        var n = peaks.length;
+                        for (var x = 0; x < w; x++) {
+                            var i0 = Math.floor(x * n / w);
+                            var i1 = Math.floor((x + 1) * n / w);
+                            if (i1 <= i0)
+                                i1 = Math.min(n, i0 + 1);
+                            var peak = 0;
+                            for (var i = i0; i < i1; i++) {
+                                if (peaks[i] > peak)
+                                    peak = peaks[i];
+                            }
+                            var amp = peak * mid * 0.9;
+                            if (amp > 0.5)
+                                ctx.fillRect(x, mid - amp, 1, amp * 2);
+                        }
+                    }
                 }
 
                 // Playhead line, aligned with the timeline playhead.

@@ -580,6 +580,7 @@ Project Project::fromJson(const QJsonObject &object, QString *errorOut)
         track.muted = trackObject.value(QStringLiteral("muted")).toBool(false);
         track.hidden = trackObject.value(QStringLiteral("hidden")).toBool(false);
         track.locked = trackObject.value(QStringLiteral("locked")).toBool(false);
+        track.showWaveform = trackObject.value(QStringLiteral("showWaveform")).toBool(false);
 
         const QJsonArray clipsArray = trackObject.value(QStringLiteral("clips")).toArray();
         for (const QJsonValue &clipValue : clipsArray) {
@@ -639,6 +640,7 @@ QJsonObject Project::toJson() const
             {QStringLiteral("muted"), track.muted},
             {QStringLiteral("hidden"), track.hidden},
             {QStringLiteral("locked"), track.locked},
+            {QStringLiteral("showWaveform"), track.showWaveform},
             {QStringLiteral("clips"), clipsArray},
             {QStringLiteral("transitions"), transitionsArray},
         });

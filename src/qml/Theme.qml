@@ -100,7 +100,9 @@ QtObject {
     readonly property color clipGraphic: "#BA5D7A"
     readonly property color clipEffect: "#5d93ba"
     readonly property color transitionOverlap: "#9B5DE5"
-    readonly property color waveformColor: "#ffffffb3" // rgba(255,255,255,0.7)
+    readonly property color waveformColor: "#ffffffb3" // rgba(255,255,255,0.7) — on dark clip chrome
+    // Waveform drawn on panel surfaces (subtitle cue lane, etc.): follows light/dark FG.
+    readonly property color panelWaveformColor: darkMode ? "#ffffffb3" : "#212121b3"
     // Video clips normally show real thumbnails (always photographic/dark-ish); until
     // thumbnail generation exists, use a fixed dark placeholder so the white filename
     // scrim stays legible in light mode too instead of following panelAccent.

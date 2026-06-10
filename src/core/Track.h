@@ -21,6 +21,7 @@ struct Track
     bool muted = false;
     bool hidden = false;
     bool locked = false;
+    bool showWaveform = false; // view-only: show audio waveform instead of filmstrip for this track's clips
 
     bool allowsClipType(ClipType clipType) const;
 };

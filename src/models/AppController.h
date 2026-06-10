@@ -242,6 +242,8 @@ public:
     Q_INVOKABLE void setTrackHidden(int trackIndex, bool hidden);
     Q_INVOKABLE bool trackMuted(int trackIndex) const;
     Q_INVOKABLE bool trackHidden(int trackIndex) const;
+    Q_INVOKABLE void setTrackShowWaveform(int trackIndex, bool show);
+    Q_INVOKABLE bool trackShowWaveform(int trackIndex) const;
     Q_INVOKABLE void addBookmark(double seconds, const QString &label);
     Q_INVOKABLE void removeBookmark(int index);
     Q_INVOKABLE void goToBookmark(int index);
@@ -259,6 +261,8 @@ public:
     Q_INVOKABLE void redo();
     Q_INVOKABLE double snapTime(double seconds) const;
     Q_INVOKABLE QVariantList waveformPeaks(const QString &path) const;
+    Q_INVOKABLE QVariantList subtitleWaveformPeaks(double startSeconds, double durSeconds,
+                                                   int sampleCount = 240) const;
     Q_INVOKABLE void saveProject(const QUrl &url);
     Q_INVOKABLE void loadProject(const QUrl &url);
     Q_INVOKABLE void newProject();
@@ -296,6 +300,7 @@ signals:
     void exportFinished(bool success);
     void projectMutated();
     void waveformReady(const QString &path);
+    void subtitleWaveformReady(double startSeconds, double durSeconds, int sampleCount);
     void guidesChanged();
     void shortcutsChanged();
     void backgroundChanged();
@@ -377,6 +382,11 @@ protected:
     // and cache by path so timeline refreshes don't re-decode on the GUI thread.
     mutable QHash<QString, QVariantList> m_waveformCache;
     mutable QSet<QString> m_waveformPending;
+
+    // Subtitle-lane voice waveform: the mixed audio underneath a subtitle clip's
+    // span, voice band-passed. Keyed by "<startUs>:<durUs>"; invalidated on edits.
+    mutable QHash<QString, QVariantList> m_subtitleWaveformCache;
+    mutable QSet<QString> m_subtitleWaveformPending;
 
     // Save state / autosave / crash recovery.
     QString m_currentProjectPath;

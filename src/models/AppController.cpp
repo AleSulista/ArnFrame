@@ -6,6 +6,7 @@
 #include "core/TimelineOps.h"
 #include "core/Transition.h"
 #include "core/commands/ProjectCommands.h"
+#include "engine/AudioMixer.h"
 #include "engine/EffectCatalog.h"
 #include "engine/Exporter.h"
 #include "engine/FontCatalog.h"
@@ -26,6 +27,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QUuid>
+#include <QVector>
 #include <QtConcurrent>
 #include <QtMath>
 #include <algorithm>
@@ -248,6 +250,7 @@ QVariantList AppController::tracks() const
             {QStringLiteral("transitions"), transitions},
             {QStringLiteral("muted"), track.muted},
             {QStringLiteral("hidden"), track.hidden},
+            {QStringLiteral("showWaveform"), track.showWaveform},
         });
     }
 
@@ -1055,6 +1058,8 @@ void AppController::finishEdit(const QString &message)
     // pulling — freezing A/V at one spot after drops like adding an effect.
     if (!m_playback.isPlaying())
         m_playback.setPlayheadUs(m_playheadUs);
+    // Underlying audio may have moved; force the subtitle-lane waveform to recompute.
+    m_subtitleWaveformCache.clear();
     emit tracksChanged();
     emit selectionChanged();
     emit selectedClipDataChanged();
@@ -3527,6 +3532,25 @@ bool AppController::trackHidden(int trackIndex) const
     return m_project.tracks().at(trackIndex).hidden;
 }
 
+void AppController::setTrackShowWaveform(int trackIndex, bool show)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    if (m_project.tracks()[trackIndex].showWaveform == show)
+        return;
+
+    // View-only preference: mutate and refresh without an undo entry.
+    m_project.tracks()[trackIndex].showWaveform = show;
+    emit tracksChanged();
+}
+
+bool AppController::trackShowWaveform(int trackIndex) const
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return false;
+    return m_project.tracks().at(trackIndex).showWaveform;
+}
+
 QVariantList AppController::bookmarks() const
 {
     QVariantList result;
@@ -3777,13 +3801,62 @@ QVariantList AppController::waveformPeaks(const QString &path) const
         m_waveformPending.insert(path);
         AppController *self = const_cast<AppController *>(this);
         (void)QtConcurrent::run([self, path] {
-            const QVariantList peaks = MediaWaveform::peaks(path);
+            const QVariantList peaks = MediaWaveform::peaks(path, 1000);
             QMetaObject::invokeMethod(
                 self,
                 [self, path, peaks] {
                     self->m_waveformCache.insert(path, peaks);
                     self->m_waveformPending.remove(path);
                     emit self->waveformReady(path);
+                },
+                Qt::QueuedConnection);
+        });
+    }
+
+    return {};
+}
+
+QVariantList AppController::subtitleWaveformPeaks(double startSeconds, double durSeconds,
+                                                  int sampleCount) const
+{
+    if (durSeconds <= 0.0 || sampleCount <= 0)
+        return {};
+
+    // Cap so extreme zoom doesn't spawn multi-megabyte peak lists / mix jobs.
+    const int buckets = qBound(1, sampleCount, 8192);
+
+    const drift::TimeUs startUs = drift::secondsToUs(startSeconds);
+    const drift::TimeUs durUs = drift::secondsToUs(durSeconds);
+    const QString key = QStringLiteral("%1:%2:%3").arg(startUs).arg(durUs).arg(buckets);
+
+    const auto cached = m_subtitleWaveformCache.constFind(key);
+    if (cached != m_subtitleWaveformCache.constEnd())
+        return cached.value();
+
+    if (!m_subtitleWaveformPending.contains(key)) {
+        m_subtitleWaveformPending.insert(key);
+        AppController *self = const_cast<AppController *>(this);
+        // Snapshot the project so the off-thread mixer never races the live one.
+        const drift::Project snap = m_project;
+        (void)QtConcurrent::run([self, snap, startUs, durUs, buckets, key, startSeconds, durSeconds] {
+            const int rate = 8000; // enough for voice; keeps the render cheap
+            const int frames = static_cast<int>((static_cast<double>(durUs) / 1'000'000.0) * rate);
+            QVariantList peaks;
+            if (frames > 0) {
+                QVector<float> buf(static_cast<qsizetype>(frames) * 2, 0.0f);
+                AudioMixer mixer;
+                mixer.setProject(&snap);
+                mixer.mix(startUs, frames, rate, buf.data());
+                // Never ask for more buckets than PCM frames — extras would be empty.
+                const int peakBuckets = qMin(buckets, frames);
+                peaks = MediaWaveform::voicePeaksFromPcm(buf.constData(), frames, rate, peakBuckets);
+            }
+            QMetaObject::invokeMethod(
+                self,
+                [self, key, peaks, startSeconds, durSeconds, buckets] {
+                    self->m_subtitleWaveformCache.insert(key, peaks);
+                    self->m_subtitleWaveformPending.remove(key);
+                    emit self->subtitleWaveformReady(startSeconds, durSeconds, buckets);
                 },
                 Qt::QueuedConnection);
         });
