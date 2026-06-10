@@ -13,6 +13,11 @@ CMakeLists.txt.user
 # Bundled font packages — fetched by scripts/fetch-fonts.py, not committed
 fonts/
 
+# Emoji source font (dropped in by hand) and the stickers extracted from it at
+# build time by scripts/extract-stickers.py — neither is committed
+emoji-fonts/
+resources/stickers/
+
 # Sample media (kept out of the repo)
 *.mp4
 *.mov

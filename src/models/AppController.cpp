@@ -20,6 +20,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
@@ -440,9 +441,45 @@ QVariantMap transitionToMap(const drift::Track &track, const drift::Transition &
     };
 }
 
-QString stickerResourcePath(const QString &id)
+// Stickers are emoji PNGs extracted from a colour font at build time (scripts/extract-stickers.py)
+// and embedded in the QRC alongside a stickers.json manifest. Loaded once; an absent/empty
+// manifest just yields no stickers.
+struct StickerCatalog {
+    QVariantList stickers;   // {id, label, category, path}
+    QVariantList categories; // {id, label}
+};
+
+const StickerCatalog &stickerCatalog()
 {
-    return QStringLiteral("qrc:/qt/qml/Drift/resources/stickers/%1.png").arg(id);
+    static const StickerCatalog catalog = [] {
+        StickerCatalog c;
+        QFile file(QStringLiteral(":/qt/qml/Drift/resources/stickers/stickers.json"));
+        if (!file.open(QIODevice::ReadOnly))
+            return c;
+
+        const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
+        for (const QJsonValue &value : root.value(QStringLiteral("categories")).toArray()) {
+            const QJsonObject object = value.toObject();
+            c.categories.append(QVariantMap{
+                {QStringLiteral("id"), object.value(QStringLiteral("id")).toString()},
+                {QStringLiteral("label"), object.value(QStringLiteral("label")).toString()},
+            });
+        }
+        for (const QJsonValue &value : root.value(QStringLiteral("stickers")).toArray()) {
+            const QJsonObject object = value.toObject();
+            c.stickers.append(QVariantMap{
+                {QStringLiteral("id"), object.value(QStringLiteral("id")).toString()},
+                {QStringLiteral("label"), object.value(QStringLiteral("label")).toString()},
+                {QStringLiteral("category"), object.value(QStringLiteral("category")).toString()},
+                // ":/" (not "qrc:/") — QImage/QResource use the colon prefix; the QML Image
+                // provider (DriftImageProvider) and the compositor both load via QImage.
+                {QStringLiteral("path"), QStringLiteral(":/qt/qml/Drift/resources/stickers/")
+                                             + object.value(QStringLiteral("file")).toString()},
+            });
+        }
+        return c;
+    }();
+    return catalog;
 }
 
 bool clipAcceptsPreviewTransform(const drift::Clip &clip)
@@ -1696,26 +1733,12 @@ void AppController::addSubtitleClip(double atSeconds)
 
 QVariantList AppController::builtinStickers() const
 {
-    return {
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("star")},
-                    {QStringLiteral("label"), QStringLiteral("Star")},
-                    {QStringLiteral("path"), stickerResourcePath(QStringLiteral("star"))}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("heart")},
-                    {QStringLiteral("label"), QStringLiteral("Heart")},
-                    {QStringLiteral("path"), stickerResourcePath(QStringLiteral("heart"))}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("arrow")},
-                    {QStringLiteral("label"), QStringLiteral("Arrow")},
-                    {QStringLiteral("path"), stickerResourcePath(QStringLiteral("arrow"))}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("circle")},
-                    {QStringLiteral("label"), QStringLiteral("Circle")},
-                    {QStringLiteral("path"), stickerResourcePath(QStringLiteral("circle"))}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("check")},
-                    {QStringLiteral("label"), QStringLiteral("Check")},
-                    {QStringLiteral("path"), stickerResourcePath(QStringLiteral("check"))}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("fire")},
-                    {QStringLiteral("label"), QStringLiteral("Fire")},
-                    {QStringLiteral("path"), stickerResourcePath(QStringLiteral("fire"))}},
-    };
+    return stickerCatalog().stickers;
+}
+
+QVariantList AppController::builtinStickerCategories() const
+{
+    return stickerCatalog().categories;
 }
 
 QVariantList AppController::builtinShapes() const

@@ -239,38 +239,67 @@ PanelFrame {
             }
 
             Item {
+                id: stickersTab
                 visible: tabsModel.get(activeTab).tabId === "stickers"
                 width: parent.width
                 height: parent.height - Theme.panelHeaderHeight
 
+                // One page per sticker category, plus a trailing Shapes page.
+                readonly property var pages: EditorState.builtinStickerCategories().concat([{ id: "shapes", label: "Shapes" }])
+                readonly property var allStickers: EditorState.builtinStickers()
+                property int pageIndex: 0
+                readonly property string currentPageId: pages[pageIndex] ? pages[pageIndex].id : ""
+
+                Flow {
+                    id: stickerPageBar
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.margins: 12
+                    spacing: 6
+
+                    Repeater {
+                        model: stickersTab.pages
+                        delegate: ThemedChip {
+                            required property var modelData
+                            required property int index
+                            text: modelData.label
+                            variant: "secondary"
+                            selected: stickersTab.pageIndex === index
+                            onClicked: stickersTab.pageIndex = index
+                        }
+                    }
+                }
+
                 Flickable {
-                    anchors.fill: parent
-                    contentHeight: stickersContent.height + 24
+                    anchors.top: stickerPageBar.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.topMargin: 12
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    contentHeight: stickerPageContent.height + 24
                     clip: true
                     ScrollBar.vertical: AppScrollBar { }
 
                     Column {
-                        id: stickersContent
-                        x: 12
-                        y: 12
-                        width: parent.width - 24
+                        id: stickerPageContent
+                        width: parent.width - 12
                         spacing: 16
 
-                        Text {
-                            text: "Stickers"
-                            color: Theme.mutedForeground
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeXs
-                        }
-
+                        // Sticker grid for the selected category page.
                         Grid {
+                            visible: stickersTab.currentPageId !== "shapes"
                             width: parent.width
                             columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
                             columnSpacing: Theme.assetCardGap
                             rowSpacing: Theme.assetCardGap
 
                             Repeater {
-                                model: EditorState.builtinStickers()
+                                model: stickersTab.currentPageId === "shapes"
+                                       ? []
+                                       : stickersTab.allStickers.filter(function(s) { return s.category === stickersTab.currentPageId })
                                 delegate: Column {
                                     required property var modelData
                                     width: Theme.assetCardWidth
@@ -311,15 +340,9 @@ PanelFrame {
                             }
                         }
 
-                        Text {
-                            text: "Shapes"
-                            color: Theme.mutedForeground
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeXs
-                            topPadding: 4
-                        }
-
+                        // Shapes page.
                         Grid {
+                            visible: stickersTab.currentPageId === "shapes"
                             width: parent.width
                             columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
                             columnSpacing: Theme.assetCardGap
