@@ -148,7 +148,7 @@ QtObject {
     readonly property real trackGap: 6
     // Invisible hit area above tracks (no visible UI) for new-track drops when timeline has clips.
     readonly property real newTrackHitSlop: 24
-    readonly property real trackLabelsWidth: 112
+    readonly property real trackLabelsWidth: 130
     readonly property real pixelsPerSecondBase: 50
     readonly property real playheadLineWidth: 2
     readonly property real playheadHandleSize: 12
@@ -199,6 +199,7 @@ QtObject {
         sun: "",
         grid: "",
         list: "",
-        sort: ""
+        sort: "",
+        gripVertical: ""
     })
 }

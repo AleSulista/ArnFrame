@@ -571,30 +571,39 @@ Project Project::fromJson(const QJsonObject &object, QString *errorOut)
             project.addAsset(assetFromJsonV1(assetObject));
     }
 
-    project.resetToDefaultTimeline();
+    // Rebuild tracks from JSON. The Project ctor seeds a 1-track default, so
+    // clearing first is required — otherwise only the first saved track loads.
+    project.m_tracks.clear();
     const QJsonArray tracksArray = object.value(QStringLiteral("tracks")).toArray();
-    for (int i = 0; i < tracksArray.size() && i < project.m_tracks.size(); ++i) {
-        const QJsonObject trackObject = tracksArray.at(i).toObject();
-        Track &track = project.m_tracks[i];
-        track.type = trackTypeFromString(trackObject.value(QStringLiteral("type")).toString(trackTypeToString(track.type)));
-        track.muted = trackObject.value(QStringLiteral("muted")).toBool(false);
-        track.hidden = trackObject.value(QStringLiteral("hidden")).toBool(false);
-        track.locked = trackObject.value(QStringLiteral("locked")).toBool(false);
-        track.showWaveform = trackObject.value(QStringLiteral("showWaveform")).toBool(false);
+    if (tracksArray.isEmpty()) {
+        project.resetToDefaultTimeline();
+    } else {
+        project.m_tracks.reserve(tracksArray.size());
+        for (const QJsonValue &value : tracksArray) {
+            const QJsonObject trackObject = value.toObject();
+            Track track;
+            track.type = trackTypeFromString(
+                trackObject.value(QStringLiteral("type")).toString(QStringLiteral("video")));
+            track.muted = trackObject.value(QStringLiteral("muted")).toBool(false);
+            track.hidden = trackObject.value(QStringLiteral("hidden")).toBool(false);
+            track.locked = trackObject.value(QStringLiteral("locked")).toBool(false);
+            track.showWaveform = trackObject.value(QStringLiteral("showWaveform")).toBool(false);
 
-        const QJsonArray clipsArray = trackObject.value(QStringLiteral("clips")).toArray();
-        for (const QJsonValue &clipValue : clipsArray) {
-            const QJsonObject clipObject = clipValue.toObject();
-            if (version >= 2)
-                track.clips.append(clipFromJsonV2(clipObject, project.width(), project.height()));
-            else
-                track.clips.append(clipFromJsonV1(clipObject, project.m_assetOrder));
+            const QJsonArray clipsArray = trackObject.value(QStringLiteral("clips")).toArray();
+            for (const QJsonValue &clipValue : clipsArray) {
+                const QJsonObject clipObject = clipValue.toObject();
+                if (version >= 2)
+                    track.clips.append(clipFromJsonV2(clipObject, project.width(), project.height()));
+                else
+                    track.clips.append(clipFromJsonV1(clipObject, project.m_assetOrder));
+            }
+
+            const QJsonArray transitionsArray = trackObject.value(QStringLiteral("transitions")).toArray();
+            for (const QJsonValue &transitionValue : transitionsArray)
+                track.transitions.append(transitionFromJson(transitionValue.toObject()));
+
+            project.m_tracks.append(track);
         }
-
-        track.transitions.clear();
-        const QJsonArray transitionsArray = trackObject.value(QStringLiteral("transitions")).toArray();
-        for (const QJsonValue &transitionValue : transitionsArray)
-            track.transitions.append(transitionFromJson(transitionValue.toObject()));
     }
 
     project.m_bookmarks.clear();

@@ -29,6 +29,7 @@ private slots:
     void subtitleCueSerialization();
     void subtitleCueLookup();
     void insertTrackAtTopAllowsDuplicateTypes();
+    void multiTrackSerializationRoundTrip();
     void textStyleAndBlendModeSerialization();
     void legacyBoldMigratesToFontWeight();
     void textPresetsAreWellFormed();
@@ -381,6 +382,39 @@ void CoreTest::insertTrackAtTopAllowsDuplicateTypes()
     QCOMPARE(second, 0);
     QCOMPARE(project.tracks().size(), 3);
     QCOMPARE(project.tracks()[0].type, drift::TrackType::Audio);
+}
+
+void CoreTest::multiTrackSerializationRoundTrip()
+{
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video, .muted = true});
+    project.tracks().append(drift::Track{.type = drift::TrackType::Audio, .showWaveform = true});
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video, .hidden = true});
+    project.tracks().append(drift::Track{.type = drift::TrackType::Text});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-v2");
+    clip.type = drift::ClipType::Video;
+    clip.timelineStart = drift::secondsToUs(1.0);
+    clip.timelineDuration = drift::secondsToUs(2.0);
+    project.tracks()[2].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    QCOMPARE(loaded.tracks().size(), 4);
+    QCOMPARE(loaded.tracks()[0].type, drift::TrackType::Video);
+    QVERIFY(loaded.tracks()[0].muted);
+    QCOMPARE(loaded.tracks()[1].type, drift::TrackType::Audio);
+    QVERIFY(loaded.tracks()[1].showWaveform);
+    QCOMPARE(loaded.tracks()[2].type, drift::TrackType::Video);
+    QVERIFY(loaded.tracks()[2].hidden);
+    QCOMPARE(loaded.tracks()[2].clips.size(), 1);
+    QCOMPARE(loaded.tracks()[2].clips[0].id, QStringLiteral("clip-v2"));
+    QCOMPARE(loaded.tracks()[3].type, drift::TrackType::Text);
 }
 
 void CoreTest::textStyleAndBlendModeSerialization()

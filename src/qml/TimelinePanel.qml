@@ -58,6 +58,9 @@ PanelFrame {
     // Clip under an in-progress effect drag (for drop highlight).
     property int effectDropTrackIndex: -1
     property int effectDropClipIndex: -1
+    // Track-header reorder: source index and live drop target while dragging.
+    property int draggingTrackFrom: -1
+    property int draggingTrackTo: -1
 
     // Shared by library drops and in-timeline clip moves so both snap and show
     // the same outline the same way.
@@ -234,6 +237,32 @@ PanelFrame {
             cursor += th + Theme.trackGap;
         }
         return -1;
+    }
+
+    // Target index for QList::move while dragging a track header.
+    function trackMoveTargetAtY(y) {
+        if (tracks.length === 0)
+            return -1
+        var cursor = 0
+        for (var i = 0; i < tracks.length; i++) {
+            const th = trackHeight(tracks[i].type)
+            if (y < cursor + th / 2)
+                return i
+            cursor += th + Theme.trackGap
+        }
+        return tracks.length - 1
+    }
+
+    function trackRowTop(index) {
+        var cursor = 0
+        for (var i = 0; i < index && i < tracks.length; i++)
+            cursor += trackHeight(tracks[i].type) + Theme.trackGap
+        return cursor
+    }
+
+    function clearTrackDrag() {
+        draggingTrackFrom = -1
+        draggingTrackTo = -1
     }
 
     function updateAssetDropPreview(assetIndex, dropX, dropY) {
@@ -423,6 +452,28 @@ PanelFrame {
                     onClicked: EditorState.undo()
                     buttonEnabled: EditorState.undoAvailable
                 }
+
+                Rectangle {
+                    width: 1
+                    height: 24
+                    color: Theme.panelBorder
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                ThemedButton {
+                    id: newTrackButton
+                    text: qsTr("New Track")
+                    variant: "ghost"
+                    glyph: Theme.icons.plus
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: newTrackMenu.open()
+
+                    NewTrackMenu {
+                        id: newTrackMenu
+                        x: 0
+                        y: newTrackButton.height + 4
+                    }
+                }
             }
 
             Rectangle {
@@ -546,105 +597,181 @@ PanelFrame {
 
                 Item { width: parent.width; height: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight }
 
-                Repeater {
-                    model: root.tracks.length
-                    delegate: Item {
-                        width: Theme.trackLabelsWidth
-                        height: root.trackHeight(root.tracks[index].type)
-                                + (index < root.tracks.length - 1 ? Theme.trackGap : 0)
+                Item {
+                    id: trackLabelsArea
+                    width: parent.width
+                    height: parent.height - Theme.timelineRulerHeight - Theme.timelineBookmarkRowHeight
 
-                        Rectangle {
-                            anchors.right: parent.right
-                            width: 1
+                    Repeater {
+                        model: root.tracks.length
+                        delegate: Item {
+                            id: trackLabelRow
+                            width: Theme.trackLabelsWidth
                             height: root.trackHeight(root.tracks[index].type)
-                            color: Theme.panelBorder
+                                    + (index < root.tracks.length - 1 ? Theme.trackGap : 0)
+                            y: root.trackRowTop(index)
+                            opacity: root.draggingTrackFrom === index ? 0.45 : 1.0
+
+                            Rectangle {
+                                anchors.right: parent.right
+                                width: 1
+                                height: root.trackHeight(root.tracks[index].type)
+                                color: Theme.panelBorder
+                            }
+
+                            // Drag handle — left-aligned reorder grip.
+                            IconGlyph {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.verticalCenterOffset: index < root.tracks.length - 1 ? -Theme.trackGap / 2 : 0
+                                glyph: Theme.icons.gripVertical
+                                iconSize: 14
+                                iconColor: trackDragMouse.containsMouse || root.draggingTrackFrom === index
+                                           ? Theme.panelForeground : Theme.mutedForeground
+
+                                ToolTip {
+                                    visible: trackDragMouse.containsMouse && root.draggingTrackFrom < 0
+                                    text: qsTr("Drag to reorder track")
+                                }
+
+                                MouseArea {
+                                    id: trackDragMouse
+                                    anchors.fill: parent
+                                    anchors.margins: -4
+                                    hoverEnabled: true
+                                    cursorShape: Qt.SizeAllCursor
+                                    preventStealing: true
+
+                                    onPressed: {
+                                        root.draggingTrackFrom = index
+                                        root.draggingTrackTo = index
+                                    }
+                                    onPositionChanged: (mouse) => {
+                                        if (root.draggingTrackFrom < 0)
+                                            return
+                                        const local = mapToItem(trackLabelsArea, mouse.x, mouse.y)
+                                        root.draggingTrackTo = root.trackMoveTargetAtY(local.y)
+                                    }
+                                    onReleased: {
+                                        if (root.draggingTrackFrom >= 0
+                                                && root.draggingTrackTo >= 0
+                                                && root.draggingTrackFrom !== root.draggingTrackTo)
+                                            EditorState.moveTrack(root.draggingTrackFrom,
+                                                                  root.draggingTrackTo)
+                                        root.clearTrackDrag()
+                                    }
+                                    onCanceled: root.clearTrackDrag()
+                                }
+                            }
+
+                            Row {
+                                anchors.right: parent.right
+                                anchors.rightMargin: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.verticalCenterOffset: index < root.tracks.length - 1 ? -Theme.trackGap / 2 : 0
+                                spacing: 8
+
+                                IconGlyph {
+                                    visible: root.tracks[index].type === "video"
+                                             || root.tracks[index].type === "audio"
+                                    glyph: EditorState.trackMuted(index) ? Theme.icons.volumeOff : Theme.icons.volumeHigh
+                                    iconSize: 16
+                                    iconColor: EditorState.trackMuted(index) ? Theme.destructive : Theme.mutedForeground
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    ToolTip {
+                                        visible: muteMouse.containsMouse
+                                        text: EditorState.trackMuted(index) ? qsTr("Unmute track") : qsTr("Mute track")
+                                    }
+
+                                    MouseArea {
+                                        id: muteMouse
+                                        anchors.fill: parent
+                                        anchors.margins: -4
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: EditorState.setTrackMuted(index, !EditorState.trackMuted(index))
+                                    }
+                                }
+
+                                IconGlyph {
+                                    visible: root.tracks[index].type === "video"
+                                             || root.tracks[index].type === "text"
+                                             || root.tracks[index].type === "subtitle"
+                                             || root.tracks[index].type === "shape"
+                                    glyph: EditorState.trackHidden(index) ? Theme.icons.eyeOff : Theme.icons.eye
+                                    iconSize: 16
+                                    iconColor: EditorState.trackHidden(index) ? Theme.destructive : Theme.mutedForeground
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    ToolTip {
+                                        visible: hideMouse.containsMouse
+                                        text: EditorState.trackHidden(index) ? qsTr("Show track") : qsTr("Hide track")
+                                    }
+
+                                    MouseArea {
+                                        id: hideMouse
+                                        anchors.fill: parent
+                                        anchors.margins: -4
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: EditorState.setTrackHidden(index, !EditorState.trackHidden(index))
+                                    }
+                                }
+
+                                // Toggle the whole track between filmstrip previews and audio waveforms.
+                                IconGlyph {
+                                    visible: root.tracks[index].type === "video"
+                                    glyph: EditorState.trackShowWaveform(index) ? Theme.icons.music : Theme.icons.film
+                                    iconSize: 16
+                                    iconColor: EditorState.trackShowWaveform(index) ? Theme.primary : Theme.mutedForeground
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    ToolTip {
+                                        visible: waveMouse.containsMouse
+                                        text: EditorState.trackShowWaveform(index) ? qsTr("Show filmstrip")
+                                                                                   : qsTr("Show waveform")
+                                    }
+
+                                    MouseArea {
+                                        id: waveMouse
+                                        anchors.fill: parent
+                                        anchors.margins: -4
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: EditorState.setTrackShowWaveform(index, !EditorState.trackShowWaveform(index))
+                                    }
+                                }
+
+                                IconGlyph {
+                                    glyph: root.trackTypeIcon(root.tracks[index].type)
+                                    iconSize: 16
+                                    iconColor: Theme.mutedForeground
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
                         }
+                    }
 
-                        Row {
-                            anchors.right: parent.right
-                            anchors.rightMargin: 12
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: index < root.tracks.length - 1 ? -Theme.trackGap / 2 : 0
-                            spacing: 8
-
-                            IconGlyph {
-                                visible: root.tracks[index].type === "video"
-                                         || root.tracks[index].type === "audio"
-                                glyph: EditorState.trackMuted(index) ? Theme.icons.volumeOff : Theme.icons.volumeHigh
-                                iconSize: 16
-                                iconColor: EditorState.trackMuted(index) ? Theme.destructive : Theme.mutedForeground
-                                anchors.verticalCenter: parent.verticalCenter
-
-                                ToolTip {
-                                    visible: muteMouse.containsMouse
-                                    text: EditorState.trackMuted(index) ? qsTr("Unmute track") : qsTr("Mute track")
-                                }
-
-                                MouseArea {
-                                    id: muteMouse
-                                    anchors.fill: parent
-                                    anchors.margins: -4
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: EditorState.setTrackMuted(index, !EditorState.trackMuted(index))
-                                }
-                            }
-
-                            IconGlyph {
-                                visible: root.tracks[index].type === "video"
-                                         || root.tracks[index].type === "text"
-                                         || root.tracks[index].type === "subtitle"
-                                         || root.tracks[index].type === "shape"
-                                glyph: EditorState.trackHidden(index) ? Theme.icons.eyeOff : Theme.icons.eye
-                                iconSize: 16
-                                iconColor: EditorState.trackHidden(index) ? Theme.destructive : Theme.mutedForeground
-                                anchors.verticalCenter: parent.verticalCenter
-
-                                ToolTip {
-                                    visible: hideMouse.containsMouse
-                                    text: EditorState.trackHidden(index) ? qsTr("Show track") : qsTr("Hide track")
-                                }
-
-                                MouseArea {
-                                    id: hideMouse
-                                    anchors.fill: parent
-                                    anchors.margins: -4
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: EditorState.setTrackHidden(index, !EditorState.trackHidden(index))
-                                }
-                            }
-
-                            // Toggle the whole track between filmstrip previews and audio waveforms.
-                            IconGlyph {
-                                visible: root.tracks[index].type === "video"
-                                glyph: EditorState.trackShowWaveform(index) ? Theme.icons.music : Theme.icons.film
-                                iconSize: 16
-                                iconColor: EditorState.trackShowWaveform(index) ? Theme.primary : Theme.mutedForeground
-                                anchors.verticalCenter: parent.verticalCenter
-
-                                ToolTip {
-                                    visible: waveMouse.containsMouse
-                                    text: EditorState.trackShowWaveform(index) ? qsTr("Show filmstrip")
-                                                                               : qsTr("Show waveform")
-                                }
-
-                                MouseArea {
-                                    id: waveMouse
-                                    anchors.fill: parent
-                                    anchors.margins: -4
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: EditorState.setTrackShowWaveform(index, !EditorState.trackShowWaveform(index))
-                                }
-                            }
-
-                            IconGlyph {
-                                glyph: root.trackTypeIcon(root.tracks[index].type)
-                                iconSize: 16
-                                iconColor: Theme.mutedForeground
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
+                    // Insertion line while reordering tracks.
+                    Rectangle {
+                        visible: root.draggingTrackFrom >= 0 && root.draggingTrackTo >= 0
+                                 && root.draggingTrackFrom !== root.draggingTrackTo
+                        width: parent.width - 8
+                        height: 2
+                        radius: 1
+                        x: 4
+                        color: Theme.primary
+                        z: 10
+                        y: {
+                            if (root.draggingTrackTo < 0)
+                                return 0
+                            const from = root.draggingTrackFrom
+                            const to = root.draggingTrackTo
+                            if (from < to)
+                                return root.trackRowTop(to) + root.trackHeight(root.tracks[to].type) - 1
+                            return root.trackRowTop(to)
                         }
                     }
                 }

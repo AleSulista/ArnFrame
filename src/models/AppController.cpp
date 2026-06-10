@@ -3551,6 +3551,55 @@ bool AppController::trackShowWaveform(int trackIndex) const
     return m_project.tracks().at(trackIndex).showWaveform;
 }
 
+void AppController::moveTrack(int fromIndex, int toIndex)
+{
+    const int trackCount = m_project.tracks().size();
+    if (fromIndex < 0 || fromIndex >= trackCount || toIndex < 0 || toIndex >= trackCount)
+        return;
+    if (fromIndex == toIndex)
+        return;
+
+    const drift::Project before = m_project;
+    m_project.tracks().move(fromIndex, toIndex);
+
+    auto remap = [fromIndex, toIndex](int index) -> int {
+        if (index < 0)
+            return index;
+        if (index == fromIndex)
+            return toIndex;
+        if (fromIndex < toIndex) {
+            if (index > fromIndex && index <= toIndex)
+                return index - 1;
+        } else if (index >= toIndex && index < fromIndex) {
+            return index + 1;
+        }
+        return index;
+    };
+
+    m_selectedTrack = remap(m_selectedTrack);
+    m_selectedTransitionTrack = remap(m_selectedTransitionTrack);
+    for (QPair<int, int> &pair : m_selection)
+        pair.first = remap(pair.first);
+
+    pushProjectEdit(before, QStringLiteral("Move track"));
+    finishEdit(QStringLiteral("Track moved"));
+}
+
+void AppController::addTrack(const QString &type)
+{
+    const QString normalized = type.trimmed().toLower();
+    if (normalized != QLatin1String("video") && normalized != QLatin1String("audio")
+        && normalized != QLatin1String("text") && normalized != QLatin1String("subtitle")
+        && normalized != QLatin1String("shape")) {
+        return;
+    }
+
+    const drift::Project before = m_project;
+    m_project.tracks().prepend(drift::Track{.type = drift::trackTypeFromString(normalized)});
+    pushProjectEdit(before, QStringLiteral("Add track"));
+    finishEdit(QStringLiteral("Track added"));
+}
+
 QVariantList AppController::bookmarks() const
 {
     QVariantList result;

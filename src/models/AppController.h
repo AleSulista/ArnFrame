@@ -244,6 +244,8 @@ public:
     Q_INVOKABLE bool trackHidden(int trackIndex) const;
     Q_INVOKABLE void setTrackShowWaveform(int trackIndex, bool show);
     Q_INVOKABLE bool trackShowWaveform(int trackIndex) const;
+    Q_INVOKABLE void moveTrack(int fromIndex, int toIndex);
+    Q_INVOKABLE void addTrack(const QString &type);
     Q_INVOKABLE void addBookmark(double seconds, const QString &label);
     Q_INVOKABLE void removeBookmark(int index);
     Q_INVOKABLE void goToBookmark(int index);

@@ -21,6 +21,8 @@ private slots:
     void undoRedoClipAdd();
     void undoTrackMute();
     void undoBookmarkAdd();
+    void moveTrackReordersAndRemapsSelection();
+    void addTrackInsertsEmptyTrackByType();
     void projectPersistenceRoundTrip();
     void textStyleBlendModeKeyframesAndEffects();
     void previewSetTextRectScalesPixelSize();
@@ -88,6 +90,61 @@ void EditorStateTest::undoBookmarkAdd()
     QCOMPARE(state.bookmarks().size(), 0);
 }
 
+void EditorStateTest::moveTrackReordersAndRemapsSelection()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("Top"), 0.0);
+    // addTextClip prepends a text track above the default video track.
+    QCOMPARE(state.tracks().size(), 2);
+    QCOMPARE(state.tracks().at(0).toMap().value(QStringLiteral("type")).toString(),
+             QStringLiteral("text"));
+    QCOMPARE(state.tracks().at(1).toMap().value(QStringLiteral("type")).toString(),
+             QStringLiteral("video"));
+    QCOMPARE(state.selectedTrack(), 0);
+
+    state.moveTrack(0, 1);
+    QCOMPARE(state.tracks().at(0).toMap().value(QStringLiteral("type")).toString(),
+             QStringLiteral("video"));
+    QCOMPARE(state.tracks().at(1).toMap().value(QStringLiteral("type")).toString(),
+             QStringLiteral("text"));
+    QCOMPARE(state.selectedTrack(), 1);
+
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    QCOMPARE(state.tracks().at(0).toMap().value(QStringLiteral("type")).toString(),
+             QStringLiteral("text"));
+    QCOMPARE(state.tracks().at(1).toMap().value(QStringLiteral("type")).toString(),
+             QStringLiteral("video"));
+}
+
+void EditorStateTest::addTrackInsertsEmptyTrackByType()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    QCOMPARE(state.tracks().size(), 1);
+
+    state.addTrack(QStringLiteral("audio"));
+    QCOMPARE(state.tracks().size(), 2);
+    QCOMPARE(state.tracks().at(0).toMap().value(QStringLiteral("type")).toString(),
+             QStringLiteral("audio"));
+    QCOMPARE(state.tracks().at(0).toMap().value(QStringLiteral("clips")).toList().size(), 0);
+
+    state.addTrack(QStringLiteral("video"));
+    QCOMPARE(state.tracks().size(), 3);
+    QCOMPARE(state.tracks().at(0).toMap().value(QStringLiteral("type")).toString(),
+             QStringLiteral("video"));
+    QCOMPARE(state.tracks().at(1).toMap().value(QStringLiteral("type")).toString(),
+             QStringLiteral("audio"));
+
+    state.addTrack(QStringLiteral("not-a-type"));
+    QCOMPARE(state.tracks().size(), 3);
+
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    QCOMPARE(state.tracks().size(), 2);
+}
+
 void EditorStateTest::projectPersistenceRoundTrip()
 {
     AssetLibrary library;
@@ -95,6 +152,7 @@ void EditorStateTest::projectPersistenceRoundTrip()
     state.addTextClip(QStringLiteral("Persist"), 0.0);
     state.setTrackMuted(0, true);
     state.addBookmark(2.0, QStringLiteral("Mark"));
+    QCOMPARE(state.tracks().size(), 2); // text + default video
 
     QTemporaryFile tempFile;
     QVERIFY(tempFile.open());
@@ -104,6 +162,9 @@ void EditorStateTest::projectPersistenceRoundTrip()
     state.loadProject(QUrl::fromLocalFile(tempFile.fileName()));
 
     QVERIFY(state.durationSeconds() > 0.0);
+    QCOMPARE(state.tracks().size(), 2);
+    QCOMPARE(state.tracks().at(0).toMap().value(QStringLiteral("type")).toString(),
+             QStringLiteral("text"));
     QVERIFY(state.trackMuted(0));
     QCOMPARE(state.bookmarks().size(), 1);
 }
