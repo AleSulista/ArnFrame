@@ -10,6 +10,8 @@ Item {
     property string family: ""
     signal familyPicked(string family)
 
+    focus: true
+
     readonly property string displayFamily: family === "" ? "Select a font" : family
 
     implicitHeight: 30
@@ -39,13 +41,68 @@ Item {
             familyModel.append({ "name": system[i], "previewFamily": system[i], "group": "System fonts" })
     }
 
+    function changeFontDelta(delta) {
+        if (familyModel.count === 0)
+            return;
+
+        let currentIndex = -1;
+        for (let i = 0; i < familyModel.count; ++i) {
+            if (familyModel.get(i).name === root.family) {
+                currentIndex = i;
+                break;
+            }
+        }
+
+        let nextIndex = 0;
+        if (currentIndex === -1) {
+            nextIndex = delta > 0 ? 0 : familyModel.count - 1;
+        } else {
+            nextIndex = currentIndex + delta;
+            nextIndex = Math.max(0, Math.min(familyModel.count - 1, nextIndex));
+        }
+
+        if (nextIndex !== currentIndex) {
+            const nextFamily = familyModel.get(nextIndex).name;
+            root.familyPicked(nextFamily);
+            list.currentIndex = nextIndex;
+            list.positionViewAtIndex(nextIndex, ListView.Contain);
+        }
+    }
+
+    Keys.onUpPressed: (event) => {
+        changeFontDelta(-1)
+        event.accepted = true
+    }
+    Keys.onDownPressed: (event) => {
+        changeFontDelta(1)
+        event.accepted = true
+    }
+    Keys.onReturnPressed: (event) => {
+        if (popup.visible) {
+            popup.close()
+            event.accepted = true
+        }
+    }
+    Keys.onEnterPressed: (event) => {
+        if (popup.visible) {
+            popup.close()
+            event.accepted = true
+        }
+    }
+    Keys.onEscapePressed: (event) => {
+        if (popup.visible) {
+            popup.close()
+            event.accepted = true
+        }
+    }
+
     Rectangle {
         id: trigger
         anchors.fill: parent
         radius: Theme.radiusSm
         color: Theme.panelAccent
-        border.width: popup.visible ? 1 : 0
-        border.color: Theme.panelSecondaryBorder
+        border.width: (popup.visible || root.activeFocus) ? 1 : 0
+        border.color: root.activeFocus ? Theme.primary : Theme.panelSecondaryBorder
 
         Text {
             anchors.left: parent.left
@@ -74,12 +131,33 @@ Item {
         MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
-            onClicked: popup.visible ? popup.close() : popup.open()
+            onClicked: {
+                root.forceActiveFocus()
+                if (popup.visible) {
+                    popup.close()
+                } else {
+                    popup.open()
+                }
+            }
         }
     }
 
     Popup {
         id: popup
+
+        onOpened: {
+            let idx = -1;
+            for (let i = 0; i < familyModel.count; ++i) {
+                if (familyModel.get(i).name === root.family) {
+                    idx = i;
+                    break;
+                }
+            }
+            list.currentIndex = idx;
+            if (idx >= 0) {
+                list.positionViewAtIndex(idx, ListView.Center);
+            }
+        }
         y: root.height + 2
         width: root.width
         implicitHeight: 320
@@ -143,6 +221,7 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
+                        root.forceActiveFocus()
                         root.familyPicked(row.name)
                         popup.close()
                     }

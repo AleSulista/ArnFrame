@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Dialogs
 import Drift
 import "components"
 
@@ -642,6 +643,16 @@ PanelFrame {
                                             color: root.textStyle.color
                                             border.width: 1
                                             border.color: Theme.panelBorder
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    styleColorDialog.targetStyleKey = "color"
+                                                    styleColorDialog.selectedColor = root.textStyle.color
+                                                    styleColorDialog.open()
+                                                }
+                                            }
                                         }
                                         ThemedTextField {
                                             id: textColorField
@@ -881,6 +892,15 @@ PanelFrame {
                                             radius: 4
                                             anchors.verticalCenter: parent.verticalCenter
                                             color: root.textStyle.outlineColor
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    styleColorDialog.targetStyleKey = "outlineColor"
+                                                    styleColorDialog.selectedColor = root.textStyle.outlineColor
+                                                    styleColorDialog.open()
+                                                }
+                                            }
                                             border.width: 1
                                             border.color: Theme.panelBorder
                                         }
@@ -1023,6 +1043,15 @@ PanelFrame {
                                     radius: 4
                                     anchors.verticalCenter: parent.verticalCenter
                                     color: root.textStyle.shadowColor
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            styleColorDialog.targetStyleKey = "shadowColor"
+                                            styleColorDialog.selectedColor = root.textStyle.shadowColor
+                                            styleColorDialog.open()
+                                        }
+                                    }
                                     border.width: 1
                                     border.color: Theme.panelBorder
                                 }
@@ -1069,6 +1098,15 @@ PanelFrame {
                                     radius: 4
                                     anchors.verticalCenter: parent.verticalCenter
                                     color: root.textStyle.boxColor
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            styleColorDialog.targetStyleKey = "boxColor"
+                                            styleColorDialog.selectedColor = root.textStyle.boxColor
+                                            styleColorDialog.open()
+                                        }
+                                    }
                                     border.width: 1
                                     border.color: Theme.panelBorder
                                 }
@@ -2178,5 +2216,25 @@ PanelFrame {
         if (!root.hasSelection || isNaN(inPoint) || isNaN(outPoint))
             return
         EditorState.setClipTrim(EditorState.selectedTrack, EditorState.selectedClip, inPoint, outPoint)
+    }
+
+    ColorDialog {
+        id: styleColorDialog
+        title: "Select Color"
+        property string targetStyleKey: ""
+
+        function colorToHex(c) {
+            var toHex = function(v) {
+                var h = Math.round(v * 255).toString(16);
+                return h.length === 1 ? "0" + h : h;
+            }
+            return "#" + toHex(c.a) + toHex(c.r) + toHex(c.g) + toHex(c.b);
+        }
+
+        onAccepted: {
+            if (targetStyleKey !== "") {
+                root.setTextStyleKey(targetStyleKey, colorToHex(selectedColor))
+            }
+        }
     }
 }
