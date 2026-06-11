@@ -38,7 +38,11 @@ struct Clip
 {
     QString id;
     QString assetId;
+    // Shared by linked video/audio companions; empty when unlinked.
+    QString linkId;
     ClipType type = ClipType::Video;
+    // When true, AudioMixer skips this video clip's embedded audio (companion audio track plays it).
+    bool suppressEmbeddedAudio = false;
 
     TimeUs timelineStart = 0;
     TimeUs timelineDuration = 0;

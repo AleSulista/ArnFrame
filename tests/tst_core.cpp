@@ -40,6 +40,7 @@ private slots:
     void clipSpeedSourceMapping();
     void clipReverseAndFlipSerialization();
     void clipSplitMergeRoundTrip();
+    void clipLinkFieldsSerialization();
     void maskAndTransitionSerialization();
     void allTransitionKindsRoundTrip();
     void transitionParametersRoundTrip();
@@ -780,6 +781,30 @@ void CoreTest::clipSplitMergeRoundTrip()
     QCOMPARE(revTail.srcIn, drift::secondsToUs(1.0));
     QCOMPARE(revTail.srcOut, drift::secondsToUs(3.0));
     QVERIFY(drift::clipsCanMerge(rev, revTail));
+}
+
+void CoreTest::clipLinkFieldsSerialization()
+{
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-v");
+    clip.linkId = QStringLiteral("link-abc");
+    clip.suppressEmbeddedAudio = true;
+    clip.type = drift::ClipType::Video;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(2.0);
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+    QVERIFY(error.isEmpty());
+    const drift::Clip &out = loaded.tracks()[0].clips[0];
+    QCOMPARE(out.linkId, QStringLiteral("link-abc"));
+    QCOMPARE(out.suppressEmbeddedAudio, true);
 }
 
 void CoreTest::maskAndTransitionSerialization()

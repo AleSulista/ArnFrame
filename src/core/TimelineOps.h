@@ -39,4 +39,20 @@ bool clipsCanMerge(const Clip &left, const Clip &right);
 // Merge abutting clips. Keeps left transforms/effects; takes right's fade-out.
 Clip mergeClips(const Clip &left, const Clip &right);
 
+struct ClipRef
+{
+    int trackIndex = -1;
+    int clipIndex = -1;
+};
+
+// All clips sharing `clip.linkId` (excluding `clip` itself).
+QList<ClipRef> linkedPartners(const Project &project, const Clip &clip);
+
+// Mirror timeline/source timing from a linked source clip.
+void syncLinkedTiming(Clip &dst, const Clip &src);
+
+// Copy link fields when splitting a linked clip so both halves stay paired.
+// Returns the link id assigned to `tail` (empty when `head` was not linked).
+QString assignSplitLinkIds(Clip &head, Clip &tail);
+
 } // namespace drift

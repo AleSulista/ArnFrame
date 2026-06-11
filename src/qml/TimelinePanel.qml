@@ -415,15 +415,17 @@ PanelFrame {
                 IconButton { icon: Theme.icons.alignLeft; variant: "text"; tooltip: qsTr("Split left"); onClicked: EditorState.splitSelectedClipLeft() }
                 IconButton { icon: Theme.icons.alignRight; variant: "text"; tooltip: qsTr("Split right"); onClicked: EditorState.splitSelectedClipRight() }
                 IconButton {
+                    icon: Theme.icons.unlink
+                    variant: "text"
+                    tooltip: qsTr("Unlink audio")
+                    buttonEnabled: EditorState.unlinkAvailable
+                    onClicked: EditorState.unlinkSelectedClips()
+                }
+                IconButton {
                     icon: Theme.icons.linkTwo
                     variant: "text"
                     tooltip: qsTr("Merge adjacent clips")
-                    buttonEnabled: {
-                        // Re-eval when selection or clips change
-                        const _sel = EditorState.selection
-                        const _tracks = EditorState.tracks
-                        return EditorState.canMergeSelection()
-                    }
+                    buttonEnabled: EditorState.mergeAvailable
                     onClicked: EditorState.mergeSelectedClips()
                 }
                 IconButton { icon: Theme.icons.copy; variant: "text"; tooltip: qsTr("Copy selection"); onClicked: EditorState.copySelection() }

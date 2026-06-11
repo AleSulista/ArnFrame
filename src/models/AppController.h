@@ -66,6 +66,8 @@ class AppController : public QObject
     Q_PROPERTY(bool recoveryAvailable READ recoveryAvailable NOTIFY recoveryChanged)
     Q_PROPERTY(QVariantMap recoveryInfo READ recoveryInfo NOTIFY recoveryChanged)
     Q_PROPERTY(QVariantList recentProjects READ recentProjects NOTIFY recentProjectsChanged)
+    Q_PROPERTY(bool unlinkAvailable READ canUnlinkSelection NOTIFY editCapabilitiesChanged)
+    Q_PROPERTY(bool mergeAvailable READ canMergeSelection NOTIFY editCapabilitiesChanged)
 
 public:
     explicit AppController(AssetLibrary *assetLibrary, QObject *parent = nullptr);
@@ -208,6 +210,8 @@ public:
     Q_INVOKABLE void setClipRotationSnap(int trackIndex, int clipIndex, double degrees);
     Q_INVOKABLE bool canMergeSelection() const;
     Q_INVOKABLE void mergeSelectedClips();
+    Q_INVOKABLE bool canUnlinkSelection() const;
+    Q_INVOKABLE void unlinkSelectedClips();
     Q_INVOKABLE void setClipMask(int trackIndex, int clipIndex, const QVariantMap &mask);
     Q_INVOKABLE void setClipFade(int trackIndex, int clipIndex, double fadeInSeconds, double fadeOutSeconds);
     Q_INVOKABLE void setClipFadeCurve(int trackIndex, int clipIndex, const QString &curve);
@@ -294,6 +298,7 @@ signals:
     void exportInProgressChanged();
     void exportProgressChanged();
     void selectionChanged();
+    void editCapabilitiesChanged();
     void selectedClipDataChanged();
     void selectedTransitionDataChanged();
     void bookmarksChanged();

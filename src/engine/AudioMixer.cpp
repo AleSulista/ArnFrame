@@ -132,7 +132,7 @@ void AudioMixer::mix(drift::TimeUs timelineStartUs, int sampleCount, int sampleR
                 accumulateClipAudio(clip, track, timelineStartUs, sampleCount, sampleRate, interleavedStereoOut);
         } else if (track.type == drift::TrackType::Video) {
             for (const drift::Clip &clip : track.clips) {
-                if (clip.type == drift::ClipType::Video)
+                if (clip.type == drift::ClipType::Video && !clip.suppressEmbeddedAudio)
                     accumulateClipAudio(clip, track, timelineStartUs, sampleCount, sampleRate, interleavedStereoOut);
             }
         }

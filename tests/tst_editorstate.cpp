@@ -33,6 +33,7 @@ private slots:
     void setTransitionKindAndDurationPersist();
     void replaceTransitionOnDrop();
     void overlapAutoAppliesCrossfade();
+    void linkedAudioUnlinkAndMove();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -458,6 +459,112 @@ static void appendAdjacentShapeClips(drift::Project &project, drift::TimeUs gapU
 
     project.tracks()[0].clips.append(clipA);
     project.tracks()[0].clips.append(clipB);
+}
+
+static void appendCombinedVideoClip(drift::Project &project)
+{
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::MediaAsset asset;
+    asset.id = QStringLiteral("asset-video");
+    asset.path = QStringLiteral("/tmp/video.mp4");
+    asset.name = QStringLiteral("Video");
+    asset.kind = drift::MediaKind::Video;
+    asset.durationUs = drift::secondsToUs(4.0);
+    asset.sampleRate = 48000;
+    asset.channels = 2;
+    project.assets().insert(asset.id, asset);
+    project.assetOrder().append(asset.id);
+
+    drift::Clip video;
+    video.id = QStringLiteral("clip-video");
+    video.assetId = asset.id;
+    video.type = drift::ClipType::Video;
+    video.name = asset.name;
+    video.path = asset.path;
+    video.timelineStart = 0;
+    video.timelineDuration = drift::secondsToUs(4.0);
+    video.srcIn = 0;
+    video.srcOut = drift::secondsToUs(4.0);
+
+    project.tracks()[0].clips.append(video);
+}
+
+static void appendLinkedVideoAudioPair(drift::Project &project)
+{
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+    project.tracks().append(drift::Track{.type = drift::TrackType::Audio});
+
+    drift::MediaAsset asset;
+    asset.id = QStringLiteral("asset-video");
+    asset.path = QStringLiteral("/tmp/video.mp4");
+    asset.name = QStringLiteral("Video");
+    asset.kind = drift::MediaKind::Video;
+    asset.durationUs = drift::secondsToUs(4.0);
+    asset.sampleRate = 48000;
+    asset.channels = 2;
+    project.assets().insert(asset.id, asset);
+    project.assetOrder().append(asset.id);
+
+    const QString linkId = QStringLiteral("link-1");
+
+    drift::Clip video;
+    video.id = QStringLiteral("clip-video");
+    video.linkId = linkId;
+    video.suppressEmbeddedAudio = true;
+    video.assetId = asset.id;
+    video.type = drift::ClipType::Video;
+    video.name = asset.name;
+    video.path = asset.path;
+    video.timelineStart = 0;
+    video.timelineDuration = drift::secondsToUs(4.0);
+    video.srcIn = 0;
+    video.srcOut = drift::secondsToUs(4.0);
+
+    drift::Clip audio;
+    audio.id = QStringLiteral("clip-audio");
+    audio.linkId = linkId;
+    audio.assetId = asset.id;
+    audio.type = drift::ClipType::Audio;
+    audio.name = asset.name;
+    audio.path = asset.path;
+    audio.timelineStart = 0;
+    audio.timelineDuration = drift::secondsToUs(4.0);
+    audio.srcIn = 0;
+    audio.srcOut = drift::secondsToUs(4.0);
+
+    project.tracks()[0].clips.append(video);
+    project.tracks()[1].clips.append(audio);
+}
+
+void EditorStateTest::linkedAudioUnlinkAndMove()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendCombinedVideoClip(*state.project());
+
+    QCOMPARE(state.project()->tracks().size(), 1);
+    QCOMPARE(state.project()->tracks().at(0).clips.size(), 1);
+
+    state.selectClip(0, 0);
+    QVERIFY(state.canUnlinkSelection());
+    QVERIFY(state.selectionContains(0, 0));
+
+    state.moveClip(0, 0, 2.0);
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).timelineStart, drift::secondsToUs(2.0));
+
+    state.selectClip(0, 0);
+    state.unlinkSelectedClips();
+    QCOMPARE(state.project()->tracks().size(), 2);
+    QCOMPARE(state.project()->tracks().at(1).clips.size(), 1);
+    QCOMPARE(state.project()->tracks().at(1).clips.at(0).timelineStart, drift::secondsToUs(2.0));
+    QVERIFY(!state.canUnlinkSelection());
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).suppressEmbeddedAudio, true);
+
+    state.moveClip(0, 0, 0.0);
+    QCOMPARE(state.project()->tracks().at(1).clips.at(0).timelineStart, drift::secondsToUs(2.0));
 }
 
 void EditorStateTest::addTransitionBetweenAdjacentClips()

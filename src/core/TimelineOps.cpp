@@ -1,5 +1,7 @@
 #include "TimelineOps.h"
 
+#include <QUuid>
+
 #include <algorithm>
 
 namespace drift {
@@ -203,6 +205,50 @@ Clip mergeClips(const Clip &left, const Clip &right)
     }
     out.fadeOutUs = right.fadeOutUs;
     return out;
+}
+
+QList<ClipRef> linkedPartners(const Project &project, const Clip &clip)
+{
+    QList<ClipRef> out;
+    if (clip.linkId.isEmpty())
+        return out;
+
+    for (int trackIndex = 0; trackIndex < project.tracks().size(); ++trackIndex) {
+        const Track &track = project.tracks().at(trackIndex);
+        for (int clipIndex = 0; clipIndex < track.clips.size(); ++clipIndex) {
+            const Clip &candidate = track.clips.at(clipIndex);
+            if (candidate.id == clip.id)
+                continue;
+            if (candidate.linkId == clip.linkId)
+                out.append(ClipRef{trackIndex, clipIndex});
+        }
+    }
+    return out;
+}
+
+void syncLinkedTiming(Clip &dst, const Clip &src)
+{
+    dst.timelineStart = src.timelineStart;
+    dst.timelineDuration = src.timelineDuration;
+    dst.srcIn = src.srcIn;
+    dst.srcOut = src.srcOut;
+    dst.speed = src.speed;
+    dst.reverse = src.reverse;
+    dst.fadeInUs = src.fadeInUs;
+    dst.fadeOutUs = src.fadeOutUs;
+    dst.fadeCurve = src.fadeCurve;
+}
+
+QString assignSplitLinkIds(Clip &head, Clip &tail)
+{
+    if (head.linkId.isEmpty())
+        return {};
+
+    const QString tailLink = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    tail.linkId = tailLink;
+    if (head.suppressEmbeddedAudio)
+        tail.suppressEmbeddedAudio = true;
+    return tailLink;
 }
 
 } // namespace drift
