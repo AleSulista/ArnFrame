@@ -558,6 +558,9 @@ WhisperResult WhisperTranscriber::transcribe(const std::vector<float> &pcm,
     if (progress)
         progress(1.0);
     sortSubtitleCues(result.cues);
+    // Pack into short display lines like openai-whisper's VTT writer
+    // (word_timestamps + max_line_width=42, max_line_count=1).
+    result.cues = packSubtitleCues(result.cues, 42, 1);
     result.ok = true;
     return result;
 }

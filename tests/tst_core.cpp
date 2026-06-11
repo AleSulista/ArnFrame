@@ -28,6 +28,7 @@ private slots:
     void trackAllowsClipTypes();
     void subtitleCueSerialization();
     void subtitleCueLookup();
+    void subtitleCuePacking();
     void insertTrackAtTopAllowsDuplicateTypes();
     void multiTrackSerializationRoundTrip();
     void textStyleAndBlendModeSerialization();
@@ -365,6 +366,34 @@ void CoreTest::subtitleCueLookup()
     QCOMPARE(active->text, QStringLiteral("A"));
     QVERIFY(!drift::activeSubtitleCueAt(cues, drift::secondsToUs(3.5)));
     QCOMPARE(drift::subtitleCueIndexAt(cues, drift::secondsToUs(5.0)), 1);
+}
+
+void CoreTest::subtitleCuePacking()
+{
+    // One long Whisper segment should become several ~42-char single-line cues.
+    QList<drift::SubtitleCue> input;
+    input.append({drift::secondsToUs(0.0), drift::secondsToUs(10.0),
+                  QStringLiteral("Hello everyone welcome to the show today we will talk about "
+                                 "video editing and automatic subtitles.")});
+
+    const QList<drift::SubtitleCue> packed = drift::packSubtitleCues(input, 42, 1);
+    QVERIFY(packed.size() >= 2);
+    for (const drift::SubtitleCue &cue : packed) {
+        // A single oversize token may exceed the width; otherwise stay within 42.
+        QVERIFY(cue.text.size() <= 42 || !cue.text.contains(QLatin1Char(' ')));
+        QVERIFY(cue.endUs > cue.startUs);
+        QVERIFY(!cue.text.contains(QLatin1Char('\n')));
+    }
+    QCOMPARE(packed.first().startUs, drift::secondsToUs(0.0));
+    QCOMPARE(packed.last().endUs, drift::secondsToUs(10.0));
+
+    // Short cues under the limit stay as a single cue.
+    QList<drift::SubtitleCue> shortInput;
+    shortInput.append(
+        {drift::secondsToUs(1.0), drift::secondsToUs(2.0), QStringLiteral("Hi there")});
+    const QList<drift::SubtitleCue> shortPacked = drift::packSubtitleCues(shortInput, 42, 1);
+    QCOMPARE(shortPacked.size(), 1);
+    QCOMPARE(shortPacked.first().text, QStringLiteral("Hi there"));
 }
 
 void CoreTest::insertTrackAtTopAllowsDuplicateTypes()
