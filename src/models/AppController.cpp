@@ -7,6 +7,7 @@
 #include "core/Transition.h"
 #include "core/commands/ProjectCommands.h"
 #include "engine/AudioMixer.h"
+#include "engine/ClipReaderPool.h"
 #include "engine/EffectCatalog.h"
 #include "engine/Exporter.h"
 #include "engine/FontCatalog.h"
@@ -14,6 +15,7 @@
 #include "engine/MediaThumbnail.h"
 #include "engine/MediaWaveform.h"
 #include "engine/TransitionCatalog.h"
+#include "engine/WhisperTranscriber.h"
 
 #include <QColor>
 #include <QCoreApplication>
@@ -29,6 +31,7 @@
 #include <QStandardPaths>
 #include <QTimer>
 #include <QUrl>
+#include <QDebug>
 #include <QUuid>
 #include <QVector>
 #include <QtConcurrent>
@@ -1907,6 +1910,202 @@ void AppController::addSubtitleClip(double atSeconds)
     pushProjectEdit(before, QStringLiteral("Subtitle clip added"));
     finishEdit(QStringLiteral("Subtitle clip added"));
     selectClip(trackIndex, track.clips.size() - 1);
+}
+
+void AppController::cancelSubtitleGeneration()
+{
+    if (m_subtitleGenerating)
+        m_subtitleGenCancel.storeRelaxed(1);
+}
+
+void AppController::generateSubtitlesForClip(int trackIndex, int clipIndex)
+{
+    if (m_subtitleGenerating) {
+        setLastMessage(QStringLiteral("Subtitle generation already in progress"));
+        return;
+    }
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Clip clip = track.clips.at(clipIndex);
+    if (clip.type != drift::ClipType::Video && clip.type != drift::ClipType::Audio) {
+        setLastMessage(QStringLiteral("Select a video or audio clip to transcribe"));
+        return;
+    }
+    if (clip.path.isEmpty() || clip.srcOut <= clip.srcIn) {
+        setLastMessage(QStringLiteral("Clip has no audio to transcribe"));
+        return;
+    }
+
+    setPlaying(false);
+
+    m_subtitleGenCancel.storeRelaxed(0);
+    m_subtitleGenProgress = 0.0;
+    emit subtitleGenProgressChanged();
+    m_subtitleGenerating = true;
+    emit subtitleGeneratingChanged();
+    setLastMessage(QStringLiteral("Generating subtitles..."));
+
+    const QString path = clip.path;
+    const drift::TimeUs srcIn = clip.srcIn;
+    const drift::TimeUs srcOut = clip.srcOut;
+    const drift::TimeUs timelineStart = clip.timelineStart;
+    const drift::TimeUs timelineDuration = clip.timelineDuration;
+    const double speed = clip.effectiveSpeed();
+    const bool reverse = clip.reverse;
+
+    (void)QtConcurrent::run([this, path, srcIn, srcOut, timelineStart, timelineDuration, speed,
+                             reverse]() {
+        auto finish = [this, timelineStart, timelineDuration](bool ok, const QString &message,
+                                                              const QList<drift::SubtitleCue> &cues) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, ok, message, cues, timelineStart, timelineDuration]() {
+                    m_subtitleGenerating = false;
+                    emit subtitleGeneratingChanged();
+                    m_subtitleGenProgress = ok ? 1.0 : 0.0;
+                    emit subtitleGenProgressChanged();
+                    if (!ok || cues.isEmpty()) {
+                        setLastMessage(message);
+                        emit subtitleGenerationFinished(false, message);
+                        return;
+                    }
+                    finalizeGeneratedSubtitles(timelineStart, timelineDuration, cues);
+                },
+                Qt::QueuedConnection);
+        };
+
+        drift::WhisperTranscriber &whisper = drift::WhisperTranscriber::instance();
+        if (!whisper.available()) {
+            qWarning() << "[subtitles] whisper unavailable:" << whisper.lastError();
+            finish(false, whisper.lastError(), {});
+            return;
+        }
+
+        // Decode the clip's raw source audio over [srcIn, srcOut] at 16 kHz mono.
+        const int rate = 16000;
+        const int chunkFrames = 30 * rate;
+        std::vector<float> mono;
+        drift::TimeUs pos = srcIn;
+        while (pos < srcOut) {
+            if (m_subtitleGenCancel.loadRelaxed()) {
+                finish(false, QStringLiteral("Subtitle generation cancelled"), {});
+                return;
+            }
+            const drift::TimeUs remainUs = srcOut - pos;
+            const int frames =
+                qMin<int64_t>(chunkFrames, (remainUs * rate) / drift::kUsPerSecond + 1);
+            if (frames <= 0)
+                break;
+            QVector<float> stereo(static_cast<qsizetype>(frames) * 2);
+            const int got =
+                ClipReaderPool::instance().readAudioInterleaved(path, pos, frames, rate,
+                                                                stereo.data());
+            if (got <= 0)
+                break;
+            const size_t base = mono.size();
+            mono.resize(base + got);
+            for (int i = 0; i < got; ++i)
+                mono[base + i] = 0.5f * (stereo[i * 2] + stereo[i * 2 + 1]);
+            pos += static_cast<drift::TimeUs>((static_cast<int64_t>(got) * drift::kUsPerSecond) / rate);
+        }
+
+        qWarning() << "[subtitles] decoded mono samples:" << mono.size()
+                   << "seconds:" << (mono.size() / 16000.0);
+        if (mono.empty()) {
+            finish(false, QStringLiteral("No audio decoded"), {});
+            return;
+        }
+
+        const drift::WhisperResult res = whisper.transcribe(mono, [this](double fraction) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, fraction]() {
+                    m_subtitleGenProgress = fraction;
+                    emit subtitleGenProgressChanged();
+                },
+                Qt::QueuedConnection);
+            return m_subtitleGenCancel.loadRelaxed() == 0;
+        });
+
+        qWarning() << "[subtitles] transcribe done. ok:" << res.ok << "cancelled:" << res.cancelled
+                   << "cues:" << res.cues.size() << "error:" << res.error;
+
+        if (res.cancelled) {
+            finish(false, QStringLiteral("Subtitle generation cancelled"), {});
+            return;
+        }
+        if (!res.ok) {
+            finish(false, res.error, {});
+            return;
+        }
+
+        // Map source-relative cue times onto clip-relative timeline time (accounts for
+        // speed and reverse), clamped to the clip's duration.
+        const double spanSec = drift::usToSeconds(srcOut - srcIn);
+        QList<drift::SubtitleCue> mapped;
+        for (const drift::SubtitleCue &cue : res.cues) {
+            const double srcStart = drift::usToSeconds(cue.startUs);
+            const double srcEnd = drift::usToSeconds(cue.endUs);
+            double tlStart = reverse ? (spanSec - srcEnd) / speed : srcStart / speed;
+            double tlEnd = reverse ? (spanSec - srcStart) / speed : srcEnd / speed;
+            drift::TimeUs s = qBound<drift::TimeUs>(0, drift::secondsToUs(tlStart), timelineDuration);
+            drift::TimeUs e = qBound<drift::TimeUs>(0, drift::secondsToUs(tlEnd), timelineDuration);
+            if (e > s) {
+                drift::SubtitleCue m;
+                m.startUs = s;
+                m.endUs = e;
+                m.text = cue.text;
+                mapped.append(m);
+            }
+        }
+        drift::sortSubtitleCues(mapped);
+
+        qWarning() << "[subtitles] mapped cues:" << mapped.size() << "spanSec:" << spanSec
+                   << "timelineDuration us:" << timelineDuration << "speed:" << speed;
+
+        if (mapped.isEmpty()) {
+            finish(false, QStringLiteral("No speech detected"), {});
+            return;
+        }
+        finish(true, QStringLiteral("Subtitles generated"), mapped);
+    });
+}
+
+void AppController::finalizeGeneratedSubtitles(drift::TimeUs timelineStart,
+                                               drift::TimeUs timelineDuration,
+                                               const QList<drift::SubtitleCue> &cues)
+{
+    const drift::Project before = m_project;
+    const int trackIndex = drift::ensureTrackForClipType(m_project, drift::ClipType::Subtitle, true);
+    qWarning() << "[subtitles] finalize: trackIndex" << trackIndex << "cues" << cues.size()
+               << "start" << timelineStart << "dur" << timelineDuration;
+    if (trackIndex < 0)
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    drift::Clip clip;
+    clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    clip.type = drift::ClipType::Subtitle;
+    clip.timelineStart = timelineStart;
+    clip.timelineDuration = timelineDuration;
+    clip.srcIn = 0;
+    clip.srcOut = timelineDuration;
+    if (const drift::TextStyle *preset = drift::textStyleForPresetId(QStringLiteral("subtitle")))
+        clip.textStyle = *preset;
+    applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
+    clip.subtitleCues = cues;
+    clip.name = subtitleClipName(cues);
+
+    track.clips.append(clip);
+    pushProjectEdit(before, QStringLiteral("Subtitles generated"));
+    finishEdit(QStringLiteral("Subtitles generated"));
+    selectClip(trackIndex, track.clips.size() - 1);
+    setLastMessage(QStringLiteral("Subtitles generated"));
+    emit subtitleGenerationFinished(true, QStringLiteral("Subtitles generated"));
 }
 
 QVariantList AppController::builtinStickers() const

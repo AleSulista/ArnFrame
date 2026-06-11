@@ -1542,6 +1542,33 @@ PanelFrame {
                             sliderTo: 2
                             percent: true
                         }
+
+                        Rectangle {
+                            visible: root.clipKind === "audio" || root.clipKind === "video"
+                            width: parent.width
+                            height: 1
+                            color: Theme.panelBorder
+                            opacity: 0.5
+                        }
+
+                        Text {
+                            visible: root.clipKind === "audio" || root.clipKind === "video"
+                            text: qsTr("Auto subtitles")
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                        }
+
+                        ThemedButton {
+                            visible: root.clipKind === "audio" || root.clipKind === "video"
+                            width: parent.width
+                            text: EditorState.subtitleGenerating
+                                  ? qsTr("Transcribing… %1%").arg(Math.round(EditorState.subtitleGenProgress * 100))
+                                  : qsTr("Generate subtitles")
+                            enabled: !EditorState.subtitleGenerating
+                            onClicked: EditorState.generateSubtitlesForClip(
+                                           EditorState.selectedTrack, EditorState.selectedClip)
+                        }
                     }
 
                     // ----- Speed ---------------------------------------------------------------

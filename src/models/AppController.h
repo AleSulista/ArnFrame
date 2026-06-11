@@ -45,6 +45,8 @@ class AppController : public QObject
     Q_PROPERTY(bool redoAvailable READ redoAvailable NOTIFY undoStackChanged)
     Q_PROPERTY(bool exportInProgress READ exportInProgress NOTIFY exportInProgressChanged)
     Q_PROPERTY(double exportProgress READ exportProgress NOTIFY exportProgressChanged)
+    Q_PROPERTY(bool subtitleGenerating READ subtitleGenerating NOTIFY subtitleGeneratingChanged)
+    Q_PROPERTY(double subtitleGenProgress READ subtitleGenProgress NOTIFY subtitleGenProgressChanged)
     Q_PROPERTY(int selectedTrack READ selectedTrack NOTIFY selectionChanged)
     Q_PROPERTY(int selectedClip READ selectedClip NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList selection READ selection NOTIFY selectionChanged)
@@ -94,6 +96,8 @@ public:
     bool redoAvailable() const { return m_undoStack.canRedo(); }
     bool exportInProgress() const { return m_exportInProgress; }
     double exportProgress() const;
+    bool subtitleGenerating() const { return m_subtitleGenerating; }
+    double subtitleGenProgress() const { return m_subtitleGenProgress; }
     int selectedTrack() const { return m_selectedTrack; }
     int selectedClip() const { return m_selectedClip; }
     QVariantList selection() const;
@@ -136,6 +140,8 @@ public:
     Q_INVOKABLE QString trackTypeForAsset(int assetIndex) const;
     Q_INVOKABLE void addTextClip(const QString &text, double atSeconds);
     Q_INVOKABLE void addSubtitleClip(double atSeconds);
+    Q_INVOKABLE void generateSubtitlesForClip(int trackIndex, int clipIndex);
+    Q_INVOKABLE void cancelSubtitleGeneration();
     Q_INVOKABLE void addShapeClip(const QString &shapeKind, double atSeconds);
     Q_INVOKABLE void addShapeClipAt(const QString &shapeKind, int trackIndex, double atSeconds);
     Q_INVOKABLE void addStickerClip(const QString &stickerId, double atSeconds);
@@ -297,6 +303,9 @@ signals:
     void undoStackChanged();
     void exportInProgressChanged();
     void exportProgressChanged();
+    void subtitleGeneratingChanged();
+    void subtitleGenProgressChanged();
+    void subtitleGenerationFinished(bool ok, const QString &message);
     void selectionChanged();
     void editCapabilitiesChanged();
     void selectedClipDataChanged();
@@ -321,6 +330,8 @@ signals:
 protected:
     void pushProjectEdit(const drift::Project &before, const QString &text);
     void finishEdit(const QString &message);
+    void finalizeGeneratedSubtitles(drift::TimeUs timelineStart, drift::TimeUs timelineDuration,
+                                    const QList<drift::SubtitleCue> &cues);
     void setLastMessage(const QString &message);
     drift::TimeUs playheadUs() const { return m_playheadUs; }
     void setPlayheadUs(drift::TimeUs us);
@@ -365,6 +376,9 @@ protected:
     bool m_exportInProgress = false;
     double m_exportProgress = 0.0;
     QAtomicInt m_exportCancel = 0;
+    bool m_subtitleGenerating = false;
+    double m_subtitleGenProgress = 0.0;
+    QAtomicInt m_subtitleGenCancel = 0;
     int m_selectedTrack = -1;
     int m_selectedClip = -1;
     int m_selectedTransitionTrack = -1;

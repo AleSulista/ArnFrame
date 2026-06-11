@@ -71,6 +71,21 @@ add_custom_target(stickers
 find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets OpenGL)
 find_package(FFmpeg REQUIRED)
 
+# ONNX Runtime powers the Whisper auto-subtitle transcriber (src/engine/WhisperTranscriber).
+option(DRIFT_FETCH_ONNXRUNTIME
+    "Download a prebuilt ONNX Runtime when it is not installed (cmake/FetchOnnxRuntime.cmake)" ON)
+find_package(OnnxRuntime QUIET)
+if(NOT OnnxRuntime_FOUND AND DRIFT_FETCH_ONNXRUNTIME)
+    include(FetchOnnxRuntime)
+    find_package(OnnxRuntime REQUIRED)
+endif()
+if(NOT OnnxRuntime_FOUND)
+    message(FATAL_ERROR
+        "ONNX Runtime not found. Install it and set ONNXRUNTIME_ROOT, "
+        "or enable DRIFT_FETCH_ONNXRUNTIME to download it automatically.")
+endif()
+message(STATUS "ONNX Runtime found: ${OnnxRuntime_LIBRARIES} — auto subtitles enabled")
+
 if(WITH_BGREMOVAL)
     # Link only modules needed for background removal — not the full OpenCV
     # distribution (opencv_viz pulls in VTK and breaks linking on many systems).
@@ -160,9 +175,14 @@ add_library(driftengine STATIC
     src/engine/AudioAtempo.cpp
     src/engine/AudioMixer.h
     src/engine/AudioMixer.cpp
+    src/engine/WhisperTokenizer.h
+    src/engine/WhisperTokenizer.cpp
+    src/engine/WhisperTranscriber.h
+    src/engine/WhisperTranscriber.cpp
 )
 target_include_directories(driftengine PUBLIC src)
-target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui Qt6::OpenGL FFmpeg::FFmpeg driftcore)
+target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui Qt6::OpenGL FFmpeg::FFmpeg driftcore
+    onnxruntime::onnxruntime)
 
 if(WITH_BGREMOVAL)
     target_include_directories(driftengine PRIVATE ${OpenCV_INCLUDE_DIRS})
@@ -242,6 +262,7 @@ qt_add_qml_module(drift
         src/qml/components/ProjectSetupDialog.qml
         src/qml/components/ExportDialog.qml
         src/qml/components/ExportProgressDialog.qml
+        src/qml/components/SubtitleProgressDialog.qml
         src/qml/components/CircularProgress.qml
         src/qml/components/RecoveryDialog.qml
         src/qml/components/RecentProjectsPopup.qml
@@ -296,9 +317,37 @@ function(drift_copy_fonts target)
     )
 endfunction()
 
+# The Whisper models are ~750 MB and gitignored, dropped into models/ by hand. Symlink
+# (not copy) the directory next to the binary so applicationDirPath()/models resolves in
+# dev builds; tolerate the directory being absent (the feature just reports unavailable).
+function(drift_link_whisper_models target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/models"
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+                "${CMAKE_SOURCE_DIR}/models"
+                "$<TARGET_FILE_DIR:${target}>/models"
+        COMMENT "Symlink whisper models next to ${target}"
+    )
+endfunction()
+
+# Deploy the ONNX Runtime shared library next to the binary (needed on Windows; harmless
+# elsewhere and keeps the app runnable from the build tree without a system install).
+function(drift_copy_onnxruntime target)
+    if(ONNXRUNTIME_RUNTIME_LIBS)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${ONNXRUNTIME_RUNTIME_LIBS}
+                    "$<TARGET_FILE_DIR:${target}>"
+            COMMENT "Copy onnxruntime runtime libs next to ${target}"
+        )
+    endif()
+endfunction()
+
 drift_copy_effects(drift)
 drift_copy_transitions(drift)
 drift_copy_fonts(drift)
+drift_link_whisper_models(drift)
+drift_copy_onnxruntime(drift)
 
 # --- CLI tools (headless engine testing, no GUI) ----------------------------
 add_subdirectory(tools)

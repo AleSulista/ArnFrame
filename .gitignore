@@ -18,6 +18,9 @@ fonts/
 emoji-fonts/
 resources/stickers/
 
+# Whisper ONNX models (dropped in by hand) for auto subtitle generation — large, not committed
+models/
+
 # Sample media (kept out of the repo)
 *.mp4
 *.mov

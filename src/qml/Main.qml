@@ -29,6 +29,10 @@ ApplicationWindow {
         id: recoveryDialog
     }
 
+    SubtitleProgressDialog {
+        id: subtitleProgressDialog
+    }
+
     function promptRecoveryIfNeeded() {
         if (!EditorState.recoveryAvailable || recoveryDialog.visible)
             return
