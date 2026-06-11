@@ -4,6 +4,7 @@
 
 #include <QList>
 #include <QString>
+#include <QVariantList>
 
 #include <functional>
 #include <memory>
@@ -32,9 +33,17 @@ public:
     bool available();
     QString lastError() const;
 
-    // pcm: 16 kHz mono float32. progress(fraction in [0,1]) returns false to request cancel.
+    // Languages the model can force, as [{code, label}, ...] sorted by label. Does not load
+    // the ONNX sessions — only needs generation_config.json next to the model files.
+    QVariantList supportedLanguages();
+
+    // pcm: 16 kHz mono float32.
+    // progress(fraction in [0,1], status) returns false to request cancel. status is a short
+    // human-readable line for the UI (may be empty to leave the last message unchanged).
+    // languageCode: ISO-ish Whisper code ("en", "si", …). Empty = auto-detect from audio.
     WhisperResult transcribe(const std::vector<float> &pcm,
-                             const std::function<bool(double)> &progress);
+                             const std::function<bool(double, const QString &)> &progress,
+                             const QString &languageCode = QString());
 
     WhisperTranscriber(const WhisperTranscriber &) = delete;
     WhisperTranscriber &operator=(const WhisperTranscriber &) = delete;

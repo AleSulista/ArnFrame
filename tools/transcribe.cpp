@@ -1,5 +1,7 @@
 // Headless smoke test for the Whisper auto-subtitle transcriber: decode a media file to
-// 16 kHz mono and print the timed cues. Usage: transcribe <media-file>
+// 16 kHz mono and print the timed cues.
+// Usage: transcribe [--lang CODE] <media-file>
+//        CODE is a Whisper language code (en, si, …). Omit for auto-detect.
 
 #include "engine/ClipReaderPool.h"
 #include "engine/MediaProbe.h"
@@ -19,11 +21,24 @@ int main(int argc, char *argv[])
     QTextStream err(stderr);
 
     const QStringList args = app.arguments();
-    if (args.size() != 2) {
-        err << "usage: transcribe <media-file>\n";
+    QString language;
+    QString path;
+    for (int i = 1; i < args.size(); ++i) {
+        if (args.at(i) == QLatin1String("--lang") && i + 1 < args.size()) {
+            language = args.at(++i);
+            continue;
+        }
+        if (path.isEmpty() && !args.at(i).startsWith(QLatin1Char('-')))
+            path = args.at(i);
+        else {
+            err << "usage: transcribe [--lang CODE] <media-file>\n";
+            return 1;
+        }
+    }
+    if (path.isEmpty()) {
+        err << "usage: transcribe [--lang CODE] <media-file>\n";
         return 1;
     }
-    const QString path = args.at(1);
 
     const MediaInfo info = MediaProbe::probe(path);
     if (!info.ok || info.durationUs <= 0) {
@@ -51,11 +66,17 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    const drift::WhisperResult res = w.transcribe(mono, [&](double p) {
-        err << "\r" << static_cast<int>(p * 100) << "%   ";
-        err.flush();
-        return true;
-    });
+    const drift::WhisperResult res = w.transcribe(
+        mono,
+        [&](double p, const QString &status) {
+            err << "\r" << static_cast<int>(p * 100) << "%";
+            if (!status.isEmpty())
+                err << "  " << status;
+            err << "   ";
+            err.flush();
+            return true;
+        },
+        language);
     err << "\n";
 
     if (!res.ok) {

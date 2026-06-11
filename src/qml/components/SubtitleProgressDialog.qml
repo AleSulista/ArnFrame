@@ -8,7 +8,7 @@ ThemedDialog {
     id: root
 
     title: qsTr("Generating subtitles")
-    width: 340
+    width: 360
     showAccept: false
     rejectText: qsTr("Cancel")
     rejectVariant: "secondary"
@@ -27,8 +27,8 @@ ThemedDialog {
     }
 
     contentItem: Column {
-        spacing: 16
-        width: parent ? parent.width : 308
+        spacing: 14
+        width: parent ? parent.width : 328
 
         Item {
             width: parent.width
@@ -52,8 +52,20 @@ ThemedDialog {
         ThemedLabel {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
+            tone: "default"
             size: "sm"
-            text: qsTr("Transcribing the clip's audio with Whisper. This runs on the CPU and may take a while.")
+            wrapMode: Text.WordWrap
+            text: EditorState.subtitleGenStatus.length > 0
+                  ? EditorState.subtitleGenStatus
+                  : qsTr("Working…")
+        }
+
+        ThemedLabel {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            size: "xs"
+            wrapMode: Text.WordWrap
+            text: qsTr("Runs on the CPU and can take a few minutes on longer clips.")
         }
     }
 }

@@ -1559,6 +1559,17 @@ PanelFrame {
                             font.pixelSize: Theme.fontSizeXs
                         }
 
+                        ThemedComboBox {
+                            id: subtitleLanguageBox
+                            visible: root.clipKind === "audio" || root.clipKind === "video"
+                            width: parent.width
+                            enabled: !EditorState.subtitleGenerating
+                            textRole: "label"
+                            valueRole: "code"
+                            model: EditorState.whisperLanguages()
+                            Component.onCompleted: currentIndex = 0
+                        }
+
                         ThemedButton {
                             visible: root.clipKind === "audio" || root.clipKind === "video"
                             width: parent.width
@@ -1566,8 +1577,13 @@ PanelFrame {
                                   ? qsTr("Transcribing… %1%").arg(Math.round(EditorState.subtitleGenProgress * 100))
                                   : qsTr("Generate subtitles")
                             enabled: !EditorState.subtitleGenerating
-                            onClicked: EditorState.generateSubtitlesForClip(
-                                           EditorState.selectedTrack, EditorState.selectedClip)
+                            onClicked: {
+                                const lang = subtitleLanguageBox.currentValue !== undefined
+                                             ? subtitleLanguageBox.currentValue
+                                             : ""
+                                EditorState.generateSubtitlesForClip(
+                                    EditorState.selectedTrack, EditorState.selectedClip, lang)
+                            }
                         }
                     }
 

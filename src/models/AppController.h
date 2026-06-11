@@ -47,6 +47,7 @@ class AppController : public QObject
     Q_PROPERTY(double exportProgress READ exportProgress NOTIFY exportProgressChanged)
     Q_PROPERTY(bool subtitleGenerating READ subtitleGenerating NOTIFY subtitleGeneratingChanged)
     Q_PROPERTY(double subtitleGenProgress READ subtitleGenProgress NOTIFY subtitleGenProgressChanged)
+    Q_PROPERTY(QString subtitleGenStatus READ subtitleGenStatus NOTIFY subtitleGenStatusChanged)
     Q_PROPERTY(int selectedTrack READ selectedTrack NOTIFY selectionChanged)
     Q_PROPERTY(int selectedClip READ selectedClip NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList selection READ selection NOTIFY selectionChanged)
@@ -98,6 +99,7 @@ public:
     double exportProgress() const;
     bool subtitleGenerating() const { return m_subtitleGenerating; }
     double subtitleGenProgress() const { return m_subtitleGenProgress; }
+    QString subtitleGenStatus() const { return m_subtitleGenStatus; }
     int selectedTrack() const { return m_selectedTrack; }
     int selectedClip() const { return m_selectedClip; }
     QVariantList selection() const;
@@ -140,8 +142,10 @@ public:
     Q_INVOKABLE QString trackTypeForAsset(int assetIndex) const;
     Q_INVOKABLE void addTextClip(const QString &text, double atSeconds);
     Q_INVOKABLE void addSubtitleClip(double atSeconds);
-    Q_INVOKABLE void generateSubtitlesForClip(int trackIndex, int clipIndex);
+    Q_INVOKABLE void generateSubtitlesForClip(int trackIndex, int clipIndex,
+                                              const QString &language = QString());
     Q_INVOKABLE void cancelSubtitleGeneration();
+    Q_INVOKABLE QVariantList whisperLanguages();
     Q_INVOKABLE void addShapeClip(const QString &shapeKind, double atSeconds);
     Q_INVOKABLE void addShapeClipAt(const QString &shapeKind, int trackIndex, double atSeconds);
     Q_INVOKABLE void addStickerClip(const QString &stickerId, double atSeconds);
@@ -305,6 +309,7 @@ signals:
     void exportProgressChanged();
     void subtitleGeneratingChanged();
     void subtitleGenProgressChanged();
+    void subtitleGenStatusChanged();
     void subtitleGenerationFinished(bool ok, const QString &message);
     void selectionChanged();
     void editCapabilitiesChanged();
@@ -378,6 +383,7 @@ protected:
     QAtomicInt m_exportCancel = 0;
     bool m_subtitleGenerating = false;
     double m_subtitleGenProgress = 0.0;
+    QString m_subtitleGenStatus;
     QAtomicInt m_subtitleGenCancel = 0;
     int m_selectedTrack = -1;
     int m_selectedClip = -1;
