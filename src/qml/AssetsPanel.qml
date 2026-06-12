@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Window
+import QtQuick.Dialogs
 import Drift
 import "components"
 
@@ -467,37 +468,35 @@ PanelFrame {
                         onActivated: EditorState.setBackground({ kind: model[currentIndex] })
                     }
 
-                    Flow {
-                        width: parent.width
+
+                    Row {
                         spacing: 6
                         visible: EditorState.background.kind === "color"
-                        Repeater {
-                            model: ["#ff000000", "#ffffffff", "#ff808080", "#ff1e293b",
-                                    "#ff2563eb", "#ff059669", "#ffdc2626", "#ffd97706"]
-                            delegate: Rectangle {
-                                required property string modelData
-                                width: 22
-                                height: 22
-                                radius: 4
-                                color: modelData
-                                property bool selected: (EditorState.background.color || "").toLowerCase()
-                                                        === modelData.toLowerCase()
-                                border.width: selected ? 2 : 1
-                                border.color: selected ? Theme.accent : Theme.panelBorder
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: EditorState.setBackground({ kind: "color", color: parent.modelData })
+
+                        Rectangle {
+                            width: 24
+                            height: 24
+                            radius: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: EditorState.background.color || "#ff000000"
+                            border.width: 1
+                            border.color: Theme.panelBorder
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    canvasColorDialog.selectedColor = EditorState.background.color || "#ff000000"
+                                    canvasColorDialog.open()
                                 }
                             }
                         }
-                    }
 
-                    ThemedTextField {
-                        width: 120
-                        visible: EditorState.background.kind === "color"
-                        text: EditorState.background.color || "#ff000000"
-                        onEditingFinished: EditorState.setBackground({ kind: "color", color: text })
+                        ThemedTextField {
+                            width: 92
+                            text: EditorState.background.color || "#ff000000"
+                            onEditingFinished: EditorState.setBackground({ kind: "color", color: text })
+                        }
                     }
 
                     Column {
@@ -960,6 +959,23 @@ PanelFrame {
                     }
                 }
             }
+        }
+    }
+
+    ColorDialog {
+        id: canvasColorDialog
+        title: "Select Canvas Color"
+
+        function colorToHex(c) {
+            var toHex = function(v) {
+                var h = Math.round(v * 255).toString(16);
+                return h.length === 1 ? "0" + h : h;
+            }
+            return "#" + toHex(c.a) + toHex(c.r) + toHex(c.g) + toHex(c.b);
+        }
+
+        onAccepted: {
+            EditorState.setBackground({ kind: "color", color: colorToHex(selectedColor) })
         }
     }
 }
