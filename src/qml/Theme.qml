@@ -10,10 +10,8 @@ QtObject {
     id: theme
 
     property FontLoader _interLoader: FontLoader { source: "qrc:/qt/qml/Drift/resources/fonts/Inter.ttf" }
-    property FontLoader _lucideLoader: FontLoader { source: "qrc:/qt/qml/Drift/resources/fonts/lucide.ttf" }
 
     readonly property string fontFamily: _interLoader.name || "sans-serif"
-    readonly property string iconFontFamily: _lucideLoader.name || "sans-serif"
     readonly property string monoFontFamily: "monospace"
 
     // --- Light/dark mode: follows the OS by default, overridable at runtime ----
@@ -154,53 +152,58 @@ QtObject {
     readonly property real playheadHandleSize: 12
     readonly property real clipSelectionRingWidth: 1.5
 
-    // --- Iconography (Lucide glyph codepoints; ISC-licensed, see
+    // --- Iconography (Lucide SVGs in resources/icons/; ISC-licensed, see
     // resources/licenses/LICENSE-lucide.txt) ------------------------------------
+    // Values are Lucide icon file names (without .svg).
     readonly property var icons: ({
-        scissors: "",
-        alignLeft: "",
-        alignRight: "",
-        copy: "",
-        trash: "",
-        snowflake: "",
-        bookmark: "",
-        layers: "",
-        magnet: "",
-        linkTwo: "",
-        unlink: "",
-        foldHorizontal: "",
-        zoomOut: "",
-        zoomIn: "",
-        play: "",
-        pause: "",
-        maximize: "",
-        folder: "",
-        headphones: "",
-        type: "",
-        smile: "",
-        wand: "",
-        sliders: "",
-        settings: "",
-        upload: "",
-        plus: "",
-        volumeHigh: "",
-        volumeOff: "",
-        eye: "",
-        eyeOff: "",
-        film: "",
-        music: "",
-        image: "",
-        shapes: "",
-        chevronDown: "",
-        chevronsRight: "",
-        x: "",
-        search: "",
-        messageSquare: "",
-        moon: "",
-        sun: "",
-        grid: "",
-        list: "",
-        sort: "",
-        gripVertical: ""
+        scissors: "scissors",
+        chevronsLeft: "chevrons-left",
+        undo: "undo",
+        redo: "redo",
+        clipboardPaste: "clipboard-paste",
+        copyPlus: "copy-plus",
+        copy: "copy",
+        trash: "trash-2",
+        snowflake: "snowflake",
+        bookmark: "bookmark",
+        layers: "layers",
+        magnet: "magnet",
+        linkTwo: "link-2",
+        unlink: "unlink-2",
+        foldHorizontal: "fold-horizontal",
+        zoomOut: "zoom-out",
+        zoomIn: "zoom-in",
+        gauge: "gauge",
+        play: "play",
+        pause: "pause",
+        maximize: "maximize",
+        folder: "folder",
+        headphones: "headphones",
+        type: "type",
+        smile: "smile",
+        wand: "wand-sparkles",
+        sliders: "sliders-horizontal",
+        settings: "settings",
+        upload: "upload",
+        plus: "plus",
+        volumeHigh: "volume-2",
+        volumeOff: "volume-off",
+        eye: "eye",
+        eyeOff: "eye-off",
+        film: "film",
+        music: "music",
+        image: "image",
+        shapes: "shapes",
+        chevronDown: "chevron-down",
+        chevronsRight: "chevrons-right",
+        x: "x",
+        search: "search",
+        messageSquare: "message-square",
+        moon: "moon",
+        sun: "sun",
+        grid: "grid-3x3",
+        list: "list",
+        sort: "arrow-down-a-z",
+        gripVertical: "grip-vertical"
     })
 }

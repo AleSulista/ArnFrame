@@ -449,6 +449,23 @@ QVariantMap transitionToMap(const drift::Track &track, const drift::Transition &
     };
 }
 
+bool isSyntheticTimelineClip(drift::ClipType type)
+{
+    return type == drift::ClipType::Text || type == drift::ClipType::Subtitle
+           || type == drift::ClipType::Shape || type == drift::ClipType::Image;
+}
+
+drift::TimeUs syntheticClipMaxDurationUs()
+{
+    return drift::secondsToUs(300.0);
+}
+
+void syncSyntheticSourceRange(drift::Clip &clip)
+{
+    clip.srcIn = 0;
+    clip.srcOut = qMin(clip.sourceSpanUs(), syntheticClipMaxDurationUs());
+}
+
 bool clipAcceptsPreviewTransform(const drift::Clip &clip)
 {
     return clip.type == drift::ClipType::Shape || clip.type == drift::ClipType::Image
@@ -1578,6 +1595,26 @@ void AppController::trimClipLeft(int trackIndex, int clipIndex, double newStart)
     if (delta == 0)
         return;
 
+    if (isSyntheticTimelineClip(clip.type)) {
+        if (delta > 0) {
+            if (clip.timelineDuration - delta < drift::kMinClipDurationUs)
+                return;
+            clip.timelineStart += delta;
+            clip.timelineDuration -= delta;
+        } else {
+            const drift::TimeUs extendBy = -delta;
+            if (clip.timelineDuration + extendBy > syntheticClipMaxDurationUs())
+                return;
+            clip.timelineStart = snappedStart;
+            clip.timelineDuration += extendBy;
+        }
+        syncSyntheticSourceRange(clip);
+        syncLinkedPartnersFrom(m_project, clip);
+        syncOverlapTransitions(m_project);
+        emit tracksChanged();
+        return;
+    }
+
     if (delta > 0) {
         if (clip.timelineDuration - delta < drift::kMinClipDurationUs)
             return;
@@ -1636,9 +1673,7 @@ void AppController::trimClipRight(int trackIndex, int clipIndex, double newEnd)
                                                      m_playheadUs);
     drift::TimeUs newDuration = snappedEnd - clip.timelineStart;
 
-    const bool syntheticVisual = clip.type == drift::ClipType::Text
-                                 || clip.type == drift::ClipType::Subtitle
-                                 || clip.type == drift::ClipType::Shape;
+    const bool syntheticVisual = isSyntheticTimelineClip(clip.type);
     const drift::TimeUs maxSource = sourceDurationForClip(clip);
     const drift::TimeUs maxSourceSpan =
         clip.reverse ? clip.srcOut : (maxSource > clip.srcIn ? maxSource - clip.srcIn : 0);
@@ -2720,25 +2755,27 @@ void AppController::setClipDuration(int trackIndex, int clipIndex, double durati
     const drift::Project before = m_project;
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs maxSource = sourceDurationForClip(clip);
+    const bool syntheticVisual = isSyntheticTimelineClip(clip.type);
     const drift::TimeUs maxSourceSpan =
-        (clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Subtitle
-         || clip.type == drift::ClipType::Shape)
-            ? drift::secondsToUs(300.0)
-            : (clip.reverse ? clip.srcOut : (maxSource > clip.srcIn ? maxSource - clip.srcIn : 0));
+        syntheticVisual ? syntheticClipMaxDurationUs()
+                        : (clip.reverse ? clip.srcOut : (maxSource > clip.srcIn ? maxSource - clip.srcIn : 0));
     const drift::TimeUs maxDuration =
-        (clip.type == drift::ClipType::Text || clip.type == drift::ClipType::Subtitle
-         || clip.type == drift::ClipType::Shape)
+        syntheticVisual
             ? maxSourceSpan
             : (clip.effectiveSpeed() > 0.0
                    ? static_cast<drift::TimeUs>(
                          llround(static_cast<double>(maxSourceSpan) / clip.effectiveSpeed()))
                    : maxSourceSpan);
     clip.timelineDuration = qBound(drift::kMinClipDurationUs, drift::secondsToUs(duration), maxDuration);
-    const drift::TimeUs span = clip.sourceSpanUs();
-    if (clip.reverse)
-        clip.srcIn = qMax<drift::TimeUs>(0, clip.srcOut - span);
-    else
-        clip.srcOut = qMin(clip.srcIn + span, maxSource);
+    if (syntheticVisual) {
+        syncSyntheticSourceRange(clip);
+    } else {
+        const drift::TimeUs span = clip.sourceSpanUs();
+        if (clip.reverse)
+            clip.srcIn = qMax<drift::TimeUs>(0, clip.srcOut - span);
+        else
+            clip.srcOut = qMin(clip.srcIn + span, maxSource);
+    }
     pushProjectEdit(before, QStringLiteral("Duration updated"));
     finishEdit(QStringLiteral("Duration updated"));
 }
@@ -4147,7 +4184,6 @@ void AppController::freezeFrameAtPlayhead()
     const int trackIndex = drift::ensureTrackForClipType(m_project, drift::ClipType::Image, false);
 
     drift::Track &track = m_project.tracks()[trackIndex];
-    const drift::TimeUs sourceTimeUs = drift::secondsToUs(sourceTime);
     const drift::TimeUs start = drift::resolveClipStart(m_project, track, -1, m_playheadUs,
                                                         drift::kImageClipDurationUs, m_snapEnabled, m_playheadUs);
 
@@ -4155,13 +4191,13 @@ void AppController::freezeFrameAtPlayhead()
     freezeClip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     freezeClip.type = drift::ClipType::Image;
     freezeClip.name = QStringLiteral("Freeze frame");
-    freezeClip.path = path;
+    freezeClip.path = thumb;
     freezeClip.thumbnailPath = thumb;
     freezeClip.filmstripPath = thumb;
     freezeClip.timelineStart = start;
     freezeClip.timelineDuration = drift::kImageClipDurationUs;
-    freezeClip.srcIn = sourceTimeUs;
-    freezeClip.srcOut = sourceTimeUs + drift::kImageClipDurationUs;
+    freezeClip.srcIn = 0;
+    freezeClip.srcOut = drift::kImageClipDurationUs;
 
     track.clips.append(freezeClip);
     pushProjectEdit(before, QStringLiteral("Freeze frame added"));

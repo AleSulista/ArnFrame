@@ -301,7 +301,7 @@ PanelFrame {
         Theme.icons.folder,
         Theme.icons.maximize,
         Theme.icons.headphones,
-        Theme.icons.zoomIn,
+        Theme.icons.gauge,
         Theme.icons.layers,
         Theme.icons.linkTwo,
         Theme.icons.grid,

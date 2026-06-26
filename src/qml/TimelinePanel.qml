@@ -412,8 +412,8 @@ PanelFrame {
                 }
 
                 IconButton { icon: Theme.icons.scissors; variant: "text"; tooltip: qsTr("Split at playhead"); onClicked: EditorState.splitAtPlayhead() }
-                IconButton { icon: Theme.icons.alignLeft; variant: "text"; tooltip: qsTr("Split left"); onClicked: EditorState.splitSelectedClipLeft() }
-                IconButton { icon: Theme.icons.alignRight; variant: "text"; tooltip: qsTr("Split right"); onClicked: EditorState.splitSelectedClipRight() }
+                IconButton { icon: Theme.icons.chevronsLeft; variant: "text"; tooltip: qsTr("Split left"); onClicked: EditorState.splitSelectedClipLeft() }
+                IconButton { icon: Theme.icons.chevronsRight; variant: "text"; tooltip: qsTr("Split right"); onClicked: EditorState.splitSelectedClipRight() }
                 IconButton {
                     icon: Theme.icons.unlink
                     variant: "text"
@@ -429,8 +429,8 @@ PanelFrame {
                     onClicked: EditorState.mergeSelectedClips()
                 }
                 IconButton { icon: Theme.icons.copy; variant: "text"; tooltip: qsTr("Copy selection"); onClicked: EditorState.copySelection() }
-                IconButton { icon: Theme.icons.plus; variant: "text"; tooltip: qsTr("Paste at playhead"); onClicked: EditorState.pasteAtPlayhead() }
-                IconButton { icon: Theme.icons.copy; variant: "text"; tooltip: qsTr("Duplicate clip"); onClicked: EditorState.duplicateSelectedClip() }
+                IconButton { icon: Theme.icons.clipboardPaste; variant: "text"; tooltip: qsTr("Paste at playhead"); onClicked: EditorState.pasteAtPlayhead() }
+                IconButton { icon: Theme.icons.copyPlus; variant: "text"; tooltip: qsTr("Duplicate clip"); onClicked: EditorState.duplicateSelectedClip() }
                 IconButton { icon: Theme.icons.snowflake; variant: "text"; tooltip: qsTr("Freeze frame at playhead"); onClicked: EditorState.freezeFrameAtPlayhead() }
                 IconButton { icon: Theme.icons.trash; variant: "text"; tooltip: qsTr("Delete clip"); onClicked: EditorState.deleteSelectedClip() }
 
@@ -448,11 +448,18 @@ PanelFrame {
                     onClicked: EditorState.addBookmark(EditorState.playheadSeconds, "Mark " + Math.round(EditorState.playheadSeconds))
                 }
                 IconButton {
-                    icon: Theme.icons.layers
+                    icon: Theme.icons.undo
                     variant: "text"
                     tooltip: qsTr("Undo")
                     onClicked: EditorState.undo()
                     buttonEnabled: EditorState.undoAvailable
+                }
+                IconButton {
+                    icon: Theme.icons.redo
+                    variant: "text"
+                    tooltip: qsTr("Redo")
+                    onClicked: EditorState.redo()
+                    buttonEnabled: EditorState.redoAvailable
                 }
 
                 Rectangle {

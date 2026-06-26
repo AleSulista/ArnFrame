@@ -40,7 +40,7 @@ set(DRIFT_ADDON_INDEX_URL "https://drift-addons.cutwire.org/v1/index"
 set(DRIFT_ADDON_CLIENT_TOKEN "79a388bba9301cacc81cc6eb0724c81e948e1b27c69aee1b"
     CACHE STRING "Client token sent to the addon service as X-Drift-Client")
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets OpenGL Network)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets OpenGL Network QuickEffects)
 find_package(FFmpeg REQUIRED)
 
 # ONNX Runtime powers the Whisper auto-subtitle transcriber (src/engine/WhisperTranscriber).
@@ -215,6 +215,10 @@ qt_add_executable(drift
 
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
 
+# Lucide icons: SVG sources in resources/icons/ (from lucide-icons-1.25.0), PNGs for QML.
+file(GLOB DRIFT_LUCIDE_ICONS RELATIVE "${CMAKE_SOURCE_DIR}" CONFIGURE_DEPENDS
+     "resources/icons/*.png")
+
 qt_add_qml_module(drift
     URI Drift
     VERSION 1.0
@@ -259,15 +263,15 @@ qt_add_qml_module(drift
         src/qml/components/RecentProjectsPopup.qml
         src/qml/components/NewTrackMenu.qml
     RESOURCES
-        # UI chrome, not catalog content: the interface font and the icon font are always needed,
-        # including before any addon is installed.
+        # UI chrome: interface font and Lucide SVG icons (always needed, including before addons).
         resources/fonts/Inter.ttf
-        resources/fonts/lucide.ttf
+        ${DRIFT_LUCIDE_ICONS}
 )
 
 target_link_libraries(drift PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
+    Qt6::QuickEffects
     Qt6::Multimedia
     Qt6::Gui
     Qt6::Widgets

@@ -52,7 +52,7 @@ PanelFrame {
         ListElement { tabId: "settings"; icon: 6; label: "Settings" }
     }
     property var tabIcons: [
-        Theme.icons.folder,
+        Theme.icons.film,
         Theme.icons.headphones,
         Theme.icons.type,
         Theme.icons.smile,
