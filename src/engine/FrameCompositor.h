@@ -5,6 +5,7 @@
 #include "core/Time.h"
 
 #include <QImage>
+#include <QString>
 
 // Composites all visible tracks into a single RGBA frame at timeline time T.
 class FrameCompositor
@@ -14,6 +15,9 @@ public:
     {
         double previewScale = 1.0;
         int maxTimeEchoHistoryFrames = -1;
+        // Clip id to omit from the frame (the text clip being edited in place on
+        // the preview). Empty renders everything.
+        QString skipClipId;
     };
 
     void setProject(const drift::Project *project) { m_project = project; }

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Drift
 import "components"
 
@@ -109,7 +110,17 @@ PanelFrame {
                         // True while a handle is being dragged. Rebuilding the model
                         // mid-drag would destroy the delegate that owns the active
                         // grab, so refreshes are suppressed until the drag ends.
+                        // (Also held true while a text clip is edited in place, so
+                        // the inline editor delegate is not destroyed mid-edit.)
                         property bool interacting: false
+
+                        // "track:clip" of the text clip currently edited in place,
+                        // or "" when no inline edit is active.
+                        property string editingKey: ""
+
+                        // "track:clip" of a freshly added placeholder text clip that
+                        // should open its editor as soon as its box exists.
+                        property string pendingEditKey: ""
 
                         function refreshOverlay() {
                             if (interacting)
@@ -130,6 +141,10 @@ PanelFrame {
                             function onTracksChanged() { transformOverlay.refreshOverlay() }
                             function onSelectionChanged() { transformOverlay.refreshOverlay() }
                             function onPlayheadSecondsChanged() { transformOverlay.refreshOverlay() }
+                            function onInlineTextEditRequested(trackIndex, clipIndex) {
+                                transformOverlay.pendingEditKey = trackIndex + ":" + clipIndex
+                                transformOverlay.refreshOverlay()
+                            }
                         }
 
                         Repeater {
@@ -141,6 +156,65 @@ PanelFrame {
 
                                 readonly property bool selected: EditorState.selectedTrack === modelData.track
                                                                         && EditorState.selectedClip === modelData.clip
+                                readonly property bool isText: modelData.kind === "text"
+                                readonly property bool editing: transformOverlay.editingKey
+                                                                        === (modelData.track + ":" + modelData.clip)
+                                // Snapshot of the clip's TextStyle taken when editing
+                                // begins; drives the inline editor's font/color/align.
+                                property var editStyle: null
+
+                                function enterEdit() {
+                                    const info = EditorState.clipAt(modelData.track, modelData.clip)
+                                    handle.editStyle = info.textStyle
+                                    editor.text = info.textContent || ""
+                                    transformOverlay.editingKey = modelData.track + ":" + modelData.clip
+                                    transformOverlay.interacting = true
+                                    EditorState.selectClip(modelData.track, modelData.clip)
+                                    EditorState.beginTextEdit(modelData.track, modelData.clip)
+                                    editor.forceActiveFocus()
+                                    editor.selectAll()
+                                }
+
+                                function commitEdit() {
+                                    if (!handle.editing)
+                                        return
+                                    EditorState.setClipTextContent(modelData.track, modelData.clip, editor.text)
+                                    handle.finishEdit()
+                                }
+
+                                function cancelEdit() {
+                                    if (!handle.editing)
+                                        return
+                                    handle.finishEdit()
+                                }
+
+                                function finishEdit() {
+                                    transformOverlay.editingKey = ""
+                                    EditorState.endTextEdit()
+                                    transformOverlay.interacting = false
+                                    Qt.callLater(transformOverlay.refreshOverlay)
+                                }
+
+                                // A just-added placeholder clip opens its own editor.
+                                // Checked both on creation and when the key arrives,
+                                // since either can happen first.
+                                function claimPendingEdit() {
+                                    if (!handle.isText || handle.editing)
+                                        return
+                                    if (transformOverlay.pendingEditKey
+                                            !== (modelData.track + ":" + modelData.clip))
+                                        return
+                                    transformOverlay.pendingEditKey = ""
+                                    Qt.callLater(handle.enterEdit)
+                                }
+
+                                Component.onCompleted: handle.claimPendingEdit()
+
+                                Connections {
+                                    target: transformOverlay
+                                    function onPendingEditKeyChanged() { handle.claimPendingEdit() }
+                                }
+
                                 readonly property real canvasW: Math.max(1, modelData.canvasWidth)
                                 readonly property real canvasH: Math.max(1, modelData.canvasHeight)
                                 readonly property real sx: parent.width / canvasW
@@ -166,8 +240,10 @@ PanelFrame {
                                 width: Math.max(24, layoutW * sx)
                                 height: Math.max(24, layoutH * sy)
                                 // Front-most track (lowest index) sits on top so it
-                                // wins click hit-testing over boxes behind it.
-                                z: -modelData.track
+                                // wins click hit-testing over boxes behind it. The clip
+                                // being edited jumps above everything so its editor and
+                                // the click-away catcher order correctly.
+                                z: handle.editing ? 1000 : -modelData.track
                                 transformOrigin: Item.Center
                                 rotation: liveRotation < 1e8 ? liveRotation : modelData.rotation
 
@@ -180,17 +256,55 @@ PanelFrame {
                                 Rectangle {
                                     anchors.fill: parent
                                     color: "transparent"
-                                    border.width: handle.selected ? 2 : 1
+                                    border.width: (handle.selected || handle.editing) ? 2 : 1
                                     border.color: handle.selected ? Theme.primary : "#99ffffff"
                                     radius: 2
                                 }
 
+                                // In-place text editor (Canva-style). Shown over the
+                                // box while editing; the baked raster is hidden by the
+                                // compositor via beginTextEdit. Plain TextArea (not a
+                                // Themed* control): this is canvas content that must
+                                // match the rendered text, not app chrome.
+                                TextArea {
+                                    id: editor
+                                    anchors.fill: parent
+                                    visible: handle.editing
+                                    enabled: handle.editing
+                                    background: null
+                                    padding: 0
+                                    selectByMouse: true
+                                    color: handle.editStyle ? handle.editStyle.color : "white"
+                                    font.family: handle.editStyle ? handle.editStyle.fontFamily : Theme.fontFamily
+                                    font.pixelSize: handle.editStyle
+                                                    ? Math.max(1, Math.round(handle.editStyle.pixelSize * handle.sy))
+                                                    : 16
+                                    font.weight: handle.editStyle ? handle.editStyle.fontWeight : Font.Normal
+                                    font.italic: handle.editStyle ? handle.editStyle.italic : false
+                                    font.letterSpacing: handle.editStyle ? handle.editStyle.letterSpacing * handle.sy : 0
+                                    wrapMode: (handle.editStyle && handle.editStyle.wordWrap === false)
+                                              ? TextEdit.NoWrap : TextEdit.WordWrap
+                                    horizontalAlignment: !handle.editStyle ? TextEdit.AlignHCenter
+                                                         : handle.editStyle.align === "left" ? TextEdit.AlignLeft
+                                                         : handle.editStyle.align === "right" ? TextEdit.AlignRight
+                                                         : TextEdit.AlignHCenter
+                                    verticalAlignment: !handle.editStyle ? TextEdit.AlignVCenter
+                                                       : handle.editStyle.valign === "top" ? TextEdit.AlignTop
+                                                       : handle.editStyle.valign === "bottom" ? TextEdit.AlignBottom
+                                                       : TextEdit.AlignVCenter
+                                    Keys.onEscapePressed: handle.cancelEdit()
+                                    onActiveFocusChanged: if (!activeFocus && handle.editing) handle.commitEdit()
+                                }
+
                                 TapHandler {
+                                    enabled: !handle.editing
                                     onTapped: EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
+                                    onDoubleTapped: if (handle.isText) handle.enterEdit()
                                 }
 
                                 DragHandler {
                                     target: null
+                                    enabled: !handle.editing
                                     cursorShape: Qt.SizeAllCursor
                                     onActiveChanged: {
                                         if (active) {
@@ -226,7 +340,7 @@ PanelFrame {
 
                                 // Corner resize handles (opposite corner stays fixed)
                                 Repeater {
-                                    model: handle.selected ? 4 : 0
+                                    model: (handle.selected && !handle.editing) ? 4 : 0
 
                                     delegate: Rectangle {
                                         id: corner
@@ -326,7 +440,7 @@ PanelFrame {
 
                                 // Rotation handle above the box
                                 Item {
-                                    visible: handle.selected
+                                    visible: handle.selected && !handle.editing
                                     width: 14
                                     height: 14
                                     x: handle.width / 2 - width / 2
@@ -378,6 +492,20 @@ PanelFrame {
                                         }
                                     }
                                 }
+                            }
+                        }
+
+                        // Click-away catcher: while a text clip is edited in place,
+                        // a press outside the (raised) editor box drops focus, which
+                        // commits the edit via the editor's onActiveFocusChanged.
+                        MouseArea {
+                            anchors.fill: parent
+                            z: 500
+                            visible: transformOverlay.editingKey !== ""
+                            enabled: visible
+                            onPressed: (mouse) => {
+                                transformOverlay.forceActiveFocus()
+                                mouse.accepted = true
                             }
                         }
                     }

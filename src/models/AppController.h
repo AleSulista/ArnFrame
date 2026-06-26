@@ -203,6 +203,10 @@ public:
     Q_INVOKABLE void setClipStart(int trackIndex, int clipIndex, double start);
     Q_INVOKABLE void setClipDuration(int trackIndex, int clipIndex, double duration);
     Q_INVOKABLE void setClipTextContent(int trackIndex, int clipIndex, const QString &text);
+    // In-place text editing on the preview: hide the clip's baked raster while the
+    // QML inline editor is shown, then restore it. Commit via setClipTextContent.
+    Q_INVOKABLE void beginTextEdit(int trackIndex, int clipIndex);
+    Q_INVOKABLE void endTextEdit();
     Q_INVOKABLE void setSubtitleCues(int trackIndex, int clipIndex, const QVariantList &cues);
     Q_INVOKABLE void previewSetSubtitleCues(int trackIndex, int clipIndex, const QVariantList &cues);
     Q_INVOKABLE double subtitleLocalPlayheadSeconds(int trackIndex, int clipIndex) const;
@@ -295,6 +299,9 @@ public:
     Q_INVOKABLE QString imageUrl(const QString &path) const;
 
 signals:
+    // A text clip was added with no text; the preview should open its inline
+    // editor so the user can type straight onto the canvas.
+    void inlineTextEditRequested(int trackIndex, int clipIndex);
     void tracksChanged();
     void playheadSecondsChanged();
     void playingChanged();

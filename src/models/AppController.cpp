@@ -1845,8 +1845,11 @@ void AppController::moveClipToTrack(int trackIndex, int clipIndex, int newTrackI
 void AppController::addTextClip(const QString &text, double atSeconds)
 {
     const QString trimmed = text.trimmed();
-    if (trimmed.isEmpty())
-        return;
+    // Adding with no text is the "drop it in, then type on the preview" path:
+    // the clip gets placeholder words and the preview opens an inline editor on
+    // it. Passing text keeps the original behaviour.
+    const bool placeholder = trimmed.isEmpty();
+    const QString content = placeholder ? tr("Your text here") : trimmed;
 
     const drift::Project before = m_project;
     const int trackIndex = drift::ensureTrackForClipType(m_project, drift::ClipType::Text, true);
@@ -1861,8 +1864,8 @@ void AppController::addTextClip(const QString &text, double atSeconds)
     drift::Clip clip;
     clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     clip.type = drift::ClipType::Text;
-    clip.name = trimmed.left(32);
-    clip.textContent = trimmed;
+    clip.name = content.left(32);
+    clip.textContent = content;
     clip.timelineStart = start;
     clip.timelineDuration = drift::kTextClipDurationUs;
     clip.srcIn = 0;
@@ -1870,9 +1873,19 @@ void AppController::addTextClip(const QString &text, double atSeconds)
     applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
 
     track.clips.append(clip);
+    const int newClipIndex = track.clips.size() - 1;
     pushProjectEdit(before, QStringLiteral("Text clip added"));
     finishEdit(QStringLiteral("Text clip added"));
-    selectClip(trackIndex, track.clips.size() - 1);
+    selectClip(trackIndex, newClipIndex);
+
+    if (placeholder) {
+        // resolveClipStart pushes the clip past anything already occupying the
+        // playhead, so park the playhead on it: the preview can only show (and
+        // edit) a clip that spans the current time.
+        if (m_playheadUs < start || m_playheadUs >= start + drift::kTextClipDurationUs)
+            setPlayheadSeconds(drift::usToSeconds(start));
+        emit inlineTextEditRequested(trackIndex, newClipIndex);
+    }
 }
 
 void AppController::addSubtitleClip(double atSeconds)
@@ -2834,6 +2847,23 @@ void AppController::setClipTextContent(int trackIndex, int clipIndex, const QStr
     clip.name = clip.textContent.left(32);
     pushProjectEdit(before, QStringLiteral("Text updated"));
     finishEdit(QStringLiteral("Text updated"));
+}
+
+void AppController::beginTextEdit(int trackIndex, int clipIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+    // Hide this clip from the composited frame; the QML inline editor stands in
+    // for it while the user types. Committing goes through setClipTextContent.
+    m_playback.setEditingClipId(track.clips.at(clipIndex).id);
+}
+
+void AppController::endTextEdit()
+{
+    m_playback.setEditingClipId(QString());
 }
 
 void AppController::setSubtitleCues(int trackIndex, int clipIndex, const QVariantList &cues)

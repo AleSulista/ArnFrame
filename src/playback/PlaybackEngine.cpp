@@ -326,7 +326,21 @@ FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
     if (m_playing)
         options.previewScale = qMax(0.1, options.previewScale * kPlaybackScaleFactor);
 
+    // Hide the text clip being edited in place so the QML inline editor stands in
+    // for it. Never applies while playing (no inline edit during playback).
+    if (!m_playing)
+        options.skipClipId = m_editingClipId;
+
     return options;
+}
+
+void PlaybackEngine::setEditingClipId(const QString &id)
+{
+    if (m_editingClipId == id)
+        return;
+    m_editingClipId = id;
+    if (!m_playing)
+        refreshFrame();
 }
 
 int PlaybackEngine::fillAudio(float *buffer, int sampleCount)

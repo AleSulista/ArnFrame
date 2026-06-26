@@ -593,6 +593,10 @@ GpuScene buildGpuScene(const drift::Project &project, drift::TimeUs timelineUs, 
         for (const drift::Clip &clip : track.clips) {
             if (transitionClipIds.contains(clip.id) || !clip.containsTime(timelineUs))
                 continue;
+            // The clip being edited in place on the preview is hidden here so the
+            // QML inline editor shows in its stead (true WYSIWYG, single path).
+            if (!options.skipClipId.isEmpty() && clip.id == options.skipClipId)
+                continue;
 
             GpuItem item;
             item.blend = clip.blendMode;

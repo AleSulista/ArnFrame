@@ -184,7 +184,7 @@ PanelFrame {
                 ThemedTextField {
                     id: textClipInput
                     width: parent.width - 24
-                    placeholderText: "Enter text for timeline clip"
+                    placeholderText: qsTr("Enter text (optional)")
                     font.family: Theme.fontFamily
                 }
 
@@ -196,6 +196,15 @@ PanelFrame {
                         EditorState.addTextClip(textClipInput.text, -1)
                         textClipInput.clear()
                     }
+                }
+
+                Text {
+                    width: parent.width - 24
+                    wrapMode: Text.WordWrap
+                    text: qsTr("Leave it empty and just add — the clip lands on the preview ready to type. You can always double-click text on the preview to edit it.")
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
                 }
 
                 Rectangle {

@@ -18,6 +18,8 @@ class EditorStateTest : public QObject
 private slots:
     void snapTimeEnabled();
     void addTextClip();
+    void addTextClipEmptyUsesPlaceholder();
+    void addTextClipWithTextDoesNotRequestEdit();
     void undoRedoClipAdd();
     void undoTrackMute();
     void undoBookmarkAdd();
@@ -52,6 +54,48 @@ void EditorStateTest::addTextClip()
     state.addTextClip(QStringLiteral("Hello"), 0.0);
     QVERIFY(state.durationSeconds() > 0.0);
     QCOMPARE(state.selectedClip(), 0);
+}
+
+// Adding with no text drops in a placeholder clip and asks the preview to open
+// its inline editor, instead of the click doing nothing at all.
+void EditorStateTest::addTextClipEmptyUsesPlaceholder()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    QSignalSpy spy(&state, &AppController::inlineTextEditRequested);
+
+    state.addTextClip(QString(), 0.0);
+
+    QCOMPARE(spy.count(), 1);
+    const int trackIndex = spy.at(0).at(0).toInt();
+    const int clipIndex = spy.at(0).at(1).toInt();
+    QCOMPARE(clipIndex, state.selectedClip());
+
+    const QVariantMap clip = state.clipAt(trackIndex, clipIndex);
+    QCOMPARE(clip.value(QStringLiteral("kind")).toString(), QStringLiteral("text"));
+    QVERIFY(!clip.value(QStringLiteral("textContent")).toString().isEmpty());
+
+    // The playhead must sit inside the clip, or the preview cannot show it.
+    const double start = clip.value(QStringLiteral("start")).toDouble();
+    const double duration = clip.value(QStringLiteral("duration")).toDouble();
+    QVERIFY(state.playheadSeconds() >= start);
+    QVERIFY(state.playheadSeconds() < start + duration);
+}
+
+// Passing real text keeps the old behaviour: no placeholder, no editor request.
+void EditorStateTest::addTextClipWithTextDoesNotRequestEdit()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    QSignalSpy spy(&state, &AppController::inlineTextEditRequested);
+
+    state.addTextClip(QStringLiteral("Hello"), 0.0);
+
+    QCOMPARE(spy.count(), 0);
+    QCOMPARE(state.clipAt(state.selectedTrack(), state.selectedClip())
+                 .value(QStringLiteral("textContent"))
+                 .toString(),
+             QStringLiteral("Hello"));
 }
 
 void EditorStateTest::undoRedoClipAdd()

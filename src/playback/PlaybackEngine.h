@@ -68,6 +68,10 @@ public:
     Q_INVOKABLE void refreshFrame();
     Q_INVOKABLE void setPreviewRenderSize(int width, int height);
 
+    // Id of the text clip currently edited in place on the preview; that clip is
+    // omitted from the composited frame so the QML inline editor stands in for it.
+    void setEditingClipId(const QString &id);
+
 signals:
     void currentFrameChanged();
     void playingChanged();
@@ -102,6 +106,7 @@ private:
     drift::TimeUs m_playheadUs = 0;
     std::atomic<bool> m_playing = false;
     QString m_previewQuality = QStringLiteral("full");
+    QString m_editingClipId;
     int m_previewRenderWidth = 0;
     int m_previewRenderHeight = 0;
     int m_sampleRate = 48000;
