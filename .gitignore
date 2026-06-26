@@ -14,11 +14,11 @@ CMakeLists.txt.user
 # repo, downloaded at runtime into <AppDataLocation>/addons/. These directories are only local
 # development overrides, pointed at with DRIFT_FONTS_DIR / DRIFT_STICKERS_DIR /
 # DRIFT_WHISPER_MODEL_DIR, and are never part of a build.
-fonts/
+/fonts/
 stickers/
 emoji-fonts/
 resources/stickers/
-models/
+/models/
 
 # Sample media (kept out of the repo)
 *.mp4
