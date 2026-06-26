@@ -352,6 +352,9 @@ protected:
 
     QByteArray serializeProjectJson() const;
     bool applyProjectJson(const QByteArray &data, QString *error);
+    // Effects and transitions render as no-ops when their package is absent, which is silent and
+    // looks like the project is simply wrong. Called after a load to say so instead.
+    void reportMissingCatalogEntries();
     void setDirty(bool dirty);
     void setCurrentProjectPath(const QString &path);
     void addRecentProject(const QString &path);

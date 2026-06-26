@@ -1,9 +1,15 @@
 #include "engine/AddonPackage.h"
+#include "engine/AddonRegistry.h"
+#include "engine/GpuPackageParse.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include <QScopeGuard>
 
 using namespace drift::addon;
 
@@ -25,6 +31,7 @@ private slots:
     void rejectsBadMagic();
     void leavesNoStagingBehindOnFailure();
     void reportsCancellation();
+    void installedAddonOutranksBundledContent();
 
 private:
     // Copy the fixture and flip one byte at `offset` (negative counts back from the end).
@@ -161,6 +168,42 @@ void TestAddonPackage::reportsCancellation()
     QCOMPARE(error, QStringLiteral("cancelled"));
     QVERIFY(!QDir(dest).exists());
     QVERIFY(!QDir(dest + QStringLiteral(".partial")).exists());
+}
+
+// Effects and transitions ship with the build *and* exist as addons, so that a shader fix can be
+// pushed without an app release. That only works if an installed package outranks the bundled one
+// of the same id, and the catalogs resolve duplicates first-root-wins — so the ordering here is
+// load-bearing, not cosmetic.
+void TestAddonPackage::installedAddonOutranksBundledContent()
+{
+    QStandardPaths::setTestModeEnabled(true);
+    auto restore = qScopeGuard([] { QStandardPaths::setTestModeEnabled(false); });
+
+    const QString installDir = drift::addon::addonInstallDir(QStringLiteral("test.fixture"));
+    QDir(installDir).removeRecursively();
+
+    PackageInfo info;
+    QString error;
+    QVERIFY2(install(m_fixture, installDir, {}, &info, &error), qPrintable(error));
+    QVERIFY2(recordInstalledAddon(info, &error), qPrintable(error));
+    reloadAddonRegistry();
+
+    const QStringList roots = GpuPackageParse::defaultSearchPaths(
+        QStringLiteral("DRIFT_UNSET_FOR_TEST"), QStringLiteral("fonts"), QStringLiteral("fonts"));
+
+    const QString addonRoot = QDir(installDir).filePath(QStringLiteral("fonts"));
+    const QString bundledRoot =
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("fonts"));
+
+    QVERIFY2(roots.contains(addonRoot), qPrintable(roots.join(QStringLiteral(" | "))));
+    QVERIFY2(roots.contains(bundledRoot), qPrintable(roots.join(QStringLiteral(" | "))));
+    QVERIFY2(roots.indexOf(addonRoot) < roots.indexOf(bundledRoot),
+             qPrintable(QStringLiteral("addon must outrank bundled: %1")
+                            .arg(roots.join(QStringLiteral(" | ")))));
+
+    QVERIFY2(forgetInstalledAddon(QStringLiteral("test.fixture"), &error), qPrintable(error));
+    QDir(installDir).removeRecursively();
+    reloadAddonRegistry();
 }
 
 QTEST_MAIN(TestAddonPackage)

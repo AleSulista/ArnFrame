@@ -83,10 +83,29 @@ written into place — installed under `<AppDataLocation>/addons/`. The format, 
 installer live in `src/engine/AddonPackage.*`, `src/engine/AddonRegistry.*` and
 `src/models/AddonManager.*`.
 
-To work against local content instead of downloading, point any of these at a directory; they
-take priority over installed addons:
+**Effects and transitions are bundled *and* addons.** They ship next to the binary so the editor
+is usable out of the box, and the `effects.core` / `transitions.core` addons exist so a shader fix
+can be published without an app release. Content resolves highest-priority-first:
+
+```
+1. $DRIFT_*_DIR          developer override
+2. installed addon       downloaded updates
+3. <appDir>/<kind>       bundled with the build
+4. <AppDataLocation>     hand-placed
+```
+
+Catalogs resolve duplicate ids first-root-wins, so an installed `builtin.effects.gaussian_blur`
+supersedes the bundled one. Note the corollary: an addon cannot *remove* a bundled package, since
+the bundled copy simply reappears when the addon no longer defines that id.
+
+Opening a project that uses an effect or transition with no catalog entry reports it rather than
+silently dropping it from the render.
+
+To work against local content instead of downloading, point any of these at a directory:
 
 ```bash
+DRIFT_EFFECTS_DIR=/path/to/effects \
+DRIFT_TRANSITIONS_DIR=/path/to/transitions \
 DRIFT_FONTS_DIR=/path/to/fonts \
 DRIFT_STICKERS_DIR=/path/to/stickers \
 DRIFT_WHISPER_MODEL_DIR=/path/to/whisper-small \

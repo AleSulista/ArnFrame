@@ -304,6 +304,11 @@ QStringList defaultSearchPaths(const QString &envVar, const QString &subdir,
         roots.append(parts);
     }
 
+    // Ahead of the bundled copy: effects and transitions ship with the build as a baseline, and an
+    // installed addon of the same id is meant to supersede it.
+    if (!addonKind.isEmpty())
+        roots.append(drift::addon::addonRootsForKind(addonKind));
+
     const QString appDir = QCoreApplication::applicationDirPath();
     if (!appDir.isEmpty())
         roots.append(QDir(appDir).filePath(subdir));
@@ -311,9 +316,6 @@ QStringList defaultSearchPaths(const QString &envVar, const QString &subdir,
     const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (!appData.isEmpty())
         roots.append(QDir(appData).filePath(subdir));
-
-    if (!addonKind.isEmpty())
-        roots.append(drift::addon::addonRootsForKind(addonKind));
 
     roots.removeDuplicates();
     return roots;

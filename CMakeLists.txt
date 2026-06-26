@@ -18,8 +18,15 @@ option(WITH_BGREMOVAL "Enable OpenCV-based background removal" OFF)
 # user installs what they want from the Addon Manager. The packaging and publishing tooling
 # lives in the drift-addons repo.
 #
-# For development without downloading, point DRIFT_FONTS_DIR, DRIFT_STICKERS_DIR or
-# DRIFT_WHISPER_MODEL_DIR at a local directory; those still take priority over installed addons.
+# Effects and transitions are the exception: they are small, they are source (GLSL reviewed
+# alongside the engine that runs them), and an editor with an empty effects browser is broken
+# rather than merely bare — so they still ship next to the binary. They are *also* addons, and an
+# installed package outranks the bundled one of the same id (see defaultSearchPaths), which is
+# what lets a shader fix go out without an app release.
+#
+# For development without downloading, point DRIFT_EFFECTS_DIR, DRIFT_TRANSITIONS_DIR,
+# DRIFT_FONTS_DIR, DRIFT_STICKERS_DIR or DRIFT_WHISPER_MODEL_DIR at a local directory; those
+# outrank everything, including installed addons.
 
 # --- Addon service ----------------------------------------------------------
 # Where the Addon Manager fetches from. These are the only place either value is defined —

@@ -161,5 +161,6 @@ QList<EffectPresetEntry> EffectPackageLoader::scanDirectories(const QStringList 
 QStringList EffectPackageLoader::defaultSearchPaths()
 {
     return GpuPackageParse::defaultSearchPaths(QStringLiteral("DRIFT_EFFECTS_DIR"),
+                                               QStringLiteral("effects"),
                                                QStringLiteral("effects"));
 }

@@ -2148,6 +2148,42 @@ void AppController::finalizeGeneratedSubtitles(drift::TimeUs timelineStart,
     emit subtitleGenerationFinished(true, QStringLiteral("Subtitles generated"));
 }
 
+void AppController::reportMissingCatalogEntries()
+{
+    QSet<QString> missingEffects;
+    QSet<QString> missingTransitions;
+
+    for (const drift::Track &track : m_project.tracks()) {
+        for (const drift::Clip &clip : track.clips) {
+            for (const drift::Effect &effect : clip.effects) {
+                if (!effect.catalogId.isEmpty() && !effectDefForId(effect.catalogId))
+                    missingEffects.insert(effect.catalogId);
+            }
+        }
+        for (const drift::Transition &transition : track.transitions) {
+            if (!transition.kindId.isEmpty() && !transitionDefForId(transition.kindId))
+                missingTransitions.insert(transition.kindId);
+        }
+    }
+
+    const int total = missingEffects.size() + missingTransitions.size();
+    if (total == 0)
+        return;
+
+    QStringList names = QStringList(missingEffects.begin(), missingEffects.end())
+                        + QStringList(missingTransitions.begin(), missingTransitions.end());
+    names.sort();
+    const QString sample = names.mid(0, 3).join(QStringLiteral(", "));
+
+    setLastMessage(total == 1
+                       ? QStringLiteral("This project uses \"%1\", which is not installed — it "
+                                        "will not be applied. Check Addons.").arg(sample)
+                       : QStringLiteral("This project uses %1 effects or transitions that are not "
+                                        "installed (%2%3) — they will not be applied. Check Addons.")
+                             .arg(total)
+                             .arg(sample, names.size() > 3 ? QStringLiteral(", …") : QString()));
+}
+
 QVariantList AppController::builtinStickers() const
 {
     QVariantList out;
@@ -4520,6 +4556,8 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
 
     if (m_assetLibrary)
         m_assetLibrary->setProject(&m_project);
+
+    reportMissingCatalogEntries();
 
     setPlaying(false);
     m_snapEnabled = root.value(QStringLiteral("snapEnabled")).toBool(true);
