@@ -175,6 +175,7 @@ PanelFrame {
 
             // Text tab panel
             Column {
+                id: textTab
                 visible: tabsModel.get(activeTab).tabId === "text"
                 width: parent.width
                 height: parent.height - Theme.panelHeaderHeight
@@ -227,6 +228,90 @@ PanelFrame {
                     variant: "secondary"
                     glyph: Theme.icons.messageSquare
                     onClicked: EditorState.addSubtitleClip(-1)
+                }
+
+                Rectangle {
+                    width: parent.width - 24
+                    height: 1
+                    color: Theme.panelBorder
+                }
+
+                // Same transcriber as the clip inspector's Audio tab, surfaced here so
+                // auto captions sit next to the manual subtitle route. It transcribes the
+                // selected clip, so it stays disabled until a video or audio clip is picked.
+                Text {
+                    width: parent.width - 24
+                    text: qsTr("Add auto caption")
+                    color: Theme.foreground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSm
+                }
+
+                Text {
+                    width: parent.width - 24
+                    wrapMode: Text.WordWrap
+                    text: textTab.captionTargetReady
+                          ? qsTr("Transcribes the selected clip and drops the cues onto a subtitle clip.")
+                          : qsTr("Select a video (or audio) clip on the timeline first — auto caption runs on the selected clip.")
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                }
+
+                // The transcriber ships as an addon; without it there are no languages to
+                // list and nothing to run, so offer the download in place of the controls.
+                property bool whisperReady: Addons.hasKind("whisper-model")
+
+                readonly property string captionClipKind: {
+                    const data = EditorState.selectedClipData
+                    return (data && data.kind) ? data.kind : ""
+                }
+                readonly property bool captionTargetReady: captionClipKind === "video"
+                                                           || captionClipKind === "audio"
+
+                Connections {
+                    target: Addons
+                    function onKindChanged(kind) {
+                        if (kind === "whisper-model")
+                            textTab.whisperReady = Addons.hasKind("whisper-model")
+                    }
+                }
+
+                ThemedComboBox {
+                    id: captionLanguageBox
+                    visible: textTab.whisperReady
+                    width: parent.width - 24
+                    enabled: textTab.captionTargetReady && !EditorState.subtitleGenerating
+                    textRole: "label"
+                    valueRole: "code"
+                    model: EditorState.whisperLanguages()
+                    Component.onCompleted: currentIndex = 0
+                }
+
+                ThemedButton {
+                    visible: textTab.whisperReady
+                    width: parent.width - 24
+                    text: EditorState.subtitleGenerating
+                          ? qsTr("Transcribing… %1%").arg(Math.round(EditorState.subtitleGenProgress * 100))
+                          : qsTr("Add auto caption")
+                    variant: "secondary"
+                    glyph: Theme.icons.messageSquare
+                    enabled: textTab.captionTargetReady && !EditorState.subtitleGenerating
+                    onClicked: {
+                        const lang = captionLanguageBox.currentValue !== undefined
+                                     ? captionLanguageBox.currentValue
+                                     : ""
+                        EditorState.generateSubtitlesForClip(
+                            EditorState.selectedTrack, EditorState.selectedClip, lang)
+                    }
+                }
+
+                ThemedButton {
+                    visible: !textTab.whisperReady
+                    width: parent.width - 24
+                    text: qsTr("Install speech model (≈670 MB)")
+                    variant: "primary"
+                    onClicked: root.Window.window.openAddonManager("whisper-model")
                 }
             }
 
