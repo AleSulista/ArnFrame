@@ -245,11 +245,25 @@ PanelFrame {
                 width: parent.width
                 height: parent.height - Theme.panelHeaderHeight
 
-                // One page per sticker category, plus a trailing Shapes page.
-                readonly property var pages: EditorState.builtinStickerCategories().concat([{ id: "shapes", label: "Shapes" }])
-                readonly property var allStickers: EditorState.builtinStickers()
+                // Stickers come from an addon, so these are refreshed on install rather than
+                // being fixed at load: a fresh install has no packs and only the Shapes page.
+                property var categories: EditorState.builtinStickerCategories()
+                property var allStickers: EditorState.builtinStickers()
+                readonly property var pages: categories.concat([{ id: "shapes", label: "Shapes" }])
+                readonly property bool hasStickers: allStickers.length > 0
                 property int pageIndex: 0
                 readonly property string currentPageId: pages[pageIndex] ? pages[pageIndex].id : ""
+
+                Connections {
+                    target: Addons
+                    function onKindChanged(kind) {
+                        if (kind !== "stickers")
+                            return
+                        stickersTab.categories = EditorState.builtinStickerCategories()
+                        stickersTab.allStickers = EditorState.builtinStickers()
+                        stickersTab.pageIndex = 0
+                    }
+                }
 
                 Flow {
                     id: stickerPageBar
@@ -288,6 +302,43 @@ PanelFrame {
                         id: stickerPageContent
                         width: parent.width - 12
                         spacing: 16
+
+                        Rectangle {
+                            visible: !stickersTab.hasStickers
+                            width: parent.width
+                            height: 72
+                            radius: Theme.radiusMd
+                            color: Theme.panelSecondaryBg
+                            border.width: 1
+                            border.color: Theme.panelSecondaryBorder
+
+                            Column {
+                                anchors.centerIn: parent
+                                width: parent.width - 24
+                                spacing: 4
+
+                                Text {
+                                    text: qsTr("No sticker packs installed")
+                                    color: Theme.panelForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeSm
+                                    font.weight: Font.Medium
+                                }
+
+                                Text {
+                                    text: qsTr("Install the emoji pack to add stickers →")
+                                    color: Theme.primary
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeSm
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.Window.window.openAddonManager("stickers")
+                            }
+                        }
 
                         // Sticker grid for the selected category page.
                         Grid {

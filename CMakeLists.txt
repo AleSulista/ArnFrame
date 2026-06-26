@@ -9,66 +9,38 @@ set(CMAKE_AUTORCC ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 option(WITH_BGREMOVAL "Enable OpenCV-based background removal" OFF)
-option(DRIFT_FETCH_FONTS "Download the bundled font packages into fonts/ when absent" ON)
-option(DRIFT_EXTRACT_STICKERS "Extract emoji stickers from emoji-fonts/ into resources/stickers/ when absent" ON)
 
-# The font bundle is ~17 MB of TTFs, so it is fetched rather than committed. A failure here is
-# only a warning: the app falls back to system fonts and the font tests skip, so an offline
-# clone still builds.
-if(DRIFT_FETCH_FONTS AND NOT EXISTS "${CMAKE_SOURCE_DIR}/fonts/inter/family.json")
-    find_package(Python3 COMPONENTS Interpreter)
-    if(Python3_FOUND)
-        message(STATUS "Fetching bundled fonts (scripts/fetch-fonts.py)...")
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/fetch-fonts.py"
-            RESULT_VARIABLE drift_fetch_fonts_result
-            OUTPUT_VARIABLE drift_fetch_fonts_output
-            ERROR_VARIABLE drift_fetch_fonts_output
-        )
-        if(NOT drift_fetch_fonts_result EQUAL 0)
-            message(WARNING "Font fetch failed; Drift will fall back to system fonts.\n"
-                            "Re-run later with: cmake --build <dir> --target fonts\n"
-                            "${drift_fetch_fonts_output}")
-        endif()
-    else()
-        message(WARNING "python3 not found — skipping font fetch. Drift will fall back to system fonts.")
-    endif()
-endif()
+# Fonts, stickers and the Whisper model used to be fetched or extracted here and shipped inside
+# the build tree — roughly 800 MB of assets every user paid for whether or not they used them.
+# They are now addons: signed .driftpkg archives downloaded at runtime into <AppDataLocation>/
+# addons/ (src/engine/AddonPackage, src/models/AddonManager). Nothing asset-shaped is bundled,
+# so a fresh build starts with system fonts, an empty sticker tab and no transcriber, and the
+# user installs what they want from the Addon Manager. The packaging and publishing tooling
+# lives in the drift-addons repo.
+#
+# For development without downloading, point DRIFT_FONTS_DIR, DRIFT_STICKERS_DIR or
+# DRIFT_WHISPER_MODEL_DIR at a local directory; those still take priority over installed addons.
 
-add_custom_target(fonts
-    COMMAND ${CMAKE_COMMAND} -E env python3 "${CMAKE_SOURCE_DIR}/scripts/fetch-fonts.py"
-    COMMENT "Fetch the bundled font packages into fonts/"
-)
+# --- Addon service ----------------------------------------------------------
+# Where the Addon Manager fetches from. These are the only place either value is defined —
+# src/models/AddonEndpoint.h just reads them — so a fork can point at its own Worker with:
+#
+#   cmake -B build -DDRIFT_ADDON_INDEX_URL=https://addons.example.com/v1/index \
+#                  -DDRIFT_ADDON_CLIENT_TOKEN=...
+#
+# Set DRIFT_ADDON_INDEX_URL to an empty string to build with the addon service disabled: the
+# manager then lists nothing and installs nothing, and the app runs on locally installed or
+# side-loaded content only.
+#
+# The token is NOT a secret. It ships inside every binary and is trivially extractable; it exists
+# so the bucket cannot be crawled or hotlinked, which would cost operations for someone else's
+# benefit. That is also why it is fine in CMakeCache.txt.
+set(DRIFT_ADDON_INDEX_URL "https://drift-addons.cutwire.org/v1/index"
+    CACHE STRING "Addon index endpoint; empty disables the addon service")
+set(DRIFT_ADDON_CLIENT_TOKEN "79a388bba9301cacc81cc6eb0724c81e948e1b27c69aee1b"
+    CACHE STRING "Client token sent to the addon service as X-Drift-Client")
 
-# Stickers are emoji PNGs pulled out of a colour-bitmap font at build time (scripts/
-# extract-stickers.py). The font is not committed and neither are the PNGs; a missing font is
-# only a warning — the script still writes an empty manifest so the QRC glob below has a file.
-if(DRIFT_EXTRACT_STICKERS AND NOT EXISTS "${CMAKE_SOURCE_DIR}/resources/stickers/stickers.json")
-    find_package(Python3 COMPONENTS Interpreter)
-    if(Python3_FOUND)
-        message(STATUS "Extracting emoji stickers (scripts/extract-stickers.py)...")
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/extract-stickers.py"
-            RESULT_VARIABLE drift_extract_stickers_result
-            OUTPUT_VARIABLE drift_extract_stickers_output
-            ERROR_VARIABLE drift_extract_stickers_output
-        )
-        if(NOT drift_extract_stickers_result EQUAL 0)
-            message(WARNING "Sticker extraction failed; the Stickers tab will be empty.\n"
-                            "Re-run later with: cmake --build <dir> --target stickers\n"
-                            "${drift_extract_stickers_output}")
-        endif()
-    else()
-        message(WARNING "python3 not found — skipping sticker extraction; the Stickers tab will be empty.")
-    endif()
-endif()
-
-add_custom_target(stickers
-    COMMAND ${CMAKE_COMMAND} -E env python3 "${CMAKE_SOURCE_DIR}/scripts/extract-stickers.py" --force
-    COMMENT "Extract emoji stickers into resources/stickers/"
-)
-
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets OpenGL)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets OpenGL Network)
 find_package(FFmpeg REQUIRED)
 
 # ONNX Runtime powers the Whisper auto-subtitle transcriber (src/engine/WhisperTranscriber).
@@ -91,6 +63,20 @@ if(WITH_BGREMOVAL)
     # distribution (opencv_viz pulls in VTK and breaks linking on many systems).
     find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 endif()
+
+# Addon packages (.driftpkg) are solid-zstd compressed and Ed25519 signed. zstd upstream only
+# ships a CMake config in recent releases, so fall back to pkg-config.
+find_package(zstd CONFIG QUIET)
+if(TARGET zstd::libzstd_shared)
+    set(DRIFT_ZSTD_TARGET zstd::libzstd_shared)
+elseif(TARGET zstd::libzstd)
+    set(DRIFT_ZSTD_TARGET zstd::libzstd)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
+    set(DRIFT_ZSTD_TARGET PkgConfig::ZSTD)
+endif()
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 
 qt_standard_project_setup(REQUIRES 6.5)
 qt_policy(SET QTP0004 NEW)
@@ -128,6 +114,11 @@ target_link_libraries(driftcore PUBLIC Qt6::Core Qt6::Gui)
 
 # --- engine: FFmpeg-facing code, no QML deps -------------------------------
 add_library(driftengine STATIC
+    src/engine/AddonPackage.h
+    src/engine/AddonPackage.cpp
+    src/engine/AddonRegistry.h
+    src/engine/AddonRegistry.cpp
+    src/engine/AddonSigningKey.h
     src/engine/MediaProbe.h
     src/engine/MediaProbe.cpp
     src/engine/MediaThumbnail.h
@@ -148,6 +139,8 @@ add_library(driftengine STATIC
     src/engine/EffectCatalog.cpp
     src/engine/FontCatalog.h
     src/engine/FontCatalog.cpp
+    src/engine/StickerCatalog.h
+    src/engine/StickerCatalog.cpp
     src/engine/TextRaster.h
     src/engine/TextRaster.cpp
     src/engine/EffectPackageLoader.h
@@ -183,6 +176,7 @@ add_library(driftengine STATIC
 target_include_directories(driftengine PUBLIC src)
 target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui Qt6::OpenGL FFmpeg::FFmpeg driftcore
     onnxruntime::onnxruntime)
+target_link_libraries(driftengine PRIVATE ${DRIFT_ZSTD_TARGET} OpenSSL::Crypto)
 
 if(WITH_BGREMOVAL)
     target_include_directories(driftengine PRIVATE ${OpenCV_INCLUDE_DIRS})
@@ -195,6 +189,9 @@ qt_add_executable(drift
     src/main.cpp
     src/DriftImageProvider.h
     src/DriftImageProvider.cpp
+    src/models/AddonEndpoint.h
+    src/models/AddonManager.h
+    src/models/AddonManager.cpp
     src/models/AppController.h
     src/models/AppController.cpp
     src/models/EditorState.h
@@ -217,13 +214,6 @@ qt_add_executable(drift
 )
 
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
-
-# Generated by extract-stickers.py above (empty set if the emoji font was absent). Globbed —
-# not listed — because the set is data-driven; CONFIGURE_DEPENDS re-globs when it changes.
-file(GLOB DRIFT_STICKER_RESOURCES RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS
-    "resources/stickers/*.png"
-    "resources/stickers/stickers.json"
-)
 
 qt_add_qml_module(drift
     URI Drift
@@ -259,6 +249,7 @@ qt_add_qml_module(drift
         src/qml/components/ThemedChip.qml
         src/qml/components/ThemedLabel.qml
         src/qml/components/ThemedDialog.qml
+        src/qml/components/AddonManagerDialog.qml
         src/qml/components/ProjectSetupDialog.qml
         src/qml/components/ExportDialog.qml
         src/qml/components/ExportProgressDialog.qml
@@ -268,9 +259,10 @@ qt_add_qml_module(drift
         src/qml/components/RecentProjectsPopup.qml
         src/qml/components/NewTrackMenu.qml
     RESOURCES
+        # UI chrome, not catalog content: the interface font and the icon font are always needed,
+        # including before any addon is installed.
         resources/fonts/Inter.ttf
         resources/fonts/lucide.ttf
-        ${DRIFT_STICKER_RESOURCES}
 )
 
 target_link_libraries(drift PRIVATE
@@ -280,10 +272,17 @@ target_link_libraries(drift PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Concurrent
+    Qt6::Network
     driftcore
     driftengine
 )
 target_include_directories(drift PRIVATE src src/preview)
+
+# Defined here rather than in the header so there is exactly one place to change them.
+target_compile_definitions(drift PRIVATE
+    DRIFT_ADDON_INDEX_URL="${DRIFT_ADDON_INDEX_URL}"
+    DRIFT_ADDON_CLIENT_TOKEN="${DRIFT_ADDON_CLIENT_TOKEN}"
+)
 
 # Ship file-based effect packages next to binaries that load the catalog.
 function(drift_copy_effects target)
@@ -305,31 +304,6 @@ function(drift_copy_transitions target)
     )
 endfunction()
 
-# Same, for the font packages. Unlike effects/ and transitions/ these are not committed —
-# they are fetched below — so tolerate the directory being absent.
-function(drift_copy_fonts target)
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/fonts"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_SOURCE_DIR}/fonts"
-                "$<TARGET_FILE_DIR:${target}>/fonts"
-        COMMENT "Copy font packages next to ${target}"
-    )
-endfunction()
-
-# The Whisper models are ~750 MB and gitignored, dropped into models/ by hand. Symlink
-# (not copy) the directory next to the binary so applicationDirPath()/models resolves in
-# dev builds; tolerate the directory being absent (the feature just reports unavailable).
-function(drift_link_whisper_models target)
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/models"
-        COMMAND ${CMAKE_COMMAND} -E create_symlink
-                "${CMAKE_SOURCE_DIR}/models"
-                "$<TARGET_FILE_DIR:${target}>/models"
-        COMMENT "Symlink whisper models next to ${target}"
-    )
-endfunction()
-
 # Deploy the ONNX Runtime shared library next to the binary (needed on Windows; harmless
 # elsewhere and keeps the app runnable from the build tree without a system install).
 function(drift_copy_onnxruntime target)
@@ -345,8 +319,6 @@ endfunction()
 
 drift_copy_effects(drift)
 drift_copy_transitions(drift)
-drift_copy_fonts(drift)
-drift_link_whisper_models(drift)
 drift_copy_onnxruntime(drift)
 
 # --- CLI tools (headless engine testing, no GUI) ----------------------------

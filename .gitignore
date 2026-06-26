@@ -10,15 +10,14 @@ CMakeLists.txt.user
 .idea/
 *.swp
 
-# Bundled font packages — fetched by scripts/fetch-fonts.py, not committed
+# Fonts, stickers and Whisper models are addons now — built and published from the drift-addons
+# repo, downloaded at runtime into <AppDataLocation>/addons/. These directories are only local
+# development overrides, pointed at with DRIFT_FONTS_DIR / DRIFT_STICKERS_DIR /
+# DRIFT_WHISPER_MODEL_DIR, and are never part of a build.
 fonts/
-
-# Emoji source font (dropped in by hand) and the stickers extracted from it at
-# build time by scripts/extract-stickers.py — neither is committed
+stickers/
 emoji-fonts/
 resources/stickers/
-
-# Whisper ONNX models (dropped in by hand) for auto subtitle generation — large, not committed
 models/
 
 # Sample media (kept out of the repo)
@@ -31,3 +30,7 @@ models/
 
 # OS
 .DS_Store
+
+# Local credential files — never commit
+.env
+.env.*

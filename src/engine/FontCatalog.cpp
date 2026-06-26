@@ -105,7 +105,8 @@ void rebuildLocked(const QStringList &packageRoots)
     g_familyIndex.clear();
 
     const QStringList roots = packageRoots.isEmpty()
-        ? GpuPackageParse::defaultSearchPaths(QStringLiteral("DRIFT_FONTS_DIR"), QStringLiteral("fonts"))
+        ? GpuPackageParse::defaultSearchPaths(QStringLiteral("DRIFT_FONTS_DIR"),
+                                              QStringLiteral("fonts"), QStringLiteral("fonts"))
         : packageRoots;
 
     for (const QString &root : roots) {

@@ -33,6 +33,18 @@ ApplicationWindow {
         id: subtitleProgressDialog
     }
 
+    AddonManagerDialog {
+        id: addonManagerDialog
+    }
+
+    // Opened from the header, and from every empty state that a missing addon causes.
+    function openAddonManager(kind) {
+        if (kind === undefined)
+            addonManagerDialog.open()
+        else
+            addonManagerDialog.openForKind(kind)
+    }
+
     function promptRecoveryIfNeeded() {
         if (!EditorState.recoveryAvailable || recoveryDialog.visible)
             return

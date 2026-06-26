@@ -36,7 +36,10 @@ bool loadGpuPipeline(const QJsonObject &root, const QString &packageDir, int max
 // Resolve an optional relative/absolute asset path inside a package; empty when missing.
 QString resolvePackageAsset(const QString &packageDir, const QString &relOrAbs);
 
-// Search roots for a package kind: $<envVar>, <appDir>/<subdir>, <AppDataLocation>/<subdir>.
-QStringList defaultSearchPaths(const QString &envVar, const QString &subdir);
+// Search roots for a package kind: $<envVar>, <appDir>/<subdir>, <AppDataLocation>/<subdir>, then
+// the content roots of any installed addon providing `addonKind` (empty to skip). Earlier roots
+// win, so a developer's DRIFT_*_DIR still shadows a downloaded addon.
+QStringList defaultSearchPaths(const QString &envVar, const QString &subdir,
+                               const QString &addonKind = {});
 
 } // namespace GpuPackageParse

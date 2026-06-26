@@ -1,4 +1,5 @@
 #include "engine/FontCatalog.h"
+#include "models/AddonManager.h"
 #include "models/AppController.h"
 #include "models/AssetLibrary.h"
 #include "models/EditorState.h"
@@ -35,10 +36,12 @@ int main(int argc, char *argv[])
     static AssetLibrary assetLibrary;
     static EditorState editorState(&assetLibrary);
     static FileDialogs fileDialogs;
+    static AddonManager addonManager;
     qmlRegisterSingletonInstance("Drift", 1, 0, "AssetLibrary", &assetLibrary);
     qmlRegisterSingletonInstance("Drift", 1, 0, "EditorState", &editorState);
     qmlRegisterSingletonInstance("Drift", 1, 0, "AppController", &editorState);
     qmlRegisterSingletonInstance("Drift", 1, 0, "FileDialogs", &fileDialogs);
+    qmlRegisterSingletonInstance("Drift", 1, 0, "Addons", &addonManager);
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("drift"), new DriftImageProvider());

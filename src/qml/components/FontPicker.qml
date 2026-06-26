@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Window
 import Drift
 
 // A font selector that previews each family in its own face and groups them by catalog category.
@@ -23,7 +24,11 @@ Item {
         id: familyModel
     }
 
-    Component.onCompleted: {
+    // True while no font addon is installed, which is the state of a fresh install.
+    property bool usingSystemFonts: false
+
+    function rebuild() {
+        familyModel.clear()
         const catalog = EditorState.fontCatalog()
         for (let i = 0; i < catalog.length; ++i) {
             familyModel.append({
@@ -32,13 +37,25 @@ Item {
                 "group": catalog[i].categoryLabel
             })
         }
-        if (familyModel.count > 0)
+        root.usingSystemFonts = familyModel.count === 0
+        if (!root.usingSystemFonts)
             return
 
-        // The bundle is fetched rather than committed, so fall back to system fonts when absent.
+        // Fonts are an addon now, so an empty catalog is the normal starting state — fall back to
+        // whatever the system has and offer the pack.
         const system = Qt.fontFamilies()
         for (let i = 0; i < system.length; ++i)
             familyModel.append({ "name": system[i], "previewFamily": system[i], "group": "System fonts" })
+    }
+
+    Component.onCompleted: root.rebuild()
+
+    Connections {
+        target: Addons
+        function onKindChanged(kind) {
+            if (kind === "fonts")
+                root.rebuild()
+        }
     }
 
     function changeFontDelta(delta) {
@@ -167,6 +184,35 @@ Item {
             id: list
             clip: true
             model: familyModel
+
+            header: Rectangle {
+                width: list.width
+                height: root.usingSystemFonts ? 40 : 0
+                visible: root.usingSystemFonts
+                color: Theme.panelSecondaryBg
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Install the font pack for 21 curated families →")
+                    color: Theme.primary
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSm
+                    elide: Text.ElideRight
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        popup.close()
+                        root.Window.window.openAddonManager("fonts")
+                    }
+                }
+            }
             currentIndex: -1
             ScrollBar.vertical: AppScrollBar {}
 

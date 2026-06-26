@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Window
 import Drift
 import "components"
 
@@ -178,6 +179,14 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         anchors.verticalCenterOffset: 1
         spacing: 8
+
+        IconButton {
+            icon: Theme.icons.layers
+            variant: "ghost"
+            tooltip: qsTr("Addons")
+            anchors.verticalCenter: parent.verticalCenter
+            onClicked: root.Window.window.openAddonManager()
+        }
 
         IconButton {
             icon: Theme.icons.messageSquare

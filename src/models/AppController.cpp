@@ -14,6 +14,7 @@
 #include "engine/MediaProbe.h"
 #include "engine/MediaThumbnail.h"
 #include "engine/MediaWaveform.h"
+#include "engine/StickerCatalog.h"
 #include "engine/TransitionCatalog.h"
 #include "engine/WhisperTranscriber.h"
 
@@ -446,47 +447,6 @@ QVariantMap transitionToMap(const drift::Track &track, const drift::Transition &
         {QStringLiteral("label"), def ? def->meta.displayName : t.kindId},
         {QStringLiteral("params"), params},
     };
-}
-
-// Stickers are emoji PNGs extracted from a colour font at build time (scripts/extract-stickers.py)
-// and embedded in the QRC alongside a stickers.json manifest. Loaded once; an absent/empty
-// manifest just yields no stickers.
-struct StickerCatalog {
-    QVariantList stickers;   // {id, label, category, path}
-    QVariantList categories; // {id, label}
-};
-
-const StickerCatalog &stickerCatalog()
-{
-    static const StickerCatalog catalog = [] {
-        StickerCatalog c;
-        QFile file(QStringLiteral(":/qt/qml/Drift/resources/stickers/stickers.json"));
-        if (!file.open(QIODevice::ReadOnly))
-            return c;
-
-        const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
-        for (const QJsonValue &value : root.value(QStringLiteral("categories")).toArray()) {
-            const QJsonObject object = value.toObject();
-            c.categories.append(QVariantMap{
-                {QStringLiteral("id"), object.value(QStringLiteral("id")).toString()},
-                {QStringLiteral("label"), object.value(QStringLiteral("label")).toString()},
-            });
-        }
-        for (const QJsonValue &value : root.value(QStringLiteral("stickers")).toArray()) {
-            const QJsonObject object = value.toObject();
-            c.stickers.append(QVariantMap{
-                {QStringLiteral("id"), object.value(QStringLiteral("id")).toString()},
-                {QStringLiteral("label"), object.value(QStringLiteral("label")).toString()},
-                {QStringLiteral("category"), object.value(QStringLiteral("category")).toString()},
-                // ":/" (not "qrc:/") — QImage/QResource use the colon prefix; the QML Image
-                // provider (DriftImageProvider) and the compositor both load via QImage.
-                {QStringLiteral("path"), QStringLiteral(":/qt/qml/Drift/resources/stickers/")
-                                             + object.value(QStringLiteral("file")).toString()},
-            });
-        }
-        return c;
-    }();
-    return catalog;
 }
 
 bool clipAcceptsPreviewTransform(const drift::Clip &clip)
@@ -2155,12 +2115,28 @@ void AppController::finalizeGeneratedSubtitles(drift::TimeUs timelineStart,
 
 QVariantList AppController::builtinStickers() const
 {
-    return stickerCatalog().stickers;
+    QVariantList out;
+    for (const StickerEntry &entry : ::stickers()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), entry.id},
+            {QStringLiteral("label"), entry.label},
+            {QStringLiteral("category"), entry.category},
+            {QStringLiteral("path"), entry.path},
+        });
+    }
+    return out;
 }
 
 QVariantList AppController::builtinStickerCategories() const
 {
-    return stickerCatalog().categories;
+    QVariantList out;
+    for (const StickerCategory &category : ::stickerCategories()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), category.id},
+            {QStringLiteral("label"), category.label},
+        });
+    }
+    return out;
 }
 
 QVariantList AppController::builtinShapes() const
@@ -4495,6 +4471,17 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
     const QJsonObject root = document.object();
     QString parseError;
     m_project = drift::Project::fromJson(root, &parseError);
+
+    // Stickers moved out of the QRC and into an addon, so projects saved before that store paths
+    // like ":/qt/qml/Drift/resources/stickers/grinning.png" that no longer resolve. Repoint them
+    // at the installed pack; a sticker with no installed pack keeps its old path and simply fails
+    // to load, which is the same outcome as a missing media file.
+    for (drift::MediaAsset &asset : m_project.assets()) {
+        const QString migrated = resolveLegacyStickerPath(asset.path);
+        if (!migrated.isEmpty())
+            asset.path = migrated;
+    }
+
     if (m_assetLibrary)
         m_assetLibrary->setProject(&m_project);
 

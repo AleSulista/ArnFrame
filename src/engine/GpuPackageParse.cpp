@@ -1,5 +1,7 @@
 #include "GpuPackageParse.h"
 
+#include "AddonRegistry.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -290,7 +292,8 @@ QString resolvePackageAsset(const QString &packageDir, const QString &relOrAbs)
     return QFileInfo::exists(path) ? path : QString();
 }
 
-QStringList defaultSearchPaths(const QString &envVar, const QString &subdir)
+QStringList defaultSearchPaths(const QString &envVar, const QString &subdir,
+                               const QString &addonKind)
 {
     QStringList roots;
 
@@ -308,6 +311,9 @@ QStringList defaultSearchPaths(const QString &envVar, const QString &subdir)
     const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (!appData.isEmpty())
         roots.append(QDir(appData).filePath(subdir));
+
+    if (!addonKind.isEmpty())
+        roots.append(drift::addon::addonRootsForKind(addonKind));
 
     roots.removeDuplicates();
     return roots;

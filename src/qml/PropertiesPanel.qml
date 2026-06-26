@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Dialogs
+import QtQuick.Window
 import Drift
 import "components"
 
@@ -1559,9 +1560,22 @@ PanelFrame {
                             font.pixelSize: Theme.fontSizeXs
                         }
 
+                        // The transcriber is an addon; without it there are no languages to list
+                        // and nothing to run, so offer the download in place of the controls.
+                        property bool whisperReady: Addons.hasKind("whisper-model")
+
+                        Connections {
+                            target: Addons
+                            function onKindChanged(kind) {
+                                if (kind === "whisper-model")
+                                    subtitleLanguageBox.parent.whisperReady = Addons.hasKind("whisper-model")
+                            }
+                        }
+
                         ThemedComboBox {
                             id: subtitleLanguageBox
-                            visible: root.clipKind === "audio" || root.clipKind === "video"
+                            visible: parent.whisperReady
+                                     && (root.clipKind === "audio" || root.clipKind === "video")
                             width: parent.width
                             enabled: !EditorState.subtitleGenerating
                             textRole: "label"
@@ -1571,7 +1585,8 @@ PanelFrame {
                         }
 
                         ThemedButton {
-                            visible: root.clipKind === "audio" || root.clipKind === "video"
+                            visible: parent.whisperReady
+                                     && (root.clipKind === "audio" || root.clipKind === "video")
                             width: parent.width
                             text: EditorState.subtitleGenerating
                                   ? qsTr("Transcribing… %1%").arg(Math.round(EditorState.subtitleGenProgress * 100))
@@ -1584,6 +1599,15 @@ PanelFrame {
                                 EditorState.generateSubtitlesForClip(
                                     EditorState.selectedTrack, EditorState.selectedClip, lang)
                             }
+                        }
+
+                        ThemedButton {
+                            visible: !parent.whisperReady
+                                     && (root.clipKind === "audio" || root.clipKind === "video")
+                            width: parent.width
+                            text: qsTr("Install speech model (≈670 MB)")
+                            variant: "primary"
+                            onClicked: root.Window.window.openAddonManager("whisper-model")
                         }
                     }
 
