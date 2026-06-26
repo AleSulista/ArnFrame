@@ -197,13 +197,20 @@ QtObject {
         chevronDown: "chevron-down",
         chevronsRight: "chevrons-right",
         x: "x",
-        search: "search",
         messageSquare: "message-square",
         moon: "moon",
         sun: "sun",
         grid: "grid-3x3",
         list: "list",
-        sort: "arrow-down-a-z",
-        gripVertical: "grip-vertical"
+        sortByName: "arrow-down-a-z",
+        sortByKind: "tags",
+        gripVertical: "grip-vertical",
+        save: "save",
+        setStart: "arrow-left-to-line",
+        setEnd: "arrow-right-to-line",
+        blend: "blend",
+        mask: "square-dashed",
+        puzzle: "puzzle",
+        info: "info"
     })
 }

@@ -23,8 +23,9 @@ icons=(
   scissors chevrons-left undo redo clipboard-paste copy-plus copy trash-2 snowflake
   bookmark layers magnet link-2 unlink-2 fold-horizontal zoom-out zoom-in gauge play pause
   maximize folder headphones type smile wand-sparkles sliders-horizontal settings upload plus
-  volume-2 volume-off eye eye-off film music image shapes chevron-down chevrons-right x search
+  volume-2 volume-off eye eye-off film music image shapes chevron-down chevrons-right x
   message-square moon sun grid-3x3 list arrow-down-a-z grip-vertical
+  save arrow-right-to-line arrow-left-to-line tags blend square-dashed puzzle info
 )
 
 for name in "${icons[@]}"; do

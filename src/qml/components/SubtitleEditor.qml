@@ -469,7 +469,7 @@ Item {
                             }
                             IconButton {
                                 id: startPh
-                                icon: Theme.icons.bookmark
+                                icon: Theme.icons.setStart
                                 variant: "ghost"
                                 buttonEnabled: root.localPlayhead >= 0
                                 tooltip: qsTr("Set start to playhead")
@@ -502,7 +502,7 @@ Item {
                             }
                             IconButton {
                                 id: endPh
-                                icon: Theme.icons.bookmark
+                                icon: Theme.icons.setEnd
                                 variant: "ghost"
                                 buttonEnabled: root.localPlayhead >= 0
                                 tooltip: qsTr("Set end to playhead")

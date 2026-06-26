@@ -156,7 +156,7 @@ Rectangle {
         }
 
         IconButton {
-            icon: Theme.icons.copy
+            icon: Theme.icons.save
             variant: "ghost"
             tooltip: qsTr("Save project")
             onClicked: root.saveProject()
@@ -181,7 +181,7 @@ Rectangle {
         spacing: 8
 
         IconButton {
-            icon: Theme.icons.layers
+            icon: Theme.icons.puzzle
             variant: "ghost"
             tooltip: qsTr("Addons")
             anchors.verticalCenter: parent.verticalCenter

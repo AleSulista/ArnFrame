@@ -384,6 +384,7 @@ PanelFrame {
             }
 
             Row {
+                id: leftControls
                 anchors.left: parent.left
                 anchors.leftMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
@@ -486,7 +487,18 @@ PanelFrame {
             }
 
             Rectangle {
-                anchors.centerIn: parent
+                id: sceneBadge
+
+                // Sits between the two button groups, which are anchored to the
+                // toolbar edges and grow freely. Prefer dead centre, but slide
+                // aside to stay clear of them, and drop out entirely once the
+                // gap can no longer fit the badge.
+                readonly property real gapStart: leftControls.x + leftControls.width + 12
+                readonly property real gapEnd: rightControls.x - 12
+
+                x: Math.max(gapStart, Math.min((toolbar.width - width) / 2, gapEnd - width))
+                anchors.verticalCenter: parent.verticalCenter
+                visible: gapEnd - gapStart >= width
                 width: sceneRow.implicitWidth + 20
                 height: 26
                 radius: Theme.radiusSm
@@ -516,6 +528,7 @@ PanelFrame {
             }
 
             Row {
+                id: rightControls
                 anchors.right: parent.right
                 anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter

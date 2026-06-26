@@ -298,13 +298,13 @@ PanelFrame {
         ListElement { tabId: "subtitles"; icon: 8; label: "Subtitles" }
     }
     property var tabIcons: [
-        Theme.icons.folder,
+        Theme.icons.info,
         Theme.icons.maximize,
         Theme.icons.headphones,
         Theme.icons.gauge,
         Theme.icons.layers,
-        Theme.icons.linkTwo,
-        Theme.icons.grid,
+        Theme.icons.blend,
+        Theme.icons.mask,
         Theme.icons.wand,
         Theme.icons.messageSquare
     ]

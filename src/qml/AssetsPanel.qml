@@ -57,7 +57,7 @@ PanelFrame {
         Theme.icons.type,
         Theme.icons.smile,
         Theme.icons.wand,
-        Theme.icons.chevronsRight,
+        Theme.icons.blend,
         Theme.icons.settings
     ]
     property int activeTab: 0
@@ -151,9 +151,9 @@ PanelFrame {
                         onClicked: assetsContent.gridMode = false
                     }
                     IconButton {
-                        icon: Theme.icons.sort
+                        icon: root.sortByKind ? Theme.icons.sortByKind : Theme.icons.sortByName
                         variant: "ghost"
-                        tooltip: qsTr("Sort assets")
+                        tooltip: root.sortByKind ? qsTr("Sort by name") : qsTr("Sort by kind")
                         onClicked: {
                             if (root.sortByKind)
                                 AssetLibrary.sortByName()
