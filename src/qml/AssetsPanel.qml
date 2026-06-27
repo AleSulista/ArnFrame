@@ -72,7 +72,7 @@ PanelFrame {
         const tabId = tabsModel.get(activeTab).tabId
         if (tabId === "text" || tabId === "stickers" || tabId === "effects"
                 || tabId === "adjustment" || tabId === "settings" || tabId === "sounds"
-                || tabId === "transitions")
+                || tabId === "transitions" || tabId === "shortcuts")
             return false
         const kinds = kindsForTab(tabId)
         return kinds.length === 0 || kinds.indexOf(kind) >= 0
@@ -87,6 +87,7 @@ PanelFrame {
         ListElement { tabId: "effects"; icon: 4; label: "Effects" }
         ListElement { tabId: "transitions"; icon: 5; label: "Transitions" }
         ListElement { tabId: "settings"; icon: 6; label: "Settings" }
+        ListElement { tabId: "shortcuts"; icon: 7; label: "Shortcuts" }
     }
     property var tabIcons: [
         Theme.icons.film,
@@ -95,7 +96,8 @@ PanelFrame {
         Theme.icons.smile,
         Theme.icons.wand,
         Theme.icons.blend,
-        Theme.icons.settings
+        Theme.icons.settings,
+        Theme.icons.keyboard
     ]
     property int activeTab: 0
     property bool sortByKind: false
@@ -763,6 +765,104 @@ PanelFrame {
                     spacing: Theme.spacingLg
                     topPadding: Theme.pagePadding
 
+                    // Live project size, re-read whenever the timeline changes so
+                    // undo/redo of a crop is reflected back into these fields.
+                    property int canvasW: { void EditorState.tracks; return EditorState.projectWidth() }
+                    property int canvasH: { void EditorState.tracks; return EditorState.projectHeight() }
+
+                    readonly property var canvasPresets: [
+                        { label: qsTr("Custom"), w: 0, h: 0 },
+                        { label: "1920×1080 (16:9)", w: 1920, h: 1080 },
+                        { label: "3840×2160 (4K)", w: 3840, h: 2160 },
+                        { label: "1080×1920 (9:16)", w: 1080, h: 1920 },
+                        { label: "1080×1080 (1:1)", w: 1080, h: 1080 },
+                        { label: "1440×1080 (4:3)", w: 1440, h: 1080 }
+                    ]
+
+                    Text {
+                        text: qsTr("Canvas resolution")
+                        color: Theme.mutedForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeXs
+                    }
+
+                    ThemedComboBox {
+                        width: parent.width
+                        enabled: !EditorState.canvasCropMode
+                        model: settingsColumn.canvasPresets.map(function (p) { return p.label })
+                        tooltip: qsTr("Resize the output frame. Clips keep their current size and position.")
+                        currentIndex: {
+                            const presets = settingsColumn.canvasPresets
+                            for (var i = 1; i < presets.length; ++i) {
+                                if (presets[i].w === settingsColumn.canvasW
+                                        && presets[i].h === settingsColumn.canvasH)
+                                    return i
+                            }
+                            return 0
+                        }
+                        onActivated: {
+                            const preset = settingsColumn.canvasPresets[currentIndex]
+                            if (preset.w > 0)
+                                EditorState.setProjectResolution(preset.w, preset.h)
+                        }
+                    }
+
+                    Row {
+                        width: parent.width
+                        spacing: Theme.spacingLg
+
+                        Column {
+                            width: (parent.width - parent.spacing) / 2
+                            spacing: Theme.spacingSm
+                            ThemedLabel { text: qsTr("Width") }
+                            ThemedNumberField {
+                                width: parent.width
+                                enabled: !EditorState.canvasCropMode
+                                from: 16
+                                to: 7680
+                                step: 2
+                                unit: "px"
+                                value: settingsColumn.canvasW
+                                onEdited: v => EditorState.setProjectResolution(v, settingsColumn.canvasH)
+                            }
+                        }
+
+                        Column {
+                            width: (parent.width - parent.spacing) / 2
+                            spacing: Theme.spacingSm
+                            ThemedLabel { text: qsTr("Height") }
+                            ThemedNumberField {
+                                width: parent.width
+                                enabled: !EditorState.canvasCropMode
+                                from: 16
+                                to: 4320
+                                step: 2
+                                unit: "px"
+                                value: settingsColumn.canvasH
+                                onEdited: v => EditorState.setProjectResolution(settingsColumn.canvasW, v)
+                            }
+                        }
+                    }
+
+                    ThemedButton {
+                        width: parent.width
+                        variant: EditorState.canvasCropMode ? "primary" : "secondary"
+                        glyph: Theme.icons.crop
+                        text: EditorState.canvasCropMode ? qsTr("Cancel crop") : qsTr("Crop canvas")
+                        tooltip: qsTr("Drag the preview edges to reframe the canvas")
+                        onClicked: EditorState.canvasCropMode = !EditorState.canvasCropMode
+                    }
+
+                    Text {
+                        text: qsTr("Clips are never rescaled by a canvas change — anything outside the new frame is cropped away.")
+                        color: Theme.mutedForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeXs
+                        opacity: 0.7
+                        width: settingsColumn.width
+                        wrapMode: Text.WordWrap
+                    }
+
                     Text {
                         text: qsTr("Preview quality")
                         color: Theme.mutedForeground
@@ -904,59 +1004,68 @@ PanelFrame {
                             }
                         }
                     }
+                }
+                }
+            }
 
-                    Text {
-                        text: qsTr("Keybindings")
-                        color: Theme.mutedForeground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeXs
-                        topPadding: Theme.spacingMd
-                    }
+            // Shortcuts tab panel. Split out of Settings, which had grown long
+            // enough that the binding list was permanently below the fold.
+            Item {
+                visible: tabsModel.get(activeTab).tabId === "shortcuts"
+                width: parent.width
+                height: parent.height - Theme.panelHeaderHeight
 
-                        Column {
-                            id: shortcutColumn
+                Flickable {
+                    anchors.fill: parent
+                    contentHeight: shortcutColumn.height + Theme.spacing3xl
+                    clip: true
+                    ScrollBar.vertical: AppScrollBar { }
+
+                    Column {
+                        id: shortcutColumn
+                        x: Theme.pagePadding
+                        width: parent.width - Theme.pagePadding * 2
+                        spacing: Theme.spacingMd
+                        topPadding: Theme.pagePadding
+
+                        Text {
                             width: parent.width
-                            spacing: Theme.spacingMd
+                            wrapMode: Text.WordWrap
+                            text: qsTr("Click a shortcut, then press the keys. Esc cancels, Backspace clears.")
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                            bottomPadding: Theme.spacingSm
+                        }
 
-                            Text {
-                                width: parent.width
-                                wrapMode: Text.WordWrap
-                                text: qsTr("Click a shortcut, then press the keys. Esc cancels, Backspace clears.")
-                                color: Theme.mutedForeground
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeXs
-                                bottomPadding: Theme.spacingSm
-                            }
+                        EmptyState {
+                            visible: !EditorState.actions || EditorState.actions.length === 0
+                            width: parent.width
+                            compact: true
+                            glyph: Theme.icons.keyboard
+                            title: qsTr("No bindable actions")
+                        }
 
-                            EmptyState {
-                                visible: !EditorState.actions || EditorState.actions.length === 0
-                                width: parent.width
-                                compact: true
-                                glyph: Theme.icons.settings
-                                title: qsTr("No bindable actions")
-                            }
+                        Repeater {
+                            model: EditorState.actions
+                            delegate: Row {
+                                required property var modelData
+                                width: shortcutColumn.width
+                                spacing: Theme.spacingLg
 
-                            Repeater {
-                                model: EditorState.actions
-                                delegate: Row {
-                                    required property var modelData
-                                    width: shortcutColumn.width
-                                    spacing: Theme.spacingLg
-
-                                    Text {
-                                        width: Math.max(90, shortcutColumn.width - 128)
-                                        text: modelData.label
-                                        color: Theme.panelForeground
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeXs
-                                        wrapMode: Text.WordWrap
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    ShortcutCaptureField {
-                                        width: 120
-                                        actionId: modelData.id
-                                        shortcut: modelData.shortcut
-                                    }
+                                Text {
+                                    width: Math.max(90, shortcutColumn.width - 128)
+                                    text: modelData.label
+                                    color: Theme.panelForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    wrapMode: Text.WordWrap
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                ShortcutCaptureField {
+                                    width: 120
+                                    actionId: modelData.id
+                                    shortcut: modelData.shortcut
                                 }
                             }
                         }

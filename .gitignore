@@ -9,6 +9,7 @@ CMakeLists.txt.user
 .vscode/
 .idea/
 *.swp
+/icons/
 
 # Fonts, stickers and Whisper models are addons now — built and published from the drift-addons
 # repo, downloaded at runtime into <AppDataLocation>/addons/. These directories are only local

@@ -50,6 +50,8 @@ private slots:
     void physicalOverlapTransitionWindow();
     void backgroundSerialization();
     void fadeSerializationAndMultiplier();
+    void rebaseClipLayoutFreezesImplicitSize();
+    void rebaseClipLayoutShiftsKeyframedPosition();
 };
 
 void CoreTest::timeConversion()
@@ -1101,6 +1103,88 @@ void CoreTest::fadeSerializationAndMultiplier()
     plain.timelineStart = 0;
     plain.timelineDuration = drift::secondsToUs(2.0);
     QCOMPARE(plain.fadeMultiplier(drift::secondsToUs(1.0)), 1.0);
+}
+
+// A canvas resize must not move or rescale anything: clips that relied on the
+// implicit full-canvas size get that size frozen, so they overflow the smaller
+// frame instead of shrinking with it.
+void CoreTest::rebaseClipLayoutFreezesImplicitSize()
+{
+    drift::Project project;
+    project.setResolution(1920, 1080);
+
+    drift::Track track;
+    track.type = drift::TrackType::Video;
+
+    drift::Clip implicitSize; // no transform keyframes at all
+    implicitSize.type = drift::ClipType::Video;
+    track.clips.append(implicitSize);
+
+    drift::Clip explicitSize;
+    explicitSize.type = drift::ClipType::Image;
+    explicitSize.transformW.setKeyframe(0, 640.0);
+    explicitSize.transformH.setKeyframe(0, 360.0);
+    explicitSize.transformX.setKeyframe(0, 100.0);
+    explicitSize.transformY.setKeyframe(0, 50.0);
+    track.clips.append(explicitSize);
+
+    drift::Clip audio; // audio carries no layout; must be left alone
+    audio.type = drift::ClipType::Audio;
+    track.clips.append(audio);
+
+    project.tracks().clear(); // drop the default timeline; this test owns the document
+    project.tracks().append(track);
+
+    // Crop to a 1520x1080 window starting 400px in from the left.
+    drift::rebaseClipLayout(project, 1920, 1080, 400.0, 0.0);
+    project.setResolution(1520, 1080);
+
+    const drift::Track &out = project.tracks().at(0);
+
+    // The implicit clip keeps its original 1920x1080 footprint and is pushed
+    // left by the crop origin, so it now overflows both sides of the frame.
+    QCOMPARE(out.clips.at(0).transformW.evaluateAt(0), 1920.0);
+    QCOMPARE(out.clips.at(0).transformH.evaluateAt(0), 1080.0);
+    QCOMPARE(out.clips.at(0).transformX.evaluateAt(0), -400.0);
+    QCOMPARE(out.clips.at(0).transformY.evaluateAt(0), 0.0);
+
+    // Explicit sizes are untouched; only the position shifts.
+    QCOMPARE(out.clips.at(1).transformW.evaluateAt(0), 640.0);
+    QCOMPARE(out.clips.at(1).transformH.evaluateAt(0), 360.0);
+    QCOMPARE(out.clips.at(1).transformX.evaluateAt(0), -300.0);
+    QCOMPARE(out.clips.at(1).transformY.evaluateAt(0), 50.0);
+
+    QVERIFY(out.clips.at(2).transformW.isEmpty());
+    QVERIFY(out.clips.at(2).transformX.isEmpty());
+}
+
+// Animated positions must shift wholesale, so the motion path is preserved
+// relative to the content rather than being flattened to one value.
+void CoreTest::rebaseClipLayoutShiftsKeyframedPosition()
+{
+    drift::Project project;
+    project.setResolution(1920, 1080);
+
+    drift::Track track;
+    track.type = drift::TrackType::Video;
+
+    drift::Clip clip;
+    clip.type = drift::ClipType::Video;
+    clip.transformX.setKeyframe(0, 0.0);
+    clip.transformX.setKeyframe(drift::secondsToUs(2.0), 800.0);
+    clip.transformY.setKeyframe(0, 200.0);
+    track.clips.append(clip);
+
+    project.tracks().clear(); // drop the default timeline; this test owns the document
+    project.tracks().append(track);
+
+    drift::rebaseClipLayout(project, 1920, 1080, 120.0, 60.0);
+
+    const drift::Clip &out = project.tracks().at(0).clips.at(0);
+    QCOMPARE(out.transformX.keyframes().size(), 2);
+    QCOMPARE(out.transformX.evaluateAt(0), -120.0);
+    QCOMPARE(out.transformX.evaluateAt(drift::secondsToUs(2.0)), 680.0);
+    QCOMPARE(out.transformY.evaluateAt(0), 140.0);
 }
 
 QTEST_MAIN(CoreTest)

@@ -296,6 +296,8 @@ QtObject {
         setStart: "arrow-left-to-line",
         setEnd: "arrow-right-to-line",
         blend: "blend",
+        keyboard: "keyboard",
+        crop: "crop",
         mask: "square-dashed",
         puzzle: "puzzle",
         info: "info",

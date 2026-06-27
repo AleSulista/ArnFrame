@@ -2398,10 +2398,37 @@ void AppController::setProjectSetup(int width, int height, int fps)
         return;
 
     const drift::Project before = m_project;
+    if (m_project.width() != width || m_project.height() != height)
+        drift::rebaseClipLayout(m_project, m_project.width(), m_project.height(), 0.0, 0.0);
     m_project.setResolution(width, height);
     m_project.setFps(fps);
     pushProjectEdit(before, QStringLiteral("Project setup"));
     finishEdit(QStringLiteral("Project setup updated"));
+}
+
+// Crop rect is given in current-canvas pixels; it may extend outside the canvas
+// (negative origin / oversized extent) to grow the frame on that side.
+void AppController::applyCanvasCrop(double x, double y, double width, double height)
+{
+    const int newWidth = qBound(16, qRound(width), 7680);
+    const int newHeight = qBound(16, qRound(height), 4320);
+    if (newWidth == m_project.width() && newHeight == m_project.height()
+        && qFuzzyIsNull(x) && qFuzzyIsNull(y))
+        return;
+
+    const drift::Project before = m_project;
+    drift::rebaseClipLayout(m_project, m_project.width(), m_project.height(), x, y);
+    m_project.setResolution(newWidth, newHeight);
+    pushProjectEdit(before, QStringLiteral("Crop canvas"));
+    finishEdit(tr("Canvas cropped to %1×%2").arg(newWidth).arg(newHeight));
+}
+
+void AppController::setCanvasCropMode(bool active)
+{
+    if (m_canvasCropMode == active)
+        return;
+    m_canvasCropMode = active;
+    emit canvasCropModeChanged();
 }
 
 QVariantMap AppController::background() const

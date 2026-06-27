@@ -251,4 +251,48 @@ QString assignSplitLinkIds(Clip &head, Clip &tail)
     return tailLink;
 }
 
+namespace {
+
+// Writes `value` as the sole keyframe of an empty track, leaving tracks that
+// already carry explicit values (including animation) untouched.
+void bakeIfImplicit(KeyframeTrack<double> &track, double value)
+{
+    if (track.isEmpty())
+        track.setKeyframe(0, value);
+}
+
+void shiftTrackValues(KeyframeTrack<double> &track, double delta, double implicitValue)
+{
+    if (qFuzzyIsNull(delta))
+        return;
+    if (track.isEmpty()) {
+        track.setKeyframe(0, implicitValue - delta);
+        return;
+    }
+    KeyframeTrack<double> shifted;
+    shifted.setInterpolation(track.interpolation());
+    const QMap<TimeUs, double> &values = track.keyframes();
+    for (auto it = values.constBegin(); it != values.constEnd(); ++it)
+        shifted.setKeyframe(it.key(), it.value() - delta);
+    track = shifted;
+}
+
+} // namespace
+
+void rebaseClipLayout(Project &project, int oldWidth, int oldHeight, double originX, double originY)
+{
+    for (Track &track : project.tracks()) {
+        if (track.type == TrackType::Audio)
+            continue;
+        for (Clip &clip : track.clips) {
+            if (clip.type == ClipType::Audio)
+                continue;
+            bakeIfImplicit(clip.transformW, oldWidth);
+            bakeIfImplicit(clip.transformH, oldHeight);
+            shiftTrackValues(clip.transformX, originX, 0.0);
+            shiftTrackValues(clip.transformY, originY, 0.0);
+        }
+    }
+}
+
 } // namespace drift

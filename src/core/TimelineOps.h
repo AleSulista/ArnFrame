@@ -55,4 +55,14 @@ void syncLinkedTiming(Clip &dst, const Clip &src);
 // Returns the link id assigned to `tail` (empty when `head` was not linked).
 QString assignSplitLinkIds(Clip &head, Clip &tail);
 
+// Prepares every clip for a canvas resize from `oldWidth`x`oldHeight`.
+//
+// Clips with no transformW/transformH keyframes fall back to the project size at
+// composite time, so they would silently rescale themselves to the new canvas.
+// This freezes that implicit size into explicit values first, then shifts stored
+// positions by (-originX, -originY) so the region the user framed stays put.
+// Clips are left visually stationary; whatever falls outside the new canvas is
+// simply clipped away by the compositor.
+void rebaseClipLayout(Project &project, int oldWidth, int oldHeight, double originX, double originY);
+
 } // namespace drift

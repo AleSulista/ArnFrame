@@ -59,6 +59,7 @@ class AppController : public QObject
     Q_PROPERTY(bool guidesEnabled READ guidesEnabled WRITE setGuidesEnabled NOTIFY guidesChanged)
     Q_PROPERTY(QString guideType READ guideType WRITE setGuideType NOTIFY guidesChanged)
     Q_PROPERTY(QVariantMap background READ background NOTIFY backgroundChanged)
+    Q_PROPERTY(bool canvasCropMode READ canvasCropMode WRITE setCanvasCropMode NOTIFY canvasCropModeChanged)
     Q_PROPERTY(QVariantList actions READ actions NOTIFY shortcutsChanged)
     Q_PROPERTY(QVariantList bookmarks READ bookmarks NOTIFY bookmarksChanged)
     Q_PROPERTY(QString projectName READ projectName WRITE setProjectName NOTIFY projectNameChanged)
@@ -175,6 +176,9 @@ public:
     Q_INVOKABLE int projectFps() const;
     Q_INVOKABLE void setProjectResolution(int width, int height);
     Q_INVOKABLE void setProjectSetup(int width, int height, int fps);
+    Q_INVOKABLE void applyCanvasCrop(double x, double y, double width, double height);
+    bool canvasCropMode() const { return m_canvasCropMode; }
+    void setCanvasCropMode(bool active);
     Q_INVOKABLE void setBackground(const QVariantMap &background);
     Q_INVOKABLE bool timelineHasVisualClips() const;
     Q_INVOKABLE bool shouldConfigureProjectForAsset(int assetIndex) const;
@@ -332,6 +336,7 @@ signals:
     void subtitleWaveformReady(double startSeconds, double durSeconds, int sampleCount);
     void guidesChanged();
     void shortcutsChanged();
+    void canvasCropModeChanged();
     void backgroundChanged();
     void dirtyChanged();
     void currentProjectPathChanged();
@@ -401,6 +406,7 @@ protected:
     int m_selectedTransitionLeftClip = -1;
     QList<QPair<int, int>> m_selection;
     bool m_guidesEnabled = false;
+    bool m_canvasCropMode = false;
     QString m_guideType = QStringLiteral("thirds");
     QHash<QString, QString> m_shortcuts;
     int m_draggingAssetIndex = -1;

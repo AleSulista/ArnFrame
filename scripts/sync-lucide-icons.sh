@@ -35,6 +35,8 @@ icons=(
   align-start-vertical align-center-vertical align-end-vertical
   # Timeline / media
   captions list-video move-horizontal
+  # Shortcuts tab and canvas crop tool
+  keyboard crop
 )
 
 for name in "${icons[@]}"; do
