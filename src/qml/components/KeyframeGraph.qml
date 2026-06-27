@@ -19,6 +19,20 @@ Item {
         return EditorState.selectedClipData
     }
     readonly property string prop: EditorState.keyframeGraphProperty
+
+    // Spelled-out names for the one-to-three character property chips.
+    function propertyLabel(id) {
+        switch (id) {
+        case "x": return qsTr("X position")
+        case "y": return qsTr("Y position")
+        case "width": return qsTr("Width")
+        case "height": return qsTr("Height")
+        case "rotation": return qsTr("Rotation")
+        case "opacity": return qsTr("Opacity")
+        case "volume": return qsTr("Volume")
+        }
+        return id
+    }
     readonly property var points: {
         void EditorState.selectedClipData
         void EditorState.tracks
@@ -130,7 +144,8 @@ Item {
                             required property var modelData
                             text: modelData.label
                             chipHeight: 18
-                            horizontalPadding: 6
+                            horizontalPadding: 3
+                            tooltip: root.propertyLabel(modelData.id)
                             selected: root.prop === modelData.id
                             onClicked: EditorState.keyframeGraphProperty = modelData.id
                         }

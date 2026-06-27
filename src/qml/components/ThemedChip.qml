@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import Drift
 
 // Selectable pill/chip used for aspect presets, speed presets, category filters, etc.
@@ -6,35 +7,47 @@ import Drift
 //   "primary"   — selected fill = Theme.primary
 //   "secondary" — selected fill = Theme.panelSecondaryBg
 //   "outline"   — transparent / accent fill; border always drawn
-Rectangle {
+//
+// Built on AbstractButton so chips are tab-reachable and Space/Enter-activatable.
+// `selected` is kept as the public API (it drives `checked` underneath) so the
+// ~20 existing call sites read the same as before.
+AbstractButton {
     id: root
 
-    property string text: ""
     property bool selected: false
     property string variant: "primary"
-    property real chipHeight: 26
-    property real horizontalPadding: 14
+    property real chipHeight: Theme.controlHeightSm
+    property string tooltip: ""
 
-    signal clicked()
+    checked: selected
+    checkable: false
+    hoverEnabled: true
+    focusPolicy: Qt.StrongFocus
 
-    implicitWidth: label.implicitWidth + horizontalPadding
+    // Control.horizontalPadding is per-side and FINAL, so it is used directly
+    // rather than shadowed. Width falls out of contentItem + padding.
+    horizontalPadding: Theme.spacingLg
     implicitHeight: chipHeight
-    width: implicitWidth
     height: chipHeight
-    radius: Theme.radiusSm
-    color: _fill
-    border.width: 1
-    border.color: _border
+
+    Accessible.role: Accessible.RadioButton
+    Accessible.name: root.text
+    Accessible.checked: root.selected
+    Accessible.onPressAction: root.clicked()
 
     readonly property color _fill: {
+        if (!enabled)
+            return variant === "outline" ? "transparent" : Theme.panelAccent
         if (selected) {
             switch (variant) {
-            case "secondary": return Theme.panelSecondaryBg
-            case "outline": return Theme.panelAccent
-            default: return Theme.primary
+            case "secondary": return down ? Qt.darker(Theme.panelSecondaryBg, 1.2) : Theme.panelSecondaryBg
+            case "outline": return down ? Theme.panelMuted : Theme.panelAccent
+            default: return down ? Qt.darker(Theme.primary, 1.15) : Theme.primary
             }
         }
-        if (chipMouse.containsMouse)
+        if (down)
+            return Theme.panelMuted
+        if (hovered)
             return Theme.popoverHover
         return variant === "outline" ? "transparent" : Theme.panelAccent
     }
@@ -58,21 +71,51 @@ Rectangle {
         return Theme.panelForeground
     }
 
-    Text {
+    background: Rectangle {
+        radius: Theme.radiusSm
+        color: root._fill
+        border.width: Theme.borderWidth
+        border.color: root._border
+        opacity: root.enabled ? 1 : 0.5
+
+        Behavior on color {
+            ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+        Behavior on border.color {
+            ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: parent.radius
+            color: "transparent"
+            border.width: Theme.borderWidthFocus
+            border.color: Theme.focusRing
+            visible: root.visualFocus
+        }
+    }
+
+    contentItem: Text {
         id: label
-        anchors.centerIn: parent
         text: root.text
         color: root._fg
+        opacity: root.enabled ? 1 : 0.6
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontSizeXs
         font.weight: root.selected ? Font.Medium : Font.Normal
+        horizontalAlignment: Text.AlignHCenter
+        verticalAlignment: Text.AlignVCenter
+        elide: Text.ElideRight
+    }
+
+    ThemedToolTip {
+        text: root.tooltip
+        visible: root.tooltip.length > 0 && (root.hovered || root.visualFocus)
     }
 
     MouseArea {
-        id: chipMouse
         anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
-        onClicked: root.clicked()
+        acceptedButtons: Qt.NoButton
+        cursorShape: root.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
 }

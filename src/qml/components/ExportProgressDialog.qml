@@ -9,7 +9,7 @@ ThemedDialog {
     id: root
 
     title: EditorState.exportInProgress ? qsTr("Exporting video") : qsTr("Export")
-    width: 340
+    preferredWidth: Theme.dialogWidthSm
     showAccept: false
     rejectText: qsTr("Close")
     rejectVariant: "secondary"
@@ -19,26 +19,13 @@ ThemedDialog {
     }
 
     contentItem: Column {
-        spacing: 16
+        spacing: Theme.spacing2xl
         width: parent ? parent.width : 308
 
-        Item {
+        LabelledProgressRing {
             width: parent.width
-            height: 100
-
-            CircularProgress {
-                anchors.centerIn: parent
-                size: 100
-                strokeWidth: 7
-                value: EditorState.exportProgress
-            }
-
-            ThemedLabel {
-                anchors.centerIn: parent
-                tone: "default"
-                size: "base"
-                text: Math.round(EditorState.exportProgress * 100) + "%"
-            }
+            value: EditorState.exportProgress
+            indeterminate: EditorState.exportInProgress && EditorState.exportProgress <= 0
         }
 
         ThemedLabel {

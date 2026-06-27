@@ -2,10 +2,15 @@ import QtQuick
 import Drift
 
 // Small circular progress ring drawn on a Canvas. value is 0..1.
+//
+// Set `indeterminate` for phases that report no fraction (an install that has
+// started but not yet published progress); a value of 0 otherwise paints an
+// empty ring that is indistinguishable from "not started".
 Item {
     id: root
 
     property real value: 0
+    property bool indeterminate: false
     property real size: 28
     property real strokeWidth: 3
     property color trackColor: Theme.panelMuted
@@ -18,6 +23,19 @@ Item {
         id: canvas
         anchors.fill: parent
 
+        // Sweeps continuously while indeterminate.
+        property real spin: 0
+
+        RotationAnimator on spin {
+            running: root.indeterminate && root.visible
+            loops: Animation.Infinite
+            from: 0
+            to: 360
+            duration: 1100
+        }
+
+        onSpinChanged: if (root.indeterminate) requestPaint()
+
         onPaint: {
             var ctx = getContext("2d")
             ctx.reset()
@@ -25,8 +43,16 @@ Item {
             var cx = width / 2
             var cy = height / 2
             var radius = Math.min(width, height) / 2 - root.strokeWidth / 2
-            var start = -Math.PI / 2
-            var end = start + Math.max(0, Math.min(1, root.value)) * Math.PI * 2
+
+            // Indeterminate draws a fixed-length arc that rotates; determinate
+            // draws from 12 o'clock to the current fraction.
+            var start = root.indeterminate
+                    ? (canvas.spin * Math.PI / 180) - Math.PI / 2
+                    : -Math.PI / 2
+            var sweep = root.indeterminate
+                    ? Math.PI * 0.6
+                    : Math.max(0, Math.min(1, root.value)) * Math.PI * 2
+            var end = start + sweep
 
             ctx.lineWidth = root.strokeWidth
             ctx.lineCap = "round"
@@ -43,7 +69,14 @@ Item {
         }
     }
 
+    // Eases determinate progress so the ring sweeps rather than steps.
+    Behavior on value {
+        enabled: !root.indeterminate
+        NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
+    }
+
     onValueChanged: canvas.requestPaint()
+    onIndeterminateChanged: canvas.requestPaint()
     onSizeChanged: canvas.requestPaint()
     onStrokeWidthChanged: canvas.requestPaint()
     onTrackColorChanged: canvas.requestPaint()

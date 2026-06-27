@@ -12,7 +12,11 @@ ThemedDialog {
     acceptText: qsTr("Restore")
     rejectText: qsTr("New session")
     rejectVariant: "secondary"
-    width: 440
+    preferredWidth: 440
+    // Deliberately not dismissable by clicking away — the choice matters — but
+    // Enter now commits Restore (see ThemedDialog), so there is a keyboard path
+    // to at least one option. Previously both Enter and Escape were inert,
+    // leaving this startup-blocking modal mouse-only.
     closePolicy: Popup.NoAutoClose
 
     readonly property var info: EditorState.recoveryInfo
@@ -21,7 +25,7 @@ ThemedDialog {
     onRejected: EditorState.discardAutosave()
 
     contentItem: Column {
-        spacing: 12
+        spacing: Theme.spacingXl
         width: parent ? parent.width : 400
 
         ThemedLabel {
@@ -64,12 +68,23 @@ ThemedDialog {
                 }
 
                 ThemedLabel {
+                    id: originalPathLabel
                     width: parent.width
                     size: "sm"
                     tone: "muted"
                     wrapMode: Text.WordWrap
+                    // Capped so a deep path cannot grow the dialog off-screen.
+                    maximumLineCount: 2
+                    elide: Text.ElideMiddle
                     visible: root.info && root.info.originalPath && root.info.originalPath.length > 0
                     text: root.info ? root.info.originalPath : ""
+
+                    HoverHandler { id: pathHover }
+
+                    ThemedToolTip {
+                        text: originalPathLabel.text
+                        visible: pathHover.hovered && originalPathLabel.truncated
+                    }
                 }
             }
         }

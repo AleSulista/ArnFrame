@@ -3,47 +3,91 @@ import QtQuick.Controls.Basic
 import Drift
 
 // Icon-only button, variants "text" / "ghost" / "secondary".
-Rectangle {
+//
+// Built on AbstractButton (not a bare Rectangle) so it joins the tab chain, is
+// activatable with Space/Enter, and reports a Button role to accessibility.
+// The icon name goes in `glyph` — AbstractButton.icon is FINAL.
+AbstractButton {
     id: root
 
-    property string icon: ""
+    property string glyph: ""
     property string tooltip: ""
-    property real buttonSize: 28
-    property real iconSize: 16
+    property real buttonSize: Theme.iconButtonSize
+    property real iconSize: Theme.iconSizeBase
     property bool active: false
-    property bool buttonEnabled: true
-    // "text": transparent, hover = reduced opacity (toolbar buttons)
+    // "text": transparent, hover = subtle tint (toolbar buttons)
     // "ghost": transparent, hover = accent background (tab rail, view toggles)
     property string variant: "text"
 
-    signal clicked()
-
+    implicitWidth: buttonSize
+    implicitHeight: buttonSize
     width: buttonSize
     height: buttonSize
-    radius: Theme.radiusSm
-    color: active ? Theme.panelSecondaryBg
-                  : (variant === "ghost" && buttonEnabled && mouseArea.containsMouse ? Theme.panelAccent : "transparent")
-    border.width: active ? 1 : 0
-    border.color: Theme.panelSecondaryBorder
-    opacity: !buttonEnabled ? 0.5 : (variant === "text" && !active && mouseArea.containsMouse ? 0.75 : 1)
+    hoverEnabled: true
+    focusPolicy: Qt.StrongFocus
 
-    IconGlyph {
-        anchors.centerIn: parent
-        glyph: root.icon
-        iconSize: root.iconSize
-        iconColor: root.active ? Theme.panelSecondaryForeground : Theme.mutedForeground
+    Accessible.role: Accessible.Button
+    Accessible.name: tooltip.length > 0 ? tooltip : glyph
+    Accessible.onPressAction: root.clicked()
+
+    background: Rectangle {
+        radius: Theme.radiusSm
+        color: {
+            if (root.active)
+                return Theme.panelSecondaryBg
+            if (!root.enabled)
+                return "transparent"
+            // Both variants now tint on hover. The old "text" variant dimmed to
+            // 0.75 opacity, which read as disabled rather than as hover.
+            if (root.down)
+                return Theme.panelMuted
+            if (root.hovered)
+                return root.variant === "ghost" ? Theme.panelAccent : Theme.popoverHover
+            return "transparent"
+        }
+        border.width: root.active ? Theme.borderWidth : 0
+        border.color: Theme.panelSecondaryBorder
+        opacity: root.enabled ? 1 : 0.5
+
+        Behavior on color {
+            ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+        Behavior on opacity {
+            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+
+        // Keyboard focus ring. Drawn outside the fill so it stays visible on the
+        // active/selected state too.
+        Rectangle {
+            anchors.fill: parent
+            radius: parent.radius
+            color: "transparent"
+            border.width: Theme.borderWidthFocus
+            border.color: Theme.focusRing
+            visible: root.visualFocus
+        }
     }
 
-    ToolTip {
-        visible: root.tooltip.length > 0 && mouseArea.containsMouse
+    contentItem: IconGlyph {
+        glyph: root.glyph
+        iconSize: root.iconSize
+        iconColor: root.active ? Theme.panelSecondaryForeground : Theme.mutedForeground
+        opacity: root.enabled ? 1 : 0.5
+
+        Behavior on opacity {
+            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+    }
+
+    ThemedToolTip {
         text: root.tooltip
+        // Shown on hover, and on keyboard focus so Tab users get the same labels.
+        visible: root.tooltip.length > 0 && (root.hovered || root.visualFocus)
     }
 
     MouseArea {
-        id: mouseArea
         anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: root.buttonEnabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-        onClicked: if (root.buttonEnabled) root.clicked()
+        acceptedButtons: Qt.NoButton
+        cursorShape: root.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
 }

@@ -26,6 +26,15 @@ icons=(
   volume-2 volume-off eye eye-off film music image shapes chevron-down chevrons-right x
   message-square moon sun grid-3x3 list arrow-down-a-z grip-vertical
   save arrow-right-to-line arrow-left-to-line tags blend square-dashed puzzle info
+  # Status / feedback (toasts, inline errors, empty states)
+  triangle-alert circle-check circle-x loader-circle refresh-cw download
+  # Affordances (reset, search, disclosure, editing, locking)
+  rotate-ccw search chevron-right chevron-left check pencil clock lock lock-open
+  # Text alignment controls (properties panel)
+  text-align-start text-align-center text-align-end
+  align-start-vertical align-center-vertical align-end-vertical
+  # Timeline / media
+  captions list-video move-horizontal
 )
 
 for name in "${icons[@]}"; do

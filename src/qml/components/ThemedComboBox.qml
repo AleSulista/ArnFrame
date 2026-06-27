@@ -5,11 +5,18 @@ import Drift
 ComboBox {
     id: root
 
+    property string tooltip: ""
+
     font.family: Theme.fontFamily
     font.pixelSize: Theme.fontSizeSm
-    implicitHeight: 30
-    leftPadding: 8
-    rightPadding: 28
+    implicitHeight: Theme.controlHeight
+    leftPadding: Theme.spacingLg
+    rightPadding: Theme.spacing3xl + Theme.spacingSm
+    hoverEnabled: true
+    focusPolicy: Qt.StrongFocus
+
+    Accessible.role: Accessible.ComboBox
+    Accessible.name: displayText
 
     contentItem: Text {
         leftPadding: root.leftPadding
@@ -17,6 +24,7 @@ ComboBox {
         text: root.displayText
         font: root.font
         color: Theme.panelForeground
+        opacity: root.enabled ? 1 : 0.5
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
     }
@@ -24,20 +32,53 @@ ComboBox {
     background: Rectangle {
         radius: Theme.radiusSm
         color: Theme.panelAccent
-        border.width: root.activeFocus || root.down ? 1 : 0
-        border.color: Theme.panelSecondaryBorder
+        // Disabled used to be visually identical to enabled, so `enabled:` bindings
+        // on combo boxes had no perceptible effect.
+        opacity: root.enabled ? 1 : 0.5
+        border.width: root.activeFocus || root.down ? Theme.borderWidthFocus
+                                                    : (root.hovered ? Theme.borderWidth : 0)
+        border.color: root.activeFocus ? Theme.focusRing : Theme.panelMuted
+
+        Behavior on border.width {
+            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+        Behavior on border.color {
+            ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+        Behavior on opacity {
+            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
     }
 
     indicator: IconGlyph {
-        x: root.width - width - 8
+        x: root.width - width - Theme.spacingLg
         y: root.topPadding + (root.availableHeight - height) / 2
         glyph: Theme.icons.chevronDown
-        iconSize: 12
+        iconSize: Theme.iconSizeSm
         iconColor: Theme.mutedForeground
+        opacity: root.enabled ? 1 : 0.5
+
+        // Points up while the list is open.
+        rotation: root.popup.visible ? 180 : 0
+        Behavior on rotation {
+            NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
+        }
+    }
+
+    ThemedToolTip {
+        text: root.tooltip
+        visible: root.tooltip.length > 0 && !root.popup.visible
+                 && (root.hovered || root.visualFocus)
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.NoButton
+        cursorShape: root.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
 
     popup: Popup {
-        y: root.height + 2
+        y: root.height + Theme.spacingXs
         width: root.width
         implicitHeight: Math.min(240, contentItem.implicitHeight + 2)
         padding: 1
@@ -47,21 +88,51 @@ ComboBox {
             implicitHeight: contentHeight
             model: root.popup.visible ? root.delegateModel : null
             currentIndex: root.highlightedIndex
+            // Arrow keys move the highlight and keep it on screen.
+            keyNavigationEnabled: true
+            highlightMoveDuration: Theme.durationFast
+            highlightRangeMode: ListView.ApplyRange
+            preferredHighlightBegin: 0
+            preferredHighlightEnd: height
             ScrollBar.vertical: AppScrollBar { }
         }
 
         background: Rectangle {
             radius: Theme.radiusSm
             color: Theme.panelBackground
-            border.width: 1
+            border.width: Theme.borderWidth
             border.color: Theme.panelBorder
+        }
+
+        enter: Transition {
+            NumberAnimation {
+                property: "opacity"
+                from: 0.0
+                to: 1.0
+                duration: Theme.durationFast
+                easing.type: Theme.easing
+            }
+        }
+
+        exit: Transition {
+            NumberAnimation {
+                property: "opacity"
+                from: 1.0
+                to: 0.0
+                duration: Theme.durationFast
+                easing.type: Theme.easing
+            }
         }
     }
 
     delegate: ItemDelegate {
+        id: comboDelegate
         width: root.width
-        height: 28
+        height: Theme.iconButtonSize
         highlighted: root.highlightedIndex === index
+        // ItemDelegate defaults to hoverEnabled: false in Controls.Basic, so the
+        // hover fill below never rendered.
+        hoverEnabled: true
 
         contentItem: Text {
             text: root.textRole ? (modelData[root.textRole] !== undefined
@@ -72,11 +143,22 @@ ComboBox {
             font: root.font
             elide: Text.ElideRight
             verticalAlignment: Text.AlignVCenter
-            leftPadding: 8
+            leftPadding: Theme.spacingLg
         }
 
         background: Rectangle {
-            color: highlighted ? Theme.panelSecondaryBg : (hovered ? Theme.panelAccent : "transparent")
+            color: comboDelegate.highlighted ? Theme.panelSecondaryBg
+                                             : (comboDelegate.hovered ? Theme.panelAccent : "transparent")
+
+            Behavior on color {
+                ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.NoButton
+            cursorShape: Qt.PointingHandCursor
         }
     }
 }

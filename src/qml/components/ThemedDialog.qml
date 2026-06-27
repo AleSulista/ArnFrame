@@ -14,16 +14,84 @@ Dialog {
     property bool showReject: true
     property string acceptVariant: "primary"
     property string rejectVariant: "secondary"
+    // Natural width; clamped against the window so the dialog always fits.
+    property real preferredWidth: Theme.dialogWidthMd
+    // Set false for dialogs where Enter must not commit (destructive confirms).
+    property bool acceptOnReturn: true
 
     modal: true
     anchors.centerIn: Overlay.overlay
     standardButtons: Dialog.NoButton
-    padding: 16
-    width: 420
+    padding: Theme.spacing2xl
+
+    width: Math.min(preferredWidth,
+                    (Overlay.overlay ? Overlay.overlay.width : preferredWidth) - Theme.dialogMargin)
+
+    // Enter/Return commits, Escape cancels. Both used to be inert: the custom
+    // footer meant standardButtons was NoButton, so no key was wired to accept.
+    Keys.onReturnPressed: function(event) {
+        if (root.acceptOnReturn && root.showAccept && acceptButton.enabled) {
+            root.accept()
+            event.accepted = true
+        }
+    }
+    Keys.onEnterPressed: function(event) {
+        if (root.acceptOnReturn && root.showAccept && acceptButton.enabled) {
+            root.accept()
+            event.accepted = true
+        }
+    }
+
+    // Give the dialog focus on open so the key handlers above are live and the
+    // default action is visibly selected.
+    onOpened: {
+        if (showAccept)
+            acceptButton.forceActiveFocus()
+        else
+            root.forceActiveFocus()
+    }
+
+    enter: Transition {
+        ParallelAnimation {
+            NumberAnimation {
+                property: "opacity"
+                from: 0.0
+                to: 1.0
+                duration: Theme.durationBase
+                easing.type: Theme.easing
+            }
+            NumberAnimation {
+                property: "scale"
+                from: 0.96
+                to: 1.0
+                duration: Theme.durationBase
+                easing.type: Theme.easing
+            }
+        }
+    }
+
+    exit: Transition {
+        ParallelAnimation {
+            NumberAnimation {
+                property: "opacity"
+                from: 1.0
+                to: 0.0
+                duration: Theme.durationFast
+                easing.type: Theme.easing
+            }
+            NumberAnimation {
+                property: "scale"
+                from: 1.0
+                to: 0.96
+                duration: Theme.durationFast
+                easing.type: Theme.easing
+            }
+        }
+    }
 
     background: Rectangle {
         color: Theme.panelBackground
-        border.width: 1
+        border.width: Theme.borderWidth
         border.color: Theme.panelBorder
         radius: Theme.radiusMd
     }
@@ -35,20 +103,23 @@ Dialog {
 
         Text {
             anchors.left: parent.left
-            anchors.leftMargin: 16
+            anchors.leftMargin: Theme.spacing2xl
+            anchors.right: parent.right
+            anchors.rightMargin: Theme.spacing2xl
             anchors.verticalCenter: parent.verticalCenter
             text: root.title
             color: Theme.panelForeground
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeBase
             font.weight: Font.Medium
+            elide: Text.ElideRight
         }
 
         Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            height: 1
+            height: Theme.borderWidth
             color: Theme.panelBorder
         }
     }
@@ -62,16 +133,16 @@ Dialog {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            height: 1
+            height: Theme.borderWidth
             color: Theme.panelBorder
             visible: root.showFooter
         }
 
         Row {
             anchors.right: parent.right
-            anchors.rightMargin: 16
+            anchors.rightMargin: Theme.spacing2xl
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 8
+            spacing: Theme.spacingLg
 
             ThemedButton {
                 visible: root.showReject
@@ -81,6 +152,7 @@ Dialog {
             }
 
             ThemedButton {
+                id: acceptButton
                 visible: root.showAccept
                 text: root.acceptText
                 variant: root.acceptVariant

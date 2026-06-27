@@ -180,6 +180,15 @@ PanelFrame {
         return Theme.icons.film;
     }
 
+    // Human label for a track type. Tracks previously showed no name at all.
+    function trackTypeLabel(type) {
+        if (type === "audio") return qsTr("Audio");
+        if (type === "text") return qsTr("Text");
+        if (type === "subtitle") return qsTr("Subtitle");
+        if (type === "shape") return qsTr("Shape");
+        return qsTr("Video");
+    }
+
     function clipColor(type) {
         if (type === "text") return Theme.clipText;
         if (type === "subtitle") return Theme.clipSubtitle;
@@ -360,11 +369,34 @@ PanelFrame {
     function ensurePlayheadVisible() {
         const playheadX = EditorState.playheadSeconds * pxPerSecond;
         const margin = 64;
+        // Eased rather than teleporting: auto-scroll during playback used to jump
+        // by up to a full viewport.
         if (playheadX < flick.contentX + margin)
-            flick.contentX = Math.max(0, playheadX - margin);
+            scrollToX(Math.max(0, playheadX - margin));
         else if (playheadX > flick.contentX + flick.width - margin)
-            flick.contentX = Math.min(Math.max(0, flick.contentWidth - flick.width),
-                                      playheadX - flick.width + margin);
+            scrollToX(Math.min(Math.max(0, flick.contentWidth - flick.width),
+                               playheadX - flick.width + margin));
+    }
+
+    // Smooth horizontal scroll helper. Skipped while the user is dragging the
+    // view, so it never fights a flick in progress.
+    function scrollToX(target) {
+        if (flick.dragging || flick.flicking) {
+            flick.contentX = target
+            return
+        }
+        contentXAnimation.stop()
+        contentXAnimation.from = flick.contentX
+        contentXAnimation.to = target
+        contentXAnimation.start()
+    }
+
+    NumberAnimation {
+        id: contentXAnimation
+        target: flick
+        property: "contentX"
+        duration: Theme.durationBase
+        easing.type: Theme.easing
     }
 
     Column {
@@ -386,12 +418,16 @@ PanelFrame {
             Row {
                 id: leftControls
                 anchors.left: parent.left
-                anchors.leftMargin: 8
+                anchors.leftMargin: Theme.spacingLg
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: 2
+                spacing: Theme.spacingXs
+                // Never runs under the right-hand controls; buttons past the
+                // available width are clipped rather than overlapping.
+                width: Math.max(0, rightControls.x - x - Theme.spacingLg)
+                clip: true
 
                 IconButton {
-                    icon: EditorState.playing ? Theme.icons.pause : Theme.icons.play
+                    glyph: EditorState.playing ? Theme.icons.pause : Theme.icons.play
                     variant: "text"
                     tooltip: EditorState.playing ? qsTr("Pause") : qsTr("Play")
                     onClicked: EditorState.togglePlayback()
@@ -406,66 +442,66 @@ PanelFrame {
                 }
 
                 Rectangle {
-                    width: 1
-                    height: 24
+                    width: Theme.borderWidth
+                    height: Theme.spacing3xl
                     color: Theme.panelBorder
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
-                IconButton { icon: Theme.icons.scissors; variant: "text"; tooltip: qsTr("Split at playhead"); onClicked: EditorState.splitAtPlayhead() }
-                IconButton { icon: Theme.icons.chevronsLeft; variant: "text"; tooltip: qsTr("Split left"); onClicked: EditorState.splitSelectedClipLeft() }
-                IconButton { icon: Theme.icons.chevronsRight; variant: "text"; tooltip: qsTr("Split right"); onClicked: EditorState.splitSelectedClipRight() }
+                IconButton { glyph: Theme.icons.scissors; variant: "text"; tooltip: qsTr("Split at playhead"); onClicked: EditorState.splitAtPlayhead() }
+                IconButton { glyph: Theme.icons.chevronsLeft; variant: "text"; tooltip: qsTr("Split left"); onClicked: EditorState.splitSelectedClipLeft() }
+                IconButton { glyph: Theme.icons.chevronsRight; variant: "text"; tooltip: qsTr("Split right"); onClicked: EditorState.splitSelectedClipRight() }
                 IconButton {
-                    icon: Theme.icons.unlink
+                    glyph: Theme.icons.unlink
                     variant: "text"
                     tooltip: qsTr("Unlink audio")
-                    buttonEnabled: EditorState.unlinkAvailable
+                    enabled: EditorState.unlinkAvailable
                     onClicked: EditorState.unlinkSelectedClips()
                 }
                 IconButton {
-                    icon: Theme.icons.linkTwo
+                    glyph: Theme.icons.linkTwo
                     variant: "text"
                     tooltip: qsTr("Merge adjacent clips")
-                    buttonEnabled: EditorState.mergeAvailable
+                    enabled: EditorState.mergeAvailable
                     onClicked: EditorState.mergeSelectedClips()
                 }
-                IconButton { icon: Theme.icons.copy; variant: "text"; tooltip: qsTr("Copy selection"); onClicked: EditorState.copySelection() }
-                IconButton { icon: Theme.icons.clipboardPaste; variant: "text"; tooltip: qsTr("Paste at playhead"); onClicked: EditorState.pasteAtPlayhead() }
-                IconButton { icon: Theme.icons.copyPlus; variant: "text"; tooltip: qsTr("Duplicate clip"); onClicked: EditorState.duplicateSelectedClip() }
-                IconButton { icon: Theme.icons.snowflake; variant: "text"; tooltip: qsTr("Freeze frame at playhead"); onClicked: EditorState.freezeFrameAtPlayhead() }
-                IconButton { icon: Theme.icons.trash; variant: "text"; tooltip: qsTr("Delete clip"); onClicked: EditorState.deleteSelectedClip() }
+                IconButton { glyph: Theme.icons.copy; variant: "text"; tooltip: qsTr("Copy selection"); onClicked: EditorState.copySelection() }
+                IconButton { glyph: Theme.icons.clipboardPaste; variant: "text"; tooltip: qsTr("Paste at playhead"); onClicked: EditorState.pasteAtPlayhead() }
+                IconButton { glyph: Theme.icons.copyPlus; variant: "text"; tooltip: qsTr("Duplicate clip"); onClicked: EditorState.duplicateSelectedClip() }
+                IconButton { glyph: Theme.icons.snowflake; variant: "text"; tooltip: qsTr("Freeze frame at playhead"); onClicked: EditorState.freezeFrameAtPlayhead() }
+                IconButton { glyph: Theme.icons.trash; variant: "text"; tooltip: qsTr("Delete clip"); onClicked: EditorState.deleteSelectedClip() }
 
                 Rectangle {
-                    width: 1
-                    height: 24
+                    width: Theme.borderWidth
+                    height: Theme.spacing3xl
                     color: Theme.panelBorder
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
                 IconButton {
-                    icon: Theme.icons.bookmark
+                    glyph: Theme.icons.bookmark
                     variant: "text"
                     tooltip: qsTr("Add bookmark at playhead")
                     onClicked: EditorState.addBookmark(EditorState.playheadSeconds, "Mark " + Math.round(EditorState.playheadSeconds))
                 }
                 IconButton {
-                    icon: Theme.icons.undo
+                    glyph: Theme.icons.undo
                     variant: "text"
                     tooltip: qsTr("Undo")
                     onClicked: EditorState.undo()
-                    buttonEnabled: EditorState.undoAvailable
+                    enabled: EditorState.undoAvailable
                 }
                 IconButton {
-                    icon: Theme.icons.redo
+                    glyph: Theme.icons.redo
                     variant: "text"
                     tooltip: qsTr("Redo")
                     onClicked: EditorState.redo()
-                    buttonEnabled: EditorState.redoAvailable
+                    enabled: EditorState.redoAvailable
                 }
 
                 Rectangle {
-                    width: 1
-                    height: 24
+                    width: Theme.borderWidth
+                    height: Theme.spacing3xl
                     color: Theme.panelBorder
                     anchors.verticalCenter: parent.verticalCenter
                 }
@@ -512,7 +548,7 @@ PanelFrame {
                     spacing: 6
 
                     Text {
-                        text: "Scene 1"
+                        text: qsTr("Scene 1")
                         color: Theme.panelForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSm
@@ -530,13 +566,13 @@ PanelFrame {
             Row {
                 id: rightControls
                 anchors.right: parent.right
-                anchors.rightMargin: 8
+                anchors.rightMargin: Theme.spacingLg
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: 4
+                spacing: Theme.spacingSm
 
                 IconButton {
                     id: magnetButton
-                    icon: Theme.icons.magnet
+                    glyph: Theme.icons.magnet
                     variant: "text"
                     tooltip: qsTr("Toggle snapping")
                     active: EditorState.snapEnabled
@@ -544,7 +580,7 @@ PanelFrame {
                 }
                 IconButton {
                     id: rippleButton
-                    icon: Theme.icons.foldHorizontal
+                    glyph: Theme.icons.foldHorizontal
                     variant: "text"
                     tooltip: qsTr("Toggle ripple editing")
                     active: EditorState.rippleEnabled
@@ -552,14 +588,14 @@ PanelFrame {
                 }
 
                 Rectangle {
-                    width: 1
-                    height: 24
+                    width: Theme.borderWidth
+                    height: Theme.spacing3xl
                     color: Theme.panelBorder
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
                 IconButton {
-                    icon: Theme.icons.zoomOut
+                    glyph: Theme.icons.zoomOut
                     variant: "text"
                     tooltip: qsTr("Zoom out")
                     onClicked: root.zoom = Math.max(root.minZoom, root.zoom / 1.5)
@@ -573,9 +609,38 @@ PanelFrame {
                     to: 1
                     value: Math.log(root.zoom / root.minZoom) / Math.log(root.maxZoom / root.minZoom)
                     onMoved: root.zoom = root.minZoom * Math.pow(root.maxZoom / root.minZoom, value)
+                    // There was no zoom readout anywhere, so the current level
+                    // was simply unknowable.
+                    valueFormatter: function () {
+                        return qsTr("Zoom %1×").arg(root.zoom.toFixed(2))
+                    }
+                }
+
+                // Numeric zoom level, and a click target to return to 1×.
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 44
+                    text: root.zoom.toFixed(2) + "×"
+                    color: Theme.mutedForeground
+                    font.family: Theme.monoFontFamily
+                    font.pixelSize: Theme.fontSizeTick
+                    horizontalAlignment: Text.AlignHCenter
+
+                    ThemedToolTip {
+                        text: qsTr("Zoom level — click to reset to 1×. Ctrl+wheel over the timeline also zooms.")
+                        visible: zoomLabelMouse.containsMouse
+                    }
+
+                    MouseArea {
+                        id: zoomLabelMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.zoom = 1.0
+                    }
                 }
                 IconButton {
-                    icon: Theme.icons.zoomIn
+                    glyph: Theme.icons.zoomIn
                     variant: "text"
                     tooltip: qsTr("Zoom in")
                     onClicked: root.zoom = Math.min(root.maxZoom, root.zoom * 1.5)
@@ -622,7 +687,11 @@ PanelFrame {
                 Item {
                     id: trackLabelsArea
                     width: parent.width
-                    height: parent.height - Theme.timelineRulerHeight - Theme.timelineBookmarkRowHeight
+                    // Clamped: went negative at small panel heights, which spilled
+                    // the absolutely-positioned label rows out of the column.
+                    height: Math.max(0, parent.height - Theme.timelineRulerHeight
+                                        - Theme.timelineBookmarkRowHeight)
+                    clip: true
 
                     Repeater {
                         model: root.tracks.length
@@ -631,7 +700,9 @@ PanelFrame {
                             width: Theme.trackLabelsWidth
                             height: root.trackHeight(root.tracks[index].type)
                                     + (index < root.tracks.length - 1 ? Theme.trackGap : 0)
-                            y: root.trackRowTop(index)
+                            // Follows the timeline's vertical scroll so labels stay
+                            // aligned with their rows.
+                            y: root.trackRowTop(index) - flick.contentY
                             opacity: root.draggingTrackFrom === index ? 0.45 : 1.0
 
                             Rectangle {
@@ -652,7 +723,7 @@ PanelFrame {
                                 iconColor: trackDragMouse.containsMouse || root.draggingTrackFrom === index
                                            ? Theme.panelForeground : Theme.mutedForeground
 
-                                ToolTip {
+                                ThemedToolTip {
                                     visible: trackDragMouse.containsMouse && root.draggingTrackFrom < 0
                                     text: qsTr("Drag to reorder track")
                                 }
@@ -702,7 +773,7 @@ PanelFrame {
                                     iconColor: EditorState.trackMuted(index) ? Theme.destructive : Theme.mutedForeground
                                     anchors.verticalCenter: parent.verticalCenter
 
-                                    ToolTip {
+                                    ThemedToolTip {
                                         visible: muteMouse.containsMouse
                                         text: EditorState.trackMuted(index) ? qsTr("Unmute track") : qsTr("Mute track")
                                     }
@@ -727,7 +798,7 @@ PanelFrame {
                                     iconColor: EditorState.trackHidden(index) ? Theme.destructive : Theme.mutedForeground
                                     anchors.verticalCenter: parent.verticalCenter
 
-                                    ToolTip {
+                                    ThemedToolTip {
                                         visible: hideMouse.containsMouse
                                         text: EditorState.trackHidden(index) ? qsTr("Show track") : qsTr("Hide track")
                                     }
@@ -750,7 +821,7 @@ PanelFrame {
                                     iconColor: EditorState.trackShowWaveform(index) ? Theme.primary : Theme.mutedForeground
                                     anchors.verticalCenter: parent.verticalCenter
 
-                                    ToolTip {
+                                    ThemedToolTip {
                                         visible: waveMouse.containsMouse
                                         text: EditorState.trackShowWaveform(index) ? qsTr("Show filmstrip")
                                                                                    : qsTr("Show waveform")
@@ -768,9 +839,72 @@ PanelFrame {
 
                                 IconGlyph {
                                     glyph: root.trackTypeIcon(root.tracks[index].type)
-                                    iconSize: 16
+                                    iconSize: Theme.iconSizeBase
                                     iconColor: Theme.mutedForeground
                                     anchors.verticalCenter: parent.verticalCenter
+
+                                    // Tracks were identifiable only by this 16px
+                                    // glyph, with no name and no tooltip.
+                                    ThemedToolTip {
+                                        text: root.trackTypeLabel(root.tracks[index].type)
+                                        visible: typeHover.hovered
+                                    }
+
+                                    HoverHandler { id: typeHover }
+                                }
+                            }
+
+                            // Track name. Nothing in the header used to say which
+                            // track this was beyond the type glyph.
+                            Text {
+                                anchors.left: parent.left
+                                anchors.leftMargin: Theme.spacing3xl + Theme.spacingSm
+                                anchors.right: parent.right
+                                anchors.rightMargin: Theme.spacingLg
+                                anchors.top: parent.top
+                                anchors.topMargin: Theme.spacingMd
+                                text: root.trackTypeLabel(root.tracks[index].type)
+                                      + " " + (index + 1)
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeTiny
+                                elide: Text.ElideRight
+                                visible: root.trackHeight(root.tracks[index].type) >= 40
+                            }
+
+                            // Track context menu.
+                            MouseArea {
+                                anchors.fill: parent
+                                acceptedButtons: Qt.RightButton
+                                onClicked: trackContextMenu.popup()
+
+                                ThemedContextMenu {
+                                    id: trackContextMenu
+
+                                    MenuItem {
+                                        text: EditorState.trackMuted(index) ? qsTr("Unmute track")
+                                                                            : qsTr("Mute track")
+                                        icon.name: EditorState.trackMuted(index) ? Theme.icons.volumeHigh
+                                                                                 : Theme.icons.volumeOff
+                                        onTriggered: EditorState.setTrackMuted(index, !EditorState.trackMuted(index))
+                                    }
+                                    MenuItem {
+                                        text: EditorState.trackHidden(index) ? qsTr("Show track")
+                                                                             : qsTr("Hide track")
+                                        icon.name: EditorState.trackHidden(index) ? Theme.icons.eye
+                                                                                  : Theme.icons.eyeOff
+                                        onTriggered: EditorState.setTrackHidden(index, !EditorState.trackHidden(index))
+                                    }
+                                    MenuItem {
+                                        visible: root.tracks[index].type === "video"
+                                        height: visible ? implicitHeight : 0
+                                        text: EditorState.trackShowWaveform(index)
+                                              ? qsTr("Show filmstrip") : qsTr("Show waveform")
+                                        icon.name: EditorState.trackShowWaveform(index)
+                                                   ? Theme.icons.film : Theme.icons.music
+                                        onTriggered: EditorState.setTrackShowWaveform(
+                                                         index, !EditorState.trackShowWaveform(index))
+                                    }
                                 }
                             }
                         }
@@ -804,21 +938,32 @@ PanelFrame {
                 id: flick
                 width: parent.width - Theme.trackLabelsWidth
                 height: parent.height
+
+                // Height of the pinned ruler + bookmark strip at the top.
+                readonly property real headerHeight: Theme.timelineRulerHeight
+                                                     + Theme.timelineBookmarkRowHeight
+
                 contentWidth: Math.max(width, (EditorState.durationSeconds + 5) * root.pxPerSecond)
-                contentHeight: height
+                // Was `height`, so once the tracks were taller than the panel the
+                // lower ones were silently truncated and could not be reached at
+                // all. totalTracksHeight() was already computed but never used.
+                contentHeight: Math.max(height,
+                                        headerHeight + root.totalTracksHeight() + Theme.trackGap)
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.horizontal: AppScrollBar { policy: ScrollBar.AlwaysOn }
+                ScrollBar.vertical: AppScrollBar { }
 
                 Item {
                     id: timelineContent
                     width: flick.contentWidth
-                    height: flick.height
+                    height: flick.contentHeight
 
                     // Wheel handling: scoped to the ruler so it does not block timeline drops.
                     MouseArea {
                         id: rulerWheelArea
                         width: parent.width
+                        y: flick.contentY
                         height: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
                         z: 1
                         acceptedButtons: Qt.NoButton
@@ -878,17 +1023,49 @@ PanelFrame {
                         onWheel: (wheel) => root.handleTimelineWheel(wheel)
                     }
 
+                    // Opaque backdrop behind the pinned ruler/bookmark strip.
+                    Rectangle {
+                        y: flick.contentY
+                        width: parent.width
+                        height: flick.headerHeight
+                        color: Theme.panelBackground
+                        z: 1
+                    }
+
                     // ruler ------------------------------------------------------------
                     Item {
                         id: ruler
                         width: parent.width
+                        // Pinned: stays at the top of the viewport as tracks scroll.
+                        y: flick.contentY
+                        z: 2
                         height: Theme.timelineRulerHeight
 
+                        // Press-and-drag scrubs; it used to handle clicks only.
                         MouseArea {
+                            id: rulerScrub
                             anchors.fill: parent
-                            onClicked: (mouse) => {
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            preventStealing: true
+
+                            function scrubTo(x) {
+                                EditorState.playheadSeconds =
+                                    EditorState.snapTime(Math.max(0, x) / root.pxPerSecond)
+                            }
+
+                            onPressed: (mouse) => {
                                 EditorState.clearSelection()
-                                EditorState.playheadSeconds = EditorState.snapTime(mouse.x / root.pxPerSecond)
+                                scrubTo(mouse.x)
+                            }
+                            onPositionChanged: (mouse) => {
+                                if (pressed)
+                                    scrubTo(mouse.x)
+                            }
+
+                            ThemedToolTip {
+                                text: qsTr("Click or drag to move the playhead")
+                                visible: rulerScrub.containsMouse && !rulerScrub.pressed
                             }
                         }
 
@@ -922,7 +1099,8 @@ PanelFrame {
 
                     Item {
                         id: bookmarkRow
-                        y: Theme.timelineRulerHeight
+                        y: flick.contentY + Theme.timelineRulerHeight
+                        z: 2
                         width: parent.width
                         height: Theme.timelineBookmarkRowHeight
 
@@ -936,7 +1114,7 @@ PanelFrame {
                                 radius: 4
                                 color: Theme.primary
 
-                                ToolTip {
+                                ThemedToolTip {
                                     visible: bookmarkMouse.containsMouse
                                     text: modelData.label + " @ " + root.formatTime(modelData.seconds)
                                 }
@@ -950,6 +1128,29 @@ PanelFrame {
                                     onClicked: EditorState.goToBookmark(index)
                                 }
                             }
+                        }
+                    }
+
+                    // A project with no tracks used to render as a completely
+                    // blank timeline, with the only route to a first track being
+                    // one button among sixteen in the toolbar.
+                    EmptyState {
+                        x: flick.contentX + (flick.width - width) / 2
+                        y: flick.contentY + flick.headerHeight
+                           + Math.max(0, (flick.height - flick.headerHeight - height) / 2)
+                        width: Math.min(flick.width - Theme.spacing3xl, 320)
+                        visible: root.tracks.length === 0
+                        z: 4
+                        glyph: Theme.icons.layers
+                        title: qsTr("Your timeline is empty")
+                        hint: qsTr("Drag media here from the library, or add an empty track to start.")
+                        actionText: qsTr("New track")
+                        actionVariant: "primary"
+                        onActionTriggered: newTrackMenuFromEmpty.open()
+
+                        NewTrackMenu {
+                            id: newTrackMenuFromEmpty
+                            y: parent.height
                         }
                     }
 
@@ -980,7 +1181,19 @@ PanelFrame {
                                 property int trackIndex: index
                                 width: flick.contentWidth
                                 height: root.trackHeight(root.tracks[trackIndex].type)
-                                color: "transparent"
+                                // Faint row tint on hover, and an empty track now
+                                // reads as a track rather than as blank space.
+                                color: trackHover.hovered
+                                       ? Qt.rgba(Theme.panelAccent.r, Theme.panelAccent.g,
+                                                 Theme.panelAccent.b, 0.5)
+                                       : Qt.rgba(Theme.panelAccent.r, Theme.panelAccent.g,
+                                                 Theme.panelAccent.b, 0.22)
+
+                                Behavior on color {
+                                    ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                }
+
+                                HoverHandler { id: trackHover }
 
                                 DropArea {
                                     anchors.fill: parent
@@ -1119,9 +1332,30 @@ PanelFrame {
                                         readonly property bool timelineFadeHandles: trackType !== "text"
                                                                                     && trackType !== "subtitle"
 
+                                        // Trim handles need room for themselves plus
+                                        // a drag region between them; below that the
+                                        // whole clip stays draggable instead.
+                                        readonly property bool showTrimHandles:
+                                            selected && width >= Theme.clipMinInteractiveWidth * 2
+
+                                        // Name band height, derived once instead of
+                                        // being hardcoded at three separate sites,
+                                        // and clamped so it can never swallow a
+                                        // short (25px) text or subtitle row.
+                                        readonly property real headerBandHeight: {
+                                            const wanted = clipEffects.length > 0
+                                                ? Theme.clipHeaderBandHeight * 1.6
+                                                : Theme.clipHeaderBandHeight
+                                            return Math.min(wanted, Math.max(0, height * 0.5))
+                                        }
+
                                         y: Theme.clipSelectionRingWidth
-                                        width: clipData.duration * root.pxPerSecond - 2 * Theme.clipSelectionRingWidth
-                                        height: parent.height - 2 * Theme.clipSelectionRingWidth
+                                        // Clamped: went negative at minimum zoom for
+                                        // short clips. The transition region below
+                                        // already clamped; this did not.
+                                        width: Math.max(1, clipData.duration * root.pxPerSecond
+                                                           - 2 * Theme.clipSelectionRingWidth)
+                                        height: Math.max(0, parent.height - 2 * Theme.clipSelectionRingWidth)
 
                                         // While dragging, show the same snapped landing outline the
                                         // library drop uses, on whichever track the clip is over.
@@ -1155,12 +1389,25 @@ PanelFrame {
                                             id: clipBackground
                                             anchors.fill: parent
                                             radius: Theme.radiusSm
-                                            color: root.clipColor(clipItem.trackType === "shape" ? "graphic" : clipItem.trackType)
+                                            // Lightens on hover — previously nothing
+                                            // in the clip reacted to the pointer.
+                                            color: {
+                                                const base = root.clipColor(
+                                                    clipItem.trackType === "shape" ? "graphic" : clipItem.trackType)
+                                                return clipMouse.containsMouse ? Qt.lighter(base, 1.15) : base
+                                            }
                                             border.width: clipItem.effectDropTarget
-                                                          ? 2
+                                                          ? Theme.borderWidthFocus
                                                           : (clipItem.selected ? Theme.clipSelectionRingWidth : 0)
                                             border.color: clipItem.effectDropTarget ? Theme.clipEffect : Theme.primary
                                             clip: true
+
+                                            Behavior on color {
+                                                ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                            }
+                                            Behavior on border.width {
+                                                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                            }
 
                                             Rectangle {
                                                 anchors.fill: parent
@@ -1221,7 +1468,7 @@ PanelFrame {
                                                 anchors.topMargin: (clipItem.trackType === "video"
                                                                     || clipItem.trackType === "audio"
                                                                     || clipItem.trackType === "shape")
-                                                                   ? (clipItem.clipEffects.length > 0 ? 32 : 20)
+                                                                   ? clipItem.headerBandHeight
                                                                    : 0
                                                 visible: clipItem.clipData.filmstripPath
                                                          && clipItem.clipData.filmstripPath.length > 0
@@ -1238,8 +1485,8 @@ PanelFrame {
                                                          || clipItem.trackType === "audio"
                                                          || clipItem.trackType === "shape"
                                                 width: parent.width
-                                                height: clipItem.clipEffects.length > 0 ? 32 : 20
-                                                color: "#00000066"
+                                                height: clipItem.headerBandHeight
+                                                color: Theme.scrimColor
                                                 z: 1
 
                                                 Column {
@@ -1253,7 +1500,7 @@ PanelFrame {
                                                     Text {
                                                         width: parent.width
                                                         text: clipItem.clipData.name
-                                                        color: "#ffffffbf"
+                                                        color: Theme.onMedia
                                                         font.pixelSize: Theme.fontSizeTiny
                                                         font.family: Theme.fontFamily
                                                         elide: Text.ElideRight
@@ -1268,7 +1515,7 @@ PanelFrame {
                                                                 names.push(clipItem.clipEffects[i].label || qsTr("Effect"))
                                                             return names.join(" · ")
                                                         }
-                                                        color: "#a8d8ff"
+                                                        color: Theme.panelSecondaryForeground
                                                         font.pixelSize: Theme.fontSizeTiny
                                                         font.family: Theme.fontFamily
                                                         elide: Text.ElideRight
@@ -1282,8 +1529,10 @@ PanelFrame {
                                                 anchors.left: parent.left
                                                 anchors.right: parent.right
                                                 anchors.verticalCenter: parent.verticalCenter
-                                                anchors.leftMargin: 8
-                                                anchors.rightMargin: 8
+                                                // Clamped so the label width cannot
+                                                // go negative on very narrow clips.
+                                                anchors.leftMargin: Math.min(Theme.spacingLg, parent.width / 4)
+                                                anchors.rightMargin: Math.min(Theme.spacingLg, parent.width / 4)
                                                 spacing: 1
 
                                                 Text {
@@ -1293,7 +1542,7 @@ PanelFrame {
                                                              || qsTr("Subtitles"))
                                                           : (clipItem.clipData.textContent
                                                              || clipItem.clipData.name)
-                                                    color: "white"
+                                                    color: Theme.onMedia
                                                     font.pixelSize: Theme.fontSizeXs
                                                     font.family: Theme.fontFamily
                                                     elide: Text.ElideRight
@@ -1308,7 +1557,7 @@ PanelFrame {
                                                             names.push(clipItem.clipEffects[i].label || qsTr("Effect"))
                                                         return names.join(" · ")
                                                     }
-                                                    color: "#a8d8ff"
+                                                    color: Theme.panelSecondaryForeground
                                                     font.pixelSize: Theme.fontSizeTiny
                                                     font.family: Theme.fontFamily
                                                     elide: Text.ElideRight
@@ -1326,7 +1575,7 @@ PanelFrame {
                                                 anchors.left: parent.left
                                                 anchors.right: parent.right
                                                 anchors.top: parent.top
-                                                anchors.topMargin: clipItem.clipEffects.length > 0 ? 32 : 20
+                                                anchors.topMargin: clipItem.headerBandHeight
                                                 anchors.bottom: parent.bottom
                                                 onPeaksChanged: requestPaint()
                                                 onWidthChanged: requestPaint()
@@ -1374,11 +1623,19 @@ PanelFrame {
                                             id: clipMouse
                                             z: 2
                                             anchors.fill: parent
-                                            anchors.leftMargin: clipItem.selected ? 14 : 0
-                                            anchors.rightMargin: clipItem.selected ? 14 : 0
+                                            hoverEnabled: true
+                                            // Insets make room for the trim handles,
+                                            // but only while the clip is wide enough
+                                            // to keep a usable drag region.
+                                            anchors.leftMargin: clipItem.showTrimHandles ? 14 : 0
+                                            anchors.rightMargin: clipItem.showTrimHandles ? 14 : 0
                                             enabled: !leftTrimMouse.pressed && !rightTrimMouse.pressed
                                                          && !fadeInMouse.pressed && !fadeOutMouse.pressed
-                                            cursorShape: Qt.PointingHandCursor
+                                            // A clip is dragged, not clicked.
+                                            cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                                            // Right-click opens the clip menu; the app
+                                            // previously had no context menus at all.
+                                            acceptedButtons: Qt.LeftButton | Qt.RightButton
                                             drag.target: clipItem
                                             drag.axis: Drag.XAndYAxis
                                             drag.threshold: 8
@@ -1387,18 +1644,62 @@ PanelFrame {
                                             drag.maximumY: trackRow.height * 2
                                             property int originTrack: trackRow.trackIndex
 
-                                            onPressed: {
+                                            onPressed: (mouse) => {
                                                 originTrack = trackRow.trackIndex
+                                                if (mouse.button === Qt.RightButton) {
+                                                    // Right-click selects, then opens the menu.
+                                                    if (!clipItem.selected)
+                                                        EditorState.selectClip(trackRow.trackIndex, modelData)
+                                                    clipContextMenu.popup()
+                                                    return
+                                                }
                                                 if ((mouse.modifiers & Qt.ShiftModifier) !== 0)
                                                     EditorState.addToSelection(trackRow.trackIndex, modelData)
                                                 else
                                                     EditorState.selectClip(trackRow.trackIndex, modelData)
                                             }
                                             onClicked: (mouse) => {
+                                                if (mouse.button === Qt.RightButton)
+                                                    return
                                                 if ((mouse.modifiers & Qt.ShiftModifier) !== 0)
                                                     EditorState.addToSelection(trackRow.trackIndex, modelData)
                                                 else
                                                     EditorState.selectClip(trackRow.trackIndex, modelData)
+                                            }
+
+                                            // Surfaces actions that were previously
+                                            // reachable only by unlabelled shortcut,
+                                            // plus cutSelection which had no UI at all.
+                                            ThemedContextMenu {
+                                                id: clipContextMenu
+
+                                                MenuItem {
+                                                    text: qsTr("Split at playhead")
+                                                    icon.name: Theme.icons.scissors
+                                                    onTriggered: EditorState.splitAtPlayhead()
+                                                }
+                                                MenuSeparator { }
+                                                MenuItem {
+                                                    text: qsTr("Cut")
+                                                    icon.name: Theme.icons.scissors
+                                                    onTriggered: EditorState.cutSelection()
+                                                }
+                                                MenuItem {
+                                                    text: qsTr("Copy")
+                                                    icon.name: Theme.icons.copy
+                                                    onTriggered: EditorState.copySelection()
+                                                }
+                                                MenuItem {
+                                                    text: qsTr("Duplicate")
+                                                    icon.name: Theme.icons.copyPlus
+                                                    onTriggered: EditorState.duplicateSelectedClip()
+                                                }
+                                                MenuSeparator { }
+                                                MenuItem {
+                                                    text: qsTr("Delete")
+                                                    icon.name: Theme.icons.trash
+                                                    onTriggered: EditorState.deleteSelectedClip()
+                                                }
                                             }
                                             onReleased: {
                                                 root.clearLandingPreview()
@@ -1426,7 +1727,7 @@ PanelFrame {
                                             z: 20
                                             visible: clipItem.timelineFadeHandles && clipItem.selected && clipItem.width > 26
                                             color: Theme.primary
-                                            border.color: "white"
+                                            border.color: Theme.onMedia
                                             border.width: 2
 
                                             Binding {
@@ -1456,8 +1757,8 @@ PanelFrame {
                                                 }
                                                 onReleased: EditorState.commitPreviewDrag()
 
-                                                ToolTip {
-                                                    visible: fadeInMouse.pressed
+                                                ThemedToolTip {
+                                                    visible: fadeInMouse.pressed || fadeInMouse.containsMouse
                                                     text: qsTr("Fade in %1s").arg((clipItem.clipData.fadeIn || 0).toFixed(2))
                                                 }
                                             }
@@ -1472,7 +1773,7 @@ PanelFrame {
                                             z: 20
                                             visible: clipItem.timelineFadeHandles && clipItem.selected && clipItem.width > 26
                                             color: Theme.primary
-                                            border.color: "white"
+                                            border.color: Theme.onMedia
                                             border.width: 2
 
                                             Binding {
@@ -1502,8 +1803,8 @@ PanelFrame {
                                                 }
                                                 onReleased: EditorState.commitPreviewDrag()
 
-                                                ToolTip {
-                                                    visible: fadeOutMouse.pressed
+                                                ThemedToolTip {
+                                                    visible: fadeOutMouse.pressed || fadeOutMouse.containsMouse
                                                     text: qsTr("Fade out %1s").arg((clipItem.clipData.fadeOut || 0).toFixed(2))
                                                 }
                                             }
@@ -1512,13 +1813,23 @@ PanelFrame {
                                         // Trim handles sit above fade dots so edge drags resize the clip.
                                         Rectangle {
                                             id: leftTrimHandle
-                                            width: 12
+                                            width: Theme.clipTrimHandleWidth
                                             anchors.left: clipBackground.left
                                             anchors.top: clipBackground.top
                                             anchors.bottom: clipBackground.bottom
-                                            visible: clipItem.selected
+                                            visible: clipItem.showTrimHandles
                                             color: Theme.primary
-                                            opacity: leftTrimMouse.pressed ? 1.0 : 0.75
+                                            opacity: leftTrimMouse.pressed ? 1.0
+                                                     : (leftTrimMouse.containsMouse ? 0.95 : 0.75)
+
+                                            Behavior on opacity {
+                                                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                            }
+
+                                            ThemedToolTip {
+                                                text: qsTr("Drag to trim the start")
+                                                visible: leftTrimMouse.containsMouse && !leftTrimMouse.pressed
+                                            }
                                             z: 30
 
                                             MouseArea {
@@ -1543,13 +1854,23 @@ PanelFrame {
 
                                         Rectangle {
                                             id: rightTrimHandle
-                                            width: 12
+                                            width: Theme.clipTrimHandleWidth
                                             anchors.right: clipBackground.right
                                             anchors.top: clipBackground.top
                                             anchors.bottom: clipBackground.bottom
-                                            visible: clipItem.selected
+                                            visible: clipItem.showTrimHandles
                                             color: Theme.primary
-                                            opacity: rightTrimMouse.pressed ? 1.0 : 0.75
+                                            opacity: rightTrimMouse.pressed ? 1.0
+                                                     : (rightTrimMouse.containsMouse ? 0.95 : 0.75)
+
+                                            Behavior on opacity {
+                                                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                            }
+
+                                            ThemedToolTip {
+                                                text: qsTr("Drag to trim the end")
+                                                visible: rightTrimMouse.containsMouse && !rightTrimMouse.pressed
+                                            }
                                             z: 30
 
                                             MouseArea {
@@ -1674,7 +1995,7 @@ PanelFrame {
                                                 onPaint: {
                                                     const ctx = getContext("2d")
                                                     ctx.clearRect(0, 0, width, height)
-                                                    ctx.strokeStyle = "#ffffff"
+                                                    ctx.strokeStyle = Theme.onMedia
                                                     ctx.lineWidth = 1
                                                     const step = 6
                                                     for (let x = -height; x < width; x += step) {
@@ -1696,13 +2017,13 @@ PanelFrame {
                                                          ? transitionRegion.transitionData.label.charAt(0)
                                                          : "≫")
                                                       : "≫"
-                                                color: "#ffffff"
+                                                color: Theme.onMedia
                                                 font.family: Theme.fontFamily
                                                 font.pixelSize: Theme.fontSizeTiny
                                                 font.weight: Font.Bold
                                             }
 
-                                            ToolTip {
+                                            ThemedToolTip {
                                                 visible: transitionMouse.containsMouse
                                                          && transitionRegion.hasTransition
                                                 delay: 400
@@ -1749,13 +2070,39 @@ PanelFrame {
 
                     // snap guide -------------------------------------------------------------
                     Rectangle {
-                        visible: root.snapGuideSeconds >= 0
+                        visible: opacity > 0
+                        opacity: root.snapGuideSeconds >= 0 ? 1 : 0
                         x: root.snapGuideSeconds * root.pxPerSecond
                         y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
-                        width: 1
+                        width: Theme.borderWidth
                         height: root.totalTracksHeight()
-                        color: "#f5c542"
+                        color: Theme.snapGuide
                         z: 6
+
+                        Behavior on opacity {
+                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
+
+                        // Says what the clip snapped to, instead of leaving a bare
+                        // unexplained line on screen.
+                        Rectangle {
+                            visible: parent.opacity > 0
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            height: snapLabel.implicitHeight + Theme.spacingSm
+                            width: snapLabel.implicitWidth + Theme.spacingLg
+                            radius: Theme.radiusXs
+                            color: Theme.snapGuide
+
+                            Text {
+                                id: snapLabel
+                                anchors.centerIn: parent
+                                text: root.formatTime(root.snapGuideSeconds)
+                                color: Theme.overlayColor
+                                font.family: Theme.monoFontFamily
+                                font.pixelSize: Theme.fontSizeTiny
+                            }
+                        }
                     }
 
                     // playhead ---------------------------------------------------------------

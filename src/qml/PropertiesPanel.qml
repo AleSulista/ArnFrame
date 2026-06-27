@@ -8,6 +8,24 @@ import "components"
 PanelFrame {
     id: root
 
+    // Raised by the Effects tab's empty state; Main wires it to the assets
+    // panel so "Browse effects" actually takes the user somewhere.
+    signal browseEffectsRequested()
+
+    // Human label for a clip kind. The raw id was shown to the user.
+    function clipKindLabel(kind) {
+        switch (kind) {
+        case "video": return qsTr("Video")
+        case "audio": return qsTr("Audio")
+        case "image": return qsTr("Image")
+        case "text": return qsTr("Text")
+        case "subtitle": return qsTr("Subtitle")
+        case "shape": return qsTr("Shape")
+        case "sticker": return qsTr("Sticker")
+        }
+        return kind.length > 0 ? kind : "—"
+    }
+
     // selectedClipData is a QVariantMap; key the binding on an explicit revision
     // so nested fields such as effects refresh after project edits.
     property int clipDataRevision: 0
@@ -358,7 +376,7 @@ PanelFrame {
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
-            text: "It's empty here"
+            text: qsTr("It's empty here")
             color: Theme.panelForeground
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeBase
@@ -369,7 +387,7 @@ PanelFrame {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            text: "Click a clip on the timeline to edit its properties"
+            text: qsTr("Click a clip on the timeline to edit its properties")
             color: Theme.mutedForeground
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeXs
@@ -387,48 +405,68 @@ PanelFrame {
             anchors.fill: parent
             spacing: 0
 
+            // Up/Down move between tabs once the rail has focus.
             Column {
+                id: propertiesTabRail
                 width: Theme.tabRailWidth
                 height: parent.height
-                topPadding: 4
-                spacing: 2
+                topPadding: Theme.spacingSm
+                spacing: Theme.spacingXs
+
+                Accessible.role: Accessible.PageTabList
+
+                Keys.onUpPressed: function(event) {
+                    root.activeTab = (root.activeTab - 1 + tabsModel.count) % tabsModel.count
+                    event.accepted = true
+                }
+                Keys.onDownPressed: function(event) {
+                    root.activeTab = (root.activeTab + 1) % tabsModel.count
+                    event.accepted = true
+                }
 
                 Repeater {
                     model: tabsModel
                     delegate: IconButton {
+                        required property int index
+                        required property var model
+
                         anchors.horizontalCenter: parent.horizontalCenter
                         visible: model.tabId !== "subtitles" || root.clipKind === "subtitle"
-                        icon: root.tabIcons[model.icon]
+                        glyph: root.tabIcons[model.icon]
                         variant: "ghost"
                         tooltip: model.label
                         active: root.activeTab === index
                         onClicked: root.activeTab = index
+
+                        Accessible.role: Accessible.PageTab
+                        Accessible.name: model.label
+                        Accessible.checked: root.activeTab === index
                     }
                 }
             }
 
             Rectangle {
-                width: 1
+                width: Theme.borderWidth
                 height: parent.height
                 color: Theme.panelBorder
             }
 
             Flickable {
                 id: tabFlick
-                width: parent.width - Theme.tabRailWidth - 1
+                width: parent.width - Theme.tabRailWidth - Theme.borderWidth
                 height: parent.height
                 visible: root.currentTabId !== "subtitles"
                 contentWidth: width
-                contentHeight: tabColumn.height + 24
+                contentHeight: tabColumn.height + Theme.spacing3xl
                 clip: true
                 ScrollBar.vertical: AppScrollBar { }
 
                 Column {
                     id: tabColumn
-                    x: 12
-                    y: 12
-                    width: parent.width - 24
-                    spacing: 12
+                    x: Theme.pagePadding
+                    y: Theme.pagePadding
+                    width: parent.width - Theme.pagePadding * 2
+                    spacing: Theme.spacingXl
 
                     Text {
                         text: tabsModel.get(root.activeTab).label
@@ -441,7 +479,7 @@ PanelFrame {
                     // ----- General -----------------------------------------------------------
                     Column {
                         width: tabColumn.width
-                        spacing: 12
+                        spacing: Theme.spacingXl
                         visible: root.currentTabId === "general"
 
                         Text {
@@ -458,16 +496,19 @@ PanelFrame {
                             width: tabColumn.width
                             spacing: 4
                             Text {
-                                text: "Kind"
+                                text: qsTr("Kind")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
                             }
                             Text {
-                                text: root.clipKind.length > 0 ? root.clipKind : "—"
+                                // Human label rather than the raw internal id.
+                                text: root.clipKindLabel(root.clipKind)
                                 color: Theme.panelForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSm
+                                elide: Text.ElideRight
+                                width: parent.width - x
                             }
                         }
 
@@ -479,13 +520,15 @@ PanelFrame {
                                 width: (parent.width - parent.spacing) / 2
                                 spacing: 4
                                 Text {
-                                    text: "Start (s)"
+                                    text: qsTr("Start (s)")
                                     color: Theme.mutedForeground
                                     font.pixelSize: Theme.fontSizeXs
                                     font.family: Theme.fontFamily
                                 }
                                 ThemedNumberField {
                                     id: startField
+                                    to: 86400
+                                    unit: "s"
                                     width: parent.width
                                     decimals: 2
                                     step: 0.1
@@ -499,13 +542,15 @@ PanelFrame {
                                 width: (parent.width - parent.spacing) / 2
                                 spacing: 4
                                 Text {
-                                    text: "Duration (s)"
+                                    text: qsTr("Duration (s)")
                                     color: Theme.mutedForeground
                                     font.pixelSize: Theme.fontSizeXs
                                     font.family: Theme.fontFamily
                                 }
                                 ThemedNumberField {
                                     id: durationField
+                                    to: 86400
+                                    unit: "s"
                                     width: parent.width
                                     decimals: 2
                                     step: 0.1
@@ -521,7 +566,7 @@ PanelFrame {
                             spacing: 4
                             visible: root.clipKind === "text"
                             Text {
-                                text: "Text content"
+                                text: qsTr("Text content")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -541,7 +586,7 @@ PanelFrame {
                             visible: root.hasTextStyle
 
                             Text {
-                                text: "Presets"
+                                text: qsTr("Presets")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -564,7 +609,7 @@ PanelFrame {
                             }
 
                             Text {
-                                text: "Font"
+                                text: qsTr("Font")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -584,7 +629,7 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Weight"
+                                        text: qsTr("Weight")
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
@@ -604,13 +649,14 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Size"
+                                        text: qsTr("Size")
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
                                     ThemedNumberField {
                                         id: pixelSizeField
+                                        unit: "px"
                                         width: parent.width
                                         decimals: 0
                                         step: 1
@@ -629,7 +675,7 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Color"
+                                        text: qsTr("Color")
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
@@ -637,16 +683,27 @@ PanelFrame {
                                     Row {
                                         spacing: 6
                                         Rectangle {
-                                            width: 24
-                                            height: 24
-                                            radius: 4
+                                            width: Theme.spacing3xl
+                                            height: Theme.spacing3xl
+                                            radius: Theme.radiusSm
                                             anchors.verticalCenter: parent.verticalCenter
                                             color: root.textStyle.color
-                                            border.width: 1
-                                            border.color: Theme.panelBorder
+                                            border.width: swatch_color.containsMouse ? Theme.borderWidthFocus : Theme.borderWidth
+                                            border.color: swatch_color.containsMouse ? Theme.primary : Theme.panelBorder
+
+                                            Behavior on border.color {
+                                                ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                            }
+
+                                            ThemedToolTip {
+                                                text: qsTr("Choose text colour")
+                                                visible: swatch_color.containsMouse
+                                            }
 
                                             MouseArea {
+                                                id: swatch_color
                                                 anchors.fill: parent
+                                                hoverEnabled: true
                                                 cursorShape: Qt.PointingHandCursor
                                                 onClicked: {
                                                     styleColorDialog.targetStyleKey = "color"
@@ -662,7 +719,11 @@ PanelFrame {
                                             color: Theme.panelForeground
                                             font.family: Theme.monoFontFamily
                                             font.pixelSize: Theme.fontSizeSm
-                                            onEditingFinished: root.setTextStyleKey("color", text)
+                                            // Rejects malformed input instead of silently applying a typo.
+                                            readonly property bool validHex:
+                                                /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(text)
+                                            errorText: validHex || text.length === 0 ? "" : qsTr("Use #RRGGBB or #AARRGGBB")
+                                            onEditingFinished: if (validHex) root.setTextStyleKey("color", text)
                                         }
                                     }
                                 }
@@ -671,113 +732,68 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Style"
+                                        text: qsTr("Style")
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
-                                    Rectangle {
+                                    ThemedToggleButton {
                                         width: 60
-                                        height: 26
-                                        radius: Theme.radiusSm
-                                        // Greyed out for the single-face display fonts, which have no italic.
-                                        opacity: root.familyHasItalic ? 1.0 : 0.4
-                                        color: root.textStyle.italic ? Theme.panelSecondaryBg : "transparent"
-                                        border.width: 1
-                                        border.color: Theme.panelBorder
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "Italic"
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: Theme.fontSizeXs
-                                            font.italic: true
-                                            color: Theme.panelForeground
-                                        }
-                                        ToolTip {
-                                            visible: italicMouse.containsMouse && !root.familyHasItalic
-                                            text: qsTr("%1 has no italic face").arg(root.textStyle.fontFamily)
-                                        }
-                                        MouseArea {
-                                            id: italicMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            enabled: root.familyHasItalic
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.setTextStyleKey("italic", !root.textStyle.italic)
-                                        }
+                                        text: qsTr("Italic")
+                                        checked: root.textStyle.italic
+                                        // Single-face display fonts have no italic.
+                                        enabled: root.familyHasItalic
+                                        tooltip: root.familyHasItalic
+                                                 ? qsTr("Italicise the text")
+                                                 : qsTr("%1 has no italic face").arg(root.textStyle.fontFamily)
+                                        onClicked: root.setTextStyleKey("italic", !root.textStyle.italic)
                                     }
                                 }
                             }
 
+                            // Alignment groups. These were two visually identical
+                            // rows of L/C/R and T/M/B boxes, distinguishable only
+                            // by their tooltips; they now carry real icons and are
+                            // keyboard-operable.
                             Row {
                                 width: parent.width
-                                spacing: 6
+                                spacing: Theme.spacingMd
 
                                 Repeater {
-                                    model: ["left", "center", "right"]
-                                    delegate: Rectangle {
-                                        required property string modelData
+                                    model: [
+                                        { value: "left",   glyph: Theme.icons.alignLeft,   label: qsTr("Align left") },
+                                        { value: "center", glyph: Theme.icons.alignCenter, label: qsTr("Align centre") },
+                                        { value: "right",  glyph: Theme.icons.alignRight,  label: qsTr("Align right") }
+                                    ]
+                                    delegate: ThemedToggleButton {
+                                        required property var modelData
                                         width: 34
-                                        height: 26
-                                        radius: Theme.radiusSm
-                                        color: root.textStyle.align === modelData ? Theme.panelSecondaryBg : "transparent"
-                                        border.width: 1
-                                        border.color: Theme.panelBorder
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: modelData.charAt(0).toUpperCase()
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: Theme.fontSizeXs
-                                            color: Theme.panelForeground
-                                        }
-                                        ToolTip {
-                                            visible: alignMouse.containsMouse
-                                            text: qsTr("Align %1").arg(modelData)
-                                        }
-                                        MouseArea {
-                                            id: alignMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.setTextStyleKey("align", modelData)
-                                        }
+                                        glyph: modelData.glyph
+                                        checked: root.textStyle.align === modelData.value
+                                        tooltip: modelData.label
+                                        onClicked: root.setTextStyleKey("align", modelData.value)
                                     }
                                 }
 
                                 Rectangle {
-                                    width: 1
-                                    height: 26
+                                    width: Theme.borderWidth
+                                    height: Theme.controlHeightSm
                                     color: Theme.panelBorder
                                 }
 
                                 Repeater {
-                                    model: ["top", "middle", "bottom"]
-                                    delegate: Rectangle {
-                                        required property string modelData
+                                    model: [
+                                        { value: "top",    glyph: Theme.icons.alignTop,    label: qsTr("Align top") },
+                                        { value: "middle", glyph: Theme.icons.alignMiddle, label: qsTr("Align middle") },
+                                        { value: "bottom", glyph: Theme.icons.alignBottom, label: qsTr("Align bottom") }
+                                    ]
+                                    delegate: ThemedToggleButton {
+                                        required property var modelData
                                         width: 34
-                                        height: 26
-                                        radius: Theme.radiusSm
-                                        color: root.textStyle.valign === modelData ? Theme.panelSecondaryBg : "transparent"
-                                        border.width: 1
-                                        border.color: Theme.panelBorder
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: modelData.charAt(0).toUpperCase()
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: Theme.fontSizeXs
-                                            color: Theme.panelForeground
-                                        }
-                                        ToolTip {
-                                            visible: valignMouse.containsMouse
-                                            text: qsTr("Vertical align %1").arg(modelData)
-                                        }
-                                        MouseArea {
-                                            id: valignMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.setTextStyleKey("valign", modelData)
-                                        }
+                                        glyph: modelData.glyph
+                                        checked: root.textStyle.valign === modelData.value
+                                        tooltip: modelData.label
+                                        onClicked: root.setTextStyleKey("valign", modelData.value)
                                     }
                                 }
                             }
@@ -790,7 +806,9 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Line height"
+                                        text: qsTr("Line height")
+                                        HoverHandler { id: tipHover761 }
+                                        ThemedToolTip { text: qsTr("Vertical spacing between lines, as a multiple of the font size"); visible: tipHover761.hovered }
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
@@ -810,13 +828,18 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Letter spacing"
+                                        text: qsTr("Letter spacing")
+                                        HoverHandler { id: tipHover781 }
+                                        ThemedToolTip { text: qsTr("Extra space between characters, in pixels"); visible: tipHover781.hovered }
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
                                     ThemedNumberField {
                                         id: letterSpacingField
+                                        to: 200
+                                        from: -100
+                                        unit: "px"
                                         width: parent.width
                                         decimals: 1
                                         step: 0.5
@@ -825,29 +848,18 @@ PanelFrame {
                                 }
                             }
 
-                            Rectangle {
+                            ThemedToggleButton {
                                 width: 96
-                                height: 26
-                                radius: Theme.radiusSm
-                                color: root.textStyle.wordWrap ? Theme.panelSecondaryBg : "transparent"
-                                border.width: 1
-                                border.color: Theme.panelBorder
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "Word wrap"
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeXs
-                                    color: Theme.panelForeground
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.setTextStyleKey("wordWrap", !root.textStyle.wordWrap)
-                                }
+                                text: qsTr("Word wrap")
+                                checked: root.textStyle.wordWrap
+                                tooltip: qsTr("Wrap long lines inside the text box instead of overflowing")
+                                onClicked: root.setTextStyleKey("wordWrap", !root.textStyle.wordWrap)
                             }
 
                             Text {
-                                text: "Outline"
+                                text: qsTr("Outline")
+                                HoverHandler { id: tipHover808 }
+                                ThemedToolTip { text: qsTr("Stroke drawn around each glyph"); visible: tipHover808.hovered }
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -861,13 +873,15 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Width"
+                                        text: qsTr("Width")
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
                                     ThemedNumberField {
                                         id: outlineWidthField
+                                        to: 100
+                                        unit: "px"
                                         width: parent.width
                                         decimals: 1
                                         step: 0.5
@@ -880,7 +894,7 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Color"
+                                        text: qsTr("Color")
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
@@ -888,13 +902,27 @@ PanelFrame {
                                     Row {
                                         spacing: 6
                                         Rectangle {
-                                            width: 24
-                                            height: 24
-                                            radius: 4
+                                            width: Theme.spacing3xl
+                                            height: Theme.spacing3xl
+                                            radius: Theme.radiusSm
                                             anchors.verticalCenter: parent.verticalCenter
                                             color: root.textStyle.outlineColor
+                                            border.width: swatch_outlineColor.containsMouse ? Theme.borderWidthFocus : Theme.borderWidth
+                                            border.color: swatch_outlineColor.containsMouse ? Theme.primary : Theme.panelBorder
+
+                                            Behavior on border.color {
+                                                ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                            }
+
+                                            ThemedToolTip {
+                                                text: qsTr("Choose outline colour")
+                                                visible: swatch_outlineColor.containsMouse
+                                            }
+
                                             MouseArea {
+                                                id: swatch_outlineColor
                                                 anchors.fill: parent
+                                                hoverEnabled: true
                                                 cursorShape: Qt.PointingHandCursor
                                                 onClicked: {
                                                     styleColorDialog.targetStyleKey = "outlineColor"
@@ -902,8 +930,6 @@ PanelFrame {
                                                     styleColorDialog.open()
                                                 }
                                             }
-                                            border.width: 1
-                                            border.color: Theme.panelBorder
                                         }
                                         ThemedTextField {
                                             id: outlineColorField
@@ -912,31 +938,22 @@ PanelFrame {
                                             color: Theme.panelForeground
                                             font.family: Theme.monoFontFamily
                                             font.pixelSize: Theme.fontSizeSm
-                                            onEditingFinished: root.setTextStyleKey("outlineColor", text)
+                                            // Rejects malformed input instead of silently applying a typo.
+                                            readonly property bool validHex:
+                                                /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(text)
+                                            errorText: validHex || text.length === 0 ? "" : qsTr("Use #RRGGBB or #AARRGGBB")
+                                            onEditingFinished: if (validHex) root.setTextStyleKey("outlineColor", text)
                                         }
                                     }
                                 }
                             }
 
-                            Rectangle {
+                            ThemedToggleButton {
                                 width: 96
-                                height: 26
-                                radius: Theme.radiusSm
-                                color: root.textStyle.shadowEnabled ? Theme.panelSecondaryBg : "transparent"
-                                border.width: 1
-                                border.color: Theme.panelBorder
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "Shadow"
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeXs
-                                    color: Theme.panelForeground
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.setTextStyleKey("shadowEnabled", !root.textStyle.shadowEnabled)
-                                }
+                                text: qsTr("Shadow")
+                                checked: root.textStyle.shadowEnabled
+                                tooltip: qsTr("Draw a drop shadow behind the text")
+                                onClicked: root.setTextStyleKey("shadowEnabled", !root.textStyle.shadowEnabled)
                             }
 
                             Row {
@@ -948,13 +965,16 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Offset X"
+                                        text: qsTr("Offset X")
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
                                     ThemedNumberField {
                                         id: shadowOffsetXField
+                                        to: 500
+                                        from: -500
+                                        unit: "px"
                                         width: parent.width
                                         decimals: 1
                                         step: 1
@@ -966,13 +986,16 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Offset Y"
+                                        text: qsTr("Offset Y")
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
                                     ThemedNumberField {
                                         id: shadowOffsetYField
+                                        to: 500
+                                        from: -500
+                                        unit: "px"
                                         width: parent.width
                                         decimals: 1
                                         step: 1
@@ -990,13 +1013,15 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Blur"
+                                        text: qsTr("Blur")
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
                                     ThemedNumberField {
                                         id: shadowBlurField
+                                        to: 100
+                                        unit: "px"
                                         width: parent.width
                                         decimals: 1
                                         step: 1
@@ -1009,7 +1034,7 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Opacity"
+                                        text: qsTr("Opacity")
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
@@ -1032,20 +1057,34 @@ PanelFrame {
                                 visible: root.textStyle.shadowEnabled
 
                                 Text {
-                                    text: "Shadow color"
+                                    text: qsTr("Shadow color")
                                     color: Theme.mutedForeground
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeXs
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
                                 Rectangle {
-                                    width: 24
-                                    height: 24
-                                    radius: 4
+                                    width: Theme.spacing3xl
+                                    height: Theme.spacing3xl
+                                    radius: Theme.radiusSm
                                     anchors.verticalCenter: parent.verticalCenter
                                     color: root.textStyle.shadowColor
+                                    border.width: swatch_shadowColor.containsMouse ? Theme.borderWidthFocus : Theme.borderWidth
+                                    border.color: swatch_shadowColor.containsMouse ? Theme.primary : Theme.panelBorder
+
+                                    Behavior on border.color {
+                                        ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                    }
+
+                                    ThemedToolTip {
+                                        text: qsTr("Choose shadow colour")
+                                        visible: swatch_shadowColor.containsMouse
+                                    }
+
                                     MouseArea {
+                                        id: swatch_shadowColor
                                         anchors.fill: parent
+                                        hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: {
                                             styleColorDialog.targetStyleKey = "shadowColor"
@@ -1053,8 +1092,6 @@ PanelFrame {
                                             styleColorDialog.open()
                                         }
                                     }
-                                    border.width: 1
-                                    border.color: Theme.panelBorder
                                 }
                                 ThemedTextField {
                                     id: shadowColorField
@@ -1063,29 +1100,20 @@ PanelFrame {
                                     color: Theme.panelForeground
                                     font.family: Theme.monoFontFamily
                                     font.pixelSize: Theme.fontSizeSm
-                                    onEditingFinished: root.setTextStyleKey("shadowColor", text)
+                                    // Rejects malformed input instead of silently applying a typo.
+                                    readonly property bool validHex:
+                                        /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(text)
+                                    errorText: validHex || text.length === 0 ? "" : qsTr("Use #RRGGBB or #AARRGGBB")
+                                    onEditingFinished: if (validHex) root.setTextStyleKey("shadowColor", text)
                                 }
                             }
 
-                            Rectangle {
+                            ThemedToggleButton {
                                 width: 96
-                                height: 26
-                                radius: Theme.radiusSm
-                                color: root.textStyle.boxEnabled ? Theme.panelSecondaryBg : "transparent"
-                                border.width: 1
-                                border.color: Theme.panelBorder
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "Background"
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeXs
-                                    color: Theme.panelForeground
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.setTextStyleKey("boxEnabled", !root.textStyle.boxEnabled)
-                                }
+                                text: qsTr("Background")
+                                checked: root.textStyle.boxEnabled
+                                tooltip: qsTr("Draw a filled box behind the text")
+                                onClicked: root.setTextStyleKey("boxEnabled", !root.textStyle.boxEnabled)
                             }
 
                             Row {
@@ -1094,13 +1122,27 @@ PanelFrame {
                                 visible: root.textStyle.boxEnabled
 
                                 Rectangle {
-                                    width: 24
-                                    height: 24
-                                    radius: 4
+                                    width: Theme.spacing3xl
+                                    height: Theme.spacing3xl
+                                    radius: Theme.radiusSm
                                     anchors.verticalCenter: parent.verticalCenter
                                     color: root.textStyle.boxColor
+                                    border.width: swatch_boxColor.containsMouse ? Theme.borderWidthFocus : Theme.borderWidth
+                                    border.color: swatch_boxColor.containsMouse ? Theme.primary : Theme.panelBorder
+
+                                    Behavior on border.color {
+                                        ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                    }
+
+                                    ThemedToolTip {
+                                        text: qsTr("Choose background colour")
+                                        visible: swatch_boxColor.containsMouse
+                                    }
+
                                     MouseArea {
+                                        id: swatch_boxColor
                                         anchors.fill: parent
+                                        hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: {
                                             styleColorDialog.targetStyleKey = "boxColor"
@@ -1108,8 +1150,6 @@ PanelFrame {
                                             styleColorDialog.open()
                                         }
                                     }
-                                    border.width: 1
-                                    border.color: Theme.panelBorder
                                 }
                                 ThemedTextField {
                                     id: boxColorField
@@ -1118,7 +1158,11 @@ PanelFrame {
                                     color: Theme.panelForeground
                                     font.family: Theme.monoFontFamily
                                     font.pixelSize: Theme.fontSizeSm
-                                    onEditingFinished: root.setTextStyleKey("boxColor", text)
+                                    // Rejects malformed input instead of silently applying a typo.
+                                    readonly property bool validHex:
+                                        /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(text)
+                                    errorText: validHex || text.length === 0 ? "" : qsTr("Use #RRGGBB or #AARRGGBB")
+                                    onEditingFinished: if (validHex) root.setTextStyleKey("boxColor", text)
                                 }
                             }
 
@@ -1131,13 +1175,17 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Padding"
+                                        text: qsTr("Padding")
+                                        HoverHandler { id: tipHover1088 }
+                                        ThemedToolTip { text: qsTr("Space between the text and the edge of its background box"); visible: tipHover1088.hovered }
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
                                     ThemedNumberField {
                                         id: boxPaddingField
+                                        to: 500
+                                        unit: "px"
                                         width: parent.width
                                         decimals: 1
                                         step: 1
@@ -1150,13 +1198,17 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Corner radius"
+                                        text: qsTr("Corner radius")
+                                        HoverHandler { id: tipHover1109 }
+                                        ThemedToolTip { text: qsTr("Roundness of the background box corners"); visible: tipHover1109.hovered }
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
                                     ThemedNumberField {
                                         id: boxRadiusField
+                                        to: 500
+                                        unit: "px"
                                         width: parent.width
                                         decimals: 1
                                         step: 1
@@ -1167,7 +1219,7 @@ PanelFrame {
                             }
 
                             Text {
-                                text: "Animation"
+                                text: qsTr("Animation")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -1178,7 +1230,7 @@ PanelFrame {
                                 spacing: 6
 
                                 Text {
-                                    text: "In"
+                                    text: qsTr("In")
                                     width: 20
                                     color: Theme.mutedForeground
                                     font.family: Theme.fontFamily
@@ -1187,20 +1239,22 @@ PanelFrame {
                                 }
                                 ThemedComboBox {
                                     id: animInKindBox
-                                    width: (parent.width - 20 - parent.spacing * 3 - 56) / 2
+                                    width: Math.max(40, (parent.width - 20 - parent.spacing * 3 - 56) / 2)
                                     model: root.animKindLabels
                                     currentIndex: Math.max(0, root.animKinds.indexOf(root.textStyle.animIn.kind))
                                     onActivated: root.setTextAnim("animIn", "kind", root.animKinds[currentIndex])
                                 }
                                 ThemedComboBox {
                                     id: animInEaseBox
-                                    width: (parent.width - 20 - parent.spacing * 3 - 56) / 2
+                                    width: Math.max(40, (parent.width - 20 - parent.spacing * 3 - 56) / 2)
                                     model: root.easeLabels
                                     currentIndex: Math.max(0, root.easeKinds.indexOf(root.textStyle.animIn.ease))
                                     onActivated: root.setTextAnim("animIn", "ease", root.easeKinds[currentIndex])
                                 }
                                 ThemedNumberField {
                                     id: animInDurationField
+                                    to: 60
+                                    unit: "s"
                                     width: 56
                                     decimals: 2
                                     step: 0.05
@@ -1214,7 +1268,7 @@ PanelFrame {
                                 spacing: 6
 
                                 Text {
-                                    text: "Out"
+                                    text: qsTr("Out")
                                     width: 20
                                     color: Theme.mutedForeground
                                     font.family: Theme.fontFamily
@@ -1223,20 +1277,22 @@ PanelFrame {
                                 }
                                 ThemedComboBox {
                                     id: animOutKindBox
-                                    width: (parent.width - 20 - parent.spacing * 3 - 56) / 2
+                                    width: Math.max(40, (parent.width - 20 - parent.spacing * 3 - 56) / 2)
                                     model: root.animKindLabels
                                     currentIndex: Math.max(0, root.animKinds.indexOf(root.textStyle.animOut.kind))
                                     onActivated: root.setTextAnim("animOut", "kind", root.animKinds[currentIndex])
                                 }
                                 ThemedComboBox {
                                     id: animOutEaseBox
-                                    width: (parent.width - 20 - parent.spacing * 3 - 56) / 2
+                                    width: Math.max(40, (parent.width - 20 - parent.spacing * 3 - 56) / 2)
                                     model: root.easeLabels
                                     currentIndex: Math.max(0, root.easeKinds.indexOf(root.textStyle.animOut.ease))
                                     onActivated: root.setTextAnim("animOut", "ease", root.easeKinds[currentIndex])
                                 }
                                 ThemedNumberField {
                                     id: animOutDurationField
+                                    to: 60
+                                    unit: "s"
                                     width: 56
                                     decimals: 2
                                     step: 0.05
@@ -1252,7 +1308,9 @@ PanelFrame {
                             visible: root.clipKind !== "text" && root.clipKind !== "subtitle"
 
                             Text {
-                                text: "Trim"
+                                text: qsTr("Trim")
+                                HoverHandler { id: tipHover1217 }
+                                ThemedToolTip { text: qsTr("Which part of the source media this clip plays"); visible: tipHover1217.hovered }
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -1266,13 +1324,17 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "In point (s)"
+                                        text: qsTr("In point (s)")
+                                        HoverHandler { id: tipHover1231 }
+                                        ThemedToolTip { text: qsTr("Seconds into the source where this clip starts"); visible: tipHover1231.hovered }
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
                                     ThemedNumberField {
                                         id: inPointField
+                                        to: 86400
+                                        unit: "s"
                                         width: parent.width
                                         decimals: 2
                                         step: 0.1
@@ -1285,13 +1347,17 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: "Out point (s)"
+                                        text: qsTr("Out point (s)")
+                                        HoverHandler { id: tipHover1252 }
+                                        ThemedToolTip { text: qsTr("Seconds into the source where this clip ends"); visible: tipHover1252.hovered }
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
                                     }
                                     ThemedNumberField {
                                         id: outPointField
+                                        to: 86400
+                                        unit: "s"
                                         width: parent.width
                                         decimals: 2
                                         step: 0.1
@@ -1308,19 +1374,31 @@ PanelFrame {
                             visible: clip.path !== undefined && clip.path.length > 0
 
                             Text {
-                                text: "Path"
+                                text: qsTr("Path")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
                             }
 
                             Text {
+                                id: clipPathLabel
                                 text: clip.path || "—"
                                 color: Theme.panelForeground
                                 font.family: Theme.monoFontFamily
                                 font.pixelSize: Theme.fontSizeSm
                                 width: parent.width
                                 wrapMode: Text.WrapAnywhere
+                                // Capped: a deep path used to wrap unbounded and
+                                // dominate the whole General tab.
+                                maximumLineCount: 3
+                                elide: Text.ElideRight
+
+                                HoverHandler { id: pathHover }
+
+                                ThemedToolTip {
+                                    text: clip.path || ""
+                                    visible: pathHover.hovered && (clip.path || "").length > 0
+                                }
                             }
                         }
                     }
@@ -1328,15 +1406,16 @@ PanelFrame {
                     // ----- Transform -------------------------------------------------------
                     Column {
                         width: tabColumn.width
-                        spacing: 10
+                        spacing: Theme.spacingXl
                         visible: root.currentTabId === "transform"
 
-                        Text {
+                        EmptyState {
                             visible: root.clipKind === "audio"
-                            text: "Not applicable to audio clips"
-                            color: Theme.mutedForeground
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSm
+                            width: parent.width
+                            compact: true
+                            glyph: Theme.icons.film
+                            title: qsTr("Video only")
+                            hint: qsTr("This tab does not apply to audio clips.")
                         }
 
                         Column {
@@ -1521,15 +1600,16 @@ PanelFrame {
                     // ----- Audio -------------------------------------------------------------
                     Column {
                         width: tabColumn.width
-                        spacing: 8
+                        spacing: Theme.spacingXl
                         visible: root.currentTabId === "audio"
 
-                        Text {
+                        EmptyState {
                             visible: root.clipKind !== "audio" && root.clipKind !== "video"
-                            text: "No audio on this clip"
-                            color: Theme.mutedForeground
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSm
+                            width: parent.width
+                            compact: true
+                            glyph: Theme.icons.volumeOff
+                            title: qsTr("No audio")
+                            hint: qsTr("This clip has no audio track.")
                         }
 
                         PropertyKeyframeRow {
@@ -1614,20 +1694,21 @@ PanelFrame {
                     // ----- Speed ---------------------------------------------------------------
                     Column {
                         width: tabColumn.width
-                        spacing: 8
+                        spacing: Theme.spacingXl
                         visible: root.currentTabId === "speed"
 
-                        Text {
+                        EmptyState {
                             visible: root.clipKind !== "video" && root.clipKind !== "audio"
-                            text: "Speed applies to video and audio clips"
-                            color: Theme.mutedForeground
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSm
+                            width: parent.width
+                            compact: true
+                            glyph: Theme.icons.gauge
+                            title: qsTr("Not available")
+                            hint: qsTr("Speed applies to video and audio clips.")
                         }
 
                         Text {
                             visible: root.clipKind === "video" || root.clipKind === "audio"
-                            text: "Playback speed"
+                            text: qsTr("Playback speed")
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeXs
@@ -1718,21 +1799,21 @@ PanelFrame {
                             spacing: 6
 
                             ThemedButton {
-                                text: "Fade in"
+                                text: qsTr("Fade in")
                                 variant: "secondary"
                                 onClicked: EditorState.setClipFade(
                                                EditorState.selectedTrack, EditorState.selectedClip,
                                                0.5, clip.fadeOut || 0)
                             }
                             ThemedButton {
-                                text: "Fade out"
+                                text: qsTr("Fade out")
                                 variant: "secondary"
                                 onClicked: EditorState.setClipFade(
                                                EditorState.selectedTrack, EditorState.selectedClip,
                                                clip.fadeIn || 0, 0.5)
                             }
                             ThemedButton {
-                                text: "Clear"
+                                text: qsTr("Clear")
                                 variant: "ghost"
                                 enabled: (clip.fadeIn || 0) > 0 || (clip.fadeOut || 0) > 0
                                 onClicked: EditorState.setClipFade(
@@ -1795,7 +1876,7 @@ PanelFrame {
                         }
 
                         Text {
-                            text: "Fade curve"
+                            text: qsTr("Fade curve")
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeXs
@@ -1816,7 +1897,7 @@ PanelFrame {
                     // ----- Transition ----------------------------------------------------------
                     Column {
                         width: tabColumn.width
-                        spacing: 12
+                        spacing: Theme.spacingXl
                         visible: root.currentTabId === "transition"
 
                         Text {
@@ -1839,14 +1920,14 @@ PanelFrame {
                             Text {
                                 width: parent.width
                                 wrapMode: Text.WordWrap
-                                text: "No transition after this clip. Add one at the cut to the next clip."
+                                text: qsTr("No transition after this clip. Add one at the cut to the next clip.")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSm
                             }
 
                             ThemedButton {
-                                text: "Add crossfade (0.5 s)"
+                                text: qsTr("Add crossfade (0.5 s)")
                                 variant: "primary"
                                 onClicked: EditorState.addTransition(
                                                EditorState.selectedTrack, EditorState.selectedClip,
@@ -1874,7 +1955,7 @@ PanelFrame {
                                 width: parent.width
                                 spacing: 4
                                 Text {
-                                    text: "Kind"
+                                    text: qsTr("Kind")
                                     color: Theme.mutedForeground
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeXs
@@ -1907,13 +1988,15 @@ PanelFrame {
                                 width: parent.width
                                 spacing: 4
                                 Text {
-                                    text: "Duration (s)"
+                                    text: qsTr("Duration (s)")
                                     color: Theme.mutedForeground
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeXs
                                 }
                                 ThemedNumberField {
                                     id: transitionDurationField
+                                    to: 60
+                                    unit: "s"
                                     width: parent.width
                                     decimals: 2
                                     step: 0.05
@@ -1941,6 +2024,7 @@ PanelFrame {
                                         spacing: 8
                                         Text {
                                             width: parent.width - 48
+                                            elide: Text.ElideRight
                                             text: trParamRow.modelData.label
                                             color: Theme.mutedForeground
                                             font.family: Theme.fontFamily
@@ -1961,7 +2045,7 @@ PanelFrame {
                                         }
                                     }
 
-                                    Switch {
+                                    ThemedSwitch {
                                         visible: !!trParamRow.modelData.isBoolean
                                         checked: !!trParamRow.modelData.value
                                         onToggled: EditorState.setTransitionParam(
@@ -1992,7 +2076,7 @@ PanelFrame {
                             }
 
                             ThemedButton {
-                                text: "Remove transition"
+                                text: qsTr("Remove transition")
                                 variant: "destructive"
                                 onClicked: EditorState.removeTransition(
                                                root.transitionEditTrack, root.activeTransition.id)
@@ -2003,48 +2087,106 @@ PanelFrame {
                     // ----- Blending ------------------------------------------------------------
                     Column {
                         width: tabColumn.width
-                        spacing: 4
+                        spacing: Theme.spacingXl
                         visible: root.currentTabId === "blending"
 
-                        Text {
+                        EmptyState {
                             visible: root.clipKind === "audio"
-                            text: "Not applicable to audio clips"
-                            color: Theme.mutedForeground
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSm
+                            width: parent.width
+                            compact: true
+                            glyph: Theme.icons.film
+                            title: qsTr("Video only")
+                            hint: qsTr("This tab does not apply to audio clips.")
                         }
 
                         Text {
                             visible: root.clipKind !== "audio"
-                            text: "Blend mode"
+                            text: qsTr("Blend mode")
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeXs
                         }
+
+                        // The tab was a label plus one combo with no description.
+                        Text {
+                            visible: root.clipKind !== "audio"
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            text: qsTr("How this clip's colours combine with the tracks beneath it.")
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                            opacity: 0.8
+                        }
+
                         ThemedComboBox {
                             id: blendModeBox
                             visible: root.clipKind !== "audio"
                             width: parent.width
                             model: ["normal", "multiply", "screen", "overlay", "add", "darken", "lighten"]
+                            // Human labels — raw ids were shown to the user.
+                            readonly property var labels: ({
+                                "normal": qsTr("Normal"),
+                                "multiply": qsTr("Multiply"),
+                                "screen": qsTr("Screen"),
+                                "overlay": qsTr("Overlay"),
+                                "add": qsTr("Add"),
+                                "darken": qsTr("Darken"),
+                                "lighten": qsTr("Lighten")
+                            })
+                            displayText: labels[model[currentIndex]] || model[currentIndex]
+                            tooltip: qsTr("How this clip blends with the layers below")
                             currentIndex: Math.max(0, model.indexOf(clip.blendMode || "normal"))
                             onActivated: EditorState.setClipBlendMode(
                                              EditorState.selectedTrack, EditorState.selectedClip, model[currentIndex])
+                        }
+
+                        ThemedButton {
+                            visible: root.clipKind !== "audio" && (clip.blendMode || "normal") !== "normal"
+                            text: qsTr("Reset to Normal")
+                            variant: "ghost"
+                            glyph: Theme.icons.reset
+                            onClicked: EditorState.setClipBlendMode(
+                                           EditorState.selectedTrack, EditorState.selectedClip, "normal")
                         }
                     }
 
                     // ----- Masks ---------------------------------------------------------------
                     Column {
                         width: tabColumn.width
-                        spacing: 8
+                        spacing: Theme.spacingXl
                         visible: root.currentTabId === "masks"
 
-                        Text {
+                        EmptyState {
                             visible: root.clipKind === "audio" || root.clipKind === "text"
                                      || root.clipKind === "subtitle"
-                            text: "Masks apply to visual clips"
+                            width: parent.width
+                            compact: true
+                            glyph: Theme.icons.mask
+                            title: qsTr("Not available")
+                            hint: qsTr("Masks apply to visual clips.")
+                        }
+
+                        // The tab used to open with a lone unlabelled combo box
+                        // and no explanation of what a mask does.
+                        Text {
+                            visible: maskShapeBox.visible
+                            width: parent.width
+                            text: qsTr("Mask shape")
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSm
+                            font.pixelSize: Theme.fontSizeXs
+                        }
+
+                        Text {
+                            visible: maskShapeBox.visible
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            text: qsTr("Hides everything outside the shape. Feather softens its edge.")
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                            opacity: 0.8
                         }
 
                         ThemedComboBox {
@@ -2053,10 +2195,37 @@ PanelFrame {
                                      && root.clipKind !== "subtitle"
                             width: parent.width
                             model: ["none", "rectangle", "ellipse", "star", "heart", "bars", "freeform"]
+                            // Human labels — the raw ids were shown to the user.
+                            readonly property var labels: ({
+                                "none": qsTr("None"),
+                                "rectangle": qsTr("Rectangle"),
+                                "ellipse": qsTr("Ellipse"),
+                                "star": qsTr("Star"),
+                                "heart": qsTr("Heart"),
+                                "bars": qsTr("Bars"),
+                                "freeform": qsTr("Freeform")
+                            })
+                            displayText: labels[model[currentIndex]] || model[currentIndex]
+                            tooltip: qsTr("Shape used to mask this clip")
                             currentIndex: Math.max(0, model.indexOf((clip.mask && clip.mask.shape) || "none"))
                             onActivated: {
                                 const mask = Object.assign({}, clip.mask || {})
                                 mask.shape = model[currentIndex]
+                                EditorState.setClipMask(EditorState.selectedTrack, EditorState.selectedClip, mask)
+                            }
+                        }
+
+                        // Clearing a mask previously required knowing to reselect
+                        // "none" in the combo above.
+                        ThemedButton {
+                            visible: maskShapeBox.visible
+                                     && ((clip.mask && clip.mask.shape) || "none") !== "none"
+                            text: qsTr("Remove mask")
+                            variant: "destructive"
+                            glyph: Theme.icons.trash
+                            onClicked: {
+                                const mask = Object.assign({}, clip.mask || {})
+                                mask.shape = "none"
                                 EditorState.setClipMask(EditorState.selectedTrack, EditorState.selectedClip, mask)
                             }
                         }
@@ -2116,13 +2285,13 @@ PanelFrame {
                                      && root.clipKind !== "subtitle"
                                      && clip.mask && clip.mask.shape !== "none"
                             Text {
-                                text: "Invert"
+                                text: qsTr("Invert")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
                                 anchors.verticalCenter: parent.verticalCenter
                             }
-                            Switch {
+                            ThemedSwitch {
                                 checked: !!(clip.mask && clip.mask.invert)
                                 onToggled: {
                                     const mask = Object.assign({}, clip.mask || {})
@@ -2136,17 +2305,19 @@ PanelFrame {
                     // ----- Effects ---------------------------------------------------------------
                     Column {
                         width: tabColumn.width
-                        spacing: 10
+                        spacing: Theme.spacingXl
                         visible: root.currentTabId === "effects"
 
-                        Text {
+                        // Has a CTA now: the copy told the user to go to the
+                        // Effects library but gave them no way to get there.
+                        EmptyState {
                             width: parent.width
                             visible: root.selectedEffects.length === 0
-                            text: "No effects yet. Drag a preset from the Effects library onto this clip, or click a preset card."
-                            wrapMode: Text.WordWrap
-                            color: Theme.mutedForeground
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSm
+                            glyph: Theme.icons.wand
+                            title: qsTr("No effects yet")
+                            hint: qsTr("Drag a preset from the Effects library onto this clip, or click a preset card.")
+                            actionText: qsTr("Browse effects")
+                            onActionTriggered: root.browseEffectsRequested()
                         }
 
                         Repeater {
@@ -2178,10 +2349,11 @@ PanelFrame {
                                             font.pixelSize: Theme.fontSizeSm
                                             font.weight: Font.Medium
                                             width: parent.width - 28
+                                            elide: Text.ElideRight
                                             anchors.verticalCenter: parent.verticalCenter
                                         }
                                         IconButton {
-                                            icon: Theme.icons.x
+                                            glyph: Theme.icons.x
                                             variant: "ghost"
                                             buttonSize: 22
                                             iconSize: 12
@@ -2206,6 +2378,7 @@ PanelFrame {
                                             spacing: 8
                                             Text {
                                                 width: parent.width - 48
+                                            elide: Text.ElideRight
                                                 text: paramRow.modelData.label
                                                 color: Theme.mutedForeground
                                                 font.family: Theme.fontFamily
@@ -2226,7 +2399,7 @@ PanelFrame {
                                             }
                                         }
 
-                                        Switch {
+                                        ThemedSwitch {
                                             visible: !!paramRow.modelData.isBoolean
                                             checked: !!paramRow.modelData.value
                                             onToggled: EditorState.setEffectParam(
@@ -2261,9 +2434,11 @@ PanelFrame {
                 }
             }
 
+            // Full-height editor with its own internal cue list scrolling, so it
+            // sits beside the tab Flickable rather than inside it.
             SubtitleEditor {
-                width: parent.width - Theme.tabRailWidth - 1
-                height: parent.height
+                width: parent.width - Theme.tabRailWidth - Theme.borderWidth
+                height: Math.max(0, parent.height)
                 visible: root.currentTabId === "subtitles"
                 clip: root.hasSelection ? root.clip : null
                 formatSeconds: root.formatSeconds
@@ -2287,7 +2462,7 @@ PanelFrame {
 
     ColorDialog {
         id: styleColorDialog
-        title: "Select Color"
+        title: qsTr("Select Color")
         property string targetStyleKey: ""
 
         function colorToHex(c) {

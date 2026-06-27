@@ -15,7 +15,7 @@ ThemedDialog {
 
     title: qsTr("Project output setup")
     acceptText: qsTr("Create")
-    width: 420
+    preferredWidth: Theme.dialogWidthMd
 
     function openForAsset(index, runner) {
         assetIndex = index
@@ -97,45 +97,47 @@ ThemedDialog {
             }
         }
 
+        // Were raw ThemedTextFields that silently reverted bad input and had no
+        // bounds at all, so a width of 1 or 100000 was accepted without comment.
         Row {
             width: parent.width
-            spacing: 8
+            spacing: Theme.spacingLg
 
             Column {
                 width: (parent.width - parent.spacing) / 2
-                spacing: 4
+                spacing: Theme.spacingSm
                 ThemedLabel { text: qsTr("Width") }
-                ThemedTextField {
+                ThemedNumberField {
                     width: parent.width
-                    text: String(root.outWidth)
-                    onEditingFinished: {
-                        const v = parseInt(text, 10)
-                        if (!isNaN(v) && v > 0) {
-                            root.outWidth = v
-                            if (root.aspectMode !== "custom" && root.aspectMode !== "source")
-                                root.applyAspectPreset(root.aspectMode)
-                            else
-                                root.aspectMode = "custom"
-                        }
-                        text = String(root.outWidth)
+                    from: 16
+                    to: 16384
+                    step: 2
+                    unit: "px"
+                    value: root.outWidth
+                    onEdited: v => {
+                        root.outWidth = v
+                        if (root.aspectMode !== "custom" && root.aspectMode !== "source")
+                            root.applyAspectPreset(root.aspectMode)
+                        else
+                            root.aspectMode = "custom"
                     }
                 }
             }
 
             Column {
                 width: (parent.width - parent.spacing) / 2
-                spacing: 4
+                spacing: Theme.spacingSm
                 ThemedLabel { text: qsTr("Height") }
-                ThemedTextField {
+                ThemedNumberField {
                     width: parent.width
-                    text: String(root.outHeight)
-                    onEditingFinished: {
-                        const v = parseInt(text, 10)
-                        if (!isNaN(v) && v > 0) {
-                            root.outHeight = v
-                            root.aspectMode = "custom"
-                        }
-                        text = String(root.outHeight)
+                    from: 16
+                    to: 16384
+                    step: 2
+                    unit: "px"
+                    value: root.outHeight
+                    onEdited: v => {
+                        root.outHeight = v
+                        root.aspectMode = "custom"
                     }
                 }
             }
@@ -143,26 +145,42 @@ ThemedDialog {
 
         Column {
             width: parent.width
-            spacing: 4
+            spacing: Theme.spacingSm
             ThemedLabel { text: qsTr("Frame rate") }
-            ThemedTextField {
-                width: parent.width / 2 - 4
-                text: String(root.outFps)
-                onEditingFinished: {
-                    const v = parseInt(text, 10)
-                    if (!isNaN(v) && v > 0)
-                        root.outFps = v
-                    text = String(root.outFps)
-                }
+            ThemedNumberField {
+                width: parent.width / 2 - Theme.spacingSm
+                from: 1
+                to: 240
+                unit: "fps"
+                value: root.outFps
+                onEdited: v => root.outFps = v
             }
         }
 
-        ThemedLabel {
+        Row {
             width: parent.width
-            tone: "default"
-            size: "sm"
-            font.family: Theme.monoFontFamily
-            text: qsTr("Output: %1×%2 @ %3 fps").arg(root.outWidth).arg(root.outHeight).arg(root.outFps)
+            spacing: Theme.spacingLg
+
+            ThemedLabel {
+                width: parent.width - resetButton.width - parent.spacing
+                anchors.verticalCenter: parent.verticalCenter
+                tone: "default"
+                size: "sm"
+                font.family: Theme.monoFontFamily
+                text: qsTr("Output: %1×%2 @ %3 fps").arg(root.outWidth).arg(root.outHeight).arg(root.outFps)
+            }
+
+            // Recovering the suggested values previously meant knowing to
+            // re-click the "Match clip" chip.
+            ThemedButton {
+                id: resetButton
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("Reset")
+                variant: "ghost"
+                glyph: Theme.icons.reset
+                tooltip: qsTr("Restore the values suggested by the source clip")
+                onClicked: root.applyAspectPreset("source")
+            }
         }
     }
 }

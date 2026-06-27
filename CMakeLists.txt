@@ -221,6 +221,8 @@ qt_add_executable(drift
 )
 
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
+# App-wide notification queue; the visual host is components/ToastHost.qml.
+set_source_files_properties(src/qml/Toasts.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
 
 # Lucide icons: SVG sources in resources/icons/ (from lucide-icons-1.25.0), PNGs for QML.
 file(GLOB DRIFT_LUCIDE_ICONS RELATIVE "${CMAKE_SOURCE_DIR}" CONFIGURE_DEPENDS
@@ -232,6 +234,7 @@ qt_add_qml_module(drift
     QML_FILES
         src/qml/Main.qml
         src/qml/Theme.qml
+        src/qml/Toasts.qml
         src/qml/EditorHeader.qml
         src/qml/AssetsPanel.qml
         src/qml/PreviewPanel.qml
@@ -269,6 +272,15 @@ qt_add_qml_module(drift
         src/qml/components/RecoveryDialog.qml
         src/qml/components/RecentProjectsPopup.qml
         src/qml/components/NewTrackMenu.qml
+        src/qml/components/ToastHost.qml
+        src/qml/components/EmptyState.qml
+        src/qml/components/SkeletonBox.qml
+        src/qml/components/ThemedSwitch.qml
+        src/qml/components/ThemedCheckBox.qml
+        src/qml/components/ThemedToggleButton.qml
+        src/qml/components/ThemedToolTip.qml
+        src/qml/components/ThemedContextMenu.qml
+        src/qml/components/LabelledProgressRing.qml
     RESOURCES
         # UI chrome: interface font and Lucide SVG icons (always needed, including before addons).
         resources/fonts/Inter.ttf

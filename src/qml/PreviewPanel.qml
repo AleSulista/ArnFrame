@@ -1,5 +1,11 @@
 import QtQuick
-import QtQuick.Controls
+// .Basic, matching every other file. Plain QtQuick.Controls pulled in the
+// platform style, so the inline text editor below was styled differently from
+// the rest of the app.
+import QtQuick.Controls.Basic
+// Window was used (fullscreen toggle) without being imported.
+import QtQuick.Window
+import QtQuick.Layouts
 import Drift
 import "components"
 
@@ -10,8 +16,16 @@ PanelFrame {
     readonly property real durationSeconds: EditorState.durationSeconds
     readonly property bool playing: EditorState.playing
 
+    // Frame rate of the project, not a fixed 30 — the timecode readout showed
+    // wrong frame numbers for every project that was not 30fps.
+    readonly property int projectFps: {
+        void EditorState.tracks
+        const fps = EditorState.projectFps()
+        return fps > 0 ? fps : 30
+    }
+
     function formatTimecode(seconds) {
-        const fps = 30;
+        const fps = root.projectFps;
         const totalFrames = Math.round(seconds * fps);
         const h = Math.floor(totalFrames / (fps * 3600));
         const m = Math.floor(totalFrames / (fps * 60)) % 60;
@@ -30,43 +44,14 @@ PanelFrame {
             height: parent.height - toolbar.height
             clip: true
 
-            Connections {
-                target: EditorState
-                function onTransformBlocked(reason) { blockToast.show(reason) }
-            }
-
-            Rectangle {
-                id: blockToast
-                z: 10
-                property string message: ""
-                function show(msg) { message = msg; opacity = 1; hideTimer.restart() }
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 16
-                visible: opacity > 0
-                opacity: 0
-                radius: Theme.radiusMd
-                color: Theme.panelBackground
-                border.width: 1
-                border.color: Theme.panelBorder
-                implicitWidth: toastLabel.implicitWidth + 24
-                implicitHeight: toastLabel.implicitHeight + 14
-                Behavior on opacity { NumberAnimation { duration: 200 } }
-                Text {
-                    id: toastLabel
-                    anchors.centerIn: parent
-                    text: blockToast.message
-                    color: Theme.mutedForeground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeXs
-                }
-                Timer { id: hideTimer; interval: 2000; onTriggered: blockToast.opacity = 0 }
-            }
+            // `transformBlocked` is now handled centrally in Main.qml and shown
+            // through the app-wide toast host, so the same block raised by a
+            // timeline drag is reported too. This panel-local toast is gone.
 
             Item {
                 id: viewport
                 anchors.fill: parent
-                anchors.margins: 8
+                anchors.margins: Theme.spacingLg
                 anchors.bottomMargin: 0
 
                 property real aspect: {
@@ -83,8 +68,8 @@ PanelFrame {
                     width: viewport.fitWidth
                     height: viewport.fitHeight
                     anchors.centerIn: parent
-                    color: "#000000"
-                    border.width: 1
+                    color: Theme.overlayColor
+                    border.width: Theme.borderWidth
                     border.color: Theme.border
                     clip: true
 
@@ -253,12 +238,47 @@ PanelFrame {
                                 property real dragStartH: 1
                                 property int dragStartPixelSize: 64
 
+                                // Arrow keys move the selected clip; Shift makes
+                                // the step coarse. Transform used to be
+                                // drag-only, with no keyboard path at all.
+                                focus: handle.selected && !handle.editing
+                                Keys.onPressed: function(event) {
+                                    if (!handle.selected || handle.editing)
+                                        return
+                                    const step = (event.modifiers & Qt.ShiftModifier) ? 10 : 1
+                                    let dx = 0
+                                    let dy = 0
+                                    switch (event.key) {
+                                    case Qt.Key_Left:  dx = -step; break
+                                    case Qt.Key_Right: dx = step; break
+                                    case Qt.Key_Up:    dy = -step; break
+                                    case Qt.Key_Down:  dy = step; break
+                                    default: return
+                                    }
+                                    EditorState.beginPreviewDrag()
+                                    EditorState.previewSetClipPosition(
+                                        handle.modelData.track,
+                                        handle.modelData.clip,
+                                        handle.modelData.x + dx,
+                                        handle.modelData.y + dy)
+                                    EditorState.commitPreviewDrag()
+                                    event.accepted = true
+                                }
+
                                 Rectangle {
                                     anchors.fill: parent
                                     color: "transparent"
-                                    border.width: (handle.selected || handle.editing) ? 2 : 1
-                                    border.color: handle.selected ? Theme.primary : "#99ffffff"
-                                    radius: 2
+                                    border.width: (handle.selected || handle.editing)
+                                                  ? Theme.borderWidthFocus : Theme.borderWidth
+                                    border.color: handle.selected ? Theme.primary : Theme.guideStrong
+                                    radius: Theme.radiusXs
+
+                                    Behavior on border.width {
+                                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                    }
+                                    Behavior on border.color {
+                                        ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                    }
                                 }
 
                                 // In-place text editor (Canva-style). Shown over the
@@ -354,7 +374,7 @@ PanelFrame {
                                         radius: 2
                                         color: Theme.primary
                                         border.width: 1
-                                        border.color: "#ffffff"
+                                        border.color: Theme.onMedia
                                         x: (sxSign < 0 ? 0 : handle.width) - width / 2
                                         y: (sySign < 0 ? 0 : handle.height) - height / 2
 
@@ -459,7 +479,7 @@ PanelFrame {
                                         radius: width / 2
                                         color: Theme.primary
                                         border.width: 1
-                                        border.color: "#ffffff"
+                                        border.color: Theme.onMedia
                                     }
 
                                     DragHandler {
@@ -520,7 +540,7 @@ PanelFrame {
                                 width: 1
                                 height: parent.height
                                 x: parent.width * (index + 1) / 3
-                                color: "#80ffffff"
+                                color: Theme.guideMedium
                             }
                         }
                         Repeater {
@@ -529,7 +549,7 @@ PanelFrame {
                                 height: 1
                                 width: parent.width
                                 y: parent.height * (index + 1) / 3
-                                color: "#80ffffff"
+                                color: Theme.guideMedium
                             }
                         }
 
@@ -538,14 +558,14 @@ PanelFrame {
                             width: 1
                             height: parent.height
                             x: parent.width / 2
-                            color: "#80ffffff"
+                            color: Theme.guideMedium
                         }
                         Rectangle {
                             visible: EditorState.guideType === "crosshair"
                             height: 1
                             width: parent.width
                             y: parent.height / 2
-                            color: "#80ffffff"
+                            color: Theme.guideMedium
                         }
 
                         Rectangle {
@@ -556,7 +576,7 @@ PanelFrame {
                             height: parent.height * 0.90
                             color: "transparent"
                             border.width: 1
-                            border.color: "#80ffffff"
+                            border.color: Theme.guideMedium
                         }
                         Rectangle {
                             visible: EditorState.guideType === "safe"
@@ -566,7 +586,7 @@ PanelFrame {
                             height: parent.height * 0.95
                             color: "transparent"
                             border.width: 1
-                            border.color: "#66ffffff"
+                            border.color: Theme.guideWeak
                         }
                     }
 
@@ -578,28 +598,51 @@ PanelFrame {
                         }
                     }
 
+                    // Fades rather than popping, so scrubbing across a gap no
+                    // longer flickers this text on and off.
                     Text {
                         anchors.centerIn: parent
-                        visible: !EditorState.playback.hasFrame
-                        text: EditorState.activeAudioClipAtPlayhead().path ? "Audio only" : "No clip at playhead"
+                        visible: opacity > 0
+                        opacity: EditorState.playback.hasFrame ? 0 : 1
+                        text: EditorState.activeAudioClipAtPlayhead().path
+                              ? qsTr("Audio only") : qsTr("No clip at playhead")
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSm
+
+                        Behavior on opacity {
+                            NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
+                        }
                     }
                 }
             }
         }
 
+        // The three groups were independently anchored and overlapped at narrow
+        // preview widths. A RowLayout keeps Play centred while the side groups
+        // compress instead of colliding.
         Item {
             id: toolbar
             width: parent.width
-            height: 20 + 12 + 28
+            height: Theme.previewToolbarPaddingTop + Theme.previewToolbarPaddingBottom
+                    + Theme.iconButtonSize
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: Theme.spacing2xl + Theme.spacingSm
+                anchors.rightMargin: Theme.spacing2xl + Theme.spacingSm
+                spacing: Theme.spacingLg
 
             Row {
-                anchors.left: parent.left
-                anchors.leftMargin: 20
-                anchors.verticalCenter: parent.verticalCenter
+                Layout.alignment: Qt.AlignVCenter
                 spacing: 0
+
+                HoverHandler { id: timecodeHover }
+
+                ThemedToolTip {
+                    text: qsTr("Playhead / total duration — hh:mm:ss:ff at %1 fps").arg(root.projectFps)
+                    visible: timecodeHover.hovered
+                }
 
                 Text {
                     text: root.formatTimecode(root.currentSeconds)
@@ -624,43 +667,45 @@ PanelFrame {
                 }
             }
 
+            // Spacers on both sides keep Play optically centred while still
+            // letting the whole row shrink instead of overlap.
+            Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
+
             IconButton {
-                anchors.centerIn: parent
-                icon: root.playing ? Theme.icons.pause : Theme.icons.play
+                Layout.alignment: Qt.AlignVCenter
+                glyph: root.playing ? Theme.icons.pause : Theme.icons.play
                 variant: "text"
                 tooltip: root.playing ? qsTr("Pause") : qsTr("Play")
                 onClicked: EditorState.togglePlayback()
             }
 
+            Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
+
             Row {
-                anchors.right: parent.right
-                anchors.rightMargin: 20
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 10
+                Layout.alignment: Qt.AlignVCenter
+                spacing: Theme.spacingLg + Theme.spacingXs
 
-                Text {
-                    text: viewport.fitMode ? "Fit" : "Fill"
-                    color: Theme.panelForeground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeXs
+                // Was plain clickable text that read as a label, with no hover,
+                // no pressed state and no explanation of the two modes.
+                ThemedToggleButton {
                     anchors.verticalCenter: parent.verticalCenter
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: viewport.fitMode = !viewport.fitMode
-                    }
+                    text: viewport.fitMode ? qsTr("Fit") : qsTr("Fill")
+                    checked: !viewport.fitMode
+                    tooltip: viewport.fitMode
+                             ? qsTr("Fit: the whole frame is visible. Click for Fill.")
+                             : qsTr("Fill: the frame covers the viewport. Click for Fit.")
+                    onClicked: viewport.fitMode = !viewport.fitMode
                 }
 
                 Rectangle {
-                    width: 1
-                    height: 16
+                    width: Theme.borderWidth
+                    height: Theme.iconSizeBase
                     color: Theme.panelBorder
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
                 IconButton {
-                    icon: Theme.icons.grid
+                    glyph: Theme.icons.grid
                     variant: "text"
                     tooltip: qsTr("Toggle guides")
                     anchors.verticalCenter: parent.verticalCenter
@@ -669,7 +714,7 @@ PanelFrame {
                 }
 
                 IconButton {
-                    icon: Theme.icons.maximize
+                    glyph: Theme.icons.maximize
                     variant: "text"
                     tooltip: qsTr("Toggle fullscreen")
                     anchors.verticalCenter: parent.verticalCenter
@@ -679,6 +724,7 @@ PanelFrame {
                             win.visibility = win.visibility === Window.FullScreen ? Window.Windowed : Window.FullScreen
                     }
                 }
+            }
             }
         }
     }

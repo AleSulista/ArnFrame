@@ -90,6 +90,34 @@ QtObject {
     readonly property color primaryForeground: "#ffffff"
     readonly property color destructive: "#e91616"
     readonly property color constructive: "#23d160"
+    readonly property color warning: "#e5a00d"
+
+    // Keyboard focus indicator. Shared by every focusable control so a Tab pass
+    // reads as one system regardless of which control has focus.
+    readonly property color focusRing: primary
+
+    // Export CTA gradient stops (the documented inline-color exception, sourced
+    // from here so the button still tracks the token system).
+    readonly property color exportGradientTop: "#37b6f7"
+    readonly property color exportGradientBottom: "#2567ec"
+    readonly property color exportGlow: "#38bdf8"
+
+    // Scrims/overlays drawn over media (clip name bands, preview letterbox,
+    // thumbnail duration badges). Fixed regardless of app theme because they sit
+    // on photographic content, not on panel surfaces.
+    readonly property color scrimColor: "#00000066"
+    readonly property color scrimStrong: "#000000b3"
+    readonly property color overlayColor: "#000000"
+    // Guides and handles drawn on top of preview media.
+    readonly property color guideStrong: "#99ffffff"
+    readonly property color guideMedium: "#80ffffff"
+    readonly property color guideWeak: "#66ffffff"
+    readonly property color onMedia: "#ffffff"
+    // Timeline snap indicator.
+    readonly property color snapGuide: "#f5c542"
+    // Async placeholder fill for thumbnails, filmstrips and waveforms.
+    readonly property color skeletonColor: darkMode ? "#242424" : "#e8e8e8"
+    readonly property color skeletonHighlight: darkMode ? "#333333" : "#f5f5f5"
 
     // --- Colors: timeline clip types (fixed regardless of app theme) ---------------
     readonly property color clipText: "#5DBAA0"
@@ -110,6 +138,51 @@ QtObject {
     readonly property real radiusSm: 5.6
     readonly property real radiusMd: 10.4
     readonly property real radiusLg: 13.12
+    readonly property real radiusXs: 3    // badges, tick marks, hairline chrome
+    readonly property real radiusPill: 999
+
+    // --- Spacing scale ---------------------------------------------------------
+    // Every gap/margin/padding in the app should come from here. Values are the
+    // ones already in de-facto use, deduplicated into a scale.
+    readonly property real spacingXs: 2
+    readonly property real spacingSm: 4
+    readonly property real spacingMd: 6
+    readonly property real spacingLg: 8
+    readonly property real spacingXl: 12
+    readonly property real spacing2xl: 16
+    readonly property real spacing3xl: 24
+
+    // --- Control metrics -------------------------------------------------------
+    // controlHeight is the alignment baseline: text fields, combo boxes and text
+    // buttons all share it so adjacent controls in a Row line up.
+    readonly property real controlHeight: 30
+    readonly property real controlHeightSm: 26   // chips, segmented toggles
+    readonly property real iconButtonSize: 28
+    readonly property real borderWidth: 1
+    readonly property real borderWidthFocus: 2
+
+    // --- Icon sizes ------------------------------------------------------------
+    readonly property real iconSizeSm: 12
+    readonly property real iconSizeMd: 14
+    readonly property real iconSizeBase: 16
+    readonly property real iconSizeLg: 18
+    readonly property real iconSizeXl: 22
+
+    // --- Motion ----------------------------------------------------------------
+    // durationFast: hover/press tints. durationBase: dialogs, tab crossfades.
+    // durationSlow: layout-affecting reveals.
+    readonly property int durationFast: 90
+    readonly property int durationBase: 140
+    readonly property int durationSlow: 220
+    readonly property int easing: Easing.OutCubic
+    readonly property int tooltipDelay: 400
+
+    // --- Dialog widths ---------------------------------------------------------
+    readonly property real dialogWidthSm: 340
+    readonly property real dialogWidthMd: 420
+    readonly property real dialogWidthLg: 660
+    // Minimum breathing room between a dialog and the window edge.
+    readonly property real dialogMargin: 32
 
     // --- Typography ------------------------------------------------------------
     readonly property real fontSizeXs: 11.52
@@ -151,6 +224,20 @@ QtObject {
     readonly property real playheadLineWidth: 2
     readonly property real playheadHandleSize: 12
     readonly property real clipSelectionRingWidth: 1.5
+    // Name band across the top of a clip. Clamped against track height at the use
+    // site so it never swallows a short (25px text/subtitle) row.
+    readonly property real clipHeaderBandHeight: 20
+    readonly property real clipTrimHandleWidth: 12
+    // Below this width a clip has no room for a trim handle plus a drag region,
+    // so trim handles are suppressed and the whole clip stays draggable.
+    readonly property real clipMinInteractiveWidth: 28
+    readonly property real timelineZoomMin: 0.05
+
+    // --- Layout: window --------------------------------------------------------
+    // Floor for ApplicationWindow. Below this the split minimums cannot all be
+    // satisfied and panels start overlapping.
+    readonly property real windowMinimumWidth: 900
+    readonly property real windowMinimumHeight: 560
 
     // --- Iconography (Lucide SVGs in resources/icons/; ISC-licensed, see
     // resources/licenses/LICENSE-lucide.txt) ------------------------------------
@@ -211,6 +298,38 @@ QtObject {
         blend: "blend",
         mask: "square-dashed",
         puzzle: "puzzle",
-        info: "info"
+        info: "info",
+
+        // Status / feedback
+        warning: "triangle-alert",
+        success: "circle-check",
+        error: "circle-x",
+        spinner: "loader-circle",
+        refresh: "refresh-cw",
+        download: "download",
+
+        // Affordances
+        reset: "rotate-ccw",
+        search: "search",
+        chevronRight: "chevron-right",
+        chevronLeft: "chevron-left",
+        check: "check",
+        pencil: "pencil",
+        clock: "clock",
+        lock: "lock",
+        lockOpen: "lock-open",
+        moveHorizontal: "move-horizontal",
+
+        // Text alignment
+        alignLeft: "text-align-start",
+        alignCenter: "text-align-center",
+        alignRight: "text-align-end",
+        alignTop: "align-start-vertical",
+        alignMiddle: "align-center-vertical",
+        alignBottom: "align-end-vertical",
+
+        // Media
+        captions: "captions",
+        listVideo: "list-video"
     })
 }

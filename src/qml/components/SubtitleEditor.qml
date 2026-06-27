@@ -414,13 +414,13 @@ Item {
                         color: applyMouse.containsMouse ? Qt.lighter(Theme.primary, 1.08) : Theme.primary
                         opacity: (dirty || applyMouse.containsMouse) ? 1 : 0.5
 
-                        Text {
+                        // Was a raw "✓" glyph while every other button in the app
+                        // uses IconGlyph + Theme.icons.
+                        IconGlyph {
                             anchors.centerIn: parent
-                            text: "✓"
-                            color: Theme.primaryForeground
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeBase
-                            font.weight: Font.Bold
+                            glyph: Theme.icons.check
+                            iconSize: Theme.iconSizeBase
+                            iconColor: Theme.primaryForeground
                         }
 
                         MouseArea {
@@ -434,7 +434,7 @@ Item {
                             }
                         }
 
-                        ToolTip {
+                        ThemedToolTip {
                             visible: applyMouse.containsMouse
                             text: qsTr("Apply text to this subtitle")
                         }
@@ -469,9 +469,9 @@ Item {
                             }
                             IconButton {
                                 id: startPh
-                                icon: Theme.icons.setStart
+                                glyph: Theme.icons.setStart
                                 variant: "ghost"
-                                buttonEnabled: root.localPlayhead >= 0
+                                enabled: root.localPlayhead >= 0
                                 tooltip: qsTr("Set start to playhead")
                                 onClicked: root.setCueEdgeToPlayhead(root.selectedCueIndex, "start")
                             }
@@ -502,9 +502,9 @@ Item {
                             }
                             IconButton {
                                 id: endPh
-                                icon: Theme.icons.setEnd
+                                glyph: Theme.icons.setEnd
                                 variant: "ghost"
-                                buttonEnabled: root.localPlayhead >= 0
+                                enabled: root.localPlayhead >= 0
                                 tooltip: qsTr("Set end to playhead")
                                 onClicked: root.setCueEdgeToPlayhead(root.selectedCueIndex, "end")
                             }

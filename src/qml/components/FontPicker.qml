@@ -11,8 +11,6 @@ Item {
     property string family: ""
     signal familyPicked(string family)
 
-    focus: true
-
     readonly property string displayFamily: family === "" ? "Select a font" : family
 
     implicitHeight: 30
@@ -197,7 +195,9 @@ Item {
                     anchors.right: parent.right
                     anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Install the font pack for 21 curated families →")
+                    // The count was baked into the translated string, so it could
+                    // not be updated or pluralised.
+                    text: qsTr("Install the font pack for curated families →")
                     color: Theme.primary
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSm

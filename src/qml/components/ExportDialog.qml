@@ -7,7 +7,7 @@ ThemedDialog {
 
     title: qsTr("Export video")
     acceptText: qsTr("Export")
-    width: 420
+    preferredWidth: Theme.dialogWidthMd
 
     property string presetId: "source"
 
@@ -18,13 +18,20 @@ ThemedDialog {
 
     onAccepted: {
         var url = FileDialogs.saveFile(qsTr("Export Video"), [qsTr("MP4 video (*.mp4)")], "mp4")
-        if (url != "")
+        if (url != "") {
             EditorState.exportWithPreset(url, root.presetId)
+            Toasts.info(qsTr("Export started…"))
+        } else {
+            // Cancelling the save picker used to be a completely silent no-op:
+            // the export dialog had already closed, so nothing happened and
+            // nothing said so.
+            Toasts.info(qsTr("Export cancelled."))
+        }
     }
 
     contentItem: Column {
-        spacing: 12
-        width: parent ? parent.width : 400
+        spacing: Theme.spacingXl
+        width: parent ? parent.width : Theme.dialogWidthMd
 
         ThemedLabel {
             width: parent.width
@@ -38,7 +45,7 @@ ThemedDialog {
 
         Flow {
             width: parent.width
-            spacing: 6
+            spacing: Theme.spacingMd
 
             Repeater {
                 model: EditorState.exportPresets()
@@ -47,7 +54,7 @@ ThemedDialog {
                     required property var modelData
                     text: modelData.label
                     selected: root.presetId === modelData.id
-                    chipHeight: 28
+                    tooltip: qsTr("Export at the %1 preset").arg(modelData.label)
                     onClicked: root.presetId = modelData.id
                 }
             }

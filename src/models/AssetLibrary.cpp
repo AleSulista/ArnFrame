@@ -67,6 +67,11 @@ QString formatDuration(drift::TimeUs durationUs)
 AssetLibrary::AssetLibrary(QObject *parent)
     : QAbstractListModel(parent)
 {
+    // Re-broadcast every row-count change as countChanged so QML bindings on
+    // `count` stay live without each mutation site having to remember to emit.
+    connect(this, &QAbstractItemModel::rowsInserted, this, &AssetLibrary::countChanged);
+    connect(this, &QAbstractItemModel::rowsRemoved, this, &AssetLibrary::countChanged);
+    connect(this, &QAbstractItemModel::modelReset, this, &AssetLibrary::countChanged);
 }
 
 void AssetLibrary::setProject(drift::Project *project)

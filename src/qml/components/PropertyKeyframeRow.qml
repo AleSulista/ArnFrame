@@ -196,10 +196,11 @@ Column {
 
         ThemedChip {
             id: linChip
-            text: "Lin"
+            text: qsTr("Lin")
+            tooltip: qsTr("Linear — constant rate between keyframes")
             selected: root.interpolationMode === "linear"
             chipHeight: 18
-            horizontalPadding: 8
+            horizontalPadding: Theme.spacingSm
             width: 28
             anchors.verticalCenter: parent.verticalCenter
             onClicked: root.setInterpolation("linear")
@@ -207,10 +208,11 @@ Column {
 
         ThemedChip {
             id: easeChip
-            text: "Ease"
+            text: qsTr("Ease")
+            tooltip: qsTr("Ease — accelerates out and decelerates in")
             selected: root.interpolationMode === "ease"
             chipHeight: 18
-            horizontalPadding: 8
+            horizontalPadding: Theme.spacingSm
             width: 36
             anchors.verticalCenter: parent.verticalCenter
             onClicked: root.setInterpolation("ease")
@@ -218,10 +220,11 @@ Column {
 
         ThemedChip {
             id: holdChip
-            text: "Hold"
+            text: qsTr("Hold")
+            tooltip: qsTr("Hold — jumps to the next value with no interpolation")
             selected: root.interpolationMode === "hold"
             chipHeight: 18
-            horizontalPadding: 8
+            horizontalPadding: Theme.spacingSm
             width: 34
             anchors.verticalCenter: parent.verticalCenter
             onClicked: root.setInterpolation("hold")

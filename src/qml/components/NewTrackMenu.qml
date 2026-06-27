@@ -7,10 +7,60 @@ Popup {
     id: root
 
     width: 180
-    padding: 6
+    padding: Theme.spacingMd
     modal: true
     dim: false
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+    // Arrow keys move the highlight, Enter adds the highlighted track type. The
+    // menu used to be mouse-only despite already handling Escape.
+    property int highlightIndex: 0
+
+    onOpened: highlightIndex = 0
+
+    Keys.onUpPressed: function(event) {
+        highlightIndex = (highlightIndex - 1 + trackTypes.length) % trackTypes.length
+        event.accepted = true
+    }
+    Keys.onDownPressed: function(event) {
+        highlightIndex = (highlightIndex + 1) % trackTypes.length
+        event.accepted = true
+    }
+    Keys.onReturnPressed: function(event) {
+        root.addHighlighted()
+        event.accepted = true
+    }
+    Keys.onEnterPressed: function(event) {
+        root.addHighlighted()
+        event.accepted = true
+    }
+
+    function addHighlighted() {
+        if (highlightIndex < 0 || highlightIndex >= trackTypes.length)
+            return
+        EditorState.addTrack(trackTypes[highlightIndex].type)
+        root.close()
+    }
+
+    enter: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 0.0
+            to: 1.0
+            duration: Theme.durationFast
+            easing.type: Theme.easing
+        }
+    }
+
+    exit: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 1.0
+            to: 0.0
+            duration: Theme.durationFast
+            easing.type: Theme.easing
+        }
+    }
 
     readonly property var trackTypes: [
         { type: "video", label: qsTr("Video"), icon: Theme.icons.film },
@@ -54,28 +104,36 @@ Popup {
             model: root.trackTypes
 
             delegate: Rectangle {
+                id: trackTypeRow
                 required property var modelData
+                required property int index
+
                 width: parent.width
-                height: 32
+                height: Theme.controlHeight + Theme.spacingXs
                 radius: Theme.radiusSm
-                color: itemMouse.containsMouse ? Theme.popoverHover : "transparent"
+                color: itemMouse.containsMouse || root.highlightIndex === index
+                       ? Theme.popoverHover : "transparent"
+
+                Behavior on color {
+                    ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                }
 
                 Row {
                     anchors.fill: parent
-                    anchors.leftMargin: 8
-                    anchors.rightMargin: 8
-                    spacing: 10
+                    anchors.leftMargin: Theme.spacingLg
+                    anchors.rightMargin: Theme.spacingLg
+                    spacing: Theme.spacingLg + Theme.spacingXs
 
                     IconGlyph {
                         anchors.verticalCenter: parent.verticalCenter
-                        glyph: modelData.icon
-                        iconSize: 14
+                        glyph: trackTypeRow.modelData.icon
+                        iconSize: Theme.iconSizeMd
                         iconColor: Theme.mutedForeground
                     }
 
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.label
+                        text: trackTypeRow.modelData.label
                         color: Theme.panelForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSm
@@ -87,8 +145,9 @@ Popup {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
+                    onEntered: root.highlightIndex = trackTypeRow.index
                     onClicked: {
-                        EditorState.addTrack(modelData.type)
+                        EditorState.addTrack(trackTypeRow.modelData.type)
                         root.close()
                     }
                 }

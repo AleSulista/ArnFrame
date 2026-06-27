@@ -148,12 +148,12 @@ Column {
                             anchors.right: parent.right
                             anchors.top: parent.top
                             anchors.margins: 3
-                            icon: Theme.icons.plus
+                            glyph: Theme.icons.plus
                             variant: "ghost"
                             buttonSize: 18
                             iconSize: 12
                             tooltip: qsTr("Apply to selected clip")
-                            buttonEnabled: EditorState.selectedClip >= 0
+                            enabled: EditorState.selectedClip >= 0
                             onClicked: root.applyPreset(presetCard.modelData.id)
                         }
                     }

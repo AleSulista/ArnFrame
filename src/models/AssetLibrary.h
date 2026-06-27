@@ -15,6 +15,9 @@ class Project;
 class AssetLibrary : public QAbstractListModel
 {
     Q_OBJECT
+    // Read-only row count, so QML can tell an empty bin from a populated one
+    // (drives the empty state) and can detect imports that produced no asset.
+    Q_PROPERTY(int count READ count NOTIFY countChanged)
 
 public:
     enum Role {
@@ -38,6 +41,8 @@ public:
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
 
+    int count() const { return rowCount(); }
+
     Q_INVOKABLE void importUrls(const QList<QUrl> &urls);
     Q_INVOKABLE QVariantMap assetAt(int index) const;
     Q_INVOKABLE QString assetIdAt(int index) const;
@@ -52,6 +57,9 @@ public:
     QJsonArray toJsonArray() const;
     void loadFromJsonArray(const QJsonArray &assets);
     void clear();
+
+signals:
+    void countChanged();
 
 private:
     void importFiles(const QStringList &paths);

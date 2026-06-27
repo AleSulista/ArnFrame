@@ -8,11 +8,15 @@ ThemedDialog {
     id: root
 
     title: qsTr("Generating subtitles")
-    width: 360
+    preferredWidth: 360
     showAccept: false
     rejectText: qsTr("Cancel")
-    rejectVariant: "secondary"
-    closePolicy: Popup.NoAutoClose
+    // Cancelling throws away a multi-minute run, so it is styled as destructive.
+    // The other progress dialogs say "Close" and are genuinely non-destructive.
+    rejectVariant: "destructive"
+    // Escape now cancels; it used to be inert, leaving no keyboard way to stop a
+    // run that can take several minutes.
+    closePolicy: Popup.CloseOnEscape
 
     onRejected: EditorState.cancelSubtitleGeneration()
 
@@ -27,26 +31,14 @@ ThemedDialog {
     }
 
     contentItem: Column {
-        spacing: 14
+        spacing: Theme.spacing2xl - Theme.spacingXs
         width: parent ? parent.width : 328
 
-        Item {
+        LabelledProgressRing {
             width: parent.width
-            height: 100
-
-            CircularProgress {
-                anchors.centerIn: parent
-                size: 100
-                strokeWidth: 7
-                value: EditorState.subtitleGenProgress
-            }
-
-            ThemedLabel {
-                anchors.centerIn: parent
-                tone: "default"
-                size: "base"
-                text: Math.round(EditorState.subtitleGenProgress * 100) + "%"
-            }
+            value: EditorState.subtitleGenProgress
+            // Whisper reports nothing until the first chunk lands.
+            indeterminate: EditorState.subtitleGenProgress <= 0
         }
 
         ThemedLabel {

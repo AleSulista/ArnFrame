@@ -9,6 +9,10 @@ Slider {
     property var _flickable: null
     property bool _flickableWasInteractive: true
 
+    // Shown in a tooltip while dragging. Set a formatter for units/precision.
+    property bool showValueTooltip: true
+    property var valueFormatter: function (v) { return Number(v).toFixed(2) }
+
     from: 0
     to: 1
     live: true
@@ -16,6 +20,11 @@ Slider {
     padding: 0
     topPadding: 0
     bottomPadding: 0
+    hoverEnabled: true
+    focusPolicy: Qt.StrongFocus
+    opacity: enabled ? 1 : 0.5
+
+    Accessible.role: Accessible.Slider
 
     function findFlickable(item) {
         var node = item
@@ -44,26 +53,62 @@ Slider {
         x: root.leftPadding
         y: root.topPadding + root.availableHeight / 2 - height / 2
         width: root.availableWidth
-        height: 4
-        radius: 2
+        height: Theme.spacingSm
+        radius: height / 2
         color: Theme.panelMuted
 
         Rectangle {
             width: root.visualPosition * parent.width
             height: parent.height
-            radius: 2
+            radius: parent.radius
             color: Theme.primary
+
+            // Eases programmatic value changes (a preset chip, a reset button)
+            // without fighting the drag, which sets position continuously.
+            Behavior on width {
+                enabled: !root.pressed
+                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+            }
         }
     }
 
     handle: Rectangle {
+        id: handleRect
         x: root.leftPadding + root.visualPosition * (root.availableWidth - width)
         y: root.topPadding + root.availableHeight / 2 - height / 2
-        width: 14
-        height: 14
-        radius: 7
-        color: root.pressed ? Theme.panelSecondaryForeground : Theme.primary
-        border.width: 2
-        border.color: Theme.primaryForeground
+        width: Theme.iconSizeMd
+        height: Theme.iconSizeMd
+        radius: width / 2
+        color: root.pressed ? Theme.panelSecondaryForeground
+                            : (root.hovered ? Qt.lighter(Theme.primary, 1.15) : Theme.primary)
+        border.width: Theme.borderWidthFocus
+        border.color: root.visualFocus ? Theme.focusRing : Theme.primaryForeground
+        // Grows slightly on hover so the grab target is legible.
+        scale: root.pressed ? 1.1 : (root.hovered || root.visualFocus ? 1.05 : 1.0)
+
+        Behavior on x {
+            enabled: !root.pressed
+            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+        Behavior on color {
+            ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+        Behavior on scale {
+            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+    }
+
+    ThemedToolTip {
+        parent: root.handle
+        visible: root.showValueTooltip && (root.pressed || root.hovered)
+        // No reveal delay while dragging — the readout must track the handle.
+        delay: root.pressed ? 0 : Theme.tooltipDelay
+        text: root.valueFormatter(root.value)
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.NoButton
+        cursorShape: root.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
 }
