@@ -816,7 +816,7 @@ PanelFrame {
                                 // Toggle the whole track between filmstrip previews and audio waveforms.
                                 IconGlyph {
                                     visible: root.tracks[index].type === "video"
-                                    glyph: EditorState.trackShowWaveform(index) ? Theme.icons.music : Theme.icons.film
+                                    glyph: EditorState.trackShowWaveform(index) ? Theme.icons.audioLines : Theme.icons.film
                                     iconSize: 16
                                     iconColor: EditorState.trackShowWaveform(index) ? Theme.primary : Theme.mutedForeground
                                     anchors.verticalCenter: parent.verticalCenter
@@ -901,7 +901,7 @@ PanelFrame {
                                         text: EditorState.trackShowWaveform(index)
                                               ? qsTr("Show filmstrip") : qsTr("Show waveform")
                                         icon.name: EditorState.trackShowWaveform(index)
-                                                   ? Theme.icons.film : Theme.icons.music
+                                                   ? Theme.icons.film : Theme.icons.audioLines
                                         onTriggered: EditorState.setTrackShowWaveform(
                                                          index, !EditorState.trackShowWaveform(index))
                                     }
