@@ -864,30 +864,6 @@ PanelFrame {
                     }
 
                     Text {
-                        text: qsTr("Preview quality")
-                        color: Theme.mutedForeground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeXs
-                    }
-
-                    ThemedComboBox {
-                        model: ["full", "half", "quarter"]
-                        tooltip: qsTr("Resolution the preview renders at. Lower is faster.")
-                        currentIndex: Math.max(0, model.indexOf(EditorState.playback.previewQuality))
-                        onActivated: EditorState.playback.previewQuality = model[currentIndex]
-                    }
-
-                    Text {
-                        text: qsTr("Playback renders at half this scale, then snaps back on pause.")
-                        color: Theme.mutedForeground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeXs
-                        opacity: 0.7
-                        width: settingsColumn.width
-                        wrapMode: Text.WordWrap
-                    }
-
-                    Text {
                         text: qsTr("Preview guides")
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily

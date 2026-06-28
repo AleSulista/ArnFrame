@@ -8,9 +8,6 @@ namespace {
 
 constexpr int kPlayheadUpdateMs = 16; // ~60 Hz UI updates, independent of video decode
 
-// Extra downscale applied only while playing; pause returns to the chosen quality.
-constexpr double kPlaybackScaleFactor = 0.5;
-
 } // namespace
 
 AudioPlaybackIODevice::AudioPlaybackIODevice(PlaybackEngine *engine, QObject *parent)
@@ -319,12 +316,6 @@ FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
         const double heightScale = static_cast<double>(m_previewRenderHeight) / qMax(1, m_project->height());
         options.previewScale = qBound(0.1, qMin(widthScale, heightScale), 1.0);
     }
-
-    // Render at half scale while rolling, and snap back to the chosen quality on
-    // pause, where the frame is actually inspected. Halving the scale quarters
-    // the pixels the compositor touches.
-    if (m_playing)
-        options.previewScale = qMax(0.1, options.previewScale * kPlaybackScaleFactor);
 
     // Hide the text clip being edited in place so the QML inline editor stands in
     // for it. Never applies while playing (no inline edit during playback).

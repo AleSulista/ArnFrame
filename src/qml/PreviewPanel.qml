@@ -1181,6 +1181,29 @@ PanelFrame {
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
+                ThemedComboBox {
+                    id: qualityCombo
+                    anchors.verticalCenter: parent.verticalCenter
+                    implicitHeight: Theme.controlHeightSm
+                    width: implicitContentWidth + leftPadding + rightPadding
+                    leftPadding: Theme.spacingMd
+                    rightPadding: Theme.spacing2xl
+                    font.pixelSize: Theme.fontSizeXs
+                    // Display is capitalised; the engine stores the lowercase value.
+                    readonly property var values: ["full", "half", "quarter"]
+                    model: [qsTr("Full"), qsTr("Half"), qsTr("Quarter")]
+                    tooltip: qsTr("Resolution the preview renders at, playing and paused. Lower is faster.")
+                    currentIndex: Math.max(0, values.indexOf(EditorState.playback.previewQuality))
+                    onActivated: EditorState.playback.previewQuality = values[currentIndex]
+                }
+
+                Rectangle {
+                    width: Theme.borderWidth
+                    height: Theme.iconSizeBase
+                    color: Theme.panelBorder
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
                 IconButton {
                     glyph: Theme.icons.grid
                     variant: "text"
