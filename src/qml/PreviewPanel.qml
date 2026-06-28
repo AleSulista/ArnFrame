@@ -16,6 +16,10 @@ PanelFrame {
     readonly property real durationSeconds: EditorState.durationSeconds
     readonly property bool playing: EditorState.playing
 
+    // Driven by Main, which owns the window and the panels that hide around it.
+    property bool previewFullscreen: false
+    signal fullscreenRequested()
+
     // Frame rate of the project, not a fixed 30 — the timecode readout showed
     // wrong frame numbers for every project that was not 30fps.
     readonly property int projectFps: {
@@ -41,7 +45,7 @@ PanelFrame {
         Item {
             id: viewportOuter
             width: parent.width
-            height: parent.height - toolbar.height
+            height: parent.height - toolbar.height - scrubBar.height
             clip: true
 
             // `transformBlocked` is now handled centrally in Main.qml and shown
@@ -1057,6 +1061,40 @@ PanelFrame {
             }
         }
 
+        // Scrub bar. Only in fullscreen: the timeline panel is the seek surface
+        // everywhere else, and it is hidden in this mode.
+        Item {
+            id: scrubBar
+            width: parent.width
+            visible: root.previewFullscreen
+            height: visible ? Theme.controlHeight : 0
+
+            ThemedSlider {
+                id: scrubSlider
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: Theme.spacing2xl + Theme.spacingSm
+                anchors.rightMargin: Theme.spacing2xl + Theme.spacingSm
+
+                from: 0
+                // Never collapse to a zero-width range: an empty project would
+                // otherwise make the handle jump erratically.
+                to: Math.max(0.001, root.durationSeconds)
+                valueFormatter: function (v) { return root.formatTimecode(v) }
+
+                onMoved: EditorState.playheadSeconds = value
+
+                // Dragging assigns `value` directly, which would clobber a plain
+                // binding to the playhead. Reasserting it only while released lets
+                // playback drive the handle without fighting the drag.
+                Binding on value {
+                    when: !scrubSlider.pressed
+                    value: root.currentSeconds
+                }
+            }
+        }
+
         // The three groups were independently anchored and overlapped at narrow
         // preview widths. A RowLayout keeps Play centred while the side groups
         // compress instead of colliding.
@@ -1153,15 +1191,16 @@ PanelFrame {
                 }
 
                 IconButton {
-                    glyph: Theme.icons.maximize
+                    glyph: root.previewFullscreen ? Theme.icons.minimize : Theme.icons.maximize
                     variant: "text"
-                    tooltip: qsTr("Toggle fullscreen")
+                    tooltip: root.previewFullscreen
+                             ? qsTr("Exit fullscreen preview (Esc)")
+                             : qsTr("Fullscreen preview")
                     anchors.verticalCenter: parent.verticalCenter
-                    onClicked: {
-                        const win = root.Window.window
-                        if (win)
-                            win.visibility = win.visibility === Window.FullScreen ? Window.Windowed : Window.FullScreen
-                    }
+                    active: root.previewFullscreen
+                    // The window and the surrounding panels belong to Main, so the
+                    // toggle is requested rather than performed here.
+                    onClicked: root.fullscreenRequested()
                 }
             }
             }

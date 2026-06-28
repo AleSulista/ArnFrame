@@ -36,7 +36,7 @@ icons=(
   # Timeline / media
   captions list-video move-horizontal
   # Shortcuts tab and canvas crop tool
-  keyboard crop
+  keyboard crop minimize
 )
 
 for name in "${icons[@]}"; do

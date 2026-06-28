@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Templates as T
+import QtQuick.Window
 import Drift
 import "components"
 
@@ -15,6 +16,31 @@ ApplicationWindow {
     visible: true
     title: "CutWire Drift"
     color: Theme.appBackground
+
+    // Fullscreen preview: the window goes fullscreen *and* every panel around the
+    // preview collapses, so the video actually fills the display. Toggling the
+    // window alone just scaled the same three-pane layout up.
+    property bool previewFullscreen: false
+    // Restoring to Windowed unconditionally would silently un-maximize a window
+    // that was maximized before going fullscreen.
+    property int _preFullscreenVisibility: Window.Windowed
+
+    function togglePreviewFullscreen() {
+        if (previewFullscreen) {
+            previewFullscreen = false
+            visibility = _preFullscreenVisibility
+        } else {
+            _preFullscreenVisibility = visibility
+            previewFullscreen = true
+            visibility = Window.FullScreen
+        }
+    }
+
+    Shortcut {
+        sequence: "Esc"
+        enabled: window.previewFullscreen
+        onActivated: window.togglePreviewFullscreen()
+    }
 
     function configureAndAddAsset(assetIndex, runner) {
         if (!EditorState.shouldConfigureProjectForAsset(assetIndex)) {
@@ -153,18 +179,21 @@ ApplicationWindow {
 
         EditorHeader {
             width: parent.width
+            visible: !window.previewFullscreen
         }
 
         Item {
             width: parent.width
             // Clamped so the editor body never takes a negative height while the
             // window is being resized toward its minimum.
-            height: Math.max(0, parent.height - Theme.headerHeight)
+            height: Math.max(0, parent.height
+                                - (window.previewFullscreen ? 0 : Theme.headerHeight))
 
             SplitView {
                 id: outerSplit
                 anchors.fill: parent
-                anchors.margins: Theme.pagePadding
+                // Edge-to-edge in fullscreen; the usual page padding otherwise.
+                anchors.margins: window.previewFullscreen ? 0 : Theme.pagePadding
                 anchors.topMargin: 0
                 orientation: Qt.Vertical
                 spacing: Theme.panelGap
@@ -216,9 +245,14 @@ ApplicationWindow {
                     // Sized against the enclosing SplitView by id. `parent` here
                     // is the SplitView's own content item, which makes these
                     // percentage constraints self-referential during a resize.
-                    SplitView.preferredHeight: outerSplit.height * 0.5
-                    SplitView.minimumHeight: outerSplit.height * 0.3
-                    SplitView.maximumHeight: outerSplit.height * 0.85
+                    // In fullscreen the timeline is hidden, so the normal 30–85%
+                    // band would leave a dead strip below the preview.
+                    SplitView.preferredHeight: window.previewFullscreen
+                                               ? outerSplit.height : outerSplit.height * 0.5
+                    SplitView.minimumHeight: window.previewFullscreen
+                                             ? outerSplit.height : outerSplit.height * 0.3
+                    SplitView.maximumHeight: window.previewFullscreen
+                                             ? outerSplit.height : outerSplit.height * 0.85
                     orientation: Qt.Horizontal
                     spacing: Theme.panelGap
 
@@ -261,18 +295,22 @@ ApplicationWindow {
 
                     AssetsPanel {
                         id: assetsPanel
+                        visible: !window.previewFullscreen
                         SplitView.preferredWidth: innerSplit.width * 0.25
                         SplitView.minimumWidth: 200
                         SplitView.maximumWidth: innerSplit.width * 0.4
                     }
 
                     PreviewPanel {
+                        previewFullscreen: window.previewFullscreen
+                        onFullscreenRequested: window.togglePreviewFullscreen()
                         SplitView.fillWidth: true
                         SplitView.minimumWidth: 320
                     }
 
                     PropertiesPanel {
                         id: propertiesPanel
+                        visible: !window.previewFullscreen
                         SplitView.preferredWidth: innerSplit.width * 0.25
                         SplitView.minimumWidth: 240
                         SplitView.maximumWidth: innerSplit.width * 0.4
@@ -283,6 +321,7 @@ ApplicationWindow {
                 }
 
                 TimelinePanel {
+                    visible: !window.previewFullscreen
                     propertiesTab: propertiesPanel.currentTabId
                     SplitView.preferredHeight: outerSplit.height * 0.5
                     SplitView.minimumHeight: 140

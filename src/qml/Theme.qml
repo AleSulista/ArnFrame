@@ -264,6 +264,7 @@ QtObject {
         play: "play",
         pause: "pause",
         maximize: "maximize",
+        minimize: "minimize",
         folder: "folder",
         headphones: "headphones",
         type: "type",
