@@ -36,8 +36,13 @@ class AppController : public QObject
     Q_PROPERTY(bool snapEnabled READ snapEnabled WRITE setSnapEnabled NOTIFY snapEnabledChanged)
     Q_PROPERTY(bool rippleEnabled READ rippleEnabled WRITE setRippleEnabled NOTIFY rippleEnabledChanged)
     Q_PROPERTY(bool autoKeyEnabled READ autoKeyEnabled WRITE setAutoKeyEnabled NOTIFY autoKeyEnabledChanged)
+    // The keyframe strip mirrors the inspector's selection: `properties` is the
+    // full set (multi-select), `property` is its focused head kept for the
+    // single-property call sites.
     Q_PROPERTY(QString keyframeGraphProperty READ keyframeGraphProperty WRITE setKeyframeGraphProperty
                    NOTIFY keyframeGraphPropertyChanged)
+    Q_PROPERTY(QStringList keyframeGraphProperties READ keyframeGraphProperties
+                   WRITE setKeyframeGraphProperties NOTIFY keyframeGraphPropertyChanged)
     Q_PROPERTY(bool subtitleEditing READ subtitleEditing WRITE setSubtitleEditing NOTIFY subtitleEditingChanged)
     Q_PROPERTY(int selectedSubtitleCue READ selectedSubtitleCue WRITE setSelectedSubtitleCue
                    NOTIFY selectedSubtitleCueChanged)
@@ -91,7 +96,11 @@ public:
     bool snapEnabled() const { return m_snapEnabled; }
     bool rippleEnabled() const { return m_rippleEnabled; }
     bool autoKeyEnabled() const { return m_autoKeyEnabled; }
-    QString keyframeGraphProperty() const { return m_keyframeGraphProperty; }
+    QString keyframeGraphProperty() const
+    {
+        return m_keyframeGraphProperties.isEmpty() ? QString() : m_keyframeGraphProperties.first();
+    }
+    QStringList keyframeGraphProperties() const { return m_keyframeGraphProperties; }
     bool subtitleEditing() const { return m_subtitleEditing; }
     int selectedSubtitleCue() const { return m_selectedSubtitleCue; }
     bool undoAvailable() const { return m_undoStack.canUndo(); }
@@ -130,6 +139,20 @@ public:
     void setRippleEnabled(bool enabled);
     void setAutoKeyEnabled(bool enabled);
     void setKeyframeGraphProperty(const QString &prop);
+    void setKeyframeGraphProperties(const QStringList &props);
+
+    // The strip accumulates: selecting or editing a property adds it alongside
+    // whatever is already there, so keying X and then moving to Y leaves both
+    // curves on screen.
+    //
+    // Inspector row click — adds `prop`, or drops it again if it is already
+    // shown. Dropping the last one is allowed and collapses the strip.
+    Q_INVOKABLE void toggleKeyframeGraphProperty(const QString &prop);
+    // Strip chip click — narrows the strip back down to just `prop`.
+    Q_INVOKABLE void soloKeyframeGraphProperty(const QString &prop);
+    // Editing a property's value/diamond/interpolation surfaces it on the strip
+    // without disturbing anything else already shown.
+    Q_INVOKABLE void ensureKeyframeGraphProperty(const QString &prop);
     void setSubtitleEditing(bool editing);
     void setSelectedSubtitleCue(int index);
     void setProjectName(const QString &name);
@@ -390,7 +413,7 @@ protected:
     bool m_snapEnabled = true;
     bool m_rippleEnabled = false;
     bool m_autoKeyEnabled = true;
-    QString m_keyframeGraphProperty = QStringLiteral("x");
+    QStringList m_keyframeGraphProperties { QStringLiteral("x") };
     bool m_subtitleEditing = false;
     int m_selectedSubtitleCue = -1;
     bool m_exportInProgress = false;

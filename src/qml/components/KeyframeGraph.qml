@@ -4,6 +4,13 @@ import Drift
 
 // Keyframe strip aligned with the timeline: left gutter matches track labels,
 // graph scroll + playhead share the timeline's contentX / pxPerSecond.
+//
+// The strip is a *mirror* of the inspector's property selection, not its own
+// picker: it shows one color-coded series per property selected over in the
+// Transform panel. The selection accumulates — clicking or editing a second
+// property adds its curve rather than replacing the first — so clicking a chip
+// here is the way back to a single series. Deselecting everything collapses the
+// strip to nothing.
 Item {
     id: root
 
@@ -18,7 +25,6 @@ Item {
         void EditorState.selectedClipData
         return EditorState.selectedClipData
     }
-    readonly property string prop: EditorState.keyframeGraphProperty
 
     // Spelled-out names for the one-to-three character property chips.
     function propertyLabel(id) {
@@ -33,66 +39,118 @@ Item {
         }
         return id
     }
-    // A preview move emits tracksChanged, which would re-evaluate `points` and
+    function chipLabel(id) {
+        switch (id) {
+        case "x": return "X"
+        case "y": return "Y"
+        case "width": return "W"
+        case "height": return "H"
+        case "rotation": return "°"
+        case "opacity": return "Op"
+        case "volume": return "Vol"
+        }
+        return id
+    }
+    // Volume only exists on clips that carry audio; the rest are visual.
+    function supportsProperty(id) {
+        if (!clip)
+            return false
+        if (id === "volume")
+            return clip.kind === "audio" || clip.kind === "video"
+        return clip.kind !== "audio"
+    }
+
+    // Each series is normalized against its own value range, so curves in wildly
+    // different units (px vs. 0–1 opacity) stay comparable when overlaid.
+    function valueRangeFor(id, pts) {
+        if (id === "opacity")
+            return { min: 0, max: 1 }
+        if (id === "volume")
+            return { min: 0, max: 2 }
+        if (id === "rotation")
+            return { min: -180, max: 180 }
+        let lo = Infinity
+        let hi = -Infinity
+        for (let i = 0; i < pts.length; ++i) {
+            const v = Number(pts[i].value)
+            lo = Math.min(lo, v)
+            hi = Math.max(hi, v)
+        }
+        if (!isFinite(lo))
+            lo = 0
+        if (!isFinite(hi))
+            hi = 100
+        return {
+            min: lo - Math.max(1, Math.abs(lo) * 0.1),
+            max: hi + Math.max(1, Math.abs(hi) * 0.1)
+        }
+    }
+
+    // A preview move emits tracksChanged, which would re-evaluate `series` and
     // make the Repeater destroy the delegate owning the active DragHandler —
     // killing the grab on the first mouse move. Freeze the model while dragging
     // and track the in-flight key separately.
     property bool draggingKey: false
-    property var frozenPoints: []
+    property var frozenSeries: []
+    property string dragProp: ""
     property int dragIndex: -1
     property real dragSeconds: 0
     property real dragValue: 0
 
-    readonly property var points: {
+    // [{ prop, label, color, points, valueMin, valueMax }, ...] — selection order.
+    readonly property var series: {
         void EditorState.selectedClipData
         void EditorState.tracks
         if (draggingKey)
-            return frozenPoints
+            return frozenSeries
         if (!hasClip)
             return []
-        return EditorState.clipKeyframes(EditorState.selectedTrack, EditorState.selectedClip, prop) || []
-    }
-    readonly property real clipStart: clip.start || 0
-    readonly property real clipDuration: Math.max(0.1, clip.duration || 1)
-    readonly property real valueMin: {
-        void points
-        if (prop === "opacity" || prop === "volume")
-            return 0
-        if (prop === "rotation")
-            return -180
-        let lo = Infinity
-        for (let i = 0; i < points.length; ++i)
-            lo = Math.min(lo, Number(points[i].value))
-        if (!isFinite(lo))
-            return 0
-        return lo - Math.max(1, Math.abs(lo) * 0.1)
-    }
-    readonly property real valueMax: {
-        void points
-        if (prop === "opacity")
-            return 1
-        if (prop === "volume")
-            return 2
-        if (prop === "rotation")
-            return 180
-        let hi = -Infinity
-        for (let i = 0; i < points.length; ++i)
-            hi = Math.max(hi, Number(points[i].value))
-        if (!isFinite(hi))
-            return 100
-        return hi + Math.max(1, Math.abs(hi) * 0.1)
+        const out = []
+        const selected = EditorState.keyframeGraphProperties
+        for (let i = 0; i < selected.length; ++i) {
+            const id = selected[i]
+            if (!supportsProperty(id))
+                continue
+            const pts = EditorState.clipKeyframes(
+                          EditorState.selectedTrack, EditorState.selectedClip, id) || []
+            const range = root.valueRangeFor(id, pts)
+            out.push({
+                prop: id,
+                label: root.chipLabel(id),
+                color: Theme.keyframeCurveColor(id),
+                points: pts,
+                valueMin: range.min,
+                valueMax: range.max
+            })
+        }
+        return out
     }
 
-    height: visible ? 88 : 0
-    visible: {
-        if (propertiesTab !== "transform")
-            return false
-        if (!hasClip || !clip)
-            return false
-        if (prop === "volume")
-            return clip.kind === "audio" || clip.kind === "video"
-        return clip.kind !== "audio"
+    // Flattened key dots so a single Repeater can own every series' handles.
+    readonly property var keyHandles: {
+        const out = []
+        for (let s = 0; s < series.length; ++s) {
+            const entry = series[s]
+            for (let i = 0; i < entry.points.length; ++i) {
+                out.push({
+                    seriesIndex: s,
+                    pointIndex: i,
+                    prop: entry.prop,
+                    color: entry.color,
+                    seconds: entry.points[i].seconds,
+                    value: entry.points[i].value
+                })
+            }
+        }
+        return out
     }
+    readonly property int keyCount: keyHandles.length
+
+    readonly property real clipStart: clip.start || 0
+    readonly property real clipDuration: Math.max(0.1, clip.duration || 1)
+
+    height: visible ? 88 : 0
+    visible: propertiesTab === "transform" && hasClip && clip && series.length > 0
 
     // Absolute timeline X — same mapping as clips on the track.
     function xForSeconds(seconds) {
@@ -101,14 +159,14 @@ Item {
     function secondsForX(x) {
         return x / pxPerSecond
     }
-    function yForValue(v) {
-        const span = Math.max(1e-6, valueMax - valueMin)
-        return graph.height - ((v - valueMin) / span) * graph.height
+    function yForValue(v, entry) {
+        const span = Math.max(1e-6, entry.valueMax - entry.valueMin)
+        return graph.height - ((v - entry.valueMin) / span) * graph.height
     }
-    function valueForY(y) {
-        const span = Math.max(1e-6, valueMax - valueMin)
+    function valueForY(y, entry) {
+        const span = Math.max(1e-6, entry.valueMax - entry.valueMin)
         const t = (graph.height - y) / Math.max(1, graph.height)
-        return valueMin + t * span
+        return entry.valueMin + t * span
     }
 
     Rectangle {
@@ -139,27 +197,25 @@ Item {
                     font.weight: Font.Medium
                 }
 
+                // Legend for what the inspector currently has selected — one chip
+                // per drawn curve, tinted to match it.
                 Flow {
                     width: parent.width
                     spacing: 3
                     Repeater {
-                        model: [
-                            { id: "x", label: "X" },
-                            { id: "y", label: "Y" },
-                            { id: "width", label: "W" },
-                            { id: "height", label: "H" },
-                            { id: "rotation", label: "°" },
-                            { id: "opacity", label: "Op" },
-                            { id: "volume", label: "Vol" }
-                        ]
+                        model: root.series
                         delegate: ThemedChip {
                             required property var modelData
                             text: modelData.label
                             chipHeight: 18
                             horizontalPadding: 3
-                            tooltip: root.propertyLabel(modelData.id)
-                            selected: root.prop === modelData.id
-                            onClicked: EditorState.keyframeGraphProperty = modelData.id
+                            accentColor: modelData.color
+                            tooltip: root.series.length > 1
+                                     ? qsTr("%1 — click to show only this")
+                                       .arg(root.propertyLabel(modelData.prop))
+                                     : root.propertyLabel(modelData.prop)
+                            selected: true
+                            onClicked: EditorState.soloKeyframeGraphProperty(modelData.prop)
                         }
                     }
                 }
@@ -167,7 +223,7 @@ Item {
                 Text {
                     width: parent.width
                     wrapMode: Text.WordWrap
-                    text: points.length === 0 ? qsTr("No keys") : (points.length + qsTr(" key(s)"))
+                    text: root.keyCount === 0 ? qsTr("No keys") : (root.keyCount + qsTr(" key(s)"))
                     color: Theme.mutedForeground
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeXs
@@ -237,32 +293,33 @@ Item {
                         onPaint: {
                             const ctx = getContext("2d")
                             ctx.clearRect(0, 0, width, height)
-                            if (!points || points.length < 2)
-                                return
-                            const live = points.map(function (p, i) {
-                                return i === root.dragIndex
-                                    ? { seconds: root.dragSeconds, value: root.dragValue }
-                                    : p
-                            })
-                            const sorted = live.sort((a, b) => a.seconds - b.seconds)
-                            ctx.strokeStyle = String(Theme.primary)
                             ctx.lineWidth = 1.5
-                            ctx.beginPath()
-                            for (let i = 0; i < sorted.length; ++i) {
-                                const px = root.xForSeconds(sorted[i].seconds)
-                                const py = root.yForValue(sorted[i].value)
-                                if (i === 0)
-                                    ctx.moveTo(px, py)
-                                else
-                                    ctx.lineTo(px, py)
+                            for (let s = 0; s < root.series.length; ++s) {
+                                const entry = root.series[s]
+                                if (entry.points.length < 2)
+                                    continue
+                                const live = entry.points.map(function (p, i) {
+                                    return (entry.prop === root.dragProp && i === root.dragIndex)
+                                        ? { seconds: root.dragSeconds, value: root.dragValue }
+                                        : p
+                                })
+                                const sorted = live.sort((a, b) => a.seconds - b.seconds)
+                                ctx.strokeStyle = String(entry.color)
+                                ctx.beginPath()
+                                for (let i = 0; i < sorted.length; ++i) {
+                                    const px = root.xForSeconds(sorted[i].seconds)
+                                    const py = root.yForValue(sorted[i].value, entry)
+                                    if (i === 0)
+                                        ctx.moveTo(px, py)
+                                    else
+                                        ctx.lineTo(px, py)
+                                }
+                                ctx.stroke()
                             }
-                            ctx.stroke()
                         }
                         Connections {
                             target: root
-                            function onPointsChanged() { curveCanvas.requestPaint() }
-                            function onValueMinChanged() { curveCanvas.requestPaint() }
-                            function onValueMaxChanged() { curveCanvas.requestPaint() }
+                            function onSeriesChanged() { curveCanvas.requestPaint() }
                             function onPxPerSecondChanged() { curveCanvas.requestPaint() }
                             function onContentXChanged() { curveCanvas.requestPaint() }
                             function onDragSecondsChanged() { curveCanvas.requestPaint() }
@@ -271,20 +328,20 @@ Item {
                     }
 
                     Repeater {
-                        model: root.points
+                        model: root.keyHandles
                         delegate: Rectangle {
                             id: keyDot
                             required property var modelData
-                            required property int index
+                            readonly property var entry: root.series[modelData.seriesIndex]
                             width: 10
                             height: 10
                             rotation: 45
                             radius: 1
-                            color: Theme.primary
+                            color: modelData.color
                             border.width: 1
                             border.color: "#ffffff"
                             x: root.xForSeconds(modelData.seconds) - width / 2 + dragDx
-                            y: root.yForValue(modelData.value) - height / 2 + dragDy
+                            y: root.yForValue(modelData.value, entry) - height / 2 + dragDy
                             z: 2
 
                             // Offsets rather than direct x/y writes, which would
@@ -298,8 +355,9 @@ Item {
                                 onActiveChanged: {
                                     if (active) {
                                         keyDot.editSeconds = keyDot.modelData.seconds
-                                        root.frozenPoints = root.points
-                                        root.dragIndex = keyDot.index
+                                        root.frozenSeries = root.series
+                                        root.dragProp = keyDot.modelData.prop
+                                        root.dragIndex = keyDot.modelData.pointIndex
                                         root.dragSeconds = keyDot.modelData.seconds
                                         root.dragValue = keyDot.modelData.value
                                         root.draggingKey = true
@@ -307,6 +365,7 @@ Item {
                                     } else {
                                         EditorState.commitPreviewDrag()
                                         root.draggingKey = false
+                                        root.dragProp = ""
                                         root.dragIndex = -1
                                         keyDot.dragDx = 0
                                         keyDot.dragDy = 0
@@ -315,6 +374,7 @@ Item {
                                 onTranslationChanged: {
                                     if (!active)
                                         return
+                                    const entry = keyDot.entry
                                     const baseSec = keyDot.modelData.seconds
                                     const baseVal = keyDot.modelData.value
                                     const newSec = Math.max(
@@ -322,15 +382,18 @@ Item {
                                         Math.min(root.clipStart + root.clipDuration,
                                                  baseSec + translation.x / root.pxPerSecond))
                                     const newVal = Math.max(
-                                        root.valueMin,
-                                        Math.min(root.valueMax,
-                                                 root.valueForY(root.yForValue(baseVal) + translation.y)))
+                                        entry.valueMin,
+                                        Math.min(entry.valueMax,
+                                                 root.valueForY(
+                                                     root.yForValue(baseVal, entry) + translation.y,
+                                                     entry)))
                                     EditorState.previewMoveClipKeyframe(
                                         EditorState.selectedTrack, EditorState.selectedClip,
-                                        root.prop, keyDot.editSeconds, newSec, newVal)
+                                        keyDot.modelData.prop, keyDot.editSeconds, newSec, newVal)
                                     keyDot.editSeconds = newSec
                                     keyDot.dragDx = root.xForSeconds(newSec) - root.xForSeconds(baseSec)
-                                    keyDot.dragDy = root.yForValue(newVal) - root.yForValue(baseVal)
+                                    keyDot.dragDy = root.yForValue(newVal, entry)
+                                                  - root.yForValue(baseVal, entry)
                                     root.dragSeconds = newSec
                                     root.dragValue = newVal
                                 }

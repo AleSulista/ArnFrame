@@ -1050,13 +1050,53 @@ void AppController::setAutoKeyEnabled(bool enabled)
 
 void AppController::setKeyframeGraphProperty(const QString &prop)
 {
-    const QString normalized = prop.trimmed().toLower();
-    if (normalized.isEmpty() || m_keyframeGraphProperty == normalized)
+    setKeyframeGraphProperties({ prop });
+}
+
+void AppController::setKeyframeGraphProperties(const QStringList &props)
+{
+    QStringList normalized;
+    for (const QString &prop : props) {
+        const QString key = prop.trimmed().toLower();
+        if (key.isEmpty() || normalized.contains(key))
+            continue;
+        if (!trackForProp(drift::Clip{}, key)) // only allow known prop keys
+            continue;
+        normalized.append(key);
+    }
+    // Clearing the selection is legitimate — it just collapses the strip. But a
+    // write made entirely of unknown keys is a mistake, not a request to clear,
+    // so keep what is already there.
+    if (normalized.isEmpty() && !props.isEmpty())
         return;
-    if (!trackForProp(drift::Clip{}, normalized)) // only allow known prop keys
+    if (normalized == m_keyframeGraphProperties)
         return;
-    m_keyframeGraphProperty = normalized;
+    m_keyframeGraphProperties = normalized;
     emit keyframeGraphPropertyChanged();
+}
+
+void AppController::toggleKeyframeGraphProperty(const QString &prop)
+{
+    const QString key = prop.trimmed().toLower();
+    QStringList next = m_keyframeGraphProperties;
+    if (next.contains(key))
+        next.removeAll(key); // may empty the selection, which collapses the strip
+    else
+        next.append(key);
+    setKeyframeGraphProperties(next);
+}
+
+void AppController::soloKeyframeGraphProperty(const QString &prop)
+{
+    setKeyframeGraphProperties({ prop });
+}
+
+void AppController::ensureKeyframeGraphProperty(const QString &prop)
+{
+    const QString key = prop.trimmed().toLower();
+    if (m_keyframeGraphProperties.contains(key))
+        return;
+    setKeyframeGraphProperties(m_keyframeGraphProperties + QStringList { key });
 }
 
 void AppController::setSubtitleEditing(bool editing)

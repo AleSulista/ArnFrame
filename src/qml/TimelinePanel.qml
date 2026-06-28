@@ -2109,6 +2109,10 @@ PanelFrame {
                     Item {
                         id: playhead
                         y: 0
+                        // Above the pinned ruler (z: 2), otherwise the ruler's
+                        // scrub area covers the handle and swallows the press
+                        // before the drag can start.
+                        z: 3
                         width: Theme.playheadLineWidth
                         height: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight + root.totalTracksHeight()
 
@@ -2117,6 +2121,13 @@ PanelFrame {
                             property: "x"
                             value: EditorState.playheadSeconds * root.pxPerSecond
                             when: !playheadDragArea.drag.active
+                        }
+
+                        // Follow the drag live so the preview scrubs with it,
+                        // matching what dragging along the ruler already does.
+                        onXChanged: {
+                            if (playheadDragArea.drag.active)
+                                EditorState.playheadSeconds = playhead.x / root.pxPerSecond
                         }
 
                         Rectangle {
@@ -2136,18 +2147,27 @@ PanelFrame {
                             color: Theme.primary
                             border.width: 2
                             border.color: Theme.primary
+                        }
 
-                            MouseArea {
-                                id: playheadDragArea
-                                anchors.fill: parent
-                                anchors.margins: -4
-                                cursorShape: Qt.SizeHorCursor
-                                drag.target: playhead
-                                drag.axis: Drag.XAxis
-                                drag.minimumX: 0
-                                drag.maximumX: flick.contentWidth - Theme.playheadLineWidth
-                                onReleased: EditorState.playheadSeconds = EditorState.snapTime(playhead.x / root.pxPerSecond)
-                            }
+                        // Grab strip running the whole height of the line, so the
+                        // playhead can be dragged from anywhere down the timeline
+                        // rather than only by its handle. Clips take selection on
+                        // press, so this band is kept as narrow as it can be while
+                        // staying grabbable — it is dead to clip clicks.
+                        MouseArea {
+                            id: playheadDragArea
+                            width: 7
+                            height: parent.height
+                            x: -(width - Theme.playheadLineWidth) / 2
+                            y: 0
+                            cursorShape: Qt.SizeHorCursor
+                            preventStealing: true
+                            drag.target: playhead
+                            drag.axis: Drag.XAxis
+                            drag.threshold: 0
+                            drag.minimumX: 0
+                            drag.maximumX: flick.contentWidth - Theme.playheadLineWidth
+                            onReleased: EditorState.playheadSeconds = EditorState.snapTime(playhead.x / root.pxPerSecond)
                         }
                     }
                 }

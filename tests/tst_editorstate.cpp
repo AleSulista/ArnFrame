@@ -36,6 +36,7 @@ private slots:
     void replaceTransitionOnDrop();
     void overlapAutoAppliesCrossfade();
     void linkedAudioUnlinkAndMove();
+    void keyframeGraphPropertySelection();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -679,6 +680,60 @@ void EditorStateTest::overlapAutoAppliesCrossfade()
     state.addTransition(0, 0, QStringLiteral("dip"), 0.5);
     QCOMPARE(state.transitionBetweenClips(0, 0).value(QStringLiteral("kind")).toString(),
              QStringLiteral("dip"));
+}
+
+void EditorStateTest::keyframeGraphPropertySelection()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("x") });
+
+    // The selection accumulates: editing x then picking y leaves both on the
+    // strip rather than swapping one for the other.
+    state.ensureKeyframeGraphProperty(QStringLiteral("x"));
+    state.toggleKeyframeGraphProperty(QStringLiteral("y"));
+    QCOMPARE(state.keyframeGraphProperties(),
+             (QStringList { QStringLiteral("x"), QStringLiteral("y") }));
+    QCOMPARE(state.keyframeGraphProperty(), QStringLiteral("x"));
+
+    // Clicking the same row again takes it back off.
+    state.toggleKeyframeGraphProperty(QStringLiteral("y"));
+    QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("x") });
+
+    // The last remaining property can be toggled off too, leaving the strip
+    // empty; editing or selecting anything brings it back.
+    state.toggleKeyframeGraphProperty(QStringLiteral("x"));
+    QVERIFY(state.keyframeGraphProperties().isEmpty());
+    QVERIFY(state.keyframeGraphProperty().isEmpty());
+    state.toggleKeyframeGraphProperty(QStringLiteral("x"));
+    QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("x") });
+
+    // Editing adds without disturbing what is already shown, and is a no-op for
+    // a property that is already on the strip.
+    state.toggleKeyframeGraphProperty(QStringLiteral("opacity"));
+    state.ensureKeyframeGraphProperty(QStringLiteral("width"));
+    QCOMPARE(state.keyframeGraphProperties(),
+             (QStringList { QStringLiteral("x"), QStringLiteral("opacity"),
+                            QStringLiteral("width") }));
+    state.ensureKeyframeGraphProperty(QStringLiteral("opacity"));
+    QCOMPARE(state.keyframeGraphProperties(),
+             (QStringList { QStringLiteral("x"), QStringLiteral("opacity"),
+                            QStringLiteral("width") }));
+
+    // A chip click narrows back down to one series.
+    state.soloKeyframeGraphProperty(QStringLiteral("rotation"));
+    QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("rotation") });
+
+    // Unknown keys and duplicates are dropped rather than reaching the strip.
+    state.setKeyframeGraphProperties({ QStringLiteral("x"), QStringLiteral("bogus"),
+                                       QStringLiteral("X"), QStringLiteral("volume") });
+    QCOMPARE(state.keyframeGraphProperties(),
+             (QStringList { QStringLiteral("x"), QStringLiteral("volume") }));
+
+    // An all-invalid write is ignored instead of emptying the selection.
+    state.setKeyframeGraphProperties({ QStringLiteral("nope") });
+    QCOMPARE(state.keyframeGraphProperties(),
+             (QStringList { QStringLiteral("x"), QStringLiteral("volume") }));
 }
 
 QTEST_MAIN(EditorStateTest)

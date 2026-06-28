@@ -18,6 +18,9 @@ AbstractButton {
     property string variant: "primary"
     property real chipHeight: Theme.controlHeightSm
     property string tooltip: ""
+    // Selected fill/border for the "primary" variant. Override to tint a chip to
+    // the series it stands for (e.g. keyframe curve colors).
+    property color accentColor: Theme.primary
 
     checked: selected
     checkable: false
@@ -42,7 +45,7 @@ AbstractButton {
             switch (variant) {
             case "secondary": return down ? Qt.darker(Theme.panelSecondaryBg, 1.2) : Theme.panelSecondaryBg
             case "outline": return down ? Theme.panelMuted : Theme.panelAccent
-            default: return down ? Qt.darker(Theme.primary, 1.15) : Theme.primary
+            default: return down ? Qt.darker(accentColor, 1.15) : accentColor
             }
         }
         if (down)
@@ -57,7 +60,7 @@ AbstractButton {
             switch (variant) {
             case "secondary": return Theme.panelSecondaryBorder
             case "outline": return Theme.panelBorder
-            default: return Theme.primary
+            default: return accentColor
             }
         }
         return Theme.panelBorder

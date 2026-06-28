@@ -134,6 +134,23 @@ QtObject {
     // scrim stays legible in light mode too instead of following panelAccent.
     readonly property color clipVideoPlaceholder: "#2b2b2b"
 
+    // --- Colors: keyframe curves (fixed regardless of app theme) -------------
+    // One hue per animatable property so overlaid curves, their key diamonds and
+    // their gutter chips all read as the same series. Chosen for separation at
+    // 1.5px stroke width on both panel backgrounds.
+    readonly property var keyframeCurveColors: ({
+        "x": "#16a9f3",
+        "y": "#f59e0b",
+        "width": "#23d160",
+        "height": "#e879f9",
+        "rotation": "#f43f5e",
+        "opacity": "#a78bfa",
+        "volume": "#2dd4bf"
+    })
+    function keyframeCurveColor(prop) {
+        return keyframeCurveColors[prop] || primary
+    }
+
     // --- Radius --------------------------------------------------------------
     readonly property real radiusSm: 5.6
     readonly property real radiusMd: 10.4

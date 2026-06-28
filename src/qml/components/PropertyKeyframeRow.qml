@@ -21,6 +21,13 @@ Column {
     property bool percent: false
     property string unit: "" // e.g. "°" — appended to the numeric readout
 
+    // Whether this property is currently drawn on the timeline keyframe strip.
+    // Clicking the row's label adds it to the strip alongside whatever is
+    // already there; clicking again takes it back off.
+    readonly property bool graphSelected:
+        EditorState.keyframeGraphProperties.indexOf(propDef.key) >= 0
+    readonly property color graphColor: Theme.keyframeCurveColor(propDef.key)
+
     spacing: 4
 
     // Bumped whenever external state that affects the displayed value changes.
@@ -131,14 +138,14 @@ Column {
     function commitValue(v) {
         if (isNaN(v))
             return
-        EditorState.keyframeGraphProperty = root.propDef.key
+        EditorState.ensureKeyframeGraphProperty(root.propDef.key)
         EditorState.setClipKeyframe(
             EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
             EditorState.playheadSeconds, v)
     }
 
     function setInterpolation(mode) {
-        EditorState.keyframeGraphProperty = root.propDef.key
+        EditorState.ensureKeyframeGraphProperty(root.propDef.key)
         EditorState.setKeyframeInterpolation(
             EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key, mode)
     }
@@ -154,80 +161,116 @@ Column {
     onKeyframeListChanged: bumpValue()
     onInterpolationModeChanged: bumpValue()
 
-    Row {
-        width: parent.width
-        spacing: 6
+    Item {
+        width: root.width
+        height: headerRow.height
 
-        KeyframeDiamond {
-            id: diamond
-            anchors.verticalCenter: parent.verticalCenter
-            hasKey: root.activeKey !== null
-            onToggled: {
-                EditorState.keyframeGraphProperty = root.propDef.key
-                if (root.activeKey) {
-                    EditorState.removeClipKeyframe(
-                        EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
-                        root.activeKey.seconds)
-                } else {
-                    commitValue(root.currentValue)
+        // Selection highlight tinted to this property's curve color, so the row
+        // and its chip/curve on the keyframe strip read as the same series.
+        Rectangle {
+            anchors.fill: parent
+            anchors.leftMargin: -4
+            anchors.rightMargin: -4
+            radius: Theme.radiusSm
+            visible: root.graphSelected
+            color: Qt.rgba(root.graphColor.r, root.graphColor.g, root.graphColor.b, 0.12)
+            border.width: Theme.borderWidth
+            border.color: Qt.rgba(root.graphColor.r, root.graphColor.g, root.graphColor.b, 0.45)
+        }
+
+        Row {
+            id: headerRow
+            width: parent.width
+            spacing: 6
+
+            KeyframeDiamond {
+                id: diamond
+                anchors.verticalCenter: parent.verticalCenter
+                hasKey: root.activeKey !== null
+                onToggled: {
+                    EditorState.ensureKeyframeGraphProperty(root.propDef.key)
+                    if (root.activeKey) {
+                        EditorState.removeClipKeyframe(
+                            EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
+                            root.activeKey.seconds)
+                    } else {
+                        commitValue(root.currentValue)
+                    }
                 }
             }
-        }
 
-        Text {
-            id: labelText
-            text: root.propDef.label
-            color: Theme.mutedForeground
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeXs
-            anchors.verticalCenter: parent.verticalCenter
-            elide: Text.ElideRight
-            width: Math.min(implicitWidth + 2,
-                            Math.max(24, parent.width - diamond.width - linChip.width - easeChip.width
-                                           - holdChip.width - parent.spacing * 5))
-        }
+            // Label + the flexible gap after it, together forming the click target
+            // that drives the keyframe strip's selection.
+            Item {
+                id: labelZone
+                anchors.verticalCenter: parent.verticalCenter
+                height: labelText.implicitHeight
+                width: Math.max(24, parent.width - diamond.width - linChip.width - easeChip.width
+                                      - holdChip.width - parent.spacing * 4)
 
-        Item {
-            width: Math.max(0, parent.width - diamond.width - labelText.width
-                                   - linChip.width - easeChip.width - holdChip.width
-                                   - parent.spacing * 5)
-            height: 1
-        }
+                Text {
+                    id: labelText
+                    text: root.propDef.label
+                    color: root.graphSelected ? Theme.panelForeground : Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                    font.weight: root.graphSelected ? Font.Medium : Font.Normal
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    elide: Text.ElideRight
+                    width: Math.min(implicitWidth + 2, parent.width)
+                }
 
-        ThemedChip {
-            id: linChip
-            text: qsTr("Lin")
-            tooltip: qsTr("Linear — constant rate between keyframes")
-            selected: root.interpolationMode === "linear"
-            chipHeight: 18
-            horizontalPadding: Theme.spacingSm
-            width: 28
-            anchors.verticalCenter: parent.verticalCenter
-            onClicked: root.setInterpolation("linear")
-        }
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: EditorState.toggleKeyframeGraphProperty(root.propDef.key)
 
-        ThemedChip {
-            id: easeChip
-            text: qsTr("Ease")
-            tooltip: qsTr("Ease — accelerates out and decelerates in")
-            selected: root.interpolationMode === "ease"
-            chipHeight: 18
-            horizontalPadding: Theme.spacingSm
-            width: 36
-            anchors.verticalCenter: parent.verticalCenter
-            onClicked: root.setInterpolation("ease")
-        }
+                    ThemedToolTip {
+                        text: root.graphSelected
+                              ? qsTr("Hide %1 from the keyframe strip").arg(root.propDef.label)
+                              : qsTr("Add %1 to the keyframe strip").arg(root.propDef.label)
+                        visible: parent.containsMouse
+                    }
+                }
+            }
 
-        ThemedChip {
-            id: holdChip
-            text: qsTr("Hold")
-            tooltip: qsTr("Hold — jumps to the next value with no interpolation")
-            selected: root.interpolationMode === "hold"
-            chipHeight: 18
-            horizontalPadding: Theme.spacingSm
-            width: 34
-            anchors.verticalCenter: parent.verticalCenter
-            onClicked: root.setInterpolation("hold")
+            ThemedChip {
+                id: linChip
+                text: qsTr("Lin")
+                tooltip: qsTr("Linear — constant rate between keyframes")
+                selected: root.interpolationMode === "linear"
+                chipHeight: 18
+                horizontalPadding: Theme.spacingSm
+                width: 28
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: root.setInterpolation("linear")
+            }
+
+            ThemedChip {
+                id: easeChip
+                text: qsTr("Ease")
+                tooltip: qsTr("Ease — accelerates out and decelerates in")
+                selected: root.interpolationMode === "ease"
+                chipHeight: 18
+                horizontalPadding: Theme.spacingSm
+                width: 36
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: root.setInterpolation("ease")
+            }
+
+            ThemedChip {
+                id: holdChip
+                text: qsTr("Hold")
+                tooltip: qsTr("Hold — jumps to the next value with no interpolation")
+                selected: root.interpolationMode === "hold"
+                chipHeight: 18
+                horizontalPadding: Theme.spacingSm
+                width: 34
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: root.setInterpolation("hold")
+            }
         }
     }
 
@@ -294,7 +337,7 @@ Column {
             value: root.currentValue
             onMoved: {
                 root.liveValue = value
-                EditorState.keyframeGraphProperty = root.propDef.key
+                EditorState.ensureKeyframeGraphProperty(root.propDef.key)
                 EditorState.previewSetClipKeyframe(
                     EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
                     EditorState.playheadSeconds, value)
