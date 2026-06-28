@@ -33,9 +33,21 @@ Item {
         }
         return id
     }
+    // A preview move emits tracksChanged, which would re-evaluate `points` and
+    // make the Repeater destroy the delegate owning the active DragHandler —
+    // killing the grab on the first mouse move. Freeze the model while dragging
+    // and track the in-flight key separately.
+    property bool draggingKey: false
+    property var frozenPoints: []
+    property int dragIndex: -1
+    property real dragSeconds: 0
+    property real dragValue: 0
+
     readonly property var points: {
         void EditorState.selectedClipData
         void EditorState.tracks
+        if (draggingKey)
+            return frozenPoints
         if (!hasClip)
             return []
         return EditorState.clipKeyframes(EditorState.selectedTrack, EditorState.selectedClip, prop) || []
@@ -227,7 +239,12 @@ Item {
                             ctx.clearRect(0, 0, width, height)
                             if (!points || points.length < 2)
                                 return
-                            const sorted = points.slice().sort((a, b) => a.seconds - b.seconds)
+                            const live = points.map(function (p, i) {
+                                return i === root.dragIndex
+                                    ? { seconds: root.dragSeconds, value: root.dragValue }
+                                    : p
+                            })
+                            const sorted = live.sort((a, b) => a.seconds - b.seconds)
                             ctx.strokeStyle = String(Theme.primary)
                             ctx.lineWidth = 1.5
                             ctx.beginPath()
@@ -248,6 +265,8 @@ Item {
                             function onValueMaxChanged() { curveCanvas.requestPaint() }
                             function onPxPerSecondChanged() { curveCanvas.requestPaint() }
                             function onContentXChanged() { curveCanvas.requestPaint() }
+                            function onDragSecondsChanged() { curveCanvas.requestPaint() }
+                            function onDragValueChanged() { curveCanvas.requestPaint() }
                         }
                     }
 
@@ -256,6 +275,7 @@ Item {
                         delegate: Rectangle {
                             id: keyDot
                             required property var modelData
+                            required property int index
                             width: 10
                             height: 10
                             rotation: 45
@@ -263,38 +283,56 @@ Item {
                             color: Theme.primary
                             border.width: 1
                             border.color: "#ffffff"
-                            x: root.xForSeconds(modelData.seconds) - width / 2
-                            y: root.yForValue(modelData.value) - height / 2
+                            x: root.xForSeconds(modelData.seconds) - width / 2 + dragDx
+                            y: root.yForValue(modelData.value) - height / 2 + dragDy
                             z: 2
 
+                            // Offsets rather than direct x/y writes, which would
+                            // clobber the bindings above for good.
+                            property real dragDx: 0
+                            property real dragDy: 0
                             property real editSeconds: modelData.seconds
-                            property real editValue: modelData.value
 
                             DragHandler {
                                 target: null
                                 onActiveChanged: {
                                     if (active) {
-                                        keyDot.editSeconds = modelData.seconds
-                                        keyDot.editValue = modelData.value
+                                        keyDot.editSeconds = keyDot.modelData.seconds
+                                        root.frozenPoints = root.points
+                                        root.dragIndex = keyDot.index
+                                        root.dragSeconds = keyDot.modelData.seconds
+                                        root.dragValue = keyDot.modelData.value
+                                        root.draggingKey = true
                                         EditorState.beginPreviewDrag(qsTr("Move keyframe"))
                                     } else {
                                         EditorState.commitPreviewDrag()
+                                        root.draggingKey = false
+                                        root.dragIndex = -1
+                                        keyDot.dragDx = 0
+                                        keyDot.dragDy = 0
                                     }
                                 }
                                 onTranslationChanged: {
+                                    if (!active)
+                                        return
+                                    const baseSec = keyDot.modelData.seconds
+                                    const baseVal = keyDot.modelData.value
                                     const newSec = Math.max(
                                         root.clipStart,
                                         Math.min(root.clipStart + root.clipDuration,
-                                                 modelData.seconds + translation.x / root.pxPerSecond))
-                                    const newVal = root.valueForY(
-                                        root.yForValue(modelData.value) + translation.y)
+                                                 baseSec + translation.x / root.pxPerSecond))
+                                    const newVal = Math.max(
+                                        root.valueMin,
+                                        Math.min(root.valueMax,
+                                                 root.valueForY(root.yForValue(baseVal) + translation.y)))
                                     EditorState.previewMoveClipKeyframe(
                                         EditorState.selectedTrack, EditorState.selectedClip,
                                         root.prop, keyDot.editSeconds, newSec, newVal)
                                     keyDot.editSeconds = newSec
-                                    keyDot.editValue = newVal
-                                    keyDot.x = root.xForSeconds(newSec) - keyDot.width / 2
-                                    keyDot.y = root.yForValue(newVal) - keyDot.height / 2
+                                    keyDot.dragDx = root.xForSeconds(newSec) - root.xForSeconds(baseSec)
+                                    keyDot.dragDy = root.yForValue(newVal) - root.yForValue(baseVal)
+                                    root.dragSeconds = newSec
+                                    root.dragValue = newVal
                                 }
                             }
                         }
