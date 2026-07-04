@@ -179,6 +179,10 @@ add_library(driftengine STATIC
     src/engine/WhisperTokenizer.cpp
     src/engine/WhisperTranscriber.h
     src/engine/WhisperTranscriber.cpp
+    src/engine/Sam2Segmenter.h
+    src/engine/Sam2Segmenter.cpp
+    src/engine/MatteWriter.h
+    src/engine/MatteWriter.cpp
 )
 target_include_directories(driftengine PUBLIC src)
 target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui Qt6::OpenGL FFmpeg::FFmpeg driftcore
@@ -196,6 +200,10 @@ qt_add_executable(drift
     src/main.cpp
     src/DriftImageProvider.h
     src/DriftImageProvider.cpp
+    src/SegmentImageProvider.h
+    src/SegmentImageProvider.cpp
+    src/SegmentImageStore.h
+    src/SegmentImageStore.cpp
     src/models/AddonEndpoint.h
     src/models/AddonManager.h
     src/models/AddonManager.cpp
@@ -238,6 +246,7 @@ qt_add_qml_module(drift
         src/qml/EditorHeader.qml
         src/qml/AssetsPanel.qml
         src/qml/PreviewPanel.qml
+        src/qml/SegmentationWindow.qml
         src/qml/PropertiesPanel.qml
         src/qml/TimelinePanel.qml
         src/qml/components/IconGlyph.qml

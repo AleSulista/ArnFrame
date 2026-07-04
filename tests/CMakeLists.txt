@@ -9,6 +9,7 @@ add_test(NAME Core COMMAND tst_core)
 
 qt_add_executable(tst_editorstate
     tst_editorstate.cpp
+    ../src/SegmentImageStore.cpp
     ../src/models/AppController.cpp
     ../src/models/AssetLibrary.cpp
     ../src/models/TimelineModel.cpp

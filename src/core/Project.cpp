@@ -185,6 +185,8 @@ QJsonObject maskToJson(const Mask &m)
         {QStringLiteral("feather"), m.feather},
         {QStringLiteral("invert"), m.invert},
         {QStringLiteral("points"), points},
+        {QStringLiteral("mattePath"), m.mattePath},
+        {QStringLiteral("matteSrcOffsetUs"), qint64(m.matteSrcOffsetUs)},
     };
 }
 
@@ -201,6 +203,9 @@ Mask maskFromJson(const QJsonObject &o)
     m.rotation = o.value(QStringLiteral("rotation")).toDouble(m.rotation);
     m.feather = o.value(QStringLiteral("feather")).toDouble(m.feather);
     m.invert = o.value(QStringLiteral("invert")).toBool(m.invert);
+    m.mattePath = o.value(QStringLiteral("mattePath")).toString(m.mattePath);
+    m.matteSrcOffsetUs =
+        TimeUs(o.value(QStringLiteral("matteSrcOffsetUs")).toInteger(m.matteSrcOffsetUs));
     const QJsonArray points = o.value(QStringLiteral("points")).toArray();
     for (const QJsonValue &value : points) {
         const QJsonArray pair = value.toArray();

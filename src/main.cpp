@@ -5,6 +5,7 @@
 #include "models/EditorState.h"
 #include "models/FileDialogs.h"
 #include "DriftImageProvider.h"
+#include "SegmentImageProvider.h"
 #include "preview/PreviewItem.h"
 
 // QApplication (not QGuiApplication) is required so QFileDialog can use the
@@ -45,6 +46,7 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("drift"), new DriftImageProvider());
+    engine.addImageProvider(QStringLiteral("segment"), new SegmentImageProvider());
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QGuiApplication::exit(-1); }, Qt::QueuedConnection);
     engine.loadFromModule("Drift", "Main");

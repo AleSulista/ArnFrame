@@ -17,6 +17,8 @@ QString maskShapeToString(MaskShape shape)
         return QStringLiteral("bars");
     case MaskShape::Freeform:
         return QStringLiteral("freeform");
+    case MaskShape::Matte:
+        return QStringLiteral("matte");
     case MaskShape::None:
         break;
     }
@@ -37,6 +39,8 @@ MaskShape maskShapeFromString(const QString &shape)
         return MaskShape::Bars;
     if (shape == QStringLiteral("freeform"))
         return MaskShape::Freeform;
+    if (shape == QStringLiteral("matte"))
+        return MaskShape::Matte;
     return MaskShape::None;
 }
 

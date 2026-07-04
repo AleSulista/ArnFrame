@@ -1689,6 +1689,7 @@ PanelFrame {
                             variant: "primary"
                             onClicked: root.Window.window.openAddonManager("whisper-model")
                         }
+
                     }
 
                     // ----- Speed ---------------------------------------------------------------
@@ -2167,6 +2168,36 @@ PanelFrame {
                             hint: qsTr("Masks apply to visual clips.")
                         }
 
+                        // Segmentation produces a matte — a per-frame mask — so it belongs beside
+                        // the parametric shapes rather than in a tab of its own. It needs a
+                        // prompting surface, so it opens a window instead of running from here.
+                        Column {
+                            visible: root.clipKind === "video" && EditorState.segmentationAvailable()
+                            width: parent.width
+                            spacing: Theme.spacingSm
+
+                            Text {
+                                width: parent.width
+                                text: qsTr("Subject")
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            ThemedButton {
+                                width: parent.width
+                                text: qsTr("Segment subject…")
+                                enabled: !EditorState.segmenting
+                                onClicked: {
+                                    const data = EditorState.selectedClipData
+                                    root.Window.window.openSegmentation(
+                                        EditorState.selectedTrack, EditorState.selectedClip,
+                                        data.start !== undefined ? data.start : 0,
+                                        data.duration !== undefined ? data.duration : 0)
+                                }
+                            }
+                        }
+
                         // The tab used to open with a lone unlabelled combo box
                         // and no explanation of what a mask does.
                         Text {
@@ -2245,7 +2276,7 @@ PanelFrame {
                                 spacing: 4
                                 visible: root.clipKind !== "audio" && root.clipKind !== "text"
                                      && root.clipKind !== "subtitle"
-                                         && clip.mask && clip.mask.shape !== "none"
+                                         && !!clip.mask && clip.mask.shape !== "none"
                                          && (modelData.key !== "rotation" || clip.mask.shape !== "bars")
 
                                 Text {
@@ -2283,7 +2314,7 @@ PanelFrame {
                             spacing: 8
                             visible: root.clipKind !== "audio" && root.clipKind !== "text"
                                      && root.clipKind !== "subtitle"
-                                     && clip.mask && clip.mask.shape !== "none"
+                                     && !!clip.mask && clip.mask.shape !== "none"
                             Text {
                                 text: qsTr("Invert")
                                 color: Theme.mutedForeground

@@ -78,6 +78,10 @@ QPainterPath maskPath(const drift::Mask &mask, int canvasWidth, int canvasHeight
         path.closeSubpath();
         return path;
     }
+    case drift::MaskShape::Matte:
+        // Raster, not parametric: the coverage map is decoded per frame in FrameCompositor and
+        // rides on GpuLayer::matte. There is no path to rasterize.
+        break;
     case drift::MaskShape::None:
         break;
     }
@@ -120,7 +124,8 @@ namespace drift {
 
 QImage maskAlphaMap(const Mask &mask, int canvasWidth, int canvasHeight)
 {
-    if (mask.shape == MaskShape::None || canvasWidth <= 0 || canvasHeight <= 0)
+    if (mask.shape == MaskShape::None || mask.shape == MaskShape::Matte || canvasWidth <= 0
+        || canvasHeight <= 0)
         return {};
 
     QImage alpha(canvasWidth, canvasHeight, QImage::Format_Grayscale8);
@@ -153,7 +158,7 @@ QImage maskAlphaMap(const Mask &mask, int canvasWidth, int canvasHeight)
 
 QImage applyMask(const QImage &frame, const Mask &mask, int canvasWidth, int canvasHeight)
 {
-    if (mask.shape == MaskShape::None || frame.isNull())
+    if (mask.shape == MaskShape::None || mask.shape == MaskShape::Matte || frame.isNull())
         return frame;
 
     const QImage alpha = maskAlphaMap(mask, canvasWidth, canvasHeight);

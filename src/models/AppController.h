@@ -2,6 +2,7 @@
 
 #include "core/Project.h"
 #include "core/Time.h"
+#include "engine/Sam2Segmenter.h"
 #include "ClipListModel.h"
 #include "TimelineModel.h"
 #include "models/AssetLibrary.h"
@@ -53,6 +54,14 @@ class AppController : public QObject
     Q_PROPERTY(bool subtitleGenerating READ subtitleGenerating NOTIFY subtitleGeneratingChanged)
     Q_PROPERTY(double subtitleGenProgress READ subtitleGenProgress NOTIFY subtitleGenProgressChanged)
     Q_PROPERTY(QString subtitleGenStatus READ subtitleGenStatus NOTIFY subtitleGenStatusChanged)
+    Q_PROPERTY(bool segmenting READ segmenting NOTIFY segmentingChanged)
+    Q_PROPERTY(double segmentProgress READ segmentProgress NOTIFY segmentProgressChanged)
+    Q_PROPERTY(QString segmentStatus READ segmentStatus NOTIFY segmentStatusChanged)
+    Q_PROPERTY(bool segmentSessionActive READ segmentSessionActive NOTIFY segmentSessionChanged)
+    Q_PROPERTY(bool segmentEncoding READ segmentEncoding NOTIFY segmentSessionChanged)
+    Q_PROPERTY(int segmentRevision READ segmentRevision NOTIFY segmentSessionChanged)
+    Q_PROPERTY(QVariantList segmentPoints READ segmentPoints NOTIFY segmentSessionChanged)
+    Q_PROPERTY(QSize segmentFrameSize READ segmentFrameSize NOTIFY segmentSessionChanged)
     Q_PROPERTY(int selectedTrack READ selectedTrack NOTIFY selectionChanged)
     Q_PROPERTY(int selectedClip READ selectedClip NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList selection READ selection NOTIFY selectionChanged)
@@ -110,6 +119,14 @@ public:
     bool subtitleGenerating() const { return m_subtitleGenerating; }
     double subtitleGenProgress() const { return m_subtitleGenProgress; }
     QString subtitleGenStatus() const { return m_subtitleGenStatus; }
+    bool segmenting() const { return m_segmenting; }
+    double segmentProgress() const { return m_segmentProgress; }
+    QString segmentStatus() const { return m_segmentStatus; }
+    bool segmentSessionActive() const { return m_segSessionActive; }
+    bool segmentEncoding() const { return m_segEncoding; }
+    int segmentRevision() const { return m_segRevision; }
+    QVariantList segmentPoints() const { return m_segPoints; }
+    QSize segmentFrameSize() const { return m_segFrame.size(); }
     int selectedTrack() const { return m_selectedTrack; }
     int selectedClip() const { return m_selectedClip; }
     QVariantList selection() const;
@@ -170,6 +187,23 @@ public:
                                               const QString &language = QString());
     Q_INVOKABLE void cancelSubtitleGeneration();
     Q_INVOKABLE QVariantList whisperLanguages();
+    // points: [{x, y, include}] with x/y normalized to the source frame.
+    // outputMode: "clips" (foreground + background on two new tracks) or "mask" (in place).
+    Q_INVOKABLE void segmentClip(int trackIndex, int clipIndex, const QVariantList &points,
+                                 const QString &outputMode);
+    Q_INVOKABLE void cancelSegmentation();
+    Q_INVOKABLE bool segmentationAvailable();
+    Q_INVOKABLE QString segmentationModelVariant();
+    // Interactive prompting session driving the segmentation window. beginSegmentationSession
+    // encodes the reference frame off the GUI thread; point edits after that only re-run the
+    // cheap decoder.
+    Q_INVOKABLE void beginSegmentationSession(int trackIndex, int clipIndex, double seconds);
+    Q_INVOKABLE void endSegmentationSession();
+    Q_INVOKABLE void setSegmentationFrame(double seconds);
+    Q_INVOKABLE void addSegmentationPoint(double x, double y, bool include);
+    Q_INVOKABLE void removeSegmentationPoint(int index);
+    Q_INVOKABLE void clearSegmentationPoints();
+    Q_INVOKABLE void runSegmentationSession(const QString &outputMode);
     Q_INVOKABLE void addShapeClip(const QString &shapeKind, double atSeconds);
     Q_INVOKABLE void addShapeClipAt(const QString &shapeKind, int trackIndex, double atSeconds);
     Q_INVOKABLE void addStickerClip(const QString &stickerId, double atSeconds);
@@ -345,6 +379,11 @@ signals:
     void subtitleGenProgressChanged();
     void subtitleGenStatusChanged();
     void subtitleGenerationFinished(bool ok, const QString &message);
+    void segmentingChanged();
+    void segmentProgressChanged();
+    void segmentStatusChanged();
+    void segmentationFinished(bool ok, const QString &message);
+    void segmentSessionChanged();
     void selectionChanged();
     void editCapabilitiesChanged();
     void selectedClipDataChanged();
@@ -370,6 +409,9 @@ signals:
 protected:
     void pushProjectEdit(const drift::Project &before, const QString &text);
     void finishEdit(const QString &message);
+    void refreshSegmentationPreview();
+    void finalizeSegmentation(const QString &clipId, const QString &mattePath,
+                              drift::TimeUs matteSrcOffsetUs, const QString &outputMode);
     void finalizeGeneratedSubtitles(drift::TimeUs timelineStart, drift::TimeUs timelineDuration,
                                     const QList<drift::SubtitleCue> &cues);
     void setLastMessage(const QString &message);
@@ -423,6 +465,20 @@ protected:
     double m_subtitleGenProgress = 0.0;
     QString m_subtitleGenStatus;
     QAtomicInt m_subtitleGenCancel = 0;
+    bool m_segmenting = false;
+    double m_segmentProgress = 0.0;
+    QString m_segmentStatus;
+    QAtomicInt m_segmentCancel = 0;
+    bool m_segSessionActive = false;
+    bool m_segEncoding = false;
+    int m_segTrack = -1;
+    int m_segClip = -1;
+    double m_segSeconds = 0.0;
+    int m_segRevision = 0;
+    int m_segGeneration = 0; // bumped per encode request; stale results are dropped
+    QImage m_segFrame;
+    drift::Sam2Embedding m_segEmbedding;
+    QVariantList m_segPoints;
     int m_selectedTrack = -1;
     int m_selectedClip = -1;
     int m_selectedTransitionTrack = -1;

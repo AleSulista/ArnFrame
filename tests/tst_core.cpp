@@ -43,6 +43,7 @@ private slots:
     void clipSplitMergeRoundTrip();
     void clipLinkFieldsSerialization();
     void maskAndTransitionSerialization();
+    void matteMaskSerialization();
     void allTransitionKindsRoundTrip();
     void transitionParametersRoundTrip();
     void legacyTransitionJsonStillLoads();
@@ -881,6 +882,37 @@ void CoreTest::maskAndTransitionSerialization()
     QCOMPARE(loaded.tracks()[0].transitions.size(), 1);
     QCOMPARE(loaded.tracks()[0].transitions[0].kindId, QStringLiteral("dip"));
     QCOMPARE(loaded.tracks()[0].transitions[0].fromClipId, QStringLiteral("clip-a"));
+}
+
+// A segmentation result is only as durable as its matte reference: losing the path or the source
+// offset on reload would silently slide the mask off the subject.
+void CoreTest::matteMaskSerialization()
+{
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-matte");
+    clip.type = drift::ClipType::Video;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(3.0);
+    clip.mask.shape = drift::MaskShape::Matte;
+    clip.mask.mattePath = QStringLiteral("/tmp/mattes/abc.mkv");
+    clip.mask.matteSrcOffsetUs = drift::secondsToUs(1.5);
+    clip.mask.invert = true;
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    const drift::Mask &mask = loaded.tracks()[0].clips[0].mask;
+    QCOMPARE(mask.shape, drift::MaskShape::Matte);
+    QCOMPARE(mask.mattePath, QStringLiteral("/tmp/mattes/abc.mkv"));
+    QCOMPARE(mask.matteSrcOffsetUs, drift::secondsToUs(1.5));
+    QCOMPARE(mask.invert, true);
 }
 
 // The pre-shader enum serialized exactly these strings, so a project written by an older build

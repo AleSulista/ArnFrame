@@ -40,11 +40,14 @@ uniform sampler2D u_layer;
 uniform sampler2D u_mask;
 uniform float u_opacity;
 uniform float u_hasMask;
+uniform float u_maskInvert;
 void main() {
     vec4 c = texture(u_layer, v_texCoord);
     float a = c.a * u_opacity;
-    if (u_hasMask > 0.5)
-        a *= texture(u_mask, v_texCoord).r;
+    if (u_hasMask > 0.5) {
+        float m = texture(u_mask, v_texCoord).r;
+        a *= mix(m, 1.0 - m, u_maskInvert);
+    }
     fragColor = vec4(c.rgb * a, a);
 }
 )";
@@ -61,6 +64,7 @@ uniform sampler2D u_dst;      // canvas, premultiplied
 uniform vec2 u_canvasSize;
 uniform float u_opacity;
 uniform float u_hasMask;
+uniform float u_maskInvert;
 uniform int u_blendMode;      // 1 multiply, 2 screen, 3 overlay, 5 darken, 6 lighten
 
 vec3 blendRgb(vec3 base, vec3 src) {
@@ -79,8 +83,10 @@ vec3 blendRgb(vec3 base, vec3 src) {
 void main() {
     vec4 src = texture(u_layer, v_texCoord);
     float sa = src.a * u_opacity;
-    if (u_hasMask > 0.5)
-        sa *= texture(u_mask, v_texCoord).r;
+    if (u_hasMask > 0.5) {
+        float m = texture(u_mask, v_texCoord).r;
+        sa *= mix(m, 1.0 - m, u_maskInvert);
+    }
 
     vec4 dst = texture(u_dst, gl_FragCoord.xy / u_canvasSize); // premultiplied
     vec3 dstRgb = dst.a > 0.0001 ? dst.rgb / dst.a : vec3(0.0);
@@ -247,8 +253,33 @@ void drawLayerOnCanvas(GlRuntime &rt, QOpenGLExtraFunctions *gl, GlTarget &canva
     if (layer.opacity <= 0.0)
         return;
 
-    const GLuint maskTex = maskTexture(rt, gl, layer.mask, layerTarget.size());
+    // A matte changes every frame, so it goes through the recycled target pool rather than
+    // maskTexture()'s static cache, which is keyed by mask parameters and would never evict.
+    // Invert cannot be baked in either: the foreground and background clips of a segmentation
+    // share one matte file and differ only by this flag.
+    GlTarget matteTarget;
+    GLuint maskTex = 0;
+    float maskInvert = 0.f;
+    if (!layer.matte.isNull()) {
+        matteTarget = promoteImageToTarget(rt, gl, layer.matte, layer.matte.size());
+        maskTex = matteTarget.isValid() ? matteTarget.texture() : 0;
+        maskInvert = layer.mask.invert ? 1.f : 0.f;
+    } else {
+        maskTex = maskTexture(rt, gl, layer.mask, layerTarget.size());
+    }
     const QMatrix4x4 model = modelMatrixFor(layer, canvasSize);
+
+    // Every return path below must recycle the matte target.
+    struct MatteGuard
+    {
+        GlRuntime &rt;
+        GlTarget &target;
+        ~MatteGuard()
+        {
+            if (target.isValid())
+                rt.releaseTarget(std::move(target));
+        }
+    } matteGuard{rt, matteTarget};
 
     if (isFixedFunctionBlend(blend)) {
         QOpenGLShaderProgram *program =
@@ -268,6 +299,7 @@ void drawLayerOnCanvas(GlRuntime &rt, QOpenGLExtraFunctions *gl, GlTarget &canva
         program->setUniformValue("u_model", model);
         program->setUniformValue("u_opacity", float(layer.opacity));
         program->setUniformValue("u_hasMask", maskTex ? 1.f : 0.f);
+        program->setUniformValue("u_maskInvert", maskInvert);
         program->setUniformValue("u_layer", 0);
         program->setUniformValue("u_mask", 1);
         gl->glActiveTexture(GL_TEXTURE0);
@@ -306,6 +338,7 @@ void drawLayerOnCanvas(GlRuntime &rt, QOpenGLExtraFunctions *gl, GlTarget &canva
     program->setUniformValue("u_model", model);
     program->setUniformValue("u_opacity", float(layer.opacity));
     program->setUniformValue("u_hasMask", maskTex ? 1.f : 0.f);
+    program->setUniformValue("u_maskInvert", maskInvert);
     program->setUniformValue("u_blendMode", blendModeCode(blend));
     program->setUniformValue("u_canvasSize",
                              QVector2D(float(canvasSize.width()), float(canvasSize.height())));

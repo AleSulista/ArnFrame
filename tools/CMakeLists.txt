@@ -27,3 +27,8 @@ add_executable(transcribe transcribe.cpp)
 target_include_directories(transcribe PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(transcribe PRIVATE Qt6::Core driftengine driftcore)
 drift_copy_onnxruntime(transcribe)
+
+add_executable(segment segment.cpp)
+target_include_directories(segment PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(segment PRIVATE Qt6::Core Qt6::Gui driftengine driftcore)
+drift_copy_onnxruntime(segment)

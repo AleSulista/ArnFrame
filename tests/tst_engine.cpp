@@ -24,6 +24,8 @@
 #include "engine/TextRaster.h"
 #include "engine/GpuEffectExecutor.h"
 #include "engine/MaskApplier.h"
+#include "engine/MatteWriter.h"
+#include "engine/ClipReaderPool.h"
 #include "engine/TransitionCatalog.h"
 #include "core/Transition.h"
 
@@ -33,6 +35,7 @@ class EngineTest : public QObject
 
 private slots:
     void initTestCase();
+    void matteWriterRoundTripsThroughClipReader();
     void effectProcessorPassthroughWithoutEffects();
     void effectProcessorBrightness();
     void clipReaderSequentialAndSeek();
@@ -118,6 +121,54 @@ void EngineTest::initTestCase()
     // The font bundle is fetched rather than committed, so an offline checkout legitimately has
     // none. The font tests skip in that case rather than fail.
     reloadFontCatalog({QString::fromUtf8(DRIFT_TEST_FONTS_DIR)});
+}
+
+// The matte is written by us but read back by the ordinary video path, so the two ends have to
+// agree on codec, pixel format and time base. A mismatch shows up as a mask that decodes black
+// or lands on the wrong frame — silent, and only visible in the composite.
+void EngineTest::matteWriterRoundTripsThroughClipReader()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("matte.mp4"));
+    const QSize size(320, 240);
+    const int frames = 10;
+
+    drift::MatteWriter writer;
+    QString error;
+    QVERIFY2(writer.open(path, size, 30, 1, &error), qPrintable(error));
+
+    // Each frame covers a different horizontal band, so a frame-indexing error is detectable.
+    for (int i = 0; i < frames; ++i) {
+        QImage mask(size, QImage::Format_Grayscale8);
+        mask.fill(0);
+        QPainter p(&mask);
+        p.fillRect(QRect(0, i * 20, size.width(), 20), Qt::white);
+        p.end();
+        QVERIFY2(writer.writeFrame(mask, &error), qPrintable(error));
+    }
+    QVERIFY2(writer.finish(&error), qPrintable(error));
+
+    QVERIFY(QFileInfo::exists(path));
+    QVERIFY(!QFileInfo::exists(path + QStringLiteral(".part")));
+
+    for (int i = 0; i < frames; ++i) {
+        // Sample the middle of each frame's interval: the boundary time can land a hair below it
+        // and resolve to the previous frame.
+        const drift::TimeUs us = (2 * drift::TimeUs(i) + 1) * drift::kUsPerSecond / 60;
+        const QImage frame = ClipReaderPool::instance().readVideoFrame(path, us, 0, 0);
+        QVERIFY2(!frame.isNull(), qPrintable(QStringLiteral("frame %1 did not decode").arg(i)));
+        QCOMPARE(frame.size(), size);
+
+        int band = -1;
+        for (int b = 0; b < frames + 2; ++b) {
+            if (qRed(frame.pixel(size.width() / 2, b * 20 + 10)) > 200) {
+                band = b;
+                break;
+            }
+        }
+        QCOMPARE(band, i);
+    }
 }
 
 void EngineTest::effectProcessorPassthroughWithoutEffects()
