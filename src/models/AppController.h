@@ -74,6 +74,7 @@ class AppController : public QObject
     Q_PROPERTY(QString guideType READ guideType WRITE setGuideType NOTIFY guidesChanged)
     Q_PROPERTY(QVariantMap background READ background NOTIFY backgroundChanged)
     Q_PROPERTY(bool canvasCropMode READ canvasCropMode WRITE setCanvasCropMode NOTIFY canvasCropModeChanged)
+    Q_PROPERTY(bool inlineTextEditing READ inlineTextEditing NOTIFY inlineTextEditingChanged)
     Q_PROPERTY(QVariantList actions READ actions NOTIFY shortcutsChanged)
     Q_PROPERTY(QVariantList bookmarks READ bookmarks NOTIFY bookmarksChanged)
     Q_PROPERTY(QString projectName READ projectName WRITE setProjectName NOTIFY projectNameChanged)
@@ -228,6 +229,7 @@ public:
     Q_INVOKABLE void previewSetClipMask(int trackIndex, int clipIndex, const QVariantMap &mask);
     Q_INVOKABLE void previewSetClipFade(int trackIndex, int clipIndex, double fadeInSeconds, double fadeOutSeconds);
     Q_INVOKABLE void commitPreviewDrag();
+    Q_INVOKABLE void cancelPreviewDrag();
     Q_INVOKABLE int projectWidth() const;
     Q_INVOKABLE int projectHeight() const;
     Q_INVOKABLE int projectFps() const;
@@ -264,10 +266,15 @@ public:
     Q_INVOKABLE void setClipStart(int trackIndex, int clipIndex, double start);
     Q_INVOKABLE void setClipDuration(int trackIndex, int clipIndex, double duration);
     Q_INVOKABLE void setClipTextContent(int trackIndex, int clipIndex, const QString &text);
+    // Live text edits (preview drag) keep the canvas and properties panel in sync
+    // while typing; commitTextEdit trims and pushes undo.
+    Q_INVOKABLE void previewSetClipTextContent(int trackIndex, int clipIndex, const QString &text);
+    Q_INVOKABLE void commitTextEdit(int trackIndex, int clipIndex, const QString &text);
     // In-place text editing on the preview: hide the clip's baked raster while the
-    // QML inline editor is shown, then restore it. Commit via setClipTextContent.
+    // QML inline editor is shown, then restore it. Commit via commitTextEdit.
     Q_INVOKABLE void beginTextEdit(int trackIndex, int clipIndex);
     Q_INVOKABLE void endTextEdit();
+    bool inlineTextEditing() const { return m_inlineTextEditing; }
     Q_INVOKABLE void setSubtitleCues(int trackIndex, int clipIndex, const QVariantList &cues);
     Q_INVOKABLE void previewSetSubtitleCues(int trackIndex, int clipIndex, const QVariantList &cues);
     Q_INVOKABLE double subtitleLocalPlayheadSeconds(int trackIndex, int clipIndex) const;
@@ -363,6 +370,7 @@ signals:
     // A text clip was added with no text; the preview should open its inline
     // editor so the user can type straight onto the canvas.
     void inlineTextEditRequested(int trackIndex, int clipIndex);
+    void inlineTextEditingChanged();
     void tracksChanged();
     void playheadSecondsChanged();
     void playingChanged();
@@ -490,10 +498,12 @@ protected:
     QHash<QString, QString> m_shortcuts;
     int m_draggingAssetIndex = -1;
     QString m_lastMessage;
+    bool m_inlineTextEditing = false;
     bool m_previewDragActive = false;
     drift::Project m_previewDragBefore;
     QString m_previewDragText = QStringLiteral("Edit clip");
     void emitPreviewFrame();
+    void syncTextOverlaySkip();
     struct ClipboardItem
     {
         drift::Clip clip;

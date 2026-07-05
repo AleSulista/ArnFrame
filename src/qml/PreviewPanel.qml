@@ -191,18 +191,35 @@ PanelFrame {
                                 readonly property bool isText: modelData.kind === "text"
                                 readonly property bool editing: transformOverlay.editingKey
                                                                         === (modelData.track + ":" + modelData.clip)
-                                // Snapshot of the clip's TextStyle taken when editing
-                                // begins; drives the inline editor's font/color/align.
-                                property var editStyle: null
+                                // True when this clip was just added with no text and should
+                                // open with an empty editor instead of the placeholder string.
+                                property bool openAsPlaceholder: false
+                                // Live clip style — tracks EditorState so property-panel edits
+                                // apply to the inline editor in real time.
+                                readonly property var liveStyle: {
+                                    void EditorState.tracks
+                                    const info = EditorState.clipAt(modelData.track, modelData.clip)
+                                    return info && info.textStyle ? info.textStyle : null
+                                }
+                                readonly property var liveClip: {
+                                    void EditorState.tracks
+                                    return EditorState.clipAt(modelData.track, modelData.clip)
+                                }
+                                readonly property string liveText: liveClip ? (liveClip.textContent || "") : ""
 
                                 function enterEdit() {
-                                    const info = EditorState.clipAt(modelData.track, modelData.clip)
-                                    handle.editStyle = info.textStyle
-                                    editor.text = info.textContent || ""
                                     transformOverlay.editingKey = modelData.track + ":" + modelData.clip
                                     transformOverlay.interacting = true
                                     EditorState.selectClip(modelData.track, modelData.clip)
                                     EditorState.beginTextEdit(modelData.track, modelData.clip)
+                                    const info = EditorState.clipAt(modelData.track, modelData.clip)
+                                    if (handle.openAsPlaceholder) {
+                                        editor.text = ""
+                                        EditorState.previewSetClipTextContent(modelData.track, modelData.clip, "")
+                                        handle.openAsPlaceholder = false
+                                    } else {
+                                        editor.text = info.textContent || ""
+                                    }
                                     editor.forceActiveFocus()
                                     editor.selectAll()
                                 }
@@ -210,13 +227,14 @@ PanelFrame {
                                 function commitEdit() {
                                     if (!handle.editing)
                                         return
-                                    EditorState.setClipTextContent(modelData.track, modelData.clip, editor.text)
+                                    EditorState.commitTextEdit(modelData.track, modelData.clip, editor.text)
                                     handle.finishEdit()
                                 }
 
                                 function cancelEdit() {
                                     if (!handle.editing)
                                         return
+                                    EditorState.cancelPreviewDrag()
                                     handle.finishEdit()
                                 }
 
@@ -237,6 +255,7 @@ PanelFrame {
                                             !== (modelData.track + ":" + modelData.clip))
                                         return
                                     transformOverlay.pendingEditKey = ""
+                                    handle.openAsPlaceholder = true
                                     Qt.callLater(handle.enterEdit)
                                 }
 
@@ -312,6 +331,60 @@ PanelFrame {
                                     event.accepted = true
                                 }
 
+                                Connections {
+                                    target: EditorState
+                                    function onSelectedClipDataChanged() {
+                                        if (!handle.editing || editor.activeFocus)
+                                            return
+                                        const info = EditorState.clipAt(modelData.track, modelData.clip)
+                                        if (!info)
+                                            return
+                                        const next = info.textContent || ""
+                                        if (editor.text !== next)
+                                            editor.text = next
+                                    }
+                                }
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    visible: handle.isText && (handle.selected || handle.editing)
+                                             && handle.liveStyle && handle.liveStyle.boxEnabled
+                                    color: handle.liveStyle ? handle.liveStyle.boxColor : "transparent"
+                                    radius: handle.liveStyle ? handle.liveStyle.boxRadius * handle.sy : 0
+                                }
+
+                                // Crisp vector text while the clip is selected. The composited
+                                // raster is downscaled for preview and looks soft when upscaled.
+                                Text {
+                                    anchors.fill: parent
+                                    visible: handle.isText && handle.selected && !handle.editing
+                                    text: handle.liveText
+                                    renderType: Text.NativeRendering
+                                    color: handle.liveStyle ? handle.liveStyle.color : "white"
+                                    font.family: handle.liveStyle ? handle.liveStyle.fontFamily : Theme.fontFamily
+                                    font.pixelSize: handle.liveStyle
+                                                    ? Math.max(1, Math.round(handle.liveStyle.pixelSize * handle.sy))
+                                                    : 16
+                                    font.weight: handle.liveStyle ? handle.liveStyle.fontWeight : Font.Normal
+                                    font.italic: handle.liveStyle ? handle.liveStyle.italic : false
+                                    font.letterSpacing: handle.liveStyle ? handle.liveStyle.letterSpacing * handle.sy : 0
+                                    wrapMode: (handle.liveStyle && handle.liveStyle.wordWrap === false)
+                                              ? Text.NoWrap : Text.WordWrap
+                                    horizontalAlignment: !handle.liveStyle ? Text.AlignHCenter
+                                                         : handle.liveStyle.align === "left" ? Text.AlignLeft
+                                                         : handle.liveStyle.align === "right" ? Text.AlignRight
+                                                         : Text.AlignHCenter
+                                    verticalAlignment: !handle.liveStyle ? Text.AlignVCenter
+                                                       : handle.liveStyle.valign === "top" ? Text.AlignTop
+                                                       : handle.liveStyle.valign === "bottom" ? Text.AlignBottom
+                                                       : Text.AlignVCenter
+                                    leftPadding: handle.liveStyle && handle.liveStyle.boxEnabled
+                                                 ? Math.max(0, handle.liveStyle.boxPadding * handle.sy) : 0
+                                    rightPadding: leftPadding
+                                    topPadding: leftPadding
+                                    bottomPadding: leftPadding
+                                }
+
                                 Rectangle {
                                     anchors.fill: parent
                                     color: "transparent"
@@ -339,26 +412,36 @@ PanelFrame {
                                     visible: handle.editing
                                     enabled: handle.editing
                                     background: null
-                                    padding: 0
+                                    renderType: TextEdit.NativeRendering
+                                    padding: handle.liveStyle && handle.liveStyle.boxEnabled
+                                              ? Math.max(0, handle.liveStyle.boxPadding * handle.sy) : 0
                                     selectByMouse: true
-                                    color: handle.editStyle ? handle.editStyle.color : "white"
-                                    font.family: handle.editStyle ? handle.editStyle.fontFamily : Theme.fontFamily
-                                    font.pixelSize: handle.editStyle
-                                                    ? Math.max(1, Math.round(handle.editStyle.pixelSize * handle.sy))
+                                    color: handle.liveStyle ? handle.liveStyle.color : "white"
+                                    font.family: handle.liveStyle ? handle.liveStyle.fontFamily : Theme.fontFamily
+                                    font.pixelSize: handle.liveStyle
+                                                    ? Math.max(1, Math.round(handle.liveStyle.pixelSize * handle.sy))
                                                     : 16
-                                    font.weight: handle.editStyle ? handle.editStyle.fontWeight : Font.Normal
-                                    font.italic: handle.editStyle ? handle.editStyle.italic : false
-                                    font.letterSpacing: handle.editStyle ? handle.editStyle.letterSpacing * handle.sy : 0
-                                    wrapMode: (handle.editStyle && handle.editStyle.wordWrap === false)
+                                    font.weight: handle.liveStyle ? handle.liveStyle.fontWeight : Font.Normal
+                                    font.italic: handle.liveStyle ? handle.liveStyle.italic : false
+                                    font.letterSpacing: handle.liveStyle ? handle.liveStyle.letterSpacing * handle.sy : 0
+                                    wrapMode: (handle.liveStyle && handle.liveStyle.wordWrap === false)
                                               ? TextEdit.NoWrap : TextEdit.WordWrap
-                                    horizontalAlignment: !handle.editStyle ? TextEdit.AlignHCenter
-                                                         : handle.editStyle.align === "left" ? TextEdit.AlignLeft
-                                                         : handle.editStyle.align === "right" ? TextEdit.AlignRight
+                                    horizontalAlignment: !handle.liveStyle ? TextEdit.AlignHCenter
+                                                         : handle.liveStyle.align === "left" ? TextEdit.AlignLeft
+                                                         : handle.liveStyle.align === "right" ? TextEdit.AlignRight
                                                          : TextEdit.AlignHCenter
-                                    verticalAlignment: !handle.editStyle ? TextEdit.AlignVCenter
-                                                       : handle.editStyle.valign === "top" ? TextEdit.AlignTop
-                                                       : handle.editStyle.valign === "bottom" ? TextEdit.AlignBottom
+                                    verticalAlignment: !handle.liveStyle ? TextEdit.AlignVCenter
+                                                       : handle.liveStyle.valign === "top" ? TextEdit.AlignTop
+                                                       : handle.liveStyle.valign === "bottom" ? TextEdit.AlignBottom
                                                        : TextEdit.AlignVCenter
+                                    onTextChanged: {
+                                        if (!handle.editing)
+                                            return
+                                        EditorState.previewSetClipTextContent(
+                                            handle.modelData.track,
+                                            handle.modelData.clip,
+                                            text)
+                                    }
                                     Keys.onEscapePressed: handle.cancelEdit()
                                     onActiveFocusChanged: if (!activeFocus && handle.editing) handle.commitEdit()
                                 }

@@ -572,10 +572,16 @@ PanelFrame {
                                 font.pixelSize: Theme.fontSizeXs
                             }
                             ThemedTextArea {
+                                id: textContentField
                                 width: parent.width
                                 height: 80
-                                text: clip.textContent || ""
-                                onEditingFinished: EditorState.setClipTextContent(
+                                onTextChanged: {
+                                    if (root.clipKind !== "text")
+                                        return
+                                    EditorState.previewSetClipTextContent(
+                                        EditorState.selectedTrack, EditorState.selectedClip, text)
+                                }
+                                onEditingFinished: EditorState.commitTextEdit(
                                                        EditorState.selectedTrack, EditorState.selectedClip, text)
                             }
                         }

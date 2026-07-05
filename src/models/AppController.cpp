@@ -995,6 +995,8 @@ void AppController::setPlayheadUs(drift::TimeUs us)
     m_playheadUs = clamped;
     m_playback.setPlayheadUs(clamped);
     emit playheadSecondsChanged();
+    if (!m_playing)
+        syncTextOverlaySkip();
 }
 
 void AppController::setPlayheadSeconds(double seconds)
@@ -1017,6 +1019,7 @@ void AppController::setPlaying(bool playing)
         m_playback.pause();
     }
     emit playingChanged();
+    syncTextOverlaySkip();
 }
 
 void AppController::togglePlayback()
@@ -1460,6 +1463,7 @@ void AppController::selectClip(int trackIndex, int clipIndex)
     m_selectedTransitionLeftClip = -1;
     emit selectionChanged();
     emit selectedTransitionDataChanged();
+    syncTextOverlaySkip();
 }
 
 void AppController::addToSelection(int trackIndex, int clipIndex)
@@ -1512,6 +1516,7 @@ void AppController::clearSelection()
     m_selectedTransitionLeftClip = -1;
     emit selectionChanged();
     emit selectedTransitionDataChanged();
+    syncTextOverlaySkip();
 }
 
 void AppController::deleteSelectedClip()
@@ -3289,6 +3294,16 @@ void AppController::commitPreviewDrag()
     finishEdit(text);
 }
 
+void AppController::cancelPreviewDrag()
+{
+    if (!m_previewDragActive)
+        return;
+
+    m_project = m_previewDragBefore;
+    m_previewDragActive = false;
+    emitPreviewFrame();
+}
+
 void AppController::setClipStart(int trackIndex, int clipIndex, double start)
 {
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
@@ -3365,6 +3380,62 @@ void AppController::setClipTextContent(int trackIndex, int clipIndex, const QStr
     finishEdit(QStringLiteral("Text updated"));
 }
 
+void AppController::previewSetClipTextContent(int trackIndex, int clipIndex, const QString &text)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Text)
+        return;
+
+    if (clip.textContent == text && clip.name == text.left(32))
+        return;
+
+    clip.textContent = text;
+    clip.name = text.left(32);
+
+    if (!m_previewDragActive)
+        beginPreviewDrag(QStringLiteral("Edit text"));
+
+    emitPreviewFrame();
+}
+
+void AppController::commitTextEdit(int trackIndex, int clipIndex, const QString &text)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Text)
+        return;
+
+    const QString trimmed = text.trimmed();
+    if (m_previewDragActive) {
+        clip.textContent = trimmed;
+        clip.name = trimmed.left(32);
+        commitPreviewDrag();
+        return;
+    }
+
+    if (clip.textContent == trimmed && clip.name == trimmed.left(32))
+        return;
+
+    const drift::Project before = m_project;
+    clip.textContent = trimmed;
+    clip.name = trimmed.left(32);
+    pushProjectEdit(before, QStringLiteral("Text updated"));
+    finishEdit(QStringLiteral("Text updated"));
+}
+
 void AppController::beginTextEdit(int trackIndex, int clipIndex)
 {
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
@@ -3372,14 +3443,45 @@ void AppController::beginTextEdit(int trackIndex, int clipIndex)
     const drift::Track &track = m_project.tracks().at(trackIndex);
     if (clipIndex < 0 || clipIndex >= track.clips.size())
         return;
+    if (track.clips.at(clipIndex).type != drift::ClipType::Text)
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag(QStringLiteral("Edit text"));
+
     // Hide this clip from the composited frame; the QML inline editor stands in
-    // for it while the user types. Committing goes through setClipTextContent.
+    // for it while the user types. Committing goes through commitTextEdit.
     m_playback.setEditingClipId(track.clips.at(clipIndex).id);
+    if (!m_inlineTextEditing) {
+        m_inlineTextEditing = true;
+        emit inlineTextEditingChanged();
+    }
 }
 
 void AppController::endTextEdit()
 {
-    m_playback.setEditingClipId(QString());
+    if (m_inlineTextEditing) {
+        m_inlineTextEditing = false;
+        emit inlineTextEditingChanged();
+    }
+    syncTextOverlaySkip();
+}
+
+void AppController::syncTextOverlaySkip()
+{
+    // Inline edit owns the skip id until it ends; then keep the composited raster
+    // hidden for the selected text clip so the QML overlay stays crisp (the baked
+    // preview texture is downscaled and looks soft when upscaled).
+    if (m_inlineTextEditing)
+        return;
+
+    QString id;
+    if (!m_playing && isValidClipIndex(m_selectedTrack, m_selectedClip)) {
+        const drift::Clip &clip = m_project.tracks().at(m_selectedTrack).clips.at(m_selectedClip);
+        if (clip.type == drift::ClipType::Text && clip.containsTime(m_playheadUs))
+            id = clip.id;
+    }
+    m_playback.setEditingClipId(id);
 }
 
 void AppController::setSubtitleCues(int trackIndex, int clipIndex, const QVariantList &cues)
