@@ -262,14 +262,18 @@ bool Sam2Segmenter::Impl::ensureLoaded()
 {
     if (loadAttempted)
         return loaded;
-    loadAttempted = true;
 
     modelDir = resolveSam2ModelDir();
     if (modelDir.isEmpty()) {
+        // Deliberately not latched: the model arrives as an addon the user can install while the
+        // app is running, and latching here would make it need a restart. A model that is present
+        // but fails to load is latched below, since retrying that just repeats the failure.
         error = QStringLiteral("SAM2 model not found. Place the sam2.1 video export in models/sam2 "
                                "or set DRIFT_SAM2_MODEL_DIR.");
         return false;
     }
+    loadAttempted = true;
+
     if (!loadConstants(modelDir))
         return false;
 

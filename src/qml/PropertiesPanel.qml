@@ -2172,9 +2172,24 @@ PanelFrame {
                         // the parametric shapes rather than in a tab of its own. It needs a
                         // prompting surface, so it opens a window instead of running from here.
                         Column {
-                            visible: root.clipKind === "video" && EditorState.segmentationAvailable()
+                            id: segmentSection
+                            visible: root.clipKind === "video"
                             width: parent.width
                             spacing: Theme.spacingSm
+
+                            // The model is an addon, but it can equally come from a bundled
+                            // models/sam2 or DRIFT_SAM2_MODEL_DIR, so ask the engine rather than
+                            // the addon registry. That answer is not a binding, hence the reset
+                            // below when an addon of this kind appears.
+                            property bool segmentReady: EditorState.segmentationAvailable()
+
+                            Connections {
+                                target: Addons
+                                function onKindChanged(kind) {
+                                    if (kind === "sam2-model")
+                                        segmentSection.segmentReady = EditorState.segmentationAvailable()
+                                }
+                            }
 
                             Text {
                                 width: parent.width
@@ -2185,6 +2200,7 @@ PanelFrame {
                             }
 
                             ThemedButton {
+                                visible: segmentSection.segmentReady
                                 width: parent.width
                                 text: qsTr("Segment subject…")
                                 enabled: !EditorState.segmenting
@@ -2195,6 +2211,14 @@ PanelFrame {
                                         data.start !== undefined ? data.start : 0,
                                         data.duration !== undefined ? data.duration : 0)
                                 }
+                            }
+
+                            ThemedButton {
+                                visible: !segmentSection.segmentReady
+                                width: parent.width
+                                text: qsTr("Install segmentation model (≈190 MB)")
+                                variant: "primary"
+                                onClicked: root.Window.window.openAddonManager("sam2-model")
                             }
                         }
 
