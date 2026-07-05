@@ -104,23 +104,47 @@ QString variantFromConstants(const QString &root)
     return obj.value(QStringLiteral("model")).toString().section(QLatin1Char('-'), -1);
 }
 
-// Execution providers are opt-in and deliberately not part of the build: the stock ONNX Runtime
-// release is CPU-only, so this only does anything when ONNXRUNTIME_ROOT points at a build that
-// carries the provider. Failure is not fatal — the session falls back to CPU.
-void appendRequestedProvider(Ort::SessionOptions &opts)
+// CUDA is used automatically when the ONNX Runtime build carries the provider and the machine can
+// actually load it — it runs this pipeline about ten times faster than CPU. DRIFT_ORT_EP overrides
+// the choice: "cpu" forces CPU, "cuda"/"openvino" force that provider.
+//
+// Whether a failure is worth complaining about depends on who asked. An explicit DRIFT_ORT_EP that
+// cannot be honoured must be loud, or identical timings look like "the GPU did not help" when in
+// fact nothing was accelerated. The automatic attempt failing is ordinary — most machines have no
+// CUDA — so that stays at info level.
+void appendRequestedProvider(Ort::SessionOptions &opts, Ort::Env &env)
 {
-    const QString ep = QString::fromLocal8Bit(qgetenv("DRIFT_ORT_EP")).trimmed().toLower();
-    if (ep.isEmpty() || ep == QLatin1String("cpu"))
+    const QString requested = QString::fromLocal8Bit(qgetenv("DRIFT_ORT_EP")).trimmed().toLower();
+    if (requested == QLatin1String("cpu"))
         return;
 
-    // Falling back to CPU is fine, but doing it silently is not: the stock ONNX Runtime release
-    // carries no provider libraries, so asking for one and getting identical timings looks like
-    // "the GPU did not help" when nothing was accelerated at all.
+    QString ep = requested;
+    if (ep.isEmpty()) {
+        const std::vector<std::string> providers = Ort::GetAvailableProviders();
+        if (std::find(providers.begin(), providers.end(), "CUDAExecutionProvider")
+            == providers.end())
+            return; // CPU-only build: nothing to try, and nothing worth saying about it
+        ep = QStringLiteral("cuda");
+    }
+
     try {
         if (ep == QLatin1String("openvino")) {
             opts.AppendExecutionProvider("OpenVINO", {{"device_type", "GPU"}});
         } else if (ep == QLatin1String("cuda")) {
-            opts.AppendExecutionProvider_CUDA(OrtCUDAProviderOptions{});
+            OrtCUDAProviderOptions cuda;
+            cuda.arena_extend_strategy = 1; // kSameAsRequested
+            opts.AppendExecutionProvider_CUDA(cuda);
+
+            // memory_attention needs one contiguous 449 MiB score matrix (28736 memory tokens x
+            // 4096 image tokens, fp32). Left alone, each of the five sessions builds its own BFC
+            // arena and between them they reserve ~3.4 GB of a 4 GB card, so that allocation fails
+            // even though the card looks nearly empty. One arena shared across the env, grown by
+            // exactly what is asked for, leaves the room.
+            Ort::MemoryInfo cudaMem("Cuda", OrtArenaAllocator, 0, OrtMemTypeDefault);
+            Ort::ArenaCfg arena(0 /*max_mem: no cap*/, 1 /*kSameAsRequested*/,
+                                -1 /*initial chunk: default*/, -1 /*max dead bytes: default*/);
+            env.CreateAndRegisterAllocatorV2("CUDAExecutionProvider", cudaMem, {}, arena);
+            opts.AddConfigEntry("session.use_env_allocators", "1");
         } else {
             qWarning("[sam2] DRIFT_ORT_EP=%s is not a provider this build knows; using CPU.",
                      qUtf8Printable(ep));
@@ -128,9 +152,15 @@ void appendRequestedProvider(Ort::SessionOptions &opts)
         }
         qInfo("[sam2] execution provider %s enabled.", qUtf8Printable(ep));
     } catch (const Ort::Exception &e) {
-        qWarning("[sam2] DRIFT_ORT_EP=%s requested but unavailable (%s). Running on CPU — this "
-                 "ONNX Runtime build has no %s provider library.",
-                 qUtf8Printable(ep), e.what(), qUtf8Printable(ep));
+        if (requested.isEmpty()) {
+            qInfo("[sam2] %s is present but could not be initialised (%s); using CPU.",
+                  qUtf8Printable(ep), e.what());
+        } else {
+            qWarning("[sam2] DRIFT_ORT_EP=%s could not be set up (%s). Falling back to CPU; if the "
+                     "message mentions loading a shared library, this ONNX Runtime build has no %s "
+                     "provider.",
+                     qUtf8Printable(ep), e.what(), qUtf8Printable(ep));
+        }
     }
 }
 
@@ -246,7 +276,7 @@ bool Sam2Segmenter::Impl::ensureLoaded()
     try {
         Ort::SessionOptions opts;
         opts.SetIntraOpNumThreads(std::max(1, QThread::idealThreadCount()));
-        appendRequestedProvider(opts);
+        appendRequestedProvider(opts, env);
 
         const QDir dir = graphDir(modelDir);
         auto open = [&](const char *name) {
@@ -292,8 +322,11 @@ Sam2Segmenter::~Sam2Segmenter() = default;
 
 Sam2Segmenter &Sam2Segmenter::instance()
 {
-    static Sam2Segmenter s;
-    return s;
+    // Deliberately leaked. A function-local static is destroyed during exit, by which point the
+    // CUDA driver has already run its own teardown, and freeing the sessions then aborts the
+    // process with "CUDA failure 4: driver shutting down". The OS reclaims this at exit anyway.
+    static Sam2Segmenter *s = new Sam2Segmenter;
+    return *s;
 }
 
 bool Sam2Segmenter::modelPresent()

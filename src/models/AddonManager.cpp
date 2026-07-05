@@ -462,7 +462,7 @@ void AddonManager::reloadForKinds(const QStringList &kinds)
             reloadFontCatalog();
         else if (kind == QLatin1String("stickers"))
             reloadStickerCatalog();
-        // whisper-model needs nothing: sessions are created lazily on the next transcription.
+        // whisper-model and sam2-model need nothing: sessions are created lazily on next use.
         emit kindChanged(kind);
     }
 }

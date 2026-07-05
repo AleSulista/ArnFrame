@@ -17,6 +17,11 @@
 int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
+    // Must match src/main.cpp, or AppDataLocation points somewhere else and the tool cannot see
+    // models installed as addons.
+    QCoreApplication::setApplicationName("CutWire Drift");
+    QCoreApplication::setOrganizationName("CutWire Drift");
+
     QTextStream out(stdout);
     QTextStream err(stderr);
 

@@ -59,6 +59,17 @@ if(OnnxRuntime_FOUND)
         "${ONNXRUNTIME_ROOT}/lib/*onnxruntime*.dll"
         "${ONNXRUNTIME_ROOT}/lib/*onnxruntime*.so*"
         "${ONNXRUNTIME_ROOT}/lib/*onnxruntime*.dylib")
+
+    # The CUDA execution provider ships as a separate library that ONNX Runtime dlopens from
+    # beside libonnxruntime. Its presence is what decides whether DRIFT_ORT_EP=cuda can work.
+    get_filename_component(_ort_libdir "${OnnxRuntime_LIBRARY}" DIRECTORY)
+    file(GLOB _ort_cuda_provider
+        "${_ort_libdir}/*onnxruntime_providers_cuda*")
+    if(_ort_cuda_provider)
+        set(OnnxRuntime_HAS_CUDA TRUE)
+    else()
+        set(OnnxRuntime_HAS_CUDA FALSE)
+    endif()
 endif()
 
 mark_as_advanced(OnnxRuntime_INCLUDE_DIR OnnxRuntime_LIBRARY)

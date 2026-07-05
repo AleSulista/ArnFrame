@@ -53,7 +53,18 @@ find_package(FFmpeg REQUIRED)
 # ONNX Runtime powers the Whisper auto-subtitle transcriber (src/engine/WhisperTranscriber).
 option(DRIFT_FETCH_ONNXRUNTIME
     "Download a prebuilt ONNX Runtime when it is not installed (cmake/FetchOnnxRuntime.cmake)" ON)
+# Which prebuilt release to fetch. "cuda" adds the CUDA execution provider, selected at runtime
+# with DRIFT_ORT_EP=cuda; it needs CUDA 13 and cuDNN 9 present on the machine that runs it.
+set(DRIFT_ONNXRUNTIME_EP "cpu" CACHE STRING "ONNX Runtime release to download: cpu or cuda")
+set_property(CACHE DRIFT_ONNXRUNTIME_EP PROPERTY STRINGS cpu cuda)
 find_package(OnnxRuntime QUIET)
+if(OnnxRuntime_FOUND AND DRIFT_ONNXRUNTIME_EP STREQUAL "cuda" AND NOT OnnxRuntime_HAS_CUDA)
+    # A system CPU-only install would otherwise win and silently defeat the request. An install
+    # that does carry the provider (e.g. Arch's onnxruntime-opt-cuda) is kept and used as-is.
+    message(STATUS "System ONNX Runtime has no CUDA provider; downloading a CUDA build instead")
+    set(OnnxRuntime_FOUND FALSE)
+    set(DRIFT_FETCH_ONNXRUNTIME ON)
+endif()
 if(NOT OnnxRuntime_FOUND AND DRIFT_FETCH_ONNXRUNTIME)
     include(FetchOnnxRuntime)
     find_package(OnnxRuntime REQUIRED)
