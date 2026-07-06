@@ -597,8 +597,10 @@ QVariantMap audioEffectToMap(const drift::Effect &effect)
     if (def) {
         for (const drift::EffectParamSpec &paramDef : def->parameters) {
             QVariant value = effect.parameters.value(paramDef.key);
-            if (!value.isValid())
-                value = QVariant(paramDef.defaultValue);
+            if (!value.isValid()) {
+                value = paramDef.isBoolean ? QVariant(paramDef.defaultValue > 0.5)
+                                           : QVariant(paramDef.defaultValue);
+            }
             params.append(QVariantMap{
                 {QStringLiteral("key"), paramDef.key},
                 {QStringLiteral("label"), paramDef.label},

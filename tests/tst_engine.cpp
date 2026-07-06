@@ -109,6 +109,7 @@ private slots:
     void audioEffectChainAltersSignal();
     void audioEffectChainBypassesUnknownEffect();
     void audioEffectStreamIsContinuousAcrossBlocks();
+    void audioEffectFlangerProcessesSignal();
 
 private:
     static QString makeColorSegmentsVideo(QTemporaryDir &dir);
@@ -2426,6 +2427,72 @@ void EngineTest::audioEffectStreamIsContinuousAcrossBlocks()
         maxDiff = std::max(maxDiff, static_cast<double>(std::abs(streamed[i] - reference[i])));
     QVERIFY2(maxDiff < 0.05,
              qPrintable(QStringLiteral("block boundary discontinuity maxDiff=%1").arg(maxDiff)));
+}
+
+void EngineTest::audioEffectFlangerProcessesSignal()
+{
+    constexpr int kRate = 48000;
+    constexpr int kFrames = 4096;
+
+    QVector<float> tone(kFrames * 2);
+    for (int i = 0; i < kFrames; ++i) {
+        const float s = std::sin(2.0 * M_PI * 440.0 * i / kRate);
+        tone[i * 2] = s;
+        tone[i * 2 + 1] = s;
+    }
+
+    const AudioEffectEntry *flanger = audioEffectDefForId(QStringLiteral("space.flanger"));
+    QVERIFY(flanger);
+    QCOMPARE(flanger->parameters.size(), 7);
+
+    drift::Effect effect;
+    effect.catalogId = flanger->id;
+    effect.parameters.insert(QStringLiteral("rate"), 0.8);
+    effect.parameters.insert(QStringLiteral("phase"), 180.0);
+    effect.parameters.insert(QStringLiteral("mix"), 80.0);
+    effect.parameters.insert(QStringLiteral("invert"), 1.0);
+
+    QString chain = AudioEffectChain::resolveChain(*flanger, effect, kRate);
+    QVERIFY2(!chain.contains(QLatin1Char('{')), qPrintable(chain));
+    QVERIFY(chain.contains(QStringLiteral("speed=0.8")));
+    QVERIFY(chain.contains(QStringLiteral("stereotools=phase=180")));
+    QVERIFY(chain.contains(QStringLiteral("width=80")));
+    QVERIFY(chain.contains(QStringLiteral("phasel=1")));
+
+    const QVector<float> out =
+        AudioEffectChain::apply({effect}, tone.constData(), 0, kFrames, kRate);
+    QCOMPARE(out.size(), kFrames * 2);
+
+    double inRms = 0.0;
+    double outRms = 0.0;
+    int changed = 0;
+    for (int i = 0; i < kFrames * 2; ++i) {
+        QVERIFY(std::isfinite(out[i]));
+        inRms += tone[i] * tone[i];
+        outRms += out[i] * out[i];
+        if (std::abs(out[i] - tone[i]) > 1e-4)
+            ++changed;
+    }
+    inRms = std::sqrt(inRms / (kFrames * 2));
+    outRms = std::sqrt(outRms / (kFrames * 2));
+
+    QVERIFY2(changed > kFrames, "flanger output matches input — chain likely failed");
+    QVERIFY2(outRms > 1e-4, "flanger output is silent");
+    QVERIFY2(outRms < inRms * 2.0,
+             qPrintable(QStringLiteral("flanger blew up: in=%1 out=%2").arg(inRms).arg(outRms)));
+
+    AudioEffectChain::Stream stream;
+    QVERIFY(stream.configure({effect}, kRate));
+    stream.feed(tone.constData(), kFrames);
+    const QVector<float> streamed = stream.drain(kFrames);
+    QCOMPARE(streamed.size(), kFrames * 2);
+    int streamChanged = 0;
+    for (int i = 0; i < streamed.size(); ++i) {
+        QVERIFY(std::isfinite(streamed[i]));
+        if (std::abs(streamed[i] - tone[i]) > 1e-4)
+            ++streamChanged;
+    }
+    QVERIFY2(streamChanged > kFrames, "streamed flanger matches input — graph likely failed");
 }
 
 QTEST_MAIN(EngineTest)

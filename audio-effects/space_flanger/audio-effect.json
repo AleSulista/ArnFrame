@@ -4,23 +4,31 @@
   "category": "space",
   "order": 430,
   "backend": "avfilter",
-  "chain": "flanger=delay={delay}:depth={depth}:regen={regen}:speed={speed}",
+  "chain": "flanger=delay={delay}:depth={depth}:regen={regen}:speed={rate}:width={mix},stereotools=phase={phase}:phasel={invert}:phaser={invert}",
   "prerollMs": 150,
   "parameters": [
     {
-      "identifier": "speed",
-      "displayName": "Speed",
+      "identifier": "rate",
+      "displayName": "Modulation Rate",
       "type": "float",
       "minValue": 0.1,
       "maxValue": 10.0,
       "defaultValue": 0.5
     },
     {
+      "identifier": "phase",
+      "displayName": "Stereo Phase",
+      "type": "float",
+      "minValue": 0,
+      "maxValue": 360,
+      "defaultValue": 90
+    },
+    {
       "identifier": "delay",
       "displayName": "Delay (ms)",
       "type": "float",
       "minValue": 0,
-      "maxValue": 20,
+      "maxValue": 30,
       "defaultValue": 5
     },
     {
@@ -37,6 +45,20 @@
       "type": "float",
       "minValue": -95,
       "maxValue": 95,
+      "defaultValue": 0
+    },
+    {
+      "identifier": "mix",
+      "displayName": "Wet Mix",
+      "type": "float",
+      "minValue": 0,
+      "maxValue": 100,
+      "defaultValue": 71
+    },
+    {
+      "identifier": "invert",
+      "displayName": "Invert Phase",
+      "type": "boolean",
       "defaultValue": 0
     }
   ]
