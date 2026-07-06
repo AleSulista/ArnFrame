@@ -2649,6 +2649,27 @@ PanelFrame {
                             }
                         }
 
+                        Column {
+                            width: parent.width
+                            spacing: 10
+                            visible: root.selectedEffects.length > 0
+
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                text: qsTr("Scrub the playhead, set a value, then click the diamond to key it. With Auto-key on, dragging a slider also writes keys.")
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            ThemedChip {
+                                text: qsTr("Auto-key")
+                                selected: EditorState.autoKeyEnabled
+                                onClicked: EditorState.autoKeyEnabled = !EditorState.autoKeyEnabled
+                            }
+                        }
+
                         // Has a CTA now: the copy told the user to go to the
                         // Effects library but gave them no way to get there.
                         EmptyState {
@@ -2714,12 +2735,15 @@ PanelFrame {
                                         width: tabColumn.width
                                         spacing: 4
 
+                                        // Booleans have nothing to interpolate, so they keep the
+                                        // plain switch and stay off the keyframe strip.
                                         Row {
+                                            visible: !!paramRow.modelData.isBoolean
                                             width: parent.width
                                             spacing: 8
                                             Text {
                                                 width: parent.width - 48
-                                            elide: Text.ElideRight
+                                                elide: Text.ElideRight
                                                 text: paramRow.modelData.label
                                                 color: Theme.mutedForeground
                                                 font.family: Theme.fontFamily
@@ -2729,10 +2753,7 @@ PanelFrame {
                                             Text {
                                                 width: 40
                                                 horizontalAlignment: Text.AlignRight
-                                                text: paramRow.modelData.isBoolean
-                                                      ? (paramRow.modelData.value ? qsTr("On") : qsTr("Off"))
-                                                      : Number(paramSlider.value).toFixed(
-                                                            Math.abs(paramRow.modelData.max - paramRow.modelData.min) >= 10 ? 1 : 2)
+                                                text: paramRow.modelData.value ? qsTr("On") : qsTr("Off")
                                                 color: Theme.panelForeground
                                                 font.family: Theme.monoFontFamily
                                                 font.pixelSize: Theme.fontSizeXs
@@ -2748,24 +2769,25 @@ PanelFrame {
                                                            effectCard.index, paramRow.modelData.key, checked ? 1 : 0)
                                         }
 
-                                        ThemedSlider {
-                                            id: paramSlider
+                                        PropertyKeyframeRow {
                                             visible: !paramRow.modelData.isBoolean
                                             width: parent.width
-                                            from: paramRow.modelData.min
-                                            to: paramRow.modelData.max
-                                            value: paramRow.modelData.value
-                                            onMoved: EditorState.previewSetEffectParam(
-                                                         EditorState.selectedTrack, EditorState.selectedClip,
-                                                         effectCard.index, paramRow.modelData.key, value)
-                                            onPressedChanged: {
-                                                if (pressed) {
-                                                    EditorState.beginPreviewDrag(qsTr("Edit effect"))
-                                                } else {
-                                                    EditorState.commitPreviewDrag()
-                                                    value = Qt.binding(() => paramRow.modelData.value)
-                                                }
-                                            }
+                                            // `def` is the param's static value, which the row falls
+                                            // back to whenever the track holds no keys.
+                                            propDef: ({
+                                                key: paramRow.modelData.prop,
+                                                label: paramRow.modelData.label,
+                                                def: paramRow.modelData.value,
+                                                decimals: Math.abs(paramRow.modelData.max
+                                                                   - paramRow.modelData.min) >= 10 ? 1 : 2
+                                            })
+                                            keyframeList: (paramRow.modelData.keyframes
+                                                           && paramRow.modelData.keyframes.points) || []
+                                            interpolationMode: (paramRow.modelData.keyframes
+                                                                && paramRow.modelData.keyframes.interpolation) || "linear"
+                                            useSlider: true
+                                            sliderFrom: paramRow.modelData.min
+                                            sliderTo: paramRow.modelData.max
                                         }
                                     }
                                 }

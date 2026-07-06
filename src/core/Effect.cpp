@@ -20,4 +20,22 @@ QString Effect::filterGraphString() const
     return QStringLiteral("%1=%2").arg(name, parts.join(QLatin1Char(':')));
 }
 
+QVariant Effect::valueAt(const QString &key, TimeUs clipTimeUs) const
+{
+    const auto it = paramKeyframes.constFind(key);
+    if (it == paramKeyframes.constEnd() || it->isEmpty())
+        return parameters.value(key);
+    return it->evaluateAt(clipTimeUs);
+}
+
+Effect Effect::resolvedAt(TimeUs clipTimeUs) const
+{
+    Effect out = *this;
+    for (auto it = paramKeyframes.constBegin(); it != paramKeyframes.constEnd(); ++it) {
+        if (!it->isEmpty())
+            out.parameters.insert(it.key(), it->evaluateAt(clipTimeUs));
+    }
+    return out;
+}
+
 } // namespace drift

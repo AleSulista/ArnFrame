@@ -37,6 +37,8 @@ private slots:
     void overlapAutoAppliesCrossfade();
     void linkedAudioUnlinkAndMove();
     void keyframeGraphPropertySelection();
+    void effectParamKeyframes();
+    void effectRemovalRemapsGraphSelection();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -316,6 +318,81 @@ void EditorStateTest::textStyleBlendModeKeyframesAndEffects()
     state.removeEffect(track, clip, 0);
     QCOMPARE(state.selectedClipData().value(QStringLiteral("effects")).toList().size(), 0);
     QCOMPARE(state.selectedClipEffects().size(), 0);
+}
+
+void EditorStateTest::effectParamKeyframes()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("Animate me"), 0.0);
+
+    const int track = state.selectedTrack();
+    const int clip = state.selectedClip();
+    state.addEffect(track, clip, QStringLiteral("adjust.contrast"));
+
+    const QString prop = QStringLiteral("fx.0.contrast");
+
+    // Reading a never-keyed param must not mint a track behind the const accessor.
+    QCOMPARE(state.clipKeyframes(track, clip, prop).size(), 0);
+    QVariantList params = state.selectedClipData().value(QStringLiteral("effects")).toList()
+                              .first().toMap().value(QStringLiteral("params")).toList();
+    QCOMPARE(params.first().toMap().value(QStringLiteral("keyframes")).toMap()
+                 .value(QStringLiteral("points")).toList().size(), 0);
+    QCOMPARE(params.first().toMap().value(QStringLiteral("prop")).toString(), prop);
+
+    // Auto-key off: a slider drag moves the static value without animating the param.
+    state.setAutoKeyEnabled(false);
+    state.beginPreviewDrag(QStringLiteral("Edit effect"));
+    state.previewSetClipKeyframe(track, clip, prop, 0.0, 1.4);
+    state.commitPreviewDrag();
+    QCOMPARE(state.clipKeyframes(track, clip, prop).size(), 0);
+    params = state.selectedClipData().value(QStringLiteral("effects")).toList()
+                 .first().toMap().value(QStringLiteral("params")).toList();
+    QCOMPARE(params.first().toMap().value(QStringLiteral("value")).toDouble(), 1.4);
+
+    // The diamond forces a key, and the static value tracks it.
+    state.setClipKeyframe(track, clip, prop, 0.0, 0.5);
+    state.setClipKeyframe(track, clip, prop, 2.0, 2.5);
+    QVariantList keys = state.clipKeyframes(track, clip, prop);
+    QCOMPARE(keys.size(), 2);
+    QCOMPARE(keys.first().toMap().value(QStringLiteral("value")).toDouble(), 0.5);
+    QCOMPARE(keys.last().toMap().value(QStringLiteral("seconds")).toDouble(), 2.0);
+
+    state.setKeyframeInterpolation(track, clip, prop, QStringLiteral("ease"));
+    params = state.selectedClipData().value(QStringLiteral("effects")).toList()
+                 .first().toMap().value(QStringLiteral("params")).toList();
+    QCOMPARE(params.first().toMap().value(QStringLiteral("keyframes")).toMap()
+                 .value(QStringLiteral("interpolation")).toString(), QStringLiteral("ease"));
+
+    state.removeClipKeyframe(track, clip, prop, 2.0);
+    QCOMPARE(state.clipKeyframes(track, clip, prop).size(), 1);
+
+    // An out-of-range effect index resolves to nothing rather than crashing.
+    QCOMPARE(state.clipKeyframes(track, clip, QStringLiteral("fx.9.contrast")).size(), 0);
+}
+
+void EditorStateTest::effectRemovalRemapsGraphSelection()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("Two effects"), 0.0);
+
+    const int track = state.selectedTrack();
+    const int clip = state.selectedClip();
+    state.addEffect(track, clip, QStringLiteral("adjust.contrast"));
+    state.addEffect(track, clip, QStringLiteral("adjust.brightness"));
+
+    state.setKeyframeGraphProperties({ QStringLiteral("x"), QStringLiteral("fx.0.contrast"),
+                                       QStringLiteral("fx.1.brightness") });
+    QCOMPARE(state.keyframeGraphProperties(),
+             (QStringList { QStringLiteral("x"), QStringLiteral("fx.0.contrast"),
+                            QStringLiteral("fx.1.brightness") }));
+
+    // Dropping effect 0 must retire its series and renumber the one above it, or the strip would
+    // start drawing brightness under the contrast label.
+    state.removeEffect(track, clip, 0);
+    QCOMPARE(state.keyframeGraphProperties(),
+             (QStringList { QStringLiteral("x"), QStringLiteral("fx.0.brightness") }));
 }
 
 void EditorStateTest::previewSetTextRectScalesPixelSize()
@@ -735,6 +812,21 @@ void EditorStateTest::keyframeGraphPropertySelection()
     state.setKeyframeGraphProperties({ QStringLiteral("nope") });
     QCOMPARE(state.keyframeGraphProperties(),
              (QStringList { QStringLiteral("x"), QStringLiteral("volume") }));
+
+    // Effect param keys are verbatim manifest identifiers and are often camelCase, so they must
+    // survive normalization intact while bare transform names stay case-insensitive.
+    state.soloKeyframeGraphProperty(QStringLiteral("fx.0.u_blurRadius"));
+    QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("fx.0.u_blurRadius") });
+    state.ensureKeyframeGraphProperty(QStringLiteral("fx.0.u_blurRadius"));
+    QCOMPARE(state.keyframeGraphProperties().size(), 1);
+    state.toggleKeyframeGraphProperty(QStringLiteral("fx.0.u_blurRadius"));
+    QVERIFY(state.keyframeGraphProperties().isEmpty());
+
+    // Malformed compound keys are rejected like any other unknown prop.
+    state.setKeyframeGraphProperties({ QStringLiteral("x") });
+    state.setKeyframeGraphProperties({ QStringLiteral("fx."), QStringLiteral("fx.a.b"),
+                                       QStringLiteral("fx.0.") });
+    QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("x") });
 }
 
 QTEST_MAIN(EditorStateTest)

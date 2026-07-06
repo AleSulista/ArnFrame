@@ -48,11 +48,21 @@ QJsonArray effectsToJson(const QList<Effect> &effects)
         QJsonObject params;
         for (auto it = effect.parameters.constBegin(); it != effect.parameters.constEnd(); ++it)
             params.insert(it.key(), QJsonValue::fromVariant(it.value()));
-        array.append(QJsonObject{
+        QJsonObject paramKeyframes;
+        for (auto it = effect.paramKeyframes.constBegin(); it != effect.paramKeyframes.constEnd(); ++it) {
+            // A track is created the moment a param is keyed *or* its interpolation is picked, so
+            // an empty non-linear track still carries a user choice worth keeping.
+            if (!it->isEmpty() || it->interpolation() != Interpolation::Linear)
+                paramKeyframes.insert(it.key(), keyframesToJson(it.value()));
+        }
+        QJsonObject object{
             {QStringLiteral("name"), effect.name},
             {QStringLiteral("catalogId"), effect.catalogId},
             {QStringLiteral("parameters"), params},
-        });
+        };
+        if (!paramKeyframes.isEmpty())
+            object.insert(QStringLiteral("paramKeyframes"), paramKeyframes);
+        array.append(object);
     }
     return array;
 }
@@ -68,6 +78,9 @@ QList<Effect> effectsFromJson(const QJsonArray &array)
         const QJsonObject params = object.value(QStringLiteral("parameters")).toObject();
         for (auto it = params.constBegin(); it != params.constEnd(); ++it)
             effect.parameters.insert(it.key(), it.value().toVariant());
+        const QJsonObject paramKeyframes = object.value(QStringLiteral("paramKeyframes")).toObject();
+        for (auto it = paramKeyframes.constBegin(); it != paramKeyframes.constEnd(); ++it)
+            effect.paramKeyframes.insert(it.key(), keyframesFromJson(it.value().toObject()));
         effects.append(effect);
     }
     return effects;

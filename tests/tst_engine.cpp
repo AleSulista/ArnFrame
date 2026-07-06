@@ -49,6 +49,7 @@ private slots:
     void compositorPreviewScaleMapsProjectPixelLayout();
     void compositorAppliesFaceWarpFromBakedTrack();
     void compositorAppliesMultiplyBlendMode();
+    void compositorAnimatesKeyedEffectParam();
     void compositorRendersShapeClip();
     void compositorSkipsClipBeingEdited();
     void adjustmentEffectContrastCatalogEntry();
@@ -648,6 +649,57 @@ void EngineTest::compositorAppliesMultiplyBlendMode()
 
     const QImage overWhite = compositeOverBackground(Qt::white);
     QCOMPARE(overWhite.pixelColor(32, 32), QColor(255, 0, 0));
+}
+
+// A keyed effect parameter is resolved inside the compositor, which is the only place preview and
+// export share. If the bake were done anywhere else the two could drift apart, so assert on the
+// composited pixels rather than on the resolved parameter map.
+void EngineTest::compositorAnimatesKeyedEffectParam()
+{
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("OpenGL offscreen context unavailable");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    QImage source(64, 64, QImage::Format_RGBA8888);
+    source.fill(QColor(100, 100, 100));
+    const QString path = dir.filePath(QStringLiteral("grey.png"));
+    QVERIFY(source.save(path, "PNG"));
+
+    drift::Project project;
+    project.setResolution(64, 64);
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("animated");
+    clip.type = drift::ClipType::Image;
+    clip.path = path;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(2.0);
+
+    drift::Effect effect;
+    effect.catalogId = QStringLiteral("adjust.brightness");
+    // The static value is deliberately the *opposite* of the ramp, so a composite that ignored the
+    // track would darken instead of brighten and the assertions below would fail.
+    effect.parameters.insert(QStringLiteral("brightness"), -0.5);
+    drift::KeyframeTrack<double> ramp;
+    ramp.setKeyframe(0, 0.0);
+    ramp.setKeyframe(drift::secondsToUs(2.0), 0.5);
+    effect.paramKeyframes.insert(QStringLiteral("brightness"), ramp);
+    clip.effects.append(effect);
+    project.tracks()[0].clips.append(clip);
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+
+    const int atStart = qRed(compositor.compositeAt(0).pixel(32, 32));
+    const int atMid = qRed(compositor.compositeAt(drift::secondsToUs(1.0)).pixel(32, 32));
+    const int atEnd = qRed(compositor.compositeAt(drift::secondsToUs(1.999)).pixel(32, 32));
+
+    QVERIFY(atStart < atMid);
+    QVERIFY(atMid < atEnd);
+    // brightness 0 at t=0 leaves the source untouched.
+    QVERIFY(qAbs(atStart - 100) <= 2);
 }
 
 void EngineTest::compositorRendersShapeClip()

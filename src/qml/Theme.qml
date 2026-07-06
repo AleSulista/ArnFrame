@@ -147,8 +147,20 @@ QtObject {
         "opacity": "#a78bfa",
         "volume": "#2dd4bf"
     })
+    // Effect parameters are open-ended ("fx.<index>.<key>"), so they can't have named entries
+    // above. Hashing the prop into this ramp keeps each one a stable, distinct color across
+    // sessions instead of drawing every effect curve in the same accent.
+    readonly property var keyframeCurveRamp: [
+        "#38bdf8", "#fb923c", "#4ade80", "#c084fc",
+        "#fb7185", "#facc15", "#2dd4bf", "#818cf8"
+    ]
     function keyframeCurveColor(prop) {
-        return keyframeCurveColors[prop] || primary
+        if (keyframeCurveColors[prop])
+            return keyframeCurveColors[prop]
+        let hash = 0
+        for (let i = 0; i < prop.length; ++i)
+            hash = (hash * 31 + prop.charCodeAt(i)) & 0x7fffffff
+        return keyframeCurveRamp[hash % keyframeCurveRamp.length]
     }
 
     // --- Radius --------------------------------------------------------------

@@ -444,6 +444,8 @@ signals:
 protected:
     void pushProjectEdit(const drift::Project &before, const QString &text);
     void finishEdit(const QString &message);
+    // Keeps the keyframe strip's index-addressed effect series in sync after an effect is removed.
+    void dropKeyframeGraphPropertiesForEffect(int removedIndex);
     void refreshSegmentationPreview();
     void finalizeFaceDetection(const QString &clipId, const QString &trackPath,
                                drift::TimeUs srcOffsetUs);

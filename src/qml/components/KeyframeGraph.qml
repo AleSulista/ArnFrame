@@ -7,10 +7,10 @@ import Drift
 //
 // The strip is a *mirror* of the inspector's property selection, not its own
 // picker: it shows one color-coded series per property selected over in the
-// Transform panel. The selection accumulates — clicking or editing a second
-// property adds its curve rather than replacing the first — so clicking a chip
-// here is the way back to a single series. Deselecting everything collapses the
-// strip to nothing.
+// Transform or Effects panel. The selection accumulates — clicking or editing a
+// second property adds its curve rather than replacing the first — so clicking a
+// chip here is the way back to a single series. Deselecting everything collapses
+// the strip to nothing.
 Item {
     id: root
 
@@ -26,6 +26,27 @@ Item {
         return EditorState.selectedClipData
     }
 
+    // Effect parameters are addressed as "fx.<effectIndex>.<paramKey>"; the label, range and
+    // color all come from the effect's own param spec on the selected clip.
+    function effectParam(id) {
+        if (!clip || !clip.effects || id.substring(0, 3) !== "fx.")
+            return null
+        const dot = id.indexOf(".", 3)
+        if (dot < 0)
+            return null
+        const effectIndex = parseInt(id.substring(3, dot))
+        const key = id.substring(dot + 1)
+        if (isNaN(effectIndex) || effectIndex < 0 || effectIndex >= clip.effects.length)
+            return null
+        const effect = clip.effects[effectIndex]
+        const params = effect.params || []
+        for (let i = 0; i < params.length; ++i) {
+            if (params[i].key === key)
+                return { effect: effect, param: params[i] }
+        }
+        return null
+    }
+
     // Spelled-out names for the one-to-three character property chips.
     function propertyLabel(id) {
         switch (id) {
@@ -37,6 +58,9 @@ Item {
         case "opacity": return qsTr("Opacity")
         case "volume": return qsTr("Volume")
         }
+        const fx = effectParam(id)
+        if (fx)
+            return fx.effect.label + " · " + fx.param.label
         return id
     }
     function chipLabel(id) {
@@ -49,6 +73,9 @@ Item {
         case "opacity": return "Op"
         case "volume": return "Vol"
         }
+        const fx = effectParam(id)
+        if (fx)
+            return fx.param.label.substring(0, 3)
         return id
     }
     // Volume only exists on clips that carry audio; the rest are visual.
@@ -57,6 +84,8 @@ Item {
             return false
         if (id === "volume")
             return clip.kind === "audio" || clip.kind === "video"
+        if (id.substring(0, 3) === "fx.")
+            return clip.kind !== "audio" && effectParam(id) !== null
         return clip.kind !== "audio"
     }
 
@@ -69,6 +98,9 @@ Item {
             return { min: 0, max: 2 }
         if (id === "rotation")
             return { min: -180, max: 180 }
+        const fx = effectParam(id)
+        if (fx)
+            return { min: fx.param.min, max: fx.param.max }
         let lo = Infinity
         let hi = -Infinity
         for (let i = 0; i < pts.length; ++i) {
@@ -113,6 +145,12 @@ Item {
                 continue
             const pts = EditorState.clipKeyframes(
                           EditorState.selectedTrack, EditorState.selectedClip, id) || []
+            // Transform props are always animatable, so they earn a chip even before their first
+            // key. An effect param is a static value until it is keyed, and merely dragging its
+            // slider selects it — showing an empty series for that would pop the strip open on
+            // every effect edit.
+            if (pts.length === 0 && id.substring(0, 3) === "fx.")
+                continue
             const range = root.valueRangeFor(id, pts)
             out.push({
                 prop: id,
@@ -150,7 +188,8 @@ Item {
     readonly property real clipDuration: Math.max(0.1, clip.duration || 1)
 
     height: visible ? 88 : 0
-    visible: propertiesTab === "transform" && hasClip && clip && series.length > 0
+    visible: (propertiesTab === "transform" || propertiesTab === "effects")
+             && hasClip && clip && series.length > 0
 
     // Absolute timeline X — same mapping as clips on the track.
     function xForSeconds(seconds) {

@@ -141,13 +141,17 @@ QList<drift::FaceAnchors> faceSlotsForClip(const drift::Clip &clip,
     return track->sampleAll(clip.timelineToSourceUs(timelineUs) - clip.faceTrackSrcOffsetUs);
 }
 
-QList<drift::Effect> effectsExcludingTimeEcho(const QList<drift::Effect> &effects)
+// The clip's chain as it should render *this* frame: time_echo dropped (its trail is assembled
+// before the chain runs) and every keyframed parameter baked down to its value at clipTimeUs.
+// Both the CPU and GPU paths go through here, so an animated parameter cannot come out different
+// between preview and export.
+QList<drift::Effect> resolvedClipEffects(const drift::Clip &clip, drift::TimeUs clipTimeUs)
 {
     QList<drift::Effect> filtered;
-    filtered.reserve(effects.size());
-    for (const drift::Effect &effect : effects) {
+    filtered.reserve(clip.effects.size());
+    for (const drift::Effect &effect : clip.effects) {
         if (effect.catalogId != QStringLiteral("time_echo"))
-            filtered.append(effect);
+            filtered.append(effect.resolvedAt(clipTimeUs));
     }
     return filtered;
 }
@@ -244,7 +248,7 @@ QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int maxWi
 
     const drift::TimeUs clipTimeUs = timelineUs - clip.timelineStart;
     const drift::Effect *timeEcho = findTimeEchoEffect(clip.effects);
-    const QList<drift::Effect> otherEffects = effectsExcludingTimeEcho(clip.effects);
+    const QList<drift::Effect> otherEffects = resolvedClipEffects(clip, clipTimeUs);
 
     QImage image;
     if (timeEcho) {
@@ -252,7 +256,8 @@ QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int maxWi
         if (!def)
             return {};
 
-        const QMap<QString, QVariant> params = resolvedEffectParameters(*timeEcho, *def);
+        const QMap<QString, QVariant> params =
+            resolvedEffectParameters(timeEcho->resolvedAt(clipTimeUs), *def);
         int frameCount = qBound(1, params.value(QStringLiteral("frames"), 4).toInt(), 10);
         if (maxTimeEchoHistoryFrames >= 0)
             frameCount = qMin(frameCount, maxTimeEchoHistoryFrames);
@@ -448,7 +453,9 @@ QImage gpuSourceForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int m
     if (!def)
         return {};
 
-    const QMap<QString, QVariant> params = resolvedEffectParameters(*timeEcho, *def);
+    const drift::TimeUs clipTimeUs = timelineUs - clip.timelineStart;
+    const QMap<QString, QVariant> params =
+        resolvedEffectParameters(timeEcho->resolvedAt(clipTimeUs), *def);
     int frameCount = qBound(1, params.value(QStringLiteral("frames"), 4).toInt(), 10);
     if (maxTimeEchoHistoryFrames >= 0)
         frameCount = qMin(frameCount, maxTimeEchoHistoryFrames);
@@ -456,7 +463,6 @@ QImage gpuSourceForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int m
     const auto blendMode =
         CompositorFrameHistory::parseEchoBlendMode(params.value(QStringLiteral("blendMode")).toString());
 
-    const drift::TimeUs clipTimeUs = timelineUs - clip.timelineStart;
     const drift::TimeUs frameStepUs = drift::frameDurationUs(projectFps);
     QList<QImage> samples;
     samples.reserve(frameCount + 1);
@@ -485,6 +491,8 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
 {
     GpuLayer layer;
 
+    const drift::TimeUs clipTimeUs = timelineUs - clip.timelineStart;
+
     double x = 0.0;
     double y = 0.0;
     double w = 0.0;
@@ -509,7 +517,7 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
         const TextAnimSample anim = sampleTextAnimation(clip, timelineUs, layoutRect, renderScale);
 
         layer.source = raster.image;
-        layer.effects = effectsExcludingTimeEcho(clip.effects);
+        layer.effects = resolvedClipEffects(clip, clipTimeUs);
 
         destRect = raster.rect.translated(anim.dx, anim.dy);
         if (!qFuzzyCompare(anim.scale, 1.0)) {
@@ -540,7 +548,7 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
                                                                renderScale);
 
         layer.source = raster.image;
-        layer.effects = effectsExcludingTimeEcho(clip.effects);
+        layer.effects = resolvedClipEffects(clip, clipTimeUs);
 
         destRect = raster.rect.translated(anim.dx, anim.dy);
         if (!qFuzzyCompare(anim.scale, 1.0)) {
@@ -558,12 +566,12 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
         }
     } else if (clip.type == drift::ClipType::Shape) {
         layer.source = shapeImageForClip(clip, layoutW, layoutH);
-        layer.effects = effectsExcludingTimeEcho(clip.effects);
+        layer.effects = resolvedClipEffects(clip, clipTimeUs);
     } else {
         // Bounded by the canvas, not the layout rect — see decodeClipMediaFrame.
         layer.source = gpuSourceForClip(clip, timelineUs, canvasWidth, canvasHeight, projectFps,
                                         maxTimeEchoHistoryFrames);
-        layer.effects = effectsExcludingTimeEcho(clip.effects);
+        layer.effects = resolvedClipEffects(clip, clipTimeUs);
     }
 
     if (layer.source.isNull())

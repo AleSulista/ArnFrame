@@ -36,6 +36,7 @@ private slots:
     void textPresetsAreWellFormed();
     void shapeStyleSerialization();
     void effectCatalogIdSerialization();
+    void effectParamKeyframeSerialization();
     void audioEffectSerialization();
     void rgbSplitEffectParametersSerialization();
     void blockGlitchEffectParametersSerialization();
@@ -647,6 +648,56 @@ void CoreTest::effectCatalogIdSerialization()
     QCOMPARE(loadedClip.effects.size(), 1);
     QCOMPARE(loadedClip.effects[0].catalogId, QStringLiteral("adjust.contrast"));
     QCOMPARE(loadedClip.effects[0].parameters.value(QStringLiteral("contrast")).toDouble(), 1.4);
+    // Projects written before animated params existed carry no paramKeyframes at all.
+    QVERIFY(loadedClip.effects[0].paramKeyframes.isEmpty());
+}
+
+// An animated effect parameter is only worth anything if it survives a save/load, and the static
+// value has to come back alongside it — that is what an un-keyed frame falls back to.
+void CoreTest::effectParamKeyframeSerialization()
+{
+    drift::Project project;
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-animated-effect");
+    clip.type = drift::ClipType::Video;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(4.0);
+
+    drift::Effect effect;
+    effect.catalogId = QStringLiteral("adjust.contrast");
+    effect.parameters.insert(QStringLiteral("contrast"), 1.4);
+    drift::KeyframeTrack<double> track;
+    track.setInterpolation(drift::Interpolation::Ease);
+    track.setKeyframe(0, 0.5);
+    track.setKeyframe(drift::secondsToUs(2.0), 2.5);
+    effect.paramKeyframes.insert(QStringLiteral("contrast"), track);
+    clip.effects.append(effect);
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    const drift::Effect &loadedEffect = loaded.tracks()[0].clips[0].effects[0];
+    QCOMPARE(loadedEffect.parameters.value(QStringLiteral("contrast")).toDouble(), 1.4);
+    const drift::KeyframeTrack<double> &loadedTrack =
+        loadedEffect.paramKeyframes.value(QStringLiteral("contrast"));
+    QCOMPARE(loadedTrack.keyframes().size(), 2);
+    QVERIFY(loadedTrack.interpolation() == drift::Interpolation::Ease);
+
+    // valueAt is what the compositor reads: the track wins where it has keys, and an unkeyed
+    // param falls back to the static value.
+    QCOMPARE(loadedEffect.valueAt(QStringLiteral("contrast"), 0).toDouble(), 0.5);
+    QCOMPARE(loadedEffect.valueAt(QStringLiteral("contrast"), drift::secondsToUs(2.0)).toDouble(), 2.5);
+    const double mid = loadedEffect.valueAt(QStringLiteral("contrast"), drift::secondsToUs(1.0)).toDouble();
+    QVERIFY(mid > 0.5 && mid < 2.5);
+    QCOMPARE(loadedEffect.valueAt(QStringLiteral("nosuch"), 0).isValid(), false);
+
+    // resolvedAt bakes the animated params down; everything else is carried through untouched.
+    const drift::Effect resolved = loadedEffect.resolvedAt(drift::secondsToUs(2.0));
+    QCOMPARE(resolved.parameters.value(QStringLiteral("contrast")).toDouble(), 2.5);
+    QCOMPARE(resolved.catalogId, QStringLiteral("adjust.contrast"));
 }
 
 // Audio effects live in a separate list from video effects on the clip and must survive a project

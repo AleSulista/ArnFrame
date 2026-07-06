@@ -584,7 +584,26 @@ drift::ShapeStyle shapeStyleForKind(const QString &shapeKind)
     return style;
 }
 
-drift::KeyframeTrack<double> *trackForProp(drift::Clip &clip, const QString &prop)
+// Effect parameters are addressed as "fx.<effectIndex>.<paramKey>" so the whole generic keyframe
+// API — set / remove / move / interpolation / keyframe-strip selection — reaches them without a
+// parallel set of invokables. Indices match the effectIndex the effect invokables already take.
+bool parseEffectProp(const QString &prop, int *effectIndex, QString *paramKey)
+{
+    if (!prop.startsWith(QLatin1String("fx.")))
+        return false;
+    const int dot = prop.indexOf(QLatin1Char('.'), 3);
+    if (dot < 0 || dot == 3 || dot + 1 >= prop.size())
+        return false;
+    bool ok = false;
+    const int index = QStringView(prop).mid(3, dot - 3).toInt(&ok);
+    if (!ok || index < 0)
+        return false;
+    *effectIndex = index;
+    *paramKey = prop.mid(dot + 1);
+    return true;
+}
+
+drift::KeyframeTrack<double> *transformTrackForProp(drift::Clip &clip, const QString &prop)
 {
     if (prop == QStringLiteral("opacity"))
         return &clip.opacity;
@@ -603,9 +622,50 @@ drift::KeyframeTrack<double> *trackForProp(drift::Clip &clip, const QString &pro
     return nullptr;
 }
 
-const drift::KeyframeTrack<double> *trackForProp(const drift::Clip &clip, const QString &prop)
+// createIfMissing must stay false on read paths: an effect param's track is created lazily, and
+// QMap::operator[] would otherwise insert an empty one into the project behind a const accessor.
+drift::KeyframeTrack<double> *keyframeTrackForProp(drift::Clip &clip, const QString &prop,
+                                                   bool createIfMissing)
 {
-    return trackForProp(const_cast<drift::Clip &>(clip), prop);
+    int effectIndex = -1;
+    QString paramKey;
+    if (!parseEffectProp(prop, &effectIndex, &paramKey))
+        return transformTrackForProp(clip, prop);
+
+    if (effectIndex >= clip.effects.size())
+        return nullptr;
+
+    drift::Effect &effect = clip.effects[effectIndex];
+    if (createIfMissing)
+        return &effect.paramKeyframes[paramKey];
+    const auto it = effect.paramKeyframes.find(paramKey);
+    return it == effect.paramKeyframes.end() ? nullptr : &it.value();
+}
+
+const drift::KeyframeTrack<double> *keyframeTrackForProp(const drift::Clip &clip, const QString &prop)
+{
+    return keyframeTrackForProp(const_cast<drift::Clip &>(clip), prop, /*createIfMissing=*/false);
+}
+
+// Well-formed enough to keep in the keyframe-strip selection. Effect params can't be validated
+// against a clip here — the selection outlives any particular clip — so only the shape is checked.
+bool isKnownKeyframeProp(const QString &prop)
+{
+    int effectIndex = -1;
+    QString paramKey;
+    if (parseEffectProp(prop, &effectIndex, &paramKey))
+        return true;
+    drift::Clip probe;
+    return transformTrackForProp(probe, prop) != nullptr;
+}
+
+// Transform prop names are lower-case by convention, but effect param keys are verbatim
+// identifiers from the effect manifest and are frequently camelCase ("u_blurRadius"), so the
+// compound form must survive normalization untouched.
+QString normalizeKeyframeProp(const QString &prop)
+{
+    const QString trimmed = prop.trimmed();
+    return trimmed.startsWith(QLatin1String("fx.")) ? trimmed : trimmed.toLower();
 }
 
 constexpr drift::TimeUs kKeyframeToleranceUs = drift::kUsPerSecond / 30;
@@ -636,7 +696,64 @@ bool writeKeyframeValue(drift::KeyframeTrack<double> &track, drift::TimeUs relat
     return true;
 }
 
-QVariantMap effectToMap(const drift::Effect &effect)
+// Writes `value` for `prop`, returning false when the write was refused (auto-key off with no key
+// near the playhead to retarget).
+//
+// Effect params differ from transform props in one way: they already have a static home in
+// Effect::parameters, so silently minting a keyframe track on an ordinary slider drag would make
+// every param "animated". An un-keyed param therefore only becomes animated on an explicit
+// diamond click (force) or with auto-key on; otherwise the write lands on the static value. Keyed
+// params mirror into the static value too, so deleting the last key leaves the param where the
+// user last put it rather than snapping back to the catalog default.
+bool writeClipPropValue(drift::Clip &clip, const QString &prop, drift::TimeUs relative, double value,
+                        bool autoKey, bool force)
+{
+    int effectIndex = -1;
+    QString paramKey;
+    if (!parseEffectProp(prop, &effectIndex, &paramKey)) {
+        drift::KeyframeTrack<double> *kt = transformTrackForProp(clip, prop);
+        return kt && writeKeyframeValue(*kt, relative, value, autoKey, force);
+    }
+
+    if (effectIndex >= clip.effects.size())
+        return false;
+
+    drift::Effect &effect = clip.effects[effectIndex];
+    const auto existing = effect.paramKeyframes.constFind(paramKey);
+    const bool keyed = existing != effect.paramKeyframes.constEnd() && !existing->isEmpty();
+    if (!keyed && !force && !autoKey) {
+        effect.parameters.insert(paramKey, value);
+        return true;
+    }
+    if (!writeKeyframeValue(effect.paramKeyframes[paramKey], relative, value, autoKey, force))
+        return false;
+    effect.parameters.insert(paramKey, value);
+    return true;
+}
+
+QVariantList keyframeListToVariant(const drift::KeyframeTrack<double> &track, drift::TimeUs timelineStart)
+{
+    QVariantList out;
+    for (auto it = track.keyframes().constBegin(); it != track.keyframes().constEnd(); ++it) {
+        out.append(QVariantMap{
+            {QStringLiteral("seconds"), drift::usToSeconds(timelineStart + it.key())},
+            {QStringLiteral("value"), it.value()},
+        });
+    }
+    return out;
+}
+
+QVariantMap keyframeTrackToMap(const drift::KeyframeTrack<double> &track, drift::TimeUs timelineStart)
+{
+    return {
+        {QStringLiteral("interpolation"), drift::interpolationToString(track.interpolation())},
+        {QStringLiteral("points"), keyframeListToVariant(track, timelineStart)},
+    };
+}
+
+// `effectIndex` and `timelineStart` are only needed to describe the params' keyframe tracks: the
+// inspector addresses them as "fx.<index>.<key>", and key times are reported on the timeline.
+QVariantMap effectToMap(const drift::Effect &effect, int effectIndex, drift::TimeUs timelineStart)
 {
     const EffectPresetEntry *def = effectDefForId(effect.catalogId);
     QVariantList params;
@@ -647,13 +764,17 @@ QVariantMap effectToMap(const drift::Effect &effect)
                 value = paramDef.isBoolean ? QVariant(paramDef.defaultValue > 0.5)
                                            : QVariant(paramDef.defaultValue);
             }
+            // `value` stays the static value; the row falls back to it whenever the track is empty.
             params.append(QVariantMap{
                 {QStringLiteral("key"), paramDef.key},
+                {QStringLiteral("prop"), QStringLiteral("fx.%1.%2").arg(effectIndex).arg(paramDef.key)},
                 {QStringLiteral("label"), paramDef.label},
                 {QStringLiteral("min"), paramDef.min},
                 {QStringLiteral("max"), paramDef.max},
                 {QStringLiteral("isBoolean"), paramDef.isBoolean},
                 {QStringLiteral("value"), value},
+                {QStringLiteral("keyframes"),
+                 keyframeTrackToMap(effect.paramKeyframes.value(paramDef.key), timelineStart)},
             });
         }
     }
@@ -692,26 +813,6 @@ QVariantMap audioEffectToMap(const drift::Effect &effect)
         {QStringLiteral("label"), def ? def->displayName : effect.name},
         {QStringLiteral("params"), params},
         {QStringLiteral("missing"), def == nullptr},
-    };
-}
-
-QVariantList keyframeListToVariant(const drift::KeyframeTrack<double> &track, drift::TimeUs timelineStart)
-{
-    QVariantList out;
-    for (auto it = track.keyframes().constBegin(); it != track.keyframes().constEnd(); ++it) {
-        out.append(QVariantMap{
-            {QStringLiteral("seconds"), drift::usToSeconds(timelineStart + it.key())},
-            {QStringLiteral("value"), it.value()},
-        });
-    }
-    return out;
-}
-
-QVariantMap keyframeTrackToMap(const drift::KeyframeTrack<double> &track, drift::TimeUs timelineStart)
-{
-    return {
-        {QStringLiteral("interpolation"), drift::interpolationToString(track.interpolation())},
-        {QStringLiteral("points"), keyframeListToVariant(track, timelineStart)},
     };
 }
 
@@ -959,8 +1060,8 @@ QHash<QString, QString> defaultShortcuts()
 QVariantMap AppController::clipToMap(const drift::Clip &clip) const
 {
     QVariantList effects;
-    for (const drift::Effect &effect : clip.effects)
-        effects.append(effectToMap(effect));
+    for (int i = 0; i < clip.effects.size(); ++i)
+        effects.append(effectToMap(clip.effects.at(i), i, clip.timelineStart));
 
     QVariantList audioEffects;
     for (const drift::Effect &effect : clip.audioEffects)
@@ -1182,10 +1283,10 @@ void AppController::setKeyframeGraphProperties(const QStringList &props)
 {
     QStringList normalized;
     for (const QString &prop : props) {
-        const QString key = prop.trimmed().toLower();
+        const QString key = normalizeKeyframeProp(prop);
         if (key.isEmpty() || normalized.contains(key))
             continue;
-        if (!trackForProp(drift::Clip{}, key)) // only allow known prop keys
+        if (!isKnownKeyframeProp(key)) // only allow known prop keys
             continue;
         normalized.append(key);
     }
@@ -1202,7 +1303,7 @@ void AppController::setKeyframeGraphProperties(const QStringList &props)
 
 void AppController::toggleKeyframeGraphProperty(const QString &prop)
 {
-    const QString key = prop.trimmed().toLower();
+    const QString key = normalizeKeyframeProp(prop);
     QStringList next = m_keyframeGraphProperties;
     if (next.contains(key))
         next.removeAll(key); // may empty the selection, which collapses the strip
@@ -1216,9 +1317,33 @@ void AppController::soloKeyframeGraphProperty(const QString &prop)
     setKeyframeGraphProperties({ prop });
 }
 
+// Effect props are addressed by index, so removing an effect would leave the strip drawing some
+// other effect's parameter. Drop the removed effect's series and renumber everything above it.
+void AppController::dropKeyframeGraphPropertiesForEffect(int removedIndex)
+{
+    QStringList next;
+    for (const QString &prop : std::as_const(m_keyframeGraphProperties)) {
+        int effectIndex = -1;
+        QString paramKey;
+        if (!parseEffectProp(prop, &effectIndex, &paramKey)) {
+            next.append(prop);
+            continue;
+        }
+        if (effectIndex == removedIndex)
+            continue;
+        next.append(effectIndex > removedIndex
+                        ? QStringLiteral("fx.%1.%2").arg(effectIndex - 1).arg(paramKey)
+                        : prop);
+    }
+    if (next == m_keyframeGraphProperties)
+        return;
+    m_keyframeGraphProperties = next;
+    emit keyframeGraphPropertyChanged();
+}
+
 void AppController::ensureKeyframeGraphProperty(const QString &prop)
 {
-    const QString key = prop.trimmed().toLower();
+    const QString key = normalizeKeyframeProp(prop);
     if (m_keyframeGraphProperties.contains(key))
         return;
     setKeyframeGraphProperties(m_keyframeGraphProperties + QStringList { key });
@@ -3514,12 +3639,8 @@ void AppController::previewSetClipKeyframe(int trackIndex, int clipIndex, const 
         return;
 
     drift::Clip &clip = track.clips[clipIndex];
-    drift::KeyframeTrack<double> *kt = trackForProp(clip, prop);
-    if (!kt)
-        return;
-
     const drift::TimeUs rel = qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds) - clip.timelineStart);
-    if (!writeKeyframeValue(*kt, rel, value, m_autoKeyEnabled, false)) {
+    if (!writeClipPropValue(clip, prop, rel, value, m_autoKeyEnabled, /*force=*/false)) {
         emit transformBlocked(tr("Can't edit — auto-key is off"));
         return;
     }
@@ -4786,13 +4907,10 @@ void AppController::setClipKeyframe(int trackIndex, int clipIndex, const QString
         return;
 
     drift::Clip &clip = track.clips[clipIndex];
-    drift::KeyframeTrack<double> *kt = trackForProp(clip, prop);
-    if (!kt)
-        return;
-
     const drift::Project before = m_project;
     const drift::TimeUs rel = qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds) - clip.timelineStart);
-    writeKeyframeValue(*kt, rel, value, m_autoKeyEnabled, /*force=*/true);
+    if (!writeClipPropValue(clip, prop, rel, value, m_autoKeyEnabled, /*force=*/true))
+        return;
     pushProjectEdit(before, QStringLiteral("Add keyframe"));
     finishEdit(QStringLiteral("Keyframe set"));
 }
@@ -4807,7 +4925,7 @@ void AppController::removeClipKeyframe(int trackIndex, int clipIndex, const QStr
         return;
 
     drift::Clip &clip = track.clips[clipIndex];
-    drift::KeyframeTrack<double> *kt = trackForProp(clip, prop);
+    drift::KeyframeTrack<double> *kt = keyframeTrackForProp(clip, prop, /*createIfMissing=*/false);
     if (!kt)
         return;
 
@@ -4832,7 +4950,7 @@ void AppController::previewMoveClipKeyframe(int trackIndex, int clipIndex, const
         return;
 
     drift::Clip &clip = track.clips[clipIndex];
-    drift::KeyframeTrack<double> *kt = trackForProp(clip, prop);
+    drift::KeyframeTrack<double> *kt = keyframeTrackForProp(clip, prop, /*createIfMissing=*/false);
     if (!kt)
         return;
 
@@ -4859,7 +4977,7 @@ QVariantList AppController::clipKeyframes(int trackIndex, int clipIndex, const Q
         return out;
 
     const drift::Clip &clip = track.clips.at(clipIndex);
-    const drift::KeyframeTrack<double> *kt = trackForProp(clip, prop);
+    const drift::KeyframeTrack<double> *kt = keyframeTrackForProp(clip, prop);
     if (!kt)
         return out;
 
@@ -4877,7 +4995,7 @@ void AppController::setKeyframeInterpolation(int trackIndex, int clipIndex, cons
         return;
 
     drift::Clip &clip = track.clips[clipIndex];
-    drift::KeyframeTrack<double> *kt = trackForProp(clip, prop);
+    drift::KeyframeTrack<double> *kt = keyframeTrackForProp(clip, prop, /*createIfMissing=*/true);
     if (!kt)
         return;
 
@@ -5004,6 +5122,7 @@ void AppController::removeEffect(int trackIndex, int clipIndex, int effectIndex)
 
     const drift::Project before = m_project;
     clip.effects.removeAt(effectIndex);
+    dropKeyframeGraphPropertiesForEffect(effectIndex);
     pushProjectEdit(before, QStringLiteral("Remove effect"));
     finishEdit(QStringLiteral("Effect removed"));
 }
