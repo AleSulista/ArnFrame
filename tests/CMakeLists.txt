@@ -20,6 +20,8 @@ qt_add_executable(tst_editorstate
 )
 target_include_directories(tst_editorstate PRIVATE ../src)
 target_link_libraries(tst_editorstate PRIVATE Qt6::Test Qt6::Gui Qt6::Multimedia Qt6::Concurrent driftcore driftengine)
+target_compile_definitions(tst_editorstate PRIVATE
+    DRIFT_TEST_DENOISE_MODEL_DIR="${CMAKE_SOURCE_DIR}/models/deepfilternet3")
 add_test(NAME EditorState COMMAND tst_editorstate)
 drift_copy_effects(tst_editorstate)
 drift_copy_transitions(tst_editorstate)
@@ -48,6 +50,9 @@ target_compile_definitions(tst_engine PRIVATE
     DRIFT_TEST_FONTS_DIR="${CMAKE_SOURCE_DIR}/fonts"
     DRIFT_TEST_EMOJI_FONT_DIR="${CMAKE_SOURCE_DIR}/emoji-fonts"
     DRIFT_TEST_AUDIO_EFFECTS_DIR="${CMAKE_SOURCE_DIR}/audio-effects"
+    # Not committed (models/ is gitignored). The denoise tests skip when it is absent so a
+    # checkout without the model still passes.
+    DRIFT_TEST_DENOISE_MODEL_DIR="${CMAKE_SOURCE_DIR}/models/deepfilternet3"
 )
 add_test(NAME Engine COMMAND tst_engine)
 drift_copy_effects(tst_engine)

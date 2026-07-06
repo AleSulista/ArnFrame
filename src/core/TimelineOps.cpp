@@ -117,6 +117,13 @@ int insertTrackAtTopForClipType(Project &project, ClipType type)
     return 0;
 }
 
+int insertTrackAboveForClipType(Project &project, int trackIndex, ClipType type)
+{
+    const int at = qBound(0, trackIndex, project.tracks().size());
+    project.tracks().insert(at, Track{.type = trackTypeForClipType(type)});
+    return at;
+}
+
 TimeUs clipDurationForAsset(const MediaAsset *asset)
 {
     if (!asset)

@@ -1,7 +1,12 @@
 #include <QtTest>
 
+#include <QDir>
+#include <QFileInfo>
+#include <QProcess>
 #include <QSet>
 #include <QSignalSpy>
+#include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 
 #include "models/AppController.h"
@@ -39,6 +44,7 @@ private slots:
     void keyframeGraphPropertySelection();
     void effectParamKeyframes();
     void effectRemovalRemapsGraphSelection();
+    void denoiseAddsCleanedClipOnTrackAbove();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -827,6 +833,88 @@ void EditorStateTest::keyframeGraphPropertySelection()
     state.setKeyframeGraphProperties({ QStringLiteral("fx."), QStringLiteral("fx.a.b"),
                                        QStringLiteral("fx.0.") });
     QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("x") });
+}
+
+// End-to-end noise removal through the controller: the whole clip is rendered on a worker thread
+// and the result lands on a new audio track directly above the source, as one undoable edit.
+void EditorStateTest::denoiseAddsCleanedClipOnTrackAbove()
+{
+    const QString modelDir = QString::fromUtf8(DRIFT_TEST_DENOISE_MODEL_DIR);
+    if (!QDir(modelDir).exists())
+        QSKIP("DeepFilterNet3 model not installed");
+    qputenv("DRIFT_DENOISE_MODEL_DIR", modelDir.toUtf8());
+
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.filePath(QStringLiteral("noisy.wav"));
+    QProcess proc;
+    proc.start(ffmpeg, {QStringLiteral("-y"), QStringLiteral("-f"), QStringLiteral("lavfi"),
+                        QStringLiteral("-i"),
+                        QStringLiteral("anoisesrc=d=3:c=white:r=48000:a=0.1"),
+                        QStringLiteral("-ac"), QStringLiteral("2"),
+                        QStringLiteral("-c:a"), QStringLiteral("pcm_s16le"), source});
+    QVERIFY(proc.waitForFinished(60000) && proc.exitCode() == 0);
+
+    AssetLibrary library;
+    AppController state(&library);
+
+    drift::Project &project = *state.project();
+    drift::Track track{.type = drift::TrackType::Audio};
+    drift::Clip clip;
+    clip.id = QStringLiteral("src-clip");
+    clip.type = drift::ClipType::Audio;
+    clip.path = source;
+    clip.name = QStringLiteral("Noisy");
+    clip.timelineStart = drift::secondsToUs(1.5);
+    clip.timelineDuration = drift::secondsToUs(3.0);
+    clip.srcIn = 0;
+    clip.srcOut = drift::secondsToUs(3.0);
+    track.clips.append(clip);
+    // A new project comes with default tracks; drop them so the indices below are the ones set up
+    // here. A video track sits above the audio one, so "directly above the clip's own track" is
+    // distinguishable from "at the very top of the timeline".
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+    project.tracks().append(track);
+    const int sourceTrack = 1;
+
+    QSignalSpy finished(&state, &AppController::denoiseFinished);
+    state.applyDenoise(sourceTrack, 0);
+    QVERIFY2(finished.wait(180000), "denoise did not finish");
+    QCOMPARE(finished.count(), 1);
+    QVERIFY2(finished.at(0).at(0).toBool(),
+             qPrintable(finished.at(0).at(1).toString()));
+
+    QCOMPARE(project.tracks().size(), 3);
+    // Inserted at the source's index, pushing it down — not at the top of the timeline.
+    QCOMPARE(project.tracks().at(0).type, drift::TrackType::Video);
+    QCOMPARE(project.tracks().at(sourceTrack).type, drift::TrackType::Audio);
+    QCOMPARE(project.tracks().at(sourceTrack + 1).clips.at(0).id, QStringLiteral("src-clip"));
+
+    const drift::Clip &out = project.tracks().at(sourceTrack).clips.at(0);
+    QVERIFY(out.id != clip.id);
+    QVERIFY(out.name.contains(QStringLiteral("denoised")));
+    QCOMPARE(out.type, drift::ClipType::Audio);
+    QVERIFY(out.assetId.isEmpty());
+    QVERIFY2(QFileInfo::exists(out.path), qPrintable(out.path));
+    QVERIFY(out.path.endsWith(QStringLiteral(".flac")));
+    // Stays put on the timeline, and the source window is rebased into the new media.
+    QCOMPARE(out.timelineStart, clip.timelineStart);
+    QCOMPARE(out.timelineDuration, clip.timelineDuration);
+    QCOMPARE(out.srcIn, drift::TimeUs(0));
+    QCOMPARE(out.srcOut, clip.srcOut - clip.srcIn);
+
+    // One undoable edit: the track and the clip go together.
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    QCOMPARE(project.tracks().size(), 2);
+    QCOMPARE(project.tracks().at(sourceTrack).clips.at(0).id, QStringLiteral("src-clip"));
+
+    QFile::remove(out.path);
 }
 
 QTEST_MAIN(EditorStateTest)

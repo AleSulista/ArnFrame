@@ -15,6 +15,8 @@
 #include "engine/FontCatalog.h"
 #include "engine/MediaProbe.h"
 #include "engine/MediaThumbnail.h"
+#include "engine/AudioFileWriter.h"
+#include "engine/DeepFilterDenoiser.h"
 #include "engine/MatteWriter.h"
 #include "engine/MediaWaveform.h"
 #include "engine/FaceLandmarker.h"
@@ -3088,6 +3090,343 @@ void AppController::finalizeSegmentation(const QString &clipId, const QString &m
     pushProjectEdit(before, QStringLiteral("Segmentation"));
     finishEdit(QStringLiteral("Segmentation"));
     selectClip(fgTrack, m_project.tracks().at(fgTrack).clips.size() - 1);
+}
+
+// ---- Noise removal ----------------------------------------------------------------------
+
+bool AppController::denoiseAvailable()
+{
+    // Deliberately only checks that the model files exist. This is reached from a QML binding, and
+    // loading the session here would block the GUI thread.
+    return drift::DeepFilterDenoiser::modelPresent();
+}
+
+void AppController::cancelDenoise()
+{
+    if (m_denoising)
+        m_denoiseCancel.storeRelaxed(1);
+}
+
+bool AppController::renderDenoisedAudio(const QString &path, drift::TimeUs srcIn,
+                                        drift::TimeUs span, const QString &outPath,
+                                        const QString &originalPath, double progressFrom,
+                                        double progressTo, QString *errorOut)
+{
+    const auto fail = [&](const QString &message) {
+        if (errorOut)
+            *errorOut = message;
+        return false;
+    };
+    const auto setProgress = [this](double fraction, const QString &status) {
+        QMetaObject::invokeMethod(
+            this,
+            [this, fraction, status]() {
+                m_denoiseProgress = fraction;
+                emit denoiseProgressChanged();
+                if (!status.isEmpty() && status != m_denoiseStatus) {
+                    m_denoiseStatus = status;
+                    emit denoiseStatusChanged();
+                }
+            },
+            Qt::QueuedConnection);
+    };
+    const auto span01 = [progressFrom, progressTo](double f) {
+        return progressFrom + (progressTo - progressFrom) * std::clamp(f, 0.0, 1.0);
+    };
+
+    drift::DeepFilterDenoiser &dn = drift::DeepFilterDenoiser::instance();
+    setProgress(span01(0.0), QStringLiteral("Loading noise removal model…"));
+    if (!dn.available())
+        return fail(dn.lastError());
+
+    const int rate = drift::DeepFilterDenoiser::sampleRate();
+    const int64_t totalFrames = (span * rate) / drift::kUsPerSecond;
+    if (totalFrames <= 0)
+        return fail(QStringLiteral("Clip is too short to process"));
+
+    // Decode the raw source window. Speed and reverse are deliberately not applied: the derived
+    // clip inherits them, so the render has to stay in the source's own time base.
+    setProgress(span01(0.05), QStringLiteral("Reading audio…"));
+    std::vector<float> interleaved(size_t(totalFrames) * 2, 0.0f);
+    int64_t have = 0;
+    const int chunkFrames = rate * 10;
+    while (have < totalFrames) {
+        if (m_denoiseCancel.loadRelaxed())
+            return fail(QStringLiteral("Noise removal cancelled"));
+        const drift::TimeUs at = srcIn + drift::TimeUs((have * drift::kUsPerSecond) / rate);
+        const int want = int(std::min<int64_t>(chunkFrames, totalFrames - have));
+        const int got = ClipReaderPool::instance().readAudioInterleaved(
+            path, at, want, rate, interleaved.data() + size_t(have) * 2);
+        if (got <= 0)
+            break;
+        have += got;
+        setProgress(span01(0.05 + 0.20 * double(have) / double(totalFrames)),
+                    QStringLiteral("Reading audio…"));
+    }
+    if (have <= 0)
+        return fail(QStringLiteral("No audio decoded"));
+    interleaved.resize(size_t(have) * 2);
+
+    // The A/B source for the preview window, written before the model runs so a cancel still
+    // leaves nothing half-made.
+    if (!originalPath.isEmpty()) {
+        drift::AudioFileWriter orig;
+        QString error;
+        if (!orig.open(originalPath, rate, 2, &error))
+            return fail(error);
+        if (!orig.writeFrames(interleaved.data(), int(have), &error) || !orig.finish(&error)) {
+            orig.abort();
+            return fail(error);
+        }
+    }
+
+    // The model is mono, so each channel goes through separately and the stereo image is kept.
+    std::vector<float> mono(size_t(have), 0.0f);
+    for (int ch = 0; ch < 2; ++ch) {
+        for (int64_t i = 0; i < have; ++i)
+            mono[size_t(i)] = interleaved[size_t(i) * 2 + ch];
+
+        const double base = 0.25 + 0.35 * ch;
+        const std::vector<float> clean = dn.denoise(mono, [&](double f) {
+            setProgress(span01(base + 0.35 * f),
+                        ch == 0 ? QStringLiteral("Removing noise (left)…")
+                                : QStringLiteral("Removing noise (right)…"));
+            return m_denoiseCancel.loadRelaxed() == 0;
+        });
+        if (clean.empty()) {
+            return fail(m_denoiseCancel.loadRelaxed() ? QStringLiteral("Noise removal cancelled")
+                                                      : dn.lastError());
+        }
+        for (int64_t i = 0; i < have; ++i)
+            interleaved[size_t(i) * 2 + ch] = clean[size_t(i)];
+    }
+
+    setProgress(span01(0.95), QStringLiteral("Writing audio…"));
+    drift::AudioFileWriter writer;
+    QString error;
+    if (!writer.open(outPath, rate, 2, &error))
+        return fail(error);
+    if (!writer.writeFrames(interleaved.data(), int(have), &error) || !writer.finish(&error)) {
+        writer.abort();
+        return fail(error);
+    }
+
+    setProgress(span01(1.0), QString());
+    return true;
+}
+
+// Both entry points share this: validate the clip, latch the busy state, and hand the work to a
+// pool thread. `preview` bounds the render to a short window and reports the pair of files rather
+// than touching the project.
+void AppController::previewDenoise(int trackIndex, int clipIndex, double atSeconds)
+{
+    if (m_denoising) {
+        setLastMessage(QStringLiteral("Noise removal already in progress"));
+        return;
+    }
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Clip clip = track.clips.at(clipIndex);
+    if (clip.type != drift::ClipType::Audio && clip.type != drift::ClipType::Video) {
+        setLastMessage(QStringLiteral("Select a video or audio clip"));
+        return;
+    }
+    if (clip.path.isEmpty() || clip.srcOut <= clip.srcIn) {
+        setLastMessage(QStringLiteral("Clip has no audio"));
+        return;
+    }
+
+    // Same reason as the export, subtitle and segmentation jobs: playback would drive the decode
+    // pool from a second thread while this walks it.
+    setPlaying(false);
+
+    // Eight seconds is enough to judge the result and short enough that dragging the window along
+    // the clip stays responsive.
+    constexpr drift::TimeUs kPreviewSpan = 8 * drift::kUsPerSecond;
+    const drift::TimeUs clipSpan = clip.srcOut - clip.srcIn;
+    const drift::TimeUs offset =
+        qBound<drift::TimeUs>(0, drift::secondsToUs(atSeconds) * clip.effectiveSpeed(),
+                              std::max<drift::TimeUs>(0, clipSpan - 1));
+    const drift::TimeUs from = clip.srcIn + offset;
+    const drift::TimeUs span = std::min(kPreviewSpan, clip.srcOut - from);
+
+    m_denoiseCancel.storeRelaxed(0);
+    m_denoiseProgress = 0.0;
+    emit denoiseProgressChanged();
+    m_denoiseStatus = QStringLiteral("Starting…");
+    emit denoiseStatusChanged();
+    m_denoising = true;
+    emit denoisingChanged();
+
+    const QString path = clip.path;
+    const QString cleanPath = drift::newDenoisePath(QStringLiteral("-preview"));
+    const QString origPath = drift::newDenoisePath(QStringLiteral("-original"));
+    if (cleanPath.isEmpty() || origPath.isEmpty()) {
+        m_denoising = false;
+        emit denoisingChanged();
+        setLastMessage(QStringLiteral("Could not create a preview file"));
+        return;
+    }
+
+    (void)QtConcurrent::run([this, path, from, span, cleanPath, origPath]() {
+        QString error;
+        const bool ok = renderDenoisedAudio(path, from, span, cleanPath, origPath, 0.0, 1.0, &error);
+        QMetaObject::invokeMethod(
+            this,
+            [this, ok, error, cleanPath, origPath]() {
+                m_denoising = false;
+                emit denoisingChanged();
+                m_denoiseProgress = ok ? 1.0 : 0.0;
+                emit denoiseProgressChanged();
+                m_denoiseStatus = ok ? QStringLiteral("Ready") : error;
+                emit denoiseStatusChanged();
+                if (!ok) {
+                    QFile::remove(cleanPath);
+                    QFile::remove(origPath);
+                    setLastMessage(error);
+                    emit denoiseFinished(false, error);
+                    return;
+                }
+                // Retire the pair this one replaces, only once the new pair is safely on disk.
+                if (!m_denoisePreviewClean.isEmpty())
+                    QFile::remove(m_denoisePreviewClean);
+                if (!m_denoisePreviewOriginal.isEmpty())
+                    QFile::remove(m_denoisePreviewOriginal);
+                m_denoisePreviewClean = cleanPath;
+                m_denoisePreviewOriginal = origPath;
+                emit denoisePreviewReady(origPath, cleanPath);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void AppController::applyDenoise(int trackIndex, int clipIndex)
+{
+    if (m_denoising) {
+        setLastMessage(QStringLiteral("Noise removal already in progress"));
+        return;
+    }
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Clip clip = track.clips.at(clipIndex);
+    if (clip.type != drift::ClipType::Audio && clip.type != drift::ClipType::Video) {
+        setLastMessage(QStringLiteral("Select a video or audio clip"));
+        return;
+    }
+    if (clip.path.isEmpty() || clip.srcOut <= clip.srcIn) {
+        setLastMessage(QStringLiteral("Clip has no audio"));
+        return;
+    }
+
+    setPlaying(false);
+
+    m_denoiseCancel.storeRelaxed(0);
+    m_denoiseProgress = 0.0;
+    emit denoiseProgressChanged();
+    m_denoiseStatus = QStringLiteral("Starting…");
+    emit denoiseStatusChanged();
+    m_denoising = true;
+    emit denoisingChanged();
+    setLastMessage(QStringLiteral("Removing noise..."));
+
+    const QString path = clip.path;
+    const drift::TimeUs srcIn = clip.srcIn;
+    const drift::TimeUs span = clip.srcOut - clip.srcIn;
+    // Resolved by id at the end rather than by index: the timeline can be edited while the job
+    // runs, and a stale index would attach the audio to the wrong clip.
+    const QString clipId = clip.id;
+    const QString outPath = drift::newDenoisePath();
+    if (outPath.isEmpty()) {
+        m_denoising = false;
+        emit denoisingChanged();
+        setLastMessage(QStringLiteral("Could not create an output file"));
+        return;
+    }
+
+    (void)QtConcurrent::run([this, path, srcIn, span, outPath, clipId]() {
+        QString error;
+        const bool ok = renderDenoisedAudio(path, srcIn, span, outPath, QString(), 0.0, 1.0, &error);
+        QMetaObject::invokeMethod(
+            this,
+            [this, ok, error, outPath, clipId]() {
+                m_denoising = false;
+                emit denoisingChanged();
+                m_denoiseProgress = ok ? 1.0 : 0.0;
+                emit denoiseProgressChanged();
+                m_denoiseStatus = ok ? QStringLiteral("Done") : error;
+                emit denoiseStatusChanged();
+                if (!ok) {
+                    QFile::remove(outPath);
+                    setLastMessage(error);
+                    emit denoiseFinished(false, error);
+                    return;
+                }
+                finalizeDenoise(clipId, outPath);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void AppController::finalizeDenoise(const QString &clipId, const QString &audioPath)
+{
+    int trackIndex = -1;
+    int clipIndex = -1;
+    for (int t = 0; t < m_project.tracks().size() && trackIndex < 0; ++t) {
+        const drift::Track &track = m_project.tracks().at(t);
+        for (int c = 0; c < track.clips.size(); ++c) {
+            if (track.clips.at(c).id == clipId) {
+                trackIndex = t;
+                clipIndex = c;
+                break;
+            }
+        }
+    }
+    if (trackIndex < 0) {
+        // The clip was deleted while the job ran; the audio has nothing to attach to.
+        QFile::remove(audioPath);
+        const QString message = QStringLiteral("The clip no longer exists");
+        setLastMessage(message);
+        emit denoiseFinished(false, message);
+        return;
+    }
+
+    const drift::Project before = m_project;
+    const drift::Clip source = m_project.tracks().at(trackIndex).clips.at(clipIndex);
+
+    // Everything about the clip carries over except the media it points at. srcIn/srcOut rebase
+    // because the render already baked in the source window, while speed and reverse stay — the
+    // render is in the source's time base, so the new clip lines up with the original.
+    drift::Clip clip = source;
+    clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    clip.linkId.clear();
+    clip.assetId.clear();
+    clip.path = audioPath;
+    clip.thumbnailPath.clear();
+    clip.filmstripPath.clear();
+    clip.type = drift::ClipType::Audio;
+    clip.mask = drift::Mask{};
+    clip.srcIn = 0;
+    clip.srcOut = source.srcOut - source.srcIn;
+    clip.name = (source.name.isEmpty() ? QStringLiteral("Clip") : source.name)
+                + QStringLiteral(" (denoised)");
+
+    const int newTrack =
+        drift::insertTrackAboveForClipType(m_project, trackIndex, drift::ClipType::Audio);
+    m_project.tracks()[newTrack].clips.append(clip);
+
+    pushProjectEdit(before, QStringLiteral("Remove noise"));
+    finishEdit(QStringLiteral("Noise removed"));
+    selectClip(newTrack, m_project.tracks().at(newTrack).clips.size() - 1);
+    setLastMessage(QStringLiteral("Noise removed"));
+    emit denoiseFinished(true, QStringLiteral("Noise removed"));
 }
 
 void AppController::finalizeGeneratedSubtitles(drift::TimeUs timelineStart,

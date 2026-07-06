@@ -10,6 +10,7 @@
 #include <QTemporaryDir>
 
 #include <cmath>
+#include <random>
 
 #include "core/Clip.h"
 #include "core/Project.h"
@@ -18,6 +19,8 @@
 #include "engine/CompositorFrameHistory.h"
 #include "engine/AudioEffectCatalog.h"
 #include "engine/AudioEffectChain.h"
+#include "engine/AudioFileWriter.h"
+#include "engine/DeepFilterDenoiser.h"
 #include "engine/EffectCatalog.h"
 #include "engine/EffectPackageLoader.h"
 #include "engine/EffectProcessor.h"
@@ -117,6 +120,11 @@ private slots:
     void audioEffectChainBypassesUnknownEffect();
     void audioEffectStreamIsContinuousAcrossBlocks();
     void audioEffectFlangerProcessesSignal();
+    void denoiseAuxiliaryConstantsRoundTrip();
+    void denoisePreservesLengthAndSilence();
+    void denoiseRemovesBroadbandNoise();
+    void denoiseHasNoSeamAcrossWindows();
+    void audioFileWriterRoundTripsThroughClipReader();
 
 private:
     static QString makeColorSegmentsVideo(QTemporaryDir &dir);
@@ -2759,6 +2767,224 @@ void EngineTest::audioEffectFlangerProcessesSignal()
             ++streamChanged;
     }
     QVERIFY2(streamChanged > kFrames, "streamed flanger matches input — graph likely failed");
+}
+
+// ---- DeepFilterNet3 denoiser -------------------------------------------------------------
+//
+// The model directory is gitignored, so every case here skips when it is absent. Point
+// DRIFT_DENOISE_MODEL_DIR elsewhere to test an installed addon instead.
+namespace {
+
+bool denoiseModelAvailable()
+{
+    const QString dir = QString::fromUtf8(DRIFT_TEST_DENOISE_MODEL_DIR);
+    if (QDir(dir).exists())
+        qputenv("DRIFT_DENOISE_MODEL_DIR", dir.toUtf8());
+    return drift::DeepFilterDenoiser::modelPresent();
+}
+
+double rms(const std::vector<float> &x, size_t from = 0, size_t to = SIZE_MAX)
+{
+    const size_t end = std::min(to, x.size());
+    if (end <= from)
+        return 0.0;
+    double acc = 0.0;
+    for (size_t i = from; i < end; ++i)
+        acc += double(x[i]) * x[i];
+    return std::sqrt(acc / double(end - from));
+}
+
+std::vector<float> whiteNoise(int samples, float amplitude, uint32_t seed)
+{
+    std::mt19937 rng(seed);
+    std::normal_distribution<float> gauss(0.0f, amplitude);
+    std::vector<float> out(size_t(samples), 0.0f);
+    for (int i = 0; i < samples; ++i)
+        out[size_t(i)] = gauss(rng);
+    return out;
+}
+
+} // namespace
+
+// The auxiliary blob is the model's own ERB geometry. If the forward and inverse matrices do not
+// describe the same 32 bands, every gain lands on the wrong frequencies and the result is
+// plausible-sounding rubbish rather than an obvious failure.
+void EngineTest::denoiseAuxiliaryConstantsRoundTrip()
+{
+    const QString path =
+        QDir(QString::fromUtf8(DRIFT_TEST_DENOISE_MODEL_DIR)).filePath(QStringLiteral("deepfilter-auxiliary.bin"));
+    if (!QFile::exists(path))
+        QSKIP("DeepFilterNet3 model not installed");
+
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    constexpr int kBins = 481;
+    constexpr int kBands = 32;
+    constexpr int kFft = 960;
+    QCOMPARE(f.size(), qint64(kBins * kBands + kBands * kBins + kFft) * 4);
+
+    const QByteArray blob = f.readAll();
+    const auto *fwd = reinterpret_cast<const float *>(blob.constData());
+    const float *inv = fwd + kBins * kBands;
+    const float *win = inv + kBands * kBins;
+
+    // Every bin belongs to exactly one band, in both directions.
+    for (int k = 0; k < kBins; ++k) {
+        int owners = 0;
+        for (int b = 0; b < kBands; ++b) {
+            if (fwd[k * kBands + b] != 0.0f)
+                ++owners;
+            QCOMPARE(inv[b * kBins + k] != 0.0f, fwd[k * kBands + b] != 0.0f);
+        }
+        QCOMPARE(owners, 1);
+    }
+
+    // The forward weights are 1/bandwidth, so a flat unit spectrum must average to 1 per band.
+    for (int b = 0; b < kBands; ++b) {
+        double acc = 0.0;
+        for (int k = 0; k < kBins; ++k)
+            acc += fwd[k * kBands + b];
+        QVERIFY2(std::abs(acc - 1.0) < 1e-5,
+                 qPrintable(QStringLiteral("band %1 forward weights sum to %2").arg(b).arg(acc)));
+    }
+
+    // Vorbis window: zero at the edges, unity at the centre, and Princen-Bradley (w^2 sums to 1
+    // across a 50% overlap) — the property the overlap-add synthesis relies on.
+    QCOMPARE(win[0], 0.0f);
+    for (int n = 0; n < kFft / 2; ++n) {
+        const double a = win[n];
+        const double b = win[n + kFft / 2];
+        QVERIFY2(std::abs(a * a + b * b - 1.0) < 1e-4,
+                 qPrintable(QStringLiteral("window fails Princen-Bradley at %1").arg(n)));
+    }
+}
+
+// Length must survive exactly (the clip on the timeline depends on it), and digital silence must
+// come back as silence rather than as the model's idea of a noise floor.
+void EngineTest::denoisePreservesLengthAndSilence()
+{
+    if (!denoiseModelAvailable())
+        QSKIP("DeepFilterNet3 model not installed");
+
+    drift::DeepFilterDenoiser &dn = drift::DeepFilterDenoiser::instance();
+    if (!dn.available())
+        QSKIP(qPrintable(dn.lastError()));
+
+    const int rate = drift::DeepFilterDenoiser::sampleRate();
+    const std::vector<float> silence(size_t(rate) * 2, 0.0f);
+    const std::vector<float> out = dn.denoise(silence, {});
+
+    QCOMPARE(out.size(), silence.size());
+    QVERIFY2(rms(out) < 1e-6, qPrintable(QStringLiteral("silence came back at %1").arg(rms(out))));
+
+    // An odd, non-frame-aligned length must round-trip too.
+    const std::vector<float> odd(size_t(rate) + 137, 0.0f);
+    QCOMPARE(dn.denoise(odd, {}).size(), odd.size());
+}
+
+// The point of the feature. Speech-free broadband noise is the one input whose correct handling
+// can be asserted without shipping an audio fixture: the model must recognise that none of it is
+// speech and pull it a long way down.
+//
+// Note that a synthesised "voice" (a harmonic stack, say) is NOT a useful test signal here — the
+// model correctly declines to treat it as speech and suppresses it too, so a test built on one
+// measures nothing. The end-to-end quality check is SI-SDR against a real reference recording;
+// see the plan's verification notes.
+void EngineTest::denoiseRemovesBroadbandNoise()
+{
+    if (!denoiseModelAvailable())
+        QSKIP("DeepFilterNet3 model not installed");
+
+    drift::DeepFilterDenoiser &dn = drift::DeepFilterDenoiser::instance();
+    if (!dn.available())
+        QSKIP(qPrintable(dn.lastError()));
+
+    const int rate = drift::DeepFilterDenoiser::sampleRate();
+    const std::vector<float> noise = whiteNoise(rate * 4, 0.1f, 1234);
+
+    const std::vector<float> out = dn.denoise(noise, {});
+    QCOMPARE(out.size(), noise.size());
+    for (float s : out)
+        QVERIFY(std::isfinite(s));
+
+    // Skip the first half second: the model is still settling into the signal there.
+    const double in = rms(noise, size_t(rate) / 2);
+    const double got = rms(out, size_t(rate) / 2);
+    QVERIFY2(got < in * 0.25,
+             qPrintable(QStringLiteral("noise only fell from %1 to %2").arg(in).arg(got)));
+}
+
+// Audio longer than one inference window is stitched from several ONNX runs. The run-up frames and
+// the carried normalisation state exist so those joins are inaudible; this is what catches it if
+// they regress. A window that started cold would need time to recognise the noise, so the samples
+// just after the boundary would come through markedly louder than those just before it.
+void EngineTest::denoiseHasNoSeamAcrossWindows()
+{
+    if (!denoiseModelAvailable())
+        QSKIP("DeepFilterNet3 model not installed");
+
+    drift::DeepFilterDenoiser &dn = drift::DeepFilterDenoiser::instance();
+    if (!dn.available())
+        QSKIP(qPrintable(dn.lastError()));
+
+    const int rate = drift::DeepFilterDenoiser::sampleRate();
+    // 25 s crosses the 20 s window boundary once, with room either side of the join.
+    const std::vector<float> noise = whiteNoise(rate * 25, 0.1f, 99);
+    const std::vector<float> out = dn.denoise(noise, {});
+    QCOMPARE(out.size(), noise.size());
+    for (float s : out)
+        QVERIFY(std::isfinite(s));
+
+    const size_t seam = size_t(rate) * 20;
+    const size_t win = size_t(rate) / 5; // 200 ms
+    const double before = rms(out, seam - win, seam);
+    const double after = rms(out, seam, seam + win);
+    const double ratio = after / std::max(before, 1e-12);
+    QVERIFY2(ratio > 0.4 && ratio < 2.5,
+             qPrintable(QStringLiteral("energy steps across the window seam: %1 -> %2 (x%3)")
+                            .arg(before)
+                            .arg(after)
+                            .arg(ratio)));
+}
+
+// The denoised render is only useful if the rest of the app can read it back as ordinary media.
+void EngineTest::audioFileWriterRoundTripsThroughClipReader()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("denoised.flac"));
+
+    constexpr int kRate = 48000;
+    constexpr int kFrames = kRate; // 1 s
+    std::vector<float> tone(size_t(kFrames) * 2);
+    for (int i = 0; i < kFrames; ++i) {
+        const float s = 0.5f * std::sin(2.0 * M_PI * 440.0 * i / kRate);
+        tone[size_t(i) * 2] = s;
+        tone[size_t(i) * 2 + 1] = s;
+    }
+
+    QString error;
+    drift::AudioFileWriter writer;
+    QVERIFY2(writer.open(path, kRate, 2, &error), qPrintable(error));
+    // Deliberately not a multiple of the encoder frame size, to exercise the partial-frame buffer.
+    QVERIFY2(writer.writeFrames(tone.data(), 1000, &error), qPrintable(error));
+    QVERIFY2(writer.writeFrames(tone.data() + 2000, kFrames - 1000, &error), qPrintable(error));
+    QVERIFY2(writer.finish(&error), qPrintable(error));
+    QVERIFY(QFileInfo::exists(path));
+    QVERIFY(!QFileInfo::exists(path + QStringLiteral(".part")));
+
+    std::vector<float> read(size_t(kFrames) * 2, 0.0f);
+    const int got = ClipReaderPool::instance().readAudioInterleaved(path, 0, kFrames, kRate,
+                                                                    read.data());
+    QVERIFY2(got > kFrames / 2, qPrintable(QStringLiteral("decoded only %1 frames").arg(got)));
+
+    double acc = 0.0;
+    for (int i = 0; i < got * 2; ++i)
+        acc += double(read[size_t(i)]) * read[size_t(i)];
+    const double outRms = std::sqrt(acc / (got * 2));
+    // 0.5 amplitude sine -> 0.3536 RMS. FLAC is lossless, so this is tight.
+    QVERIFY2(std::abs(outRms - 0.3536) < 0.02,
+             qPrintable(QStringLiteral("round-tripped RMS %1").arg(outRms)));
 }
 
 QTEST_MAIN(EngineTest)

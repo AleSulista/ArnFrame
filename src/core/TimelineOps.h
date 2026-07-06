@@ -25,6 +25,10 @@ int ensureTrackForClipType(Project &project, ClipType type, bool insertAtTop = f
 // Always prepends a fresh track (multiple tracks of the same type are allowed).
 int insertTrackAtTopForClipType(Project &project, ClipType type);
 
+// Inserts a fresh track directly above `trackIndex` (index 0 is the topmost track), pushing that
+// track and everything below it down one. Returns the new track's index.
+int insertTrackAboveForClipType(Project &project, int trackIndex, ClipType type);
+
 TimeUs clipDurationForAsset(const MediaAsset *asset);
 
 TimeUs sourceDurationForClip(const Project &project, const Clip &clip);

@@ -1640,6 +1640,63 @@ PanelFrame {
                             opacity: 0.5
                         }
 
+                        // ----- Noise removal ---------------------------------------------
+                        Column {
+                            id: denoiseSection
+                            width: parent.width
+                            spacing: Theme.spacingSm
+                            visible: root.clipKind === "audio" || root.clipKind === "video"
+
+                            // Whether the model is on disk is a one-shot filesystem answer, not a
+                            // binding, hence the reset below when an addon of this kind appears.
+                            property bool denoiseReady: EditorState.denoiseAvailable()
+
+                            Connections {
+                                target: Addons
+                                function onKindChanged(kind) {
+                                    if (kind === "denoise-model")
+                                        denoiseSection.denoiseReady = EditorState.denoiseAvailable()
+                                }
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: qsTr("Noise")
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            ThemedButton {
+                                visible: denoiseSection.denoiseReady
+                                width: parent.width
+                                text: qsTr("Remove noise…")
+                                enabled: !EditorState.denoising
+                                onClicked: {
+                                    const data = EditorState.selectedClipData
+                                    root.Window.window.openDenoise(
+                                        EditorState.selectedTrack, EditorState.selectedClip,
+                                        data.duration !== undefined ? data.duration : 0)
+                                }
+                            }
+
+                            ThemedButton {
+                                visible: !denoiseSection.denoiseReady
+                                width: parent.width
+                                text: qsTr("Install noise removal model (≈9 MB)")
+                                variant: "primary"
+                                onClicked: root.Window.window.openAddonManager("denoise-model")
+                            }
+                        }
+
+                        Rectangle {
+                            visible: root.clipKind === "audio" || root.clipKind === "video"
+                            width: parent.width
+                            height: 1
+                            color: Theme.panelBorder
+                            opacity: 0.5
+                        }
+
                         // ----- Audio effects ---------------------------------------------
                         Text {
                             visible: root.clipKind === "audio" || root.clipKind === "video"

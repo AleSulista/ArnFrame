@@ -205,8 +205,12 @@ add_library(driftengine STATIC
     src/engine/FaceLandmarker.cpp
     src/engine/FaceTrack.h
     src/engine/FaceTrack.cpp
+    src/engine/DeepFilterDenoiser.h
+    src/engine/DeepFilterDenoiser.cpp
     src/engine/MatteWriter.h
     src/engine/MatteWriter.cpp
+    src/engine/AudioFileWriter.h
+    src/engine/AudioFileWriter.cpp
 )
 target_include_directories(driftengine PUBLIC src)
 target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui Qt6::OpenGL FFmpeg::FFmpeg driftcore
@@ -271,6 +275,7 @@ qt_add_qml_module(drift
         src/qml/AssetsPanel.qml
         src/qml/PreviewPanel.qml
         src/qml/SegmentationWindow.qml
+        src/qml/DenoiseWindow.qml
         src/qml/PropertiesPanel.qml
         src/qml/TimelinePanel.qml
         src/qml/components/IconGlyph.qml

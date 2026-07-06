@@ -57,6 +57,9 @@ class AppController : public QObject
     Q_PROPERTY(bool segmenting READ segmenting NOTIFY segmentingChanged)
     Q_PROPERTY(double segmentProgress READ segmentProgress NOTIFY segmentProgressChanged)
     Q_PROPERTY(QString segmentStatus READ segmentStatus NOTIFY segmentStatusChanged)
+    Q_PROPERTY(bool denoising READ denoising NOTIFY denoisingChanged)
+    Q_PROPERTY(double denoiseProgress READ denoiseProgress NOTIFY denoiseProgressChanged)
+    Q_PROPERTY(QString denoiseStatus READ denoiseStatus NOTIFY denoiseStatusChanged)
     Q_PROPERTY(bool segmentSessionActive READ segmentSessionActive NOTIFY segmentSessionChanged)
     Q_PROPERTY(bool segmentEncoding READ segmentEncoding NOTIFY segmentSessionChanged)
     Q_PROPERTY(int segmentRevision READ segmentRevision NOTIFY segmentSessionChanged)
@@ -127,6 +130,9 @@ public:
     bool segmenting() const { return m_segmenting; }
     double segmentProgress() const { return m_segmentProgress; }
     QString segmentStatus() const { return m_segmentStatus; }
+    bool denoising() const { return m_denoising; }
+    double denoiseProgress() const { return m_denoiseProgress; }
+    QString denoiseStatus() const { return m_denoiseStatus; }
     bool segmentSessionActive() const { return m_segSessionActive; }
     bool segmentEncoding() const { return m_segEncoding; }
     int segmentRevision() const { return m_segRevision; }
@@ -213,6 +219,14 @@ public:
     Q_INVOKABLE void removeSegmentationPoint(int index);
     Q_INVOKABLE void clearSegmentationPoints();
     Q_INVOKABLE void runSegmentationSession(const QString &outputMode);
+
+    // Noise removal (DeepFilterNet3). previewDenoise renders a short window either side of the
+    // model — original and cleaned — so the denoise window can A/B them before anything is
+    // committed; applyDenoise renders the whole clip and adds it to the timeline.
+    Q_INVOKABLE bool denoiseAvailable();
+    Q_INVOKABLE void previewDenoise(int trackIndex, int clipIndex, double atSeconds);
+    Q_INVOKABLE void applyDenoise(int trackIndex, int clipIndex);
+    Q_INVOKABLE void cancelDenoise();
 
     // Bakes the clip's face landmarks to a sidecar so the face warp effects have something to
     // follow. Runs off the GUI thread; the result lands on the clip through the undo stack.
@@ -420,6 +434,11 @@ signals:
     void segmentProgressChanged();
     void segmentStatusChanged();
     void segmentationFinished(bool ok, const QString &message);
+    void denoisingChanged();
+    void denoiseProgressChanged();
+    void denoiseStatusChanged();
+    void denoisePreviewReady(const QString &originalPath, const QString &cleanPath);
+    void denoiseFinished(bool ok, const QString &message);
     void segmentSessionChanged();
     void faceDetectingChanged();
     void faceDetectProgressChanged();
@@ -459,6 +478,13 @@ protected:
                               drift::TimeUs matteSrcOffsetUs, const QString &outputMode);
     void finalizeGeneratedSubtitles(drift::TimeUs timelineStart, drift::TimeUs timelineDuration,
                                     const QList<drift::SubtitleCue> &cues);
+    void finalizeDenoise(const QString &clipId, const QString &audioPath);
+    // Shared body of the two denoise jobs: decodes [srcIn, srcIn + span) of `path` at the model's
+    // rate, runs each channel through it, and writes the result. Runs on a worker thread.
+    // `originalPathOut` is written only when non-empty, for the preview's A/B source.
+    bool renderDenoisedAudio(const QString &path, drift::TimeUs srcIn, drift::TimeUs span,
+                             const QString &outPath, const QString &originalPath,
+                             double progressFrom, double progressTo, QString *errorOut);
     void setLastMessage(const QString &message);
     drift::TimeUs playheadUs() const { return m_playheadUs; }
     void setPlayheadUs(drift::TimeUs us);
@@ -518,6 +544,14 @@ protected:
     double m_segmentProgress = 0.0;
     QString m_segmentStatus;
     QAtomicInt m_segmentCancel = 0;
+    bool m_denoising = false;
+    double m_denoiseProgress = 0.0;
+    QString m_denoiseStatus;
+    QAtomicInt m_denoiseCancel = 0;
+    // The A/B snippets currently on offer. Dragging the preview window along a clip re-renders
+    // repeatedly, so each pair is deleted as the next supersedes it.
+    QString m_denoisePreviewClean;
+    QString m_denoisePreviewOriginal;
     bool m_faceDetecting = false;
     double m_faceDetectProgress = 0.0;
     QString m_faceDetectStatus;

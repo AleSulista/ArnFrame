@@ -1,3 +1,4 @@
+#include "engine/AudioFileWriter.h"
 #include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
 #include "models/AddonManager.h"
@@ -33,6 +34,10 @@ int main(int argc, char *argv[])
     // thread starts touching QFontDatabase.
     reloadFontCatalog();
     reloadEmojiCatalog();
+
+    // Noise-removal A/B snippets are scratch. Anything still here is from a previous session that
+    // did not get to clean up after itself.
+    drift::sweepDenoisePreviews();
 
     qmlRegisterType<PreviewItem>("Drift", 1, 0, "PreviewItem");
 
