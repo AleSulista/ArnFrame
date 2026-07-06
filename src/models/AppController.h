@@ -225,6 +225,12 @@ public:
     Q_INVOKABLE void addStickerClip(const QString &stickerId, double atSeconds);
     Q_INVOKABLE QVariantList builtinStickers() const;
     Q_INVOKABLE QVariantList builtinStickerCategories() const;
+    // The full emoji set behind the sticker packs; empty until the pack carrying the font is
+    // installed.
+    Q_INVOKABLE QVariantList emojiCatalog() const;
+    Q_INVOKABLE QStringList emojiGroups() const;
+    Q_INVOKABLE QString emojiFontFamily() const;
+    Q_INVOKABLE void addEmojiClip(const QString &emoji, const QString &name, double atSeconds);
     Q_INVOKABLE QVariantList builtinShapes() const;
     Q_INVOKABLE QVariantList previewClipsAtPlayhead() const;
     Q_INVOKABLE void beginPreviewDrag(const QString &undoText = QStringLiteral("Edit clip"));
@@ -456,6 +462,10 @@ protected:
     void setLastMessage(const QString &message);
     drift::TimeUs playheadUs() const { return m_playheadUs; }
     void setPlayheadUs(drift::TimeUs us);
+
+    // Stickers and emoji are both a PNG dropped on an image track at the playhead.
+    void addImageOverlayClip(const QString &path, const QString &name, const QString &emoji,
+                             double atSeconds, const QString &undoText);
 
     QVariantMap clipToMap(const drift::Clip &clip) const;
     int assetIndexForClip(const drift::Clip &clip) const;

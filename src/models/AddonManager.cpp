@@ -5,6 +5,7 @@
 #include "engine/AddonRegistry.h"
 #include "engine/AudioEffectCatalog.h"
 #include "engine/EffectCatalog.h"
+#include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
 #include "engine/StickerCatalog.h"
 #include "engine/TransitionCatalog.h"
@@ -465,6 +466,8 @@ void AddonManager::reloadForKinds(const QStringList &kinds)
             reloadFontCatalog();
         else if (kind == QLatin1String("stickers"))
             reloadStickerCatalog();
+        else if (kind == QLatin1String("emoji-font"))
+            reloadEmojiCatalog();
         else if (kind == QLatin1String("effects"))
             reloadEffectCatalog();
         else if (kind == QLatin1String("transitions"))

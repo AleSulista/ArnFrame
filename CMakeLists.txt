@@ -25,8 +25,8 @@ option(WITH_BGREMOVAL "Enable OpenCV-based background removal" OFF)
 # what lets a shader fix go out without an app release.
 #
 # For development without downloading, point DRIFT_EFFECTS_DIR, DRIFT_TRANSITIONS_DIR,
-# DRIFT_FONTS_DIR, DRIFT_STICKERS_DIR or DRIFT_WHISPER_MODEL_DIR at a local directory; those
-# outrank everything, including installed addons.
+# DRIFT_FONTS_DIR, DRIFT_STICKERS_DIR, DRIFT_EMOJI_FONT_DIR or DRIFT_WHISPER_MODEL_DIR at a local
+# directory; those outrank everything, including installed addons.
 
 # --- Addon service ----------------------------------------------------------
 # Where the Addon Manager fetches from. These are the only place either value is defined —
@@ -159,6 +159,10 @@ add_library(driftengine STATIC
     src/engine/FontCatalog.cpp
     src/engine/StickerCatalog.h
     src/engine/StickerCatalog.cpp
+    src/engine/EmojiCatalog.h
+    src/engine/EmojiCatalog.cpp
+    src/engine/EmojiTable.h
+    src/engine/EmojiTable.cpp
     src/engine/TextRaster.h
     src/engine/TextRaster.cpp
     src/engine/EffectPackageLoader.h
@@ -288,6 +292,7 @@ qt_add_qml_module(drift
         src/qml/components/SubtitleEditor.qml
         src/qml/components/ThemedComboBox.qml
         src/qml/components/FontPicker.qml
+        src/qml/components/EmojiPicker.qml
         src/qml/components/ThemedButton.qml
         src/qml/components/ThemedChip.qml
         src/qml/components/ThemedProgressBar.qml

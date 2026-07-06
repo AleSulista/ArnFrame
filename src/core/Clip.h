@@ -59,6 +59,11 @@ struct Clip
     QString thumbnailPath;
     QString filmstripPath;
 
+    // Set on image clips added from the emoji picker. `path` points at a rasterised glyph in the
+    // app data cache, which another machine will not have — keeping the sequence lets the load
+    // re-render it instead of leaving a broken clip.
+    QString emoji;
+
     BlendMode blendMode = BlendMode::Normal;
     double speed = 1.0; // 1.0 = realtime; >1 faster, <1 slower
     bool reverse = false; // play source range backward; speed still applies as magnitude

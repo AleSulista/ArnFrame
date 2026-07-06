@@ -47,6 +47,7 @@ private slots:
     void maskAndTransitionSerialization();
     void matteMaskSerialization();
     void faceTrackSerialization();
+    void emojiClipSerialization();
     void allTransitionKindsRoundTrip();
     void transitionParametersRoundTrip();
     void legacyTransitionJsonStillLoads();
@@ -1056,6 +1057,46 @@ void CoreTest::faceTrackSerialization()
     QVERIFY(error.isEmpty());
     QVERIFY(old.tracks()[0].clips[0].faceTrackPath.isEmpty());
     QCOMPARE(old.tracks()[0].clips[0].faceTrackSrcOffsetUs, drift::TimeUs(0));
+}
+
+void CoreTest::emojiClipSerialization()
+{
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-emoji");
+    clip.type = drift::ClipType::Image;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(3.0);
+    clip.path = QStringLiteral("/tmp/emoji/1f600.png");
+    clip.emoji = QStringLiteral("\U0001F600");
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    // The sequence is what survives a move between machines; the cached raster path does not.
+    QCOMPARE(loaded.tracks()[0].clips[0].emoji, QStringLiteral("\U0001F600"));
+
+    // A sticker or any other image clip written before the picker existed has no key at all.
+    QJsonObject legacy = json;
+    QJsonArray legacyTracks = legacy.value(QStringLiteral("tracks")).toArray();
+    QJsonObject legacyTrack = legacyTracks.at(0).toObject();
+    QJsonArray legacyClips = legacyTrack.value(QStringLiteral("clips")).toArray();
+    QJsonObject legacyClip = legacyClips.at(0).toObject();
+    legacyClip.remove(QStringLiteral("emoji"));
+    legacyClips.replace(0, legacyClip);
+    legacyTrack.insert(QStringLiteral("clips"), legacyClips);
+    legacyTracks.replace(0, legacyTrack);
+    legacy.insert(QStringLiteral("tracks"), legacyTracks);
+
+    const drift::Project old = drift::Project::fromJson(legacy, &error);
+    QVERIFY(error.isEmpty());
+    QVERIFY(old.tracks()[0].clips[0].emoji.isEmpty());
 }
 
 // The pre-shader enum serialized exactly these strings, so a project written by an older build

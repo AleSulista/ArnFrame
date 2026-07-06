@@ -46,6 +46,7 @@ target_compile_definitions(tst_engine PRIVATE
     DRIFT_TEST_EFFECTS_DIR="${CMAKE_SOURCE_DIR}/effects"
     DRIFT_TEST_TRANSITIONS_DIR="${CMAKE_SOURCE_DIR}/transitions"
     DRIFT_TEST_FONTS_DIR="${CMAKE_SOURCE_DIR}/fonts"
+    DRIFT_TEST_EMOJI_FONT_DIR="${CMAKE_SOURCE_DIR}/emoji-fonts"
     DRIFT_TEST_AUDIO_EFFECTS_DIR="${CMAKE_SOURCE_DIR}/audio-effects"
 )
 add_test(NAME Engine COMMAND tst_engine)

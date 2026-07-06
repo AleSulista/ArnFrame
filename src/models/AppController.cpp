@@ -11,6 +11,7 @@
 #include "engine/AudioEffectCatalog.h"
 #include "engine/EffectCatalog.h"
 #include "engine/Exporter.h"
+#include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
 #include "engine/MediaProbe.h"
 #include "engine/MediaThumbnail.h"
@@ -3253,6 +3254,49 @@ void AppController::addStickerClip(const QString &stickerId, double atSeconds)
     if (path.isEmpty())
         return;
 
+    addImageOverlayClip(path, label.isEmpty() ? stickerId : label, QString(), atSeconds,
+                        QStringLiteral("Sticker added"));
+}
+
+QVariantList AppController::emojiCatalog() const
+{
+    QVariantList out;
+    for (const EmojiEntry &entry : ::emojiCatalog()) {
+        out.append(QVariantMap{
+            {QStringLiteral("emoji"), entry.emoji},
+            {QStringLiteral("name"), entry.name},
+            {QStringLiteral("group"), entry.group},
+            {QStringLiteral("keywords"), entry.keywords},
+        });
+    }
+    return out;
+}
+
+QStringList AppController::emojiGroups() const
+{
+    return ::emojiGroups();
+}
+
+QString AppController::emojiFontFamily() const
+{
+    return ::emojiFontFamily();
+}
+
+void AppController::addEmojiClip(const QString &emoji, const QString &name, double atSeconds)
+{
+    const QString path = emojiImagePath(emoji);
+    if (path.isEmpty()) {
+        setLastMessage(QStringLiteral("Install the emoji sticker pack to add emoji"));
+        return;
+    }
+    addImageOverlayClip(path, name.isEmpty() ? emoji : name, emoji, atSeconds,
+                        QStringLiteral("Emoji added"));
+}
+
+void AppController::addImageOverlayClip(const QString &path, const QString &name,
+                                        const QString &emoji, double atSeconds,
+                                        const QString &undoText)
+{
     const drift::Project before = m_project;
     const int trackIndex = drift::ensureTrackForClipType(m_project, drift::ClipType::Image, true);
     if (trackIndex < 0)
@@ -3266,10 +3310,11 @@ void AppController::addStickerClip(const QString &stickerId, double atSeconds)
     drift::Clip clip;
     clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     clip.type = drift::ClipType::Image;
-    clip.name = label.isEmpty() ? stickerId : label;
+    clip.name = name;
     clip.path = path;
     clip.thumbnailPath = path;
     clip.filmstripPath = path;
+    clip.emoji = emoji;
     clip.timelineStart = start;
     clip.timelineDuration = drift::kImageClipDurationUs;
     clip.srcIn = 0;
@@ -3277,8 +3322,8 @@ void AppController::addStickerClip(const QString &stickerId, double atSeconds)
     applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
 
     track.clips.append(clip);
-    pushProjectEdit(before, QStringLiteral("Sticker added"));
-    finishEdit(QStringLiteral("Sticker added"));
+    pushProjectEdit(before, undoText);
+    finishEdit(undoText);
     selectClip(trackIndex, track.clips.size() - 1);
 }
 
@@ -5792,6 +5837,23 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
         const QString migrated = resolveLegacyStickerPath(asset.path);
         if (!migrated.isEmpty())
             asset.path = migrated;
+    }
+
+    // Emoji clips point at a raster in this machine's app data cache, which a project opened
+    // elsewhere will not have. The glyph sequence is what was saved, so re-derive the path — the
+    // render is cached, and without the font addon it comes back empty and the clip fails to load
+    // like any other missing file.
+    for (drift::Track &track : m_project.tracks()) {
+        for (drift::Clip &clip : track.clips) {
+            if (clip.emoji.isEmpty())
+                continue;
+            const QString path = emojiImagePath(clip.emoji);
+            if (path.isEmpty())
+                continue;
+            clip.path = path;
+            clip.thumbnailPath = path;
+            clip.filmstripPath = path;
+        }
     }
 
     if (m_assetLibrary)

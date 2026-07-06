@@ -1,3 +1,4 @@
+#include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
 #include "models/AddonManager.h"
 #include "models/AppController.h"
@@ -31,6 +32,7 @@ int main(int argc, char *argv[])
     // Registering the bundled fonts needs a QGuiApplication, and must happen before the compositor
     // thread starts touching QFontDatabase.
     reloadFontCatalog();
+    reloadEmojiCatalog();
 
     qmlRegisterType<PreviewItem>("Drift", 1, 0, "PreviewItem");
 

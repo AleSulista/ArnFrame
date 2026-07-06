@@ -237,6 +237,21 @@ PanelFrame {
                     font.pixelSize: Theme.fontSizeSm
                 }
 
+                // The sticker packs are a curated subset of the emoji set, so the rest live behind
+                // this button rather than being unreachable.
+                IconButton {
+                    id: emojiPickerButton
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: tabsModel.get(root.activeTab).tabId === "stickers"
+                    glyph: Theme.icons.plus
+                    variant: "ghost"
+                    tooltip: qsTr("More emoji")
+                    active: emojiPicker.opened
+                    onClicked: emojiPicker.opened ? emojiPicker.close() : emojiPicker.open()
+                }
+
                 Row {
                     anchors.right: parent.right
                     anchors.rightMargin: 8
@@ -281,6 +296,15 @@ PanelFrame {
                         onClicked: root.importMedia()
                     }
                 }
+            }
+
+            EmojiPicker {
+                id: emojiPicker
+                // Hangs off the button at the panel's right edge, and slides back rather than
+                // running off-window when the panel is dragged narrow.
+                x: Math.max(-Theme.tabRailWidth, assetsContent.width - width - 8)
+                y: Theme.panelHeaderHeight + 4
+                onAddonManagerRequested: root.Window.window.openAddonManager("stickers")
             }
 
             // Text tab panel

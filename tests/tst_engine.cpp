@@ -22,6 +22,7 @@
 #include "engine/EffectPackageLoader.h"
 #include "engine/EffectProcessor.h"
 #include "engine/FaceTrack.h"
+#include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
 #include "engine/FrameCompositor.h"
 #include "engine/TextRaster.h"
@@ -40,6 +41,8 @@ private slots:
     void initTestCase();
     void matteWriterRoundTripsThroughClipReader();
     void faceTrackRoundTripsAndInterpolates();
+    void emojiCatalogNeedsFontAddon();
+    void emojiRasterisesGlyph();
     void effectProcessorPassthroughWithoutEffects();
     void effectProcessorBrightness();
     void clipReaderSequentialAndSeek();
@@ -137,6 +140,53 @@ void EngineTest::initTestCase()
     const QString audioEffectsDir = QString::fromUtf8(DRIFT_TEST_AUDIO_EFFECTS_DIR);
     QVERIFY2(QDir(audioEffectsDir).exists(), qPrintable(audioEffectsDir));
     reloadAudioEffectCatalog({audioEffectsDir});
+}
+
+// Without the emoji-font addon there is nothing to draw with, and offering a picker full of tofu
+// is worse than offering none — so the catalog stays empty rather than falling back to the system.
+void EngineTest::emojiCatalogNeedsFontAddon()
+{
+    QTemporaryDir empty;
+    QVERIFY(empty.isValid());
+    reloadEmojiCatalog({empty.path()});
+
+    QVERIFY(emojiFontFamily().isEmpty());
+    QVERIFY(emojiCatalog().isEmpty());
+    QVERIFY(emojiGroups().isEmpty());
+    QVERIFY(emojiImagePath(QString::fromUtf8("\xF0\x9F\x98\x80")).isEmpty());
+}
+
+void EngineTest::emojiRasterisesGlyph()
+{
+    // Like the font bundle, the emoji font is an addon rather than a checked-in asset.
+    reloadEmojiCatalog({QString::fromUtf8(DRIFT_TEST_EMOJI_FONT_DIR)});
+    if (emojiFontFamily().isEmpty())
+        QSKIP("No emoji font available");
+
+    QVERIFY(!emojiCatalog().isEmpty());
+    QVERIFY(!emojiGroups().isEmpty());
+
+    const QString grinning = QString::fromUtf8("\xF0\x9F\x98\x80");
+    const QString path = emojiImagePath(grinning);
+    QVERIFY(!path.isEmpty());
+
+    QImage image(path);
+    QVERIFY(!image.isNull());
+    QCOMPARE(image.size(), QSize(160, 160));
+
+    // A glyph that failed to render still writes a valid, entirely transparent PNG.
+    bool painted = false;
+    for (int y = 0; y < image.height() && !painted; ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            if (qAlpha(image.pixel(x, y)) > 0) {
+                painted = true;
+                break;
+            }
+        }
+    }
+    QVERIFY(painted);
+
+    reloadEmojiCatalog();
 }
 
 // The matte is written by us but read back by the ordinary video path, so the two ends have to
