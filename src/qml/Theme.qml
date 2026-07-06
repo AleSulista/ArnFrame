@@ -296,6 +296,7 @@ QtObject {
         eye: "eye",
         eyeOff: "eye-off",
         film: "film",
+        video: "video",
         music: "music",
         audioLines: "audio-lines",
         image: "image",

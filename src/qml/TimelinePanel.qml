@@ -177,7 +177,7 @@ PanelFrame {
         if (type === "text") return Theme.icons.type;
         if (type === "subtitle") return Theme.icons.messageSquare;
         if (type === "shape") return Theme.icons.shapes;
-        return Theme.icons.film;
+        return Theme.icons.video;
     }
 
     // Human label for a track type. Tracks previously showed no name at all.
@@ -697,6 +697,11 @@ PanelFrame {
                         model: root.tracks.length
                         delegate: Item {
                             id: trackLabelRow
+                            // Read through root.tracks (not the EditorState
+                            // getters) so the toggles rebind on tracksChanged.
+                            readonly property bool trackMuted: root.tracks[index].muted === true
+                            readonly property bool trackHidden: root.tracks[index].hidden === true
+                            readonly property bool trackWaveform: root.tracks[index].showWaveform === true
                             width: Theme.trackLabelsWidth
                             height: root.trackHeight(root.tracks[index].type)
                                     + (index < root.tracks.length - 1 ? Theme.trackGap : 0)
@@ -768,14 +773,14 @@ PanelFrame {
                                 IconGlyph {
                                     visible: root.tracks[index].type === "video"
                                              || root.tracks[index].type === "audio"
-                                    glyph: EditorState.trackMuted(index) ? Theme.icons.volumeOff : Theme.icons.volumeHigh
+                                    glyph: trackLabelRow.trackMuted ? Theme.icons.volumeOff : Theme.icons.volumeHigh
                                     iconSize: 16
-                                    iconColor: EditorState.trackMuted(index) ? Theme.destructive : Theme.mutedForeground
+                                    iconColor: trackLabelRow.trackMuted ? Theme.destructive : Theme.mutedForeground
                                     anchors.verticalCenter: parent.verticalCenter
 
                                     ThemedToolTip {
                                         visible: muteMouse.containsMouse
-                                        text: EditorState.trackMuted(index) ? qsTr("Unmute track") : qsTr("Mute track")
+                                        text: trackLabelRow.trackMuted ? qsTr("Unmute track") : qsTr("Mute track")
                                     }
 
                                     MouseArea {
@@ -784,7 +789,7 @@ PanelFrame {
                                         anchors.margins: -4
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: EditorState.setTrackMuted(index, !EditorState.trackMuted(index))
+                                        onClicked: EditorState.setTrackMuted(index, !trackLabelRow.trackMuted)
                                     }
                                 }
 
@@ -793,14 +798,14 @@ PanelFrame {
                                              || root.tracks[index].type === "text"
                                              || root.tracks[index].type === "subtitle"
                                              || root.tracks[index].type === "shape"
-                                    glyph: EditorState.trackHidden(index) ? Theme.icons.eyeOff : Theme.icons.eye
+                                    glyph: trackLabelRow.trackHidden ? Theme.icons.eyeOff : Theme.icons.eye
                                     iconSize: 16
-                                    iconColor: EditorState.trackHidden(index) ? Theme.destructive : Theme.mutedForeground
+                                    iconColor: trackLabelRow.trackHidden ? Theme.destructive : Theme.mutedForeground
                                     anchors.verticalCenter: parent.verticalCenter
 
                                     ThemedToolTip {
                                         visible: hideMouse.containsMouse
-                                        text: EditorState.trackHidden(index) ? qsTr("Show track") : qsTr("Hide track")
+                                        text: trackLabelRow.trackHidden ? qsTr("Show track") : qsTr("Hide track")
                                     }
 
                                     MouseArea {
@@ -809,22 +814,22 @@ PanelFrame {
                                         anchors.margins: -4
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: EditorState.setTrackHidden(index, !EditorState.trackHidden(index))
+                                        onClicked: EditorState.setTrackHidden(index, !trackLabelRow.trackHidden)
                                     }
                                 }
 
                                 // Toggle the whole track between filmstrip previews and audio waveforms.
                                 IconGlyph {
                                     visible: root.tracks[index].type === "video"
-                                    glyph: EditorState.trackShowWaveform(index) ? Theme.icons.audioLines : Theme.icons.film
+                                    glyph: trackLabelRow.trackWaveform ? Theme.icons.audioLines : Theme.icons.film
                                     iconSize: 16
-                                    iconColor: EditorState.trackShowWaveform(index) ? Theme.primary : Theme.mutedForeground
+                                    iconColor: trackLabelRow.trackWaveform ? Theme.primary : Theme.mutedForeground
                                     anchors.verticalCenter: parent.verticalCenter
 
                                     ThemedToolTip {
                                         visible: waveMouse.containsMouse
-                                        text: EditorState.trackShowWaveform(index) ? qsTr("Show filmstrip")
-                                                                                   : qsTr("Show waveform")
+                                        text: trackLabelRow.trackWaveform ? qsTr("Show filmstrip")
+                                                                          : qsTr("Show waveform")
                                     }
 
                                     MouseArea {
@@ -833,7 +838,7 @@ PanelFrame {
                                         anchors.margins: -4
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: EditorState.setTrackShowWaveform(index, !EditorState.trackShowWaveform(index))
+                                        onClicked: EditorState.setTrackShowWaveform(index, !trackLabelRow.trackWaveform)
                                     }
                                 }
 
@@ -882,28 +887,28 @@ PanelFrame {
                                     id: trackContextMenu
 
                                     MenuItem {
-                                        text: EditorState.trackMuted(index) ? qsTr("Unmute track")
-                                                                            : qsTr("Mute track")
-                                        icon.name: EditorState.trackMuted(index) ? Theme.icons.volumeHigh
-                                                                                 : Theme.icons.volumeOff
-                                        onTriggered: EditorState.setTrackMuted(index, !EditorState.trackMuted(index))
+                                        text: trackLabelRow.trackMuted ? qsTr("Unmute track")
+                                                                       : qsTr("Mute track")
+                                        icon.name: trackLabelRow.trackMuted ? Theme.icons.volumeHigh
+                                                                            : Theme.icons.volumeOff
+                                        onTriggered: EditorState.setTrackMuted(index, !trackLabelRow.trackMuted)
                                     }
                                     MenuItem {
-                                        text: EditorState.trackHidden(index) ? qsTr("Show track")
-                                                                             : qsTr("Hide track")
-                                        icon.name: EditorState.trackHidden(index) ? Theme.icons.eye
-                                                                                  : Theme.icons.eyeOff
-                                        onTriggered: EditorState.setTrackHidden(index, !EditorState.trackHidden(index))
+                                        text: trackLabelRow.trackHidden ? qsTr("Show track")
+                                                                        : qsTr("Hide track")
+                                        icon.name: trackLabelRow.trackHidden ? Theme.icons.eye
+                                                                             : Theme.icons.eyeOff
+                                        onTriggered: EditorState.setTrackHidden(index, !trackLabelRow.trackHidden)
                                     }
                                     MenuItem {
                                         visible: root.tracks[index].type === "video"
                                         height: visible ? implicitHeight : 0
-                                        text: EditorState.trackShowWaveform(index)
+                                        text: trackLabelRow.trackWaveform
                                               ? qsTr("Show filmstrip") : qsTr("Show waveform")
-                                        icon.name: EditorState.trackShowWaveform(index)
+                                        icon.name: trackLabelRow.trackWaveform
                                                    ? Theme.icons.film : Theme.icons.audioLines
                                         onTriggered: EditorState.setTrackShowWaveform(
-                                                         index, !EditorState.trackShowWaveform(index))
+                                                         index, !trackLabelRow.trackWaveform)
                                     }
                                 }
                             }
