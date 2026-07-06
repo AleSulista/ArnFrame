@@ -45,6 +45,7 @@ private slots:
     void clipLinkFieldsSerialization();
     void maskAndTransitionSerialization();
     void matteMaskSerialization();
+    void faceTrackSerialization();
     void allTransitionKindsRoundTrip();
     void transitionParametersRoundTrip();
     void legacyTransitionJsonStillLoads();
@@ -960,6 +961,50 @@ void CoreTest::matteMaskSerialization()
     QCOMPARE(mask.mattePath, QStringLiteral("/tmp/mattes/abc.mkv"));
     QCOMPARE(mask.matteSrcOffsetUs, drift::secondsToUs(1.5));
     QCOMPARE(mask.invert, true);
+}
+
+void CoreTest::faceTrackSerialization()
+{
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-face");
+    clip.type = drift::ClipType::Video;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(3.0);
+    clip.faceTrackPath = QStringLiteral("/tmp/facetracks/abc.json");
+    clip.faceTrackSrcOffsetUs = drift::secondsToUs(2.25);
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    const drift::Clip &out = loaded.tracks()[0].clips[0];
+    QCOMPARE(out.faceTrackPath, QStringLiteral("/tmp/facetracks/abc.json"));
+    QCOMPARE(out.faceTrackSrcOffsetUs, drift::secondsToUs(2.25));
+
+    // A project written before face tracking existed carries neither key, and must still load with
+    // the clip simply having no track rather than failing.
+    QJsonObject legacy = json;
+    QJsonArray legacyTracks = legacy.value(QStringLiteral("tracks")).toArray();
+    QJsonObject legacyTrack = legacyTracks.at(0).toObject();
+    QJsonArray legacyClips = legacyTrack.value(QStringLiteral("clips")).toArray();
+    QJsonObject legacyClip = legacyClips.at(0).toObject();
+    legacyClip.remove(QStringLiteral("faceTrackPath"));
+    legacyClip.remove(QStringLiteral("faceTrackSrcOffsetUs"));
+    legacyClips.replace(0, legacyClip);
+    legacyTrack.insert(QStringLiteral("clips"), legacyClips);
+    legacyTracks.replace(0, legacyTrack);
+    legacy.insert(QStringLiteral("tracks"), legacyTracks);
+
+    const drift::Project old = drift::Project::fromJson(legacy, &error);
+    QVERIFY(error.isEmpty());
+    QVERIFY(old.tracks()[0].clips[0].faceTrackPath.isEmpty());
+    QCOMPARE(old.tracks()[0].clips[0].faceTrackSrcOffsetUs, drift::TimeUs(0));
 }
 
 // The pre-shader enum serialized exactly these strings, so a project written by an older build

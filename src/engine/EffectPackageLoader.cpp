@@ -64,6 +64,14 @@ EffectPresetEntry EffectPackageLoader::loadPackage(const QString &packageDir, QS
         GpuPackageParse::slugifyCategory(categoryRaw.isEmpty() ? QStringLiteral("dreamy") : categoryRaw);
     entry.catalogOrder = root.value(QStringLiteral("order")).toInt(0);
 
+    const QString requirement = root.value(QStringLiteral("requires")).toString();
+    if (requirement == QLatin1String("face")) {
+        entry.needsFace = true;
+    } else if (!requirement.isEmpty()) {
+        setError(errorOut, &entry, QStringLiteral("unsupported requires '%1'").arg(requirement));
+        return entry;
+    }
+
     if (entry.meta.id.isEmpty()) {
         setError(errorOut, &entry, QStringLiteral("effect.json missing id"));
         return entry;

@@ -4,6 +4,7 @@
 #include "CompositorFrameHistory.h"
 #include "EffectCatalog.h"
 #include "EffectProcessor.h"
+#include "FaceTrack.h"
 #include "GpuCompositor.h"
 #include "GpuEffectExecutor.h"
 #include "MaskApplier.h"
@@ -110,6 +111,34 @@ const drift::Effect *findTimeEchoEffect(const QList<drift::Effect> &effects)
             return &effect;
     }
     return nullptr;
+}
+
+// Only worth touching the face track when something in the chain actually consumes it, so a clip
+// that has been detected but is running ordinary effects pays nothing.
+bool chainNeedsFace(const QList<drift::Effect> &effects)
+{
+    for (const drift::Effect &effect : effects) {
+        const EffectPresetEntry *def =
+            effect.catalogId.isEmpty() ? nullptr : effectDefForId(effect.catalogId);
+        if (def && def->needsFace)
+            return true;
+    }
+    return false;
+}
+
+// This frame's anchors for a clip, or an empty list when nothing in the chain wants them. Shared by
+// the CPU and GPU compositing paths so a face warp cannot come out differently between preview and
+// export depending on which one ran.
+QList<drift::FaceAnchors> faceSlotsForClip(const drift::Clip &clip,
+                                           const QList<drift::Effect> &effects,
+                                           drift::TimeUs timelineUs)
+{
+    if (clip.faceTrackPath.isEmpty() || !chainNeedsFace(effects))
+        return {};
+    const auto track = drift::loadFaceTrackCached(clip.faceTrackPath);
+    if (!track)
+        return {};
+    return track->sampleAll(clip.timelineToSourceUs(timelineUs) - clip.faceTrackSrcOffsetUs);
 }
 
 QList<drift::Effect> effectsExcludingTimeEcho(const QList<drift::Effect> &effects)
@@ -260,8 +289,12 @@ QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int maxWi
 
     // Mask geometry is normalized, so it applies at whatever size the decode
     // actually produced.
-    if (!otherEffects.isEmpty())
-        image = EffectProcessor::applyEffects(image, otherEffects, clipTimeUs);
+    if (!otherEffects.isEmpty()) {
+        // Baked anchors, so this is a lookup rather than an inference: no ONNX ever runs on the
+        // compositor thread, and preview and export read the same numbers.
+        image = EffectProcessor::applyEffects(image, otherEffects, clipTimeUs,
+                                              faceSlotsForClip(clip, otherEffects, timelineUs));
+    }
     if (clip.mask.shape != drift::MaskShape::None)
         image = drift::applyMask(image, clip.mask, image.width(), image.height());
     return image;
@@ -553,6 +586,7 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
     layer.flipV = clip.flipV;
     layer.opacity = opacity;
     layer.clipTimeUs = timelineUs - clip.timelineStart;
+    layer.faceSlots = faceSlotsForClip(clip, layer.effects, timelineUs);
     layer.valid = true;
     return layer;
 }

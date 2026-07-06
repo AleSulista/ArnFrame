@@ -16,6 +16,8 @@
 #include "engine/MediaThumbnail.h"
 #include "engine/MatteWriter.h"
 #include "engine/MediaWaveform.h"
+#include "engine/FaceLandmarker.h"
+#include "engine/FaceTrack.h"
 #include "engine/Sam2Segmenter.h"
 #include "engine/StickerCatalog.h"
 #include "SegmentImageStore.h"
@@ -153,6 +155,80 @@ namespace {
 QVariantMap transitionToMap(const drift::Track &track, const drift::Transition &t);
 QVariantMap maskToMap(const drift::Mask &m);
 drift::Mask maskFromMap(const QVariantMap &m);
+
+// Raw per-frame landmarks jitter by a pixel or two even on a still head, and a bulge anchored to a
+// jittering point visibly boils. A short symmetric average over neighbouring frames costs nothing
+// at bake time and is what makes the warps sit still.
+//
+// Only runs across frames where the slot is continuously valid, so smoothing never drags an anchor
+// across the gap where a face left and came back.
+void smoothFaceTrack(drift::FaceTrack *track)
+{
+    constexpr int kRadius = 2;
+    const int frameCount = track->frames.size();
+    if (frameCount < 3)
+        return;
+
+    int slotCount = 0;
+    for (const drift::FaceTrackFrame &f : track->frames)
+        slotCount = qMax(slotCount, int(f.faces.size()));
+
+    const drift::FaceTrack source = *track;
+    for (int slot = 0; slot < slotCount; ++slot) {
+        for (int i = 0; i < frameCount; ++i) {
+            if (slot >= track->frames[i].faces.size() || !track->frames[i].faces[slot].valid)
+                continue;
+
+            drift::FaceAnchors sum{};
+            QPointF *sums[] = {&sum.leftEye,  &sum.rightEye, &sum.noseTip,  &sum.mouthCenter,
+                               &sum.mouthLeft, &sum.mouthRight, &sum.chin,  &sum.forehead,
+                               &sum.faceCenter};
+            double angleX = 0.0;
+            double angleY = 0.0;
+            int n = 0;
+
+            for (int d = -kRadius; d <= kRadius; ++d) {
+                const int j = i + d;
+                if (j < 0 || j >= frameCount || slot >= source.frames[j].faces.size())
+                    continue;
+                const drift::FaceAnchors &a = source.frames[j].faces[slot];
+                if (!a.valid)
+                    continue;
+                const QPointF points[] = {a.leftEye,  a.rightEye,   a.noseTip,
+                                          a.mouthCenter, a.mouthLeft, a.mouthRight,
+                                          a.chin,     a.forehead,   a.faceCenter};
+                for (int k = 0; k < 9; ++k)
+                    *sums[k] += points[k];
+                sum.faceRx += a.faceRx;
+                sum.faceRy += a.faceRy;
+                sum.eyeRadius += a.eyeRadius;
+                // Averaged as a vector, so angles either side of the +/-pi seam do not cancel.
+                angleX += std::cos(a.angle);
+                angleY += std::sin(a.angle);
+                ++n;
+            }
+            if (n < 2)
+                continue;
+
+            drift::FaceAnchors &out = track->frames[i].faces[slot];
+            for (int k = 0; k < 9; ++k)
+                *sums[k] /= double(n);
+            out.leftEye = sum.leftEye;
+            out.rightEye = sum.rightEye;
+            out.noseTip = sum.noseTip;
+            out.mouthCenter = sum.mouthCenter;
+            out.mouthLeft = sum.mouthLeft;
+            out.mouthRight = sum.mouthRight;
+            out.chin = sum.chin;
+            out.forehead = sum.forehead;
+            out.faceCenter = sum.faceCenter;
+            out.faceRx = sum.faceRx / n;
+            out.faceRy = sum.faceRy / n;
+            out.eyeRadius = sum.eyeRadius / n;
+            out.angle = std::atan2(angleY, angleX);
+        }
+    }
+}
 
 int findTransitionPartnerIndex(const drift::Track &track, int fromIndex)
 {
@@ -907,6 +983,7 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("flipH"), clip.flipH},
         {QStringLiteral("flipV"), clip.flipV},
         {QStringLiteral("mask"), maskToMap(clip.mask)},
+        {QStringLiteral("hasFaceTrack"), !clip.faceTrackPath.isEmpty()},
         {QStringLiteral("start"), drift::usToSeconds(clip.timelineStart)},
         {QStringLiteral("duration"), drift::usToSeconds(clip.timelineDuration)},
         {QStringLiteral("inPoint"), drift::usToSeconds(clip.srcIn)},
@@ -2599,6 +2676,229 @@ void AppController::segmentClip(int trackIndex, int clipIndex, const QVariantLis
                    : QStringLiteral("Segmentation complete"),
                mattePath);
     });
+}
+
+bool AppController::faceDetectionAvailable()
+{
+    return drift::FaceLandmarker::modelPresent();
+}
+
+void AppController::cancelFaceDetection()
+{
+    if (m_faceDetecting)
+        m_faceDetectCancel.storeRelaxed(1);
+}
+
+void AppController::clearFaceTrack(int trackIndex, int clipIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    if (clipIndex < 0 || clipIndex >= m_project.tracks().at(trackIndex).clips.size())
+        return;
+    if (m_project.tracks().at(trackIndex).clips.at(clipIndex).faceTrackPath.isEmpty())
+        return;
+
+    // The sidecar itself is left on disk: undo has to be able to bring the track back, and these
+    // files are small and live in a cache directory.
+    const drift::Project before = m_project;
+    m_project.tracks()[trackIndex].clips[clipIndex].faceTrackPath.clear();
+    m_project.tracks()[trackIndex].clips[clipIndex].faceTrackSrcOffsetUs = 0;
+    pushProjectEdit(before, QStringLiteral("Clear Face Track"));
+    finishEdit(QStringLiteral("Clear Face Track"));
+}
+
+void AppController::detectFacesForClip(int trackIndex, int clipIndex)
+{
+    if (m_faceDetecting) {
+        setLastMessage(QStringLiteral("Face detection already in progress"));
+        return;
+    }
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Clip clip = track.clips.at(clipIndex);
+    if (clip.type != drift::ClipType::Video && clip.type != drift::ClipType::Image) {
+        setLastMessage(QStringLiteral("Select a video clip to detect faces in"));
+        return;
+    }
+    if (clip.path.isEmpty() || clip.srcOut <= clip.srcIn) {
+        setLastMessage(QStringLiteral("Clip has no video to scan"));
+        return;
+    }
+
+    // Same reason as the export and segmentation jobs: playback would drive the decode pool from a
+    // second thread while this job walks it frame by frame.
+    setPlaying(false);
+
+    m_faceDetectCancel.storeRelaxed(0);
+    m_faceDetectProgress = 0.0;
+    emit faceDetectProgressChanged();
+    m_faceDetectStatus = QStringLiteral("Loading model…");
+    emit faceDetectStatusChanged();
+    m_faceDetecting = true;
+    emit faceDetectingChanged();
+    setLastMessage(QStringLiteral("Detecting faces..."));
+
+    const QString path = clip.path;
+    const drift::TimeUs srcIn = clip.srcIn;
+    const drift::TimeUs srcOut = clip.srcOut;
+    const int fps = qMax(1, m_project.fps());
+    const int canvasW = m_project.width();
+    const int canvasH = m_project.height();
+    // Resolved by id at the end rather than by index: the timeline can be edited while the job
+    // runs, and stale indices would attach the track to the wrong clip.
+    const QString clipId = clip.id;
+
+    (void)QtConcurrent::run([this, path, srcIn, srcOut, fps, canvasW, canvasH, clipId]() {
+        auto setProgress = [this](double fraction, const QString &status) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, fraction, status]() {
+                    m_faceDetectProgress = fraction;
+                    emit faceDetectProgressChanged();
+                    if (!status.isEmpty() && status != m_faceDetectStatus) {
+                        m_faceDetectStatus = status;
+                        emit faceDetectStatusChanged();
+                    }
+                },
+                Qt::QueuedConnection);
+        };
+
+        auto finish = [this, clipId, srcIn](bool ok, const QString &message,
+                                            const QString &trackPath) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, ok, message, trackPath, clipId, srcIn]() {
+                    m_faceDetecting = false;
+                    emit faceDetectingChanged();
+                    m_faceDetectProgress = ok ? 1.0 : 0.0;
+                    emit faceDetectProgressChanged();
+                    m_faceDetectStatus = ok ? QStringLiteral("Done") : message;
+                    emit faceDetectStatusChanged();
+                    if (!ok) {
+                        setLastMessage(message);
+                        emit faceDetectionFinished(false, message);
+                        return;
+                    }
+                    finalizeFaceDetection(clipId, trackPath, srcIn);
+                    setLastMessage(message);
+                    emit faceDetectionFinished(true, message);
+                },
+                Qt::QueuedConnection);
+        };
+
+        drift::FaceLandmarker &landmarker = drift::FaceLandmarker::instance();
+        if (!landmarker.available()) {
+            finish(false, landmarker.lastError(), {});
+            return;
+        }
+
+        const drift::TimeUs step = drift::kUsPerSecond / fps;
+        const int totalFrames = int((srcOut - srcIn + step - 1) / step);
+        if (totalFrames <= 0) {
+            finish(false, QStringLiteral("Clip is too short to scan"), {});
+            return;
+        }
+
+        drift::FaceTrack faceTrack;
+        faceTrack.fps = fps;
+        faceTrack.startSrcUs = srcIn;
+        faceTrack.frames.reserve(totalFrames);
+
+        QList<drift::FaceAnchors> previous;
+        int framesWithFace = 0;
+
+        for (int i = 0; i < totalFrames; ++i) {
+            if (m_faceDetectCancel.loadRelaxed() != 0) {
+                finish(false, QStringLiteral("Face detection cancelled"), {});
+                return;
+            }
+
+            const drift::TimeUs sourceUs = srcIn + drift::TimeUs(i) * step;
+            const QImage frame =
+                ClipReaderPool::instance().readVideoFrame(path, sourceUs, canvasW, canvasH);
+            if (frame.isNull()) {
+                finish(false, QStringLiteral("Could not decode frame %1").arg(i), {});
+                return;
+            }
+
+            // The previous frame seeds the next one's ROI, which is what keeps a face in the same
+            // slot for the whole clip and skips the detector while tracking holds.
+            QList<drift::FaceAnchors> faces =
+                landmarker.detect(frame, previous.isEmpty() ? nullptr : &previous);
+            previous = faces;
+
+            drift::FaceTrackFrame baked;
+            baked.faces = faces;
+            faceTrack.frames.append(baked);
+
+            for (const drift::FaceAnchors &a : faces) {
+                if (a.valid) {
+                    ++framesWithFace;
+                    break;
+                }
+            }
+
+            setProgress(double(i + 1) / totalFrames,
+                        QStringLiteral("Scanning frame %1 of %2…").arg(i + 1).arg(totalFrames));
+        }
+
+        if (framesWithFace == 0) {
+            finish(false, QStringLiteral("No faces found in this clip"), {});
+            return;
+        }
+
+        smoothFaceTrack(&faceTrack);
+
+        const QString trackPath = drift::newFaceTrackPath();
+        QString error;
+        if (trackPath.isEmpty() || !drift::writeFaceTrack(trackPath, faceTrack, &error)) {
+            finish(false, error.isEmpty() ? QStringLiteral("Could not write the face track") : error,
+                   {});
+            return;
+        }
+
+        finish(true,
+               framesWithFace < totalFrames
+                   ? QStringLiteral("Face detection complete — a face was visible in %1 of %2 frames")
+                         .arg(framesWithFace)
+                         .arg(totalFrames)
+                   : QStringLiteral("Face detection complete"),
+               trackPath);
+    });
+}
+
+void AppController::finalizeFaceDetection(const QString &clipId, const QString &trackPath,
+                                          drift::TimeUs srcOffsetUs)
+{
+    int trackIndex = -1;
+    int clipIndex = -1;
+    for (int t = 0; t < m_project.tracks().size() && trackIndex < 0; ++t) {
+        const drift::Track &track = m_project.tracks().at(t);
+        for (int c = 0; c < track.clips.size(); ++c) {
+            if (track.clips.at(c).id == clipId) {
+                trackIndex = t;
+                clipIndex = c;
+                break;
+            }
+        }
+    }
+    if (trackIndex < 0) {
+        // The clip was deleted while the job ran; the track has nothing to attach to.
+        QFile::remove(trackPath);
+        setLastMessage(QStringLiteral("Scanned clip no longer exists"));
+        return;
+    }
+
+    const drift::Project before = m_project;
+    m_project.tracks()[trackIndex].clips[clipIndex].faceTrackPath = trackPath;
+    m_project.tracks()[trackIndex].clips[clipIndex].faceTrackSrcOffsetUs = srcOffsetUs;
+    pushProjectEdit(before, QStringLiteral("Detect Faces"));
+    finishEdit(QStringLiteral("Detect Faces"));
+    selectClip(trackIndex, clipIndex);
 }
 
 void AppController::finalizeSegmentation(const QString &clipId, const QString &mattePath,

@@ -5,8 +5,9 @@
 
 namespace drift {
 
-// Reserved uniform names supplied by the engine — package JSON must not claim these.
-inline bool isReservedGpuUniform(const QString &name)
+// Uniforms the executor binds itself, from its own state rather than from the parameter map.
+// Binding them again from a parameter of the same name would just overwrite the real value.
+inline bool isEngineBoundGpuUniform(const QString &name)
 {
     if (name == QLatin1String("u_resolution") || name == QLatin1String("u_time")
         || name == QLatin1String("u_timeUs") || name == QLatin1String("u_frameIndex")
@@ -16,6 +17,14 @@ inline bool isReservedGpuUniform(const QString &name)
     }
     // Extra samplers bound for multi-input passes: u_texture1, u_texture2, ...
     return name.startsWith(QLatin1String("u_texture"));
+}
+
+// Names package JSON must not claim. Wider than the above: the per-frame face anchors travel to
+// the shader *through* the parameter map, so they must still be bound from it, but a package
+// declaring its own u_face* slider would collide with what the engine injects.
+inline bool isReservedGpuUniform(const QString &name)
+{
+    return isEngineBoundGpuUniform(name) || name.startsWith(QLatin1String("u_face"));
 }
 
 struct GpuEffectBufferSpec

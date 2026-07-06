@@ -194,8 +194,13 @@ add_library(driftengine STATIC
     src/engine/WhisperTokenizer.cpp
     src/engine/WhisperTranscriber.h
     src/engine/WhisperTranscriber.cpp
+    src/engine/OrtSupport.h
     src/engine/Sam2Segmenter.h
     src/engine/Sam2Segmenter.cpp
+    src/engine/FaceLandmarker.h
+    src/engine/FaceLandmarker.cpp
+    src/engine/FaceTrack.h
+    src/engine/FaceTrack.cpp
     src/engine/MatteWriter.h
     src/engine/MatteWriter.cpp
 )
@@ -285,6 +290,7 @@ qt_add_qml_module(drift
         src/qml/components/FontPicker.qml
         src/qml/components/ThemedButton.qml
         src/qml/components/ThemedChip.qml
+        src/qml/components/ThemedProgressBar.qml
         src/qml/components/ThemedLabel.qml
         src/qml/components/ThemedDialog.qml
         src/qml/components/AddonManagerDialog.qml

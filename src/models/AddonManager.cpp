@@ -471,7 +471,8 @@ void AddonManager::reloadForKinds(const QStringList &kinds)
             reloadTransitionCatalog();
         else if (kind == QLatin1String("audio-effects"))
             reloadAudioEffectCatalog();
-        // whisper-model and sam2-model need nothing: sessions are created lazily on next use.
+        // whisper-model, sam2-model and face-model need nothing: sessions are created lazily on
+        // next use.
         emit kindChanged(kind);
     }
 }

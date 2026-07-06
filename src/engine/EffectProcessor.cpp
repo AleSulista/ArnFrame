@@ -1,6 +1,7 @@
 #include "EffectProcessor.h"
 
 #include "EffectCatalog.h"
+#include "FaceTrack.h"
 #include "GpuEffectExecutor.h"
 
 #include <cstring>
@@ -146,7 +147,7 @@ QImage applyLibavFilterGraph(const QImage &input, const QString &filters)
 } // namespace
 
 QImage EffectProcessor::applyEffects(const QImage &input, const QList<drift::Effect> &effects,
-                                     drift::TimeUs timeUs)
+                                     drift::TimeUs timeUs, const QList<drift::FaceAnchors> &faceSlots)
 {
     if (input.isNull() || effects.isEmpty())
         return input;
@@ -183,8 +184,10 @@ QImage EffectProcessor::applyEffects(const QImage &input, const QList<drift::Eff
 
         if (def && def->isGpu && def->gpu.valid) {
             flushLegacy();
-            gpuChain.append(GpuEffectExecutor::ChainStep{def->meta.id, &def->gpu,
-                                                         resolvedEffectParameters(effect, *def)});
+            QMap<QString, QVariant> params = resolvedEffectParameters(effect, *def);
+            if (def->needsFace)
+                drift::applyFaceUniforms(&params, faceSlots);
+            gpuChain.append(GpuEffectExecutor::ChainStep{def->meta.id, &def->gpu, params});
             continue;
         }
 

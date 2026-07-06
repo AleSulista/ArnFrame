@@ -490,7 +490,7 @@ void setPackageUniforms(QOpenGLShaderProgram *program, const QMap<QString, QVari
     program->setUniformValue("u_progress", float(qBound(0.0, progress, 1.0)));
 
     for (auto it = parameters.constBegin(); it != parameters.constEnd(); ++it) {
-        if (drift::isReservedGpuUniform(it.key()))
+        if (drift::isEngineBoundGpuUniform(it.key()))
             continue;
         const int loc = program->uniformLocation(it.key());
         if (loc < 0)

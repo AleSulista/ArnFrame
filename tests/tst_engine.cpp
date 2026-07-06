@@ -21,6 +21,7 @@
 #include "engine/EffectCatalog.h"
 #include "engine/EffectPackageLoader.h"
 #include "engine/EffectProcessor.h"
+#include "engine/FaceTrack.h"
 #include "engine/FontCatalog.h"
 #include "engine/FrameCompositor.h"
 #include "engine/TextRaster.h"
@@ -38,6 +39,7 @@ class EngineTest : public QObject
 private slots:
     void initTestCase();
     void matteWriterRoundTripsThroughClipReader();
+    void faceTrackRoundTripsAndInterpolates();
     void effectProcessorPassthroughWithoutEffects();
     void effectProcessorBrightness();
     void clipReaderSequentialAndSeek();
@@ -45,6 +47,7 @@ private slots:
     void compositorDefaultRenderStaysFullResolution();
     void compositorPreviewScaleRendersLowerResolution();
     void compositorPreviewScaleMapsProjectPixelLayout();
+    void compositorAppliesFaceWarpFromBakedTrack();
     void compositorAppliesMultiplyBlendMode();
     void compositorRendersShapeClip();
     void compositorSkipsClipBeingEdited();
@@ -137,6 +140,71 @@ void EngineTest::initTestCase()
 
 // The matte is written by us but read back by the ordinary video path, so the two ends have to
 // agree on codec, pixel format and time base. A mismatch shows up as a mask that decodes black
+// The sidecar is what preview and export both read, so a rounding or indexing slip here shows up
+// as a warp that lags the face rather than as an error.
+void EngineTest::faceTrackRoundTripsAndInterpolates()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("track.json"));
+
+    drift::FaceTrack track;
+    track.fps = 30;
+    track.startSrcUs = drift::secondsToUs(1.0);
+    for (int i = 0; i < 3; ++i) {
+        drift::FaceAnchors a;
+        a.valid = true;
+        a.faceCenter = QPointF(0.25 + 0.25 * i, 0.5);
+        a.leftEye = QPointF(0.2 + 0.25 * i, 0.4);
+        a.faceRx = 0.1;
+        a.faceRy = 0.12;
+        a.angle = 0.2;
+        a.eyeRadius = 0.02;
+        a.score = 0.9;
+
+        drift::FaceTrackFrame frame;
+        frame.faces.append(a);
+        // A second slot that drops out in the middle: sampling it there must report no face
+        // rather than interpolating across the gap.
+        drift::FaceAnchors second = a;
+        second.valid = (i != 1);
+        second.faceCenter = QPointF(0.8, 0.3);
+        frame.faces.append(second);
+        track.frames.append(frame);
+    }
+
+    QString error;
+    QVERIFY2(drift::writeFaceTrack(path, track, &error), qPrintable(error));
+
+    drift::FaceTrack loaded;
+    QVERIFY2(drift::readFaceTrack(path, &loaded, &error), qPrintable(error));
+    QCOMPARE(loaded.fps, 30);
+    QCOMPARE(loaded.startSrcUs, drift::secondsToUs(1.0));
+    QCOMPARE(loaded.frames.size(), 3);
+
+    // Exactly on frame 1.
+    const drift::FaceAnchors onFrame = loaded.sample(drift::kUsPerSecond / 30, 0);
+    QVERIFY(onFrame.valid);
+    QVERIFY(qAbs(onFrame.faceCenter.x() - 0.5) < 1e-4);
+
+    // Halfway between frames 0 and 1 — the whole point of interpolating rather than snapping.
+    const drift::FaceAnchors between = loaded.sample(drift::kUsPerSecond / 60, 0);
+    QVERIFY(between.valid);
+    QVERIFY(qAbs(between.faceCenter.x() - 0.375) < 1e-4);
+
+    // Past the end clamps to the last frame instead of falling off.
+    const drift::FaceAnchors after = loaded.sample(drift::secondsToUs(10.0), 0);
+    QVERIFY(after.valid);
+    QVERIFY(qAbs(after.faceCenter.x() - 0.75) < 1e-4);
+
+    // The gap in slot 1: neither neighbour pair may produce a face.
+    QVERIFY(!loaded.sample(drift::kUsPerSecond / 60, 1).valid);
+    QVERIFY(!loaded.sample(drift::kUsPerSecond / 30, 1).valid);
+
+    // A slot that was never baked is simply absent.
+    QVERIFY(!loaded.sample(0, 3).valid);
+}
+
 // or lands on the wrong frame — silent, and only visible in the composite.
 void EngineTest::matteWriterRoundTripsThroughClipReader()
 {
@@ -436,6 +504,101 @@ void EngineTest::compositorPreviewScaleMapsProjectPixelLayout()
     QCOMPARE(frame.pixelColor(90, 40), QColor(0, 0, 0));
 }
 
+// Effects reach the screen through two different code paths — the CPU chain in EffectProcessor and
+// the GPU chain in GpuCompositor — and only the CPU one was wired up at first, so face warps
+// rendered in tools and exports while the preview showed nothing at all. This drives the whole
+// compositor, which is what the preview uses.
+void EngineTest::compositorAppliesFaceWarpFromBakedTrack()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    // Diagonal wedges: a warp has to move visibly different pixels around, which a flat or
+    // radially symmetric image would hide.
+    QImage source(64, 64, QImage::Format_RGBA8888);
+    for (int y = 0; y < 64; ++y) {
+        for (int x = 0; x < 64; ++x)
+            source.setPixelColor(x, y, ((x / 8) + (y / 8)) % 2 ? Qt::white : QColor(20, 40, 200));
+    }
+    const QString imagePath = dir.filePath(QStringLiteral("src.png"));
+    QVERIFY(source.save(imagePath, "PNG"));
+
+    // A face filling most of the frame, so the warp covers a large share of the pixels.
+    drift::FaceAnchors a;
+    a.valid = true;
+    a.faceCenter = QPointF(0.5, 0.5);
+    a.leftEye = QPointF(0.38, 0.42);
+    a.rightEye = QPointF(0.62, 0.42);
+    a.noseTip = QPointF(0.5, 0.52);
+    a.mouthCenter = QPointF(0.5, 0.66);
+    a.mouthLeft = QPointF(0.42, 0.66);
+    a.mouthRight = QPointF(0.58, 0.66);
+    a.chin = QPointF(0.5, 0.8);
+    a.forehead = QPointF(0.5, 0.2);
+    a.faceRx = 0.3;
+    a.faceRy = 0.35;
+    a.angle = 0.0;
+    a.eyeRadius = 0.05;
+    a.score = 1.0;
+
+    drift::FaceTrack track;
+    track.fps = 30;
+    drift::FaceTrackFrame frame;
+    frame.faces.append(a);
+    for (int i = 0; i < 4; ++i)
+        track.frames.append(frame);
+
+    const QString trackPath = dir.filePath(QStringLiteral("track.json"));
+    QString error;
+    QVERIFY2(drift::writeFaceTrack(trackPath, track, &error), qPrintable(error));
+
+    auto composite = [&](bool attachTrack) {
+        drift::Project project;
+        project.setResolution(64, 64);
+        project.tracks().clear();
+        project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+        drift::Clip clip;
+        clip.id = QStringLiteral("c");
+        clip.type = drift::ClipType::Image;
+        clip.path = imagePath;
+        clip.timelineStart = 0;
+        clip.timelineDuration = drift::secondsToUs(1.0);
+        if (attachTrack)
+            clip.faceTrackPath = trackPath;
+
+        drift::Effect warp;
+        warp.catalogId = QStringLiteral("face_swirl");
+        warp.parameters.insert(QStringLiteral("twist"), 2.5);
+        warp.parameters.insert(QStringLiteral("coverage"), 1.8);
+        warp.parameters.insert(QStringLiteral("faceIndex"), 0);
+        clip.effects.append(warp);
+
+        project.tracks()[0].clips.append(clip);
+
+        FrameCompositor compositor;
+        compositor.setProject(&project);
+        return compositor.compositeAt(0);
+    };
+
+    const QImage warped = composite(true);
+    const QImage untracked = composite(false);
+    QVERIFY(!warped.isNull());
+    QVERIFY(!untracked.isNull());
+
+    // Without a track the effect must be a clean pass-through, and with one it must actually bend
+    // the picture. Comparing the two pins both directions at once.
+    int differing = 0;
+    for (int y = 0; y < warped.height(); ++y) {
+        for (int x = 0; x < warped.width(); ++x)
+            differing += warped.pixel(x, y) != untracked.pixel(x, y) ? 1 : 0;
+    }
+    QVERIFY2(differing > 200,
+             qPrintable(QStringLiteral("face warp changed only %1 pixels — the compositor is not "
+                                       "feeding anchors to the effect")
+                            .arg(differing)));
+}
+
 void EngineTest::compositorAppliesMultiplyBlendMode()
 {
     QTemporaryDir dir;
@@ -603,7 +766,8 @@ void EngineTest::effectPresetStableIds()
                      || id == QStringLiteral("digital_glitch")
                      || id == QStringLiteral("film_burn")
                      || id == QStringLiteral("time_echo")
-                     || id == QStringLiteral("shockwave_pulse"),
+                     || id == QStringLiteral("shockwave_pulse")
+                     || id.startsWith(QStringLiteral("face_")),
                  qPrintable(QStringLiteral("stable id: %1").arg(id)));
         QVERIFY2(!seen.contains(id), qPrintable(QStringLiteral("duplicate id: %1").arg(id)));
         seen.insert(id);

@@ -4,6 +4,7 @@
 #include "core/Effect.h"
 #include "core/Mask.h"
 #include "core/Time.h"
+#include "engine/FaceLandmarker.h"
 
 #include <QColor>
 #include <QImage>
@@ -33,6 +34,9 @@ struct GpuLayer
     bool flipV = false;
     double opacity = 1.0;
     drift::TimeUs clipTimeUs = 0; // effect time base (relative to clip start)
+    // This frame's baked face anchors, one per tracked slot, sampled by FrameCompositor. Carried
+    // by value: the scene outlives the cache lookup that produced them.
+    QList<drift::FaceAnchors> faceSlots;
     bool valid = false;
 };
 

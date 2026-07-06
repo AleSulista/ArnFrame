@@ -2551,6 +2551,104 @@ PanelFrame {
                         spacing: Theme.spacingXl
                         visible: root.currentTabId === "effects"
 
+                        // The face warp effects follow baked landmarks, so the clip has to be
+                        // scanned before any of them do anything. This sits above the effect list
+                        // because that ordering is the workflow: detect, then apply.
+                        Column {
+                            id: faceSection
+                            visible: root.clipKind === "video"
+                            width: parent.width
+                            spacing: Theme.spacingSm
+
+                            // The model is an addon, but it can equally come from a bundled
+                            // models/face or DRIFT_FACE_MODEL_DIR, so ask the engine rather than
+                            // the addon registry. That answer is not a binding, hence the reset
+                            // below when an addon of this kind appears.
+                            property bool faceReady: EditorState.faceDetectionAvailable()
+                            property bool hasTrack: {
+                                const data = EditorState.selectedClipData
+                                return data && data.hasFaceTrack === true
+                            }
+
+                            Connections {
+                                target: Addons
+                                function onKindChanged(kind) {
+                                    if (kind === "face-model")
+                                        faceSection.faceReady = EditorState.faceDetectionAvailable()
+                                }
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: qsTr("Face tracking")
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                visible: faceSection.faceReady && !faceSection.hasTrack
+                                         && !EditorState.faceDetecting
+                                text: qsTr("Scan this clip once, then the Funny Face effects will follow the face through it.")
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            ThemedButton {
+                                visible: faceSection.faceReady && !EditorState.faceDetecting
+                                width: parent.width
+                                text: faceSection.hasTrack ? qsTr("Re-detect faces") : qsTr("Detect faces…")
+                                variant: faceSection.hasTrack ? "ghost" : "secondary"
+                                onClicked: EditorState.detectFacesForClip(
+                                               EditorState.selectedTrack, EditorState.selectedClip)
+                            }
+
+                            ThemedButton {
+                                visible: faceSection.faceReady && faceSection.hasTrack
+                                         && !EditorState.faceDetecting
+                                width: parent.width
+                                text: qsTr("Clear face track")
+                                variant: "ghost"
+                                onClicked: EditorState.clearFaceTrack(
+                                               EditorState.selectedTrack, EditorState.selectedClip)
+                            }
+
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                visible: EditorState.faceDetecting
+                                text: EditorState.faceDetectStatus
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            ThemedProgressBar {
+                                visible: EditorState.faceDetecting
+                                width: parent.width
+                                value: EditorState.faceDetectProgress
+                            }
+
+                            ThemedButton {
+                                visible: EditorState.faceDetecting
+                                width: parent.width
+                                text: qsTr("Cancel")
+                                variant: "ghost"
+                                onClicked: EditorState.cancelFaceDetection()
+                            }
+
+                            ThemedButton {
+                                visible: !faceSection.faceReady
+                                width: parent.width
+                                text: qsTr("Install face model (≈5 MB)")
+                                variant: "primary"
+                                onClicked: root.Window.window.openAddonManager("face-model")
+                            }
+                        }
+
                         // Has a CTA now: the copy told the user to go to the
                         // Effects library but gave them no way to get there.
                         EmptyState {

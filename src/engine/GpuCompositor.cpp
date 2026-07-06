@@ -1,6 +1,7 @@
 #include "GpuCompositor.h"
 
 #include "EffectCatalog.h"
+#include "FaceTrack.h"
 #include "GlRuntime.h"
 #include "GpuEffectDefinition.h"
 #include "MaskApplier.h"
@@ -221,10 +222,13 @@ GlTarget buildLayerTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const GpuLay
         if (def->meta.id == QStringLiteral("time_echo"))
             continue; // history is assembled before the scene is built
 
+        QMap<QString, QVariant> params = resolvedEffectParameters(effect, *def);
+        if (def->needsFace)
+            drift::applyFaceUniforms(&params, layer.faceSlots);
+
         const std::vector<const GlTarget *> sources{&target};
-        GlTarget next = runPipeline(rt, gl, def->meta.id, def->gpu, sources,
-                                    resolvedEffectParameters(effect, *def), layer.clipTimeUs, 0.0,
-                                    target.size());
+        GlTarget next = runPipeline(rt, gl, def->meta.id, def->gpu, sources, params,
+                                    layer.clipTimeUs, 0.0, target.size());
         if (!next.isValid())
             continue; // grace mode
 

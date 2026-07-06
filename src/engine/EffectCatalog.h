@@ -17,6 +17,7 @@ struct EffectPresetEntry
     QString graphTemplate;                 // optional multi-filter template with {{key}} placeholders
     QMap<QString, QVariant> fixedParams;   // always applied, not exposed as sliders
     bool isGpu = false;                    // true for file-based GPU effect packages
+    bool needsFace = false;                // "requires": "face" — engine injects u_face* uniforms
     drift::GpuEffectDefinition gpu;        // valid when isGpu && gpu.valid
     int catalogOrder = 0;                  // lower sorts first in the browser catalog
     QString thumbnailPath;                 // absolute path to package thumbnail (optional)

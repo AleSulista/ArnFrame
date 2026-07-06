@@ -66,6 +66,12 @@ struct Clip
     bool flipV = false;
     Mask mask;
 
+    // Baked face landmarks driving the face warp effects, written once by the detect job and read
+    // back per frame at composite time. Like a matte it covers the detected source range, so it is
+    // indexed at (sourceUs - faceTrackSrcOffsetUs).
+    QString faceTrackPath;
+    TimeUs faceTrackSrcOffsetUs = 0;
+
     // Fades are edge-relative ramps applied multiplicatively on top of opacity
     // (visual clips) or volume (audio). They auto-follow trims and speed changes.
     TimeUs fadeInUs = 0;

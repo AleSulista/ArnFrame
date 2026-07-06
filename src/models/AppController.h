@@ -62,6 +62,9 @@ class AppController : public QObject
     Q_PROPERTY(int segmentRevision READ segmentRevision NOTIFY segmentSessionChanged)
     Q_PROPERTY(QVariantList segmentPoints READ segmentPoints NOTIFY segmentSessionChanged)
     Q_PROPERTY(QSize segmentFrameSize READ segmentFrameSize NOTIFY segmentSessionChanged)
+    Q_PROPERTY(bool faceDetecting READ faceDetecting NOTIFY faceDetectingChanged)
+    Q_PROPERTY(double faceDetectProgress READ faceDetectProgress NOTIFY faceDetectProgressChanged)
+    Q_PROPERTY(QString faceDetectStatus READ faceDetectStatus NOTIFY faceDetectStatusChanged)
     Q_PROPERTY(int selectedTrack READ selectedTrack NOTIFY selectionChanged)
     Q_PROPERTY(int selectedClip READ selectedClip NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList selection READ selection NOTIFY selectionChanged)
@@ -129,6 +132,9 @@ public:
     int segmentRevision() const { return m_segRevision; }
     QVariantList segmentPoints() const { return m_segPoints; }
     QSize segmentFrameSize() const { return m_segFrame.size(); }
+    bool faceDetecting() const { return m_faceDetecting; }
+    double faceDetectProgress() const { return m_faceDetectProgress; }
+    QString faceDetectStatus() const { return m_faceDetectStatus; }
     int selectedTrack() const { return m_selectedTrack; }
     int selectedClip() const { return m_selectedClip; }
     QVariantList selection() const;
@@ -207,6 +213,13 @@ public:
     Q_INVOKABLE void removeSegmentationPoint(int index);
     Q_INVOKABLE void clearSegmentationPoints();
     Q_INVOKABLE void runSegmentationSession(const QString &outputMode);
+
+    // Bakes the clip's face landmarks to a sidecar so the face warp effects have something to
+    // follow. Runs off the GUI thread; the result lands on the clip through the undo stack.
+    Q_INVOKABLE void detectFacesForClip(int trackIndex, int clipIndex);
+    Q_INVOKABLE void cancelFaceDetection();
+    Q_INVOKABLE void clearFaceTrack(int trackIndex, int clipIndex);
+    Q_INVOKABLE bool faceDetectionAvailable();
     Q_INVOKABLE void addShapeClip(const QString &shapeKind, double atSeconds);
     Q_INVOKABLE void addShapeClipAt(const QString &shapeKind, int trackIndex, double atSeconds);
     Q_INVOKABLE void addStickerClip(const QString &stickerId, double atSeconds);
@@ -402,6 +415,10 @@ signals:
     void segmentStatusChanged();
     void segmentationFinished(bool ok, const QString &message);
     void segmentSessionChanged();
+    void faceDetectingChanged();
+    void faceDetectProgressChanged();
+    void faceDetectStatusChanged();
+    void faceDetectionFinished(bool ok, const QString &message);
     void selectionChanged();
     void editCapabilitiesChanged();
     void selectedClipDataChanged();
@@ -428,6 +445,8 @@ protected:
     void pushProjectEdit(const drift::Project &before, const QString &text);
     void finishEdit(const QString &message);
     void refreshSegmentationPreview();
+    void finalizeFaceDetection(const QString &clipId, const QString &trackPath,
+                               drift::TimeUs srcOffsetUs);
     void finalizeSegmentation(const QString &clipId, const QString &mattePath,
                               drift::TimeUs matteSrcOffsetUs, const QString &outputMode);
     void finalizeGeneratedSubtitles(drift::TimeUs timelineStart, drift::TimeUs timelineDuration,
@@ -487,6 +506,10 @@ protected:
     double m_segmentProgress = 0.0;
     QString m_segmentStatus;
     QAtomicInt m_segmentCancel = 0;
+    bool m_faceDetecting = false;
+    double m_faceDetectProgress = 0.0;
+    QString m_faceDetectStatus;
+    QAtomicInt m_faceDetectCancel = 0;
     bool m_segSessionActive = false;
     bool m_segEncoding = false;
     int m_segTrack = -1;

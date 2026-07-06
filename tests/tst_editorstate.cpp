@@ -391,8 +391,9 @@ void EditorStateTest::effectBrowserCategoriesAndApply()
     AssetLibrary library;
     AppController state(&library);
 
+    // Four built in, plus any contributed by effect packages (currently "funny").
     const QVariantList categories = state.effectCategories();
-    QCOMPARE(categories.size(), 4);
+    QCOMPARE(categories.size(), 5);
     QCOMPARE(categories.first().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("glitch"));
     QCOMPARE(categories.first().toMap().value(QStringLiteral("label")).toString(),
              QStringLiteral("Glitch & Distortion"));
