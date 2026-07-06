@@ -1,0 +1,19 @@
+{
+  "id": "voice.chipmunk",
+  "displayName": "Chipmunk",
+  "category": "voice",
+  "order": 100,
+  "backend": "avfilter",
+  "chain": "asetrate={sampleRate}*{pitch},aresample={sampleRate},atempo=1/{pitch}",
+  "prerollMs": 300,
+  "parameters": [
+    {
+      "identifier": "pitch",
+      "displayName": "Pitch",
+      "type": "float",
+      "minValue": 1.05,
+      "maxValue": 2.0,
+      "defaultValue": 1.5
+    }
+  ]
+}

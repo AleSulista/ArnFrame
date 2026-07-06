@@ -339,6 +339,7 @@ QJsonObject clipToJson(const Clip &clip)
         {QStringLiteral("height"), keyframesToJson(clip.transformH)},
         {QStringLiteral("rotation"), keyframesToJson(clip.rotation)},
         {QStringLiteral("effects"), effectsToJson(clip.effects)},
+        {QStringLiteral("audioEffects"), effectsToJson(clip.audioEffects)},
     };
 }
 
@@ -409,6 +410,7 @@ Clip clipFromJsonV2(const QJsonObject &object, int canvasW = 1920, int canvasH =
     clip.opacity = keyframesFromJson(object.value(QStringLiteral("opacity")).toObject());
     clip.rotation = keyframesFromJson(object.value(QStringLiteral("rotation")).toObject());
     clip.effects = effectsFromJson(object.value(QStringLiteral("effects")).toArray());
+    clip.audioEffects = effectsFromJson(object.value(QStringLiteral("audioEffects")).toArray());
 
     const bool hasPixelLayout = object.value(QStringLiteral("x")).isObject()
                                 || object.value(QStringLiteral("width")).isObject();

@@ -87,6 +87,7 @@ ThemedDialog {
                     { id: "all", label: qsTr("All") },
                     { id: "effects", label: qsTr("Effects") },
                     { id: "transitions", label: qsTr("Transitions") },
+                    { id: "audio-effects", label: qsTr("Audio FX") },
                     { id: "fonts", label: qsTr("Fonts") },
                     { id: "stickers", label: qsTr("Stickers") },
                     { id: "whisper-model", label: qsTr("AI models") }

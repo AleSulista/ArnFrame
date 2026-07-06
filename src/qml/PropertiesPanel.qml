@@ -90,6 +90,7 @@ PanelFrame {
     }
     readonly property int transitionTabIndex: 5
     readonly property var selectedEffects: EditorState.selectedClipEffects
+    readonly property var selectedAudioEffects: EditorState.selectedClipAudioEffects
     readonly property string clipKind: hasSelection ? (clip.kind || "") : ""
     readonly property bool hasTextStyle: hasSelection
                                          && (clipKind === "text" || clipKind === "subtitle")
@@ -1605,6 +1606,7 @@ PanelFrame {
 
                     // ----- Audio -------------------------------------------------------------
                     Column {
+                        id: audioTabColumn
                         width: tabColumn.width
                         spacing: Theme.spacingXl
                         visible: root.currentTabId === "audio"
@@ -1628,6 +1630,186 @@ PanelFrame {
                             sliderFrom: 0
                             sliderTo: 2
                             percent: true
+                        }
+
+                        Rectangle {
+                            visible: root.clipKind === "audio" || root.clipKind === "video"
+                            width: parent.width
+                            height: 1
+                            color: Theme.panelBorder
+                            opacity: 0.5
+                        }
+
+                        // ----- Audio effects ---------------------------------------------
+                        Text {
+                            visible: root.clipKind === "audio" || root.clipKind === "video"
+                            text: qsTr("Audio effects")
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                        }
+
+                        // Empty state doubles as the discovery hint: the effects come from an addon,
+                        // so when the catalog is empty point the user at the Addon Manager.
+                        property var audioFxCatalog: (root.clipKind === "audio" || root.clipKind === "video")
+                                                     ? EditorState.audioEffectCatalog() : []
+
+                        Text {
+                            visible: (root.clipKind === "audio" || root.clipKind === "video")
+                                     && parent.audioFxCatalog.length === 0
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            text: qsTr("No audio effects installed. Get the Audio Effects pack from the Addon Manager.")
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                        }
+
+                        ThemedButton {
+                            visible: (root.clipKind === "audio" || root.clipKind === "video")
+                                     && parent.audioFxCatalog.length === 0
+                            width: parent.width
+                            text: qsTr("Install audio effects")
+                            variant: "primary"
+                            onClicked: root.Window.window.openAddonManager("audio-effects")
+                        }
+
+                        Row {
+                            visible: (root.clipKind === "audio" || root.clipKind === "video")
+                                     && parent.audioFxCatalog.length > 0
+                            width: parent.width
+                            spacing: 8
+
+                            ThemedComboBox {
+                                id: audioFxPicker
+                                width: parent.width - 96
+                                textRole: "label"
+                                valueRole: "id"
+                                model: audioTabColumn.audioFxCatalog
+                            }
+
+                            ThemedButton {
+                                width: 88
+                                text: qsTr("Add")
+                                enabled: audioFxPicker.currentValue !== undefined
+                                onClicked: EditorState.addAudioEffect(
+                                               EditorState.selectedTrack, EditorState.selectedClip,
+                                               audioFxPicker.currentValue)
+                            }
+                        }
+
+                        Repeater {
+                            model: root.selectedAudioEffects
+                            delegate: Column {
+                                id: audioEffectCard
+                                required property var modelData
+                                required property int index
+                                width: tabColumn.width
+                                spacing: 6
+
+                                Rectangle {
+                                    width: parent.width
+                                    height: audioEffectHeader.implicitHeight + 8
+                                    radius: Theme.radiusSm
+                                    color: Theme.panelAccent
+
+                                    Row {
+                                        id: audioEffectHeader
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 4
+                                        Text {
+                                            text: audioEffectCard.modelData.missing
+                                                  ? qsTr("%1 (not installed)").arg(audioEffectCard.modelData.label)
+                                                  : audioEffectCard.modelData.label
+                                            color: Theme.panelForeground
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSm
+                                            font.weight: Font.Medium
+                                            width: parent.width - 28
+                                            elide: Text.ElideRight
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                        IconButton {
+                                            glyph: Theme.icons.x
+                                            variant: "ghost"
+                                            buttonSize: 22
+                                            iconSize: 12
+                                            tooltip: qsTr("Remove audio effect")
+                                            onClicked: EditorState.removeAudioEffect(
+                                                           EditorState.selectedTrack, EditorState.selectedClip,
+                                                           audioEffectCard.index)
+                                        }
+                                    }
+                                }
+
+                                Repeater {
+                                    model: audioEffectCard.modelData.params || []
+                                    delegate: Column {
+                                        id: audioParamRow
+                                        required property var modelData
+                                        width: tabColumn.width
+                                        spacing: 4
+
+                                        Row {
+                                            width: parent.width
+                                            spacing: 8
+                                            Text {
+                                                width: parent.width - 48
+                                                elide: Text.ElideRight
+                                                text: audioParamRow.modelData.label
+                                                color: Theme.mutedForeground
+                                                font.family: Theme.fontFamily
+                                                font.pixelSize: Theme.fontSizeXs
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
+                                            Text {
+                                                width: 40
+                                                horizontalAlignment: Text.AlignRight
+                                                text: audioParamRow.modelData.isBoolean
+                                                      ? (audioParamRow.modelData.value ? qsTr("On") : qsTr("Off"))
+                                                      : Number(audioParamSlider.value).toFixed(
+                                                            Math.abs(audioParamRow.modelData.max - audioParamRow.modelData.min) >= 10 ? 1 : 2)
+                                                color: Theme.panelForeground
+                                                font.family: Theme.monoFontFamily
+                                                font.pixelSize: Theme.fontSizeXs
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
+                                        }
+
+                                        ThemedSwitch {
+                                            visible: !!audioParamRow.modelData.isBoolean
+                                            checked: !!audioParamRow.modelData.value
+                                            onToggled: EditorState.previewSetAudioEffectParam(
+                                                           EditorState.selectedTrack, EditorState.selectedClip,
+                                                           audioEffectCard.index, audioParamRow.modelData.key,
+                                                           checked ? 1 : 0)
+                                        }
+
+                                        ThemedSlider {
+                                            id: audioParamSlider
+                                            visible: !audioParamRow.modelData.isBoolean
+                                            width: parent.width
+                                            from: audioParamRow.modelData.min
+                                            to: audioParamRow.modelData.max
+                                            value: audioParamRow.modelData.value
+                                            onMoved: EditorState.previewSetAudioEffectParam(
+                                                         EditorState.selectedTrack, EditorState.selectedClip,
+                                                         audioEffectCard.index, audioParamRow.modelData.key, value)
+                                            onPressedChanged: {
+                                                if (pressed) {
+                                                    EditorState.beginPreviewDrag(qsTr("Edit audio effect"))
+                                                } else {
+                                                    EditorState.commitPreviewDrag()
+                                                    value = Qt.binding(() => audioParamRow.modelData.value)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         Rectangle {

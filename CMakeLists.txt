@@ -184,6 +184,10 @@ add_library(driftengine STATIC
     src/engine/MaskApplier.cpp
     src/engine/AudioAtempo.h
     src/engine/AudioAtempo.cpp
+    src/engine/AudioEffectCatalog.h
+    src/engine/AudioEffectCatalog.cpp
+    src/engine/AudioEffectChain.h
+    src/engine/AudioEffectChain.cpp
     src/engine/AudioMixer.h
     src/engine/AudioMixer.cpp
     src/engine/WhisperTokenizer.h
@@ -347,6 +351,17 @@ function(drift_copy_transitions target)
     )
 endfunction()
 
+# Same, for file-based audio effect packages. These ship as the "audio-effects" addon, so this
+# only makes the build tree self-contained — <appDir>/audio-effects is already a search root.
+function(drift_copy_audio_effects target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_SOURCE_DIR}/audio-effects"
+                "$<TARGET_FILE_DIR:${target}>/audio-effects"
+        COMMENT "Copy audio effect packages next to ${target}"
+    )
+endfunction()
+
 # Deploy the ONNX Runtime shared library next to the binary (needed on Windows; harmless
 # elsewhere and keeps the app runnable from the build tree without a system install).
 function(drift_copy_onnxruntime target)
@@ -362,6 +377,7 @@ endfunction()
 
 drift_copy_effects(drift)
 drift_copy_transitions(drift)
+drift_copy_audio_effects(drift)
 drift_copy_onnxruntime(drift)
 
 # --- CLI tools (headless engine testing, no GUI) ----------------------------

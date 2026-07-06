@@ -1,0 +1,43 @@
+{
+  "id": "space.autopan",
+  "displayName": "Auto-Pan",
+  "category": "space",
+  "order": 460,
+  "backend": "avfilter",
+  "chain": "apulsator=hz={rate}:amount={amount}:level_in={level_in}:level_out={level_out}",
+  "prerollMs": 0,
+  "parameters": [
+    {
+      "identifier": "rate",
+      "displayName": "Rate",
+      "type": "float",
+      "minValue": 0.01,
+      "maxValue": 10.0,
+      "defaultValue": 0.5
+    },
+    {
+      "identifier": "amount",
+      "displayName": "Amount",
+      "type": "float",
+      "minValue": 0.0,
+      "maxValue": 1.0,
+      "defaultValue": 1.0
+    },
+    {
+      "identifier": "level_in",
+      "displayName": "Input Level",
+      "type": "float",
+      "minValue": 0.0,
+      "maxValue": 4.0,
+      "defaultValue": 1.0
+    },
+    {
+      "identifier": "level_out",
+      "displayName": "Output Level",
+      "type": "float",
+      "minValue": 0.0,
+      "maxValue": 4.0,
+      "defaultValue": 1.0
+    }
+  ]
+}

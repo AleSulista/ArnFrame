@@ -82,6 +82,7 @@ struct Clip
     KeyframeTrack<double> rotation;
     KeyframeTrack<double> volume;
     QList<Effect> effects;
+    QList<Effect> audioEffects; // libavfilter chains applied to this clip's audio in the mixer
 
     TimeUs timelineEnd() const { return timelineStart + timelineDuration; }
 

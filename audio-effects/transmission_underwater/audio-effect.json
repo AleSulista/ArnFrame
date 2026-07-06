@@ -1,0 +1,35 @@
+{
+  "id": "transmission.underwater",
+  "displayName": "Underwater",
+  "category": "transmission",
+  "order": 230,
+  "backend": "avfilter",
+  "chain": "lowpass=f={cutoff},chorus={wet}:0.9:50:0.4:{motion}:2",
+  "prerollMs": 150,
+  "parameters": [
+    {
+      "identifier": "cutoff",
+      "displayName": "Cutoff",
+      "type": "float",
+      "minValue": 100,
+      "maxValue": 2000,
+      "defaultValue": 500
+    },
+    {
+      "identifier": "wet",
+      "displayName": "Chorus",
+      "type": "float",
+      "minValue": 0.0,
+      "maxValue": 1.0,
+      "defaultValue": 0.6
+    },
+    {
+      "identifier": "motion",
+      "displayName": "Motion",
+      "type": "float",
+      "minValue": 0.1,
+      "maxValue": 2.0,
+      "defaultValue": 0.25
+    }
+  ]
+}

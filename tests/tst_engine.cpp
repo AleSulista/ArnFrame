@@ -16,6 +16,8 @@
 #include "engine/ClipReader.h"
 #include "engine/Exporter.h"
 #include "engine/CompositorFrameHistory.h"
+#include "engine/AudioEffectCatalog.h"
+#include "engine/AudioEffectChain.h"
 #include "engine/EffectCatalog.h"
 #include "engine/EffectPackageLoader.h"
 #include "engine/EffectProcessor.h"
@@ -102,6 +104,11 @@ private slots:
     void textAnimationFadesAndSlides();
     void maskApplierEllipseMasksCorners();
     void exporterProducesPlayableFileWithBackground();
+    void audioEffectCatalogLoadsPackages();
+    void audioEffectChainResolvesPlaceholders();
+    void audioEffectChainAltersSignal();
+    void audioEffectChainBypassesUnknownEffect();
+    void audioEffectStreamIsContinuousAcrossBlocks();
 
 private:
     static QString makeColorSegmentsVideo(QTemporaryDir &dir);
@@ -121,6 +128,10 @@ void EngineTest::initTestCase()
     // The font bundle is fetched rather than committed, so an offline checkout legitimately has
     // none. The font tests skip in that case rather than fail.
     reloadFontCatalog({QString::fromUtf8(DRIFT_TEST_FONTS_DIR)});
+
+    const QString audioEffectsDir = QString::fromUtf8(DRIFT_TEST_AUDIO_EFFECTS_DIR);
+    QVERIFY2(QDir(audioEffectsDir).exists(), qPrintable(audioEffectsDir));
+    reloadAudioEffectCatalog({audioEffectsDir});
 }
 
 // The matte is written by us but read back by the ordinary video path, so the two ends have to
@@ -2259,6 +2270,162 @@ void EngineTest::exporterProducesPlayableFileWithBackground()
     const QRgb corner = frame.pixel(6, 6);
     QVERIFY(qBlue(corner) > 150);
     QVERIFY(qBlue(corner) > qRed(corner));
+}
+
+// The audio-effects addon content must parse into a usable catalog: known ids resolve, categories
+// are discovered, and every manifest carries a chain. A broken manifest would be skipped silently,
+// so assert the expected count rather than merely "non-empty".
+void EngineTest::audioEffectCatalogLoadsPackages()
+{
+    const QList<AudioEffectEntry> &catalog = audioEffectCatalog();
+    QVERIFY2(catalog.size() >= 20,
+             qPrintable(QStringLiteral("only %1 audio effects loaded").arg(catalog.size())));
+
+    const AudioEffectEntry *telephone = audioEffectDefForId(QStringLiteral("transmission.telephone"));
+    QVERIFY(telephone);
+    QCOMPARE(telephone->displayName, QStringLiteral("Telephone"));
+    QCOMPARE(telephone->category, QStringLiteral("transmission"));
+    QVERIFY(!telephone->chainTemplate.isEmpty());
+
+    const AudioEffectEntry *chipmunk = audioEffectDefForId(QStringLiteral("voice.chipmunk"));
+    QVERIFY(chipmunk);
+    QVERIFY(chipmunk->chainTemplate.contains(QStringLiteral("{sampleRate}")));
+    QVERIFY(chipmunk->chainTemplate.contains(QStringLiteral("{pitch}")));
+    QCOMPARE(chipmunk->parameters.size(), 1);
+    QCOMPARE(chipmunk->parameters[0].key, QStringLiteral("pitch"));
+
+    const QList<QPair<QString, QString>> categories = audioEffectCategories();
+    QSet<QString> slugs;
+    for (const auto &c : categories)
+        slugs.insert(c.first);
+    QVERIFY(slugs.contains(QStringLiteral("voice")));
+    QVERIFY(slugs.contains(QStringLiteral("transmission")));
+
+    // Every catalog entry must carry a chain, or the mixer has nothing to run.
+    for (const AudioEffectEntry &entry : catalog)
+        QVERIFY2(!entry.chainTemplate.isEmpty(), qPrintable(entry.id));
+}
+
+void EngineTest::audioEffectChainResolvesPlaceholders()
+{
+    const AudioEffectEntry *chipmunk = audioEffectDefForId(QStringLiteral("voice.chipmunk"));
+    QVERIFY(chipmunk);
+
+    drift::Effect effect;
+    effect.catalogId = chipmunk->id;
+    // No instance parameters set: the default (1.5) must fill in.
+    QString chain = AudioEffectChain::resolveChain(*chipmunk, effect, 48000);
+    QVERIFY2(!chain.contains(QLatin1Char('{')), qPrintable(chain));
+    QVERIFY(chain.contains(QStringLiteral("48000")));
+    QVERIFY(chain.contains(QStringLiteral("1.5")));
+
+    // An explicit instance value overrides the default.
+    effect.parameters.insert(QStringLiteral("pitch"), 1.25);
+    chain = AudioEffectChain::resolveChain(*chipmunk, effect, 44100);
+    QVERIFY(chain.contains(QStringLiteral("1.25")));
+    QVERIFY(chain.contains(QStringLiteral("44100")));
+    QVERIFY(!chain.contains(QStringLiteral("1.5")));
+}
+
+void EngineTest::audioEffectChainAltersSignal()
+{
+    // A 4 kHz tone pushed through the telephone band-limit (300–3400 Hz) must come back quieter,
+    // finite, and the right length — a real avfilter pass, not a passthrough.
+    constexpr int kRate = 48000;
+    constexpr int kFrames = 4096;
+    QVector<float> tone(kFrames * 2);
+    for (int i = 0; i < kFrames; ++i) {
+        const float s = std::sin(2.0 * M_PI * 4000.0 * i / kRate);
+        tone[i * 2] = s;
+        tone[i * 2 + 1] = s;
+    }
+
+    double inRms = 0.0;
+    for (float s : tone)
+        inRms += static_cast<double>(s) * s;
+    inRms = std::sqrt(inRms / tone.size());
+
+    drift::Effect telephone;
+    telephone.catalogId = QStringLiteral("transmission.telephone");
+    const QVector<float> out =
+        AudioEffectChain::apply({telephone}, tone.constData(), 0, kFrames, kRate);
+
+    QCOMPARE(out.size(), kFrames * 2);
+    double outRms = 0.0;
+    for (float s : out) {
+        QVERIFY(std::isfinite(s));
+        outRms += static_cast<double>(s) * s;
+    }
+    outRms = std::sqrt(outRms / out.size());
+
+    // 4 kHz sits above the 3400 Hz cutoff, so the band-limited output is markedly attenuated.
+    QVERIFY2(outRms < inRms * 0.6,
+             qPrintable(QStringLiteral("in=%1 out=%2").arg(inRms).arg(outRms)));
+    QVERIFY2(outRms > 1e-4, "output is silent — chain likely failed to build");
+}
+
+void EngineTest::audioEffectChainBypassesUnknownEffect()
+{
+    // An effect whose id is not in the catalog (e.g. an addon the user hasn't installed) must be a
+    // clean passthrough, never a dropout.
+    constexpr int kRate = 48000;
+    constexpr int kFrames = 1024;
+    QVector<float> tone(kFrames * 2);
+    for (int i = 0; i < kFrames; ++i)
+        tone[i * 2] = tone[i * 2 + 1] = std::sin(2.0 * M_PI * 440.0 * i / kRate);
+
+    drift::Effect unknown;
+    unknown.catalogId = QStringLiteral("does.not.exist");
+    const QVector<float> out =
+        AudioEffectChain::apply({unknown}, tone.constData(), 0, kFrames, kRate);
+
+    QCOMPARE(out.size(), kFrames * 2);
+    for (int i = 0; i < out.size(); ++i)
+        QCOMPARE(out[i], tone[i]);
+}
+
+void EngineTest::audioEffectStreamIsContinuousAcrossBlocks()
+{
+    // Tremolo's LFO phase must carry across blocks; resetting every buffer causes audible jitter.
+    constexpr int kRate = 48000;
+    constexpr int kBlock = 1024;
+    constexpr int kBlocks = 8;
+
+    QVector<float> tone((kBlock * kBlocks) * 2);
+    for (int i = 0; i < kBlock * kBlocks; ++i) {
+        const float s = std::sin(2.0 * M_PI * 440.0 * i / kRate);
+        tone[i * 2] = s;
+        tone[i * 2 + 1] = s;
+    }
+
+    drift::Effect tremolo;
+    tremolo.catalogId = QStringLiteral("space.tremolo");
+    tremolo.parameters.insert(QStringLiteral("rate"), 8.0);
+    tremolo.parameters.insert(QStringLiteral("depth"), 0.9);
+
+    AudioEffectChain::Stream stream;
+    QVERIFY(stream.configure({tremolo}, kRate));
+
+    QVector<float> streamed;
+    streamed.reserve(tone.size());
+    for (int block = 0; block < kBlocks; ++block) {
+        const float *blockIn = tone.constData() + block * kBlock * 2;
+        stream.feed(blockIn, kBlock);
+        const QVector<float> blockOut = stream.drain(kBlock);
+        QCOMPARE(blockOut.size(), kBlock * 2);
+        streamed.append(blockOut);
+    }
+
+    const QVector<float> reference =
+        AudioEffectChain::apply({tremolo}, tone.constData(), 0, kBlock * kBlocks, kRate);
+    QVERIFY2(reference.size() == streamed.size(),
+             qPrintable(QStringLiteral("ref=%1 streamed=%2").arg(reference.size()).arg(streamed.size())));
+
+    double maxDiff = 0.0;
+    for (int i = 0; i < streamed.size(); ++i)
+        maxDiff = std::max(maxDiff, static_cast<double>(std::abs(streamed[i] - reference[i])));
+    QVERIFY2(maxDiff < 0.05,
+             qPrintable(QStringLiteral("block boundary discontinuity maxDiff=%1").arg(maxDiff)));
 }
 
 QTEST_MAIN(EngineTest)

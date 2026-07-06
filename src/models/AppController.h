@@ -67,6 +67,7 @@ class AppController : public QObject
     Q_PROPERTY(QVariantList selection READ selection NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selectedClipData READ selectedClipData NOTIFY selectedClipDataChanged)
     Q_PROPERTY(QVariantList selectedClipEffects READ selectedClipEffects NOTIFY selectedClipDataChanged)
+    Q_PROPERTY(QVariantList selectedClipAudioEffects READ selectedClipAudioEffects NOTIFY selectedClipDataChanged)
     Q_PROPERTY(QVariantMap selectedTransitionData READ selectedTransitionData NOTIFY selectedTransitionDataChanged)
     Q_PROPERTY(int selectedTransitionTrack READ selectedTransitionTrack NOTIFY selectedTransitionDataChanged)
     Q_PROPERTY(int selectedTransitionLeftClip READ selectedTransitionLeftClip NOTIFY selectedTransitionDataChanged)
@@ -133,6 +134,7 @@ public:
     QVariantList selection() const;
     QVariantMap selectedClipData() const;
     QVariantList selectedClipEffects() const;
+    QVariantList selectedClipAudioEffects() const;
     QVariantMap selectedTransitionData() const;
     int selectedTransitionTrack() const { return m_selectedTransitionTrack; }
     int selectedTransitionLeftClip() const { return m_selectedTransitionLeftClip; }
@@ -325,6 +327,14 @@ public:
     Q_INVOKABLE void removeEffect(int trackIndex, int clipIndex, int effectIndex);
     Q_INVOKABLE void setEffectParam(int trackIndex, int clipIndex, int effectIndex, const QString &key,
                                     double value);
+    Q_INVOKABLE QVariantList audioEffectCatalog() const;
+    Q_INVOKABLE QVariantList audioEffectCategories() const;
+    Q_INVOKABLE void addAudioEffect(int trackIndex, int clipIndex, const QString &effectId);
+    Q_INVOKABLE void removeAudioEffect(int trackIndex, int clipIndex, int effectIndex);
+    Q_INVOKABLE void setAudioEffectParam(int trackIndex, int clipIndex, int effectIndex,
+                                         const QString &key, double value);
+    Q_INVOKABLE void previewSetAudioEffectParam(int trackIndex, int clipIndex, int effectIndex,
+                                                const QString &key, double value);
     Q_INVOKABLE void setTrackMuted(int trackIndex, bool muted);
     Q_INVOKABLE void setTrackHidden(int trackIndex, bool hidden);
     Q_INVOKABLE bool trackMuted(int trackIndex) const;

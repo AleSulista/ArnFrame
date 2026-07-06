@@ -1,0 +1,19 @@
+{
+  "id": "voice.deep",
+  "displayName": "Deep Voice",
+  "category": "voice",
+  "order": 110,
+  "backend": "avfilter",
+  "chain": "asetrate={sampleRate}*{pitch},aresample={sampleRate},atempo=1/{pitch}",
+  "prerollMs": 300,
+  "parameters": [
+    {
+      "identifier": "pitch",
+      "displayName": "Pitch",
+      "type": "float",
+      "minValue": 0.5,
+      "maxValue": 0.95,
+      "defaultValue": 0.7
+    }
+  ]
+}

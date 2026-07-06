@@ -1,0 +1,27 @@
+{
+  "id": "voice.robot",
+  "displayName": "Robot",
+  "category": "voice",
+  "order": 130,
+  "backend": "avfilter",
+  "chain": "tremolo=f={freq}:d={depth}",
+  "prerollMs": 0,
+  "parameters": [
+    {
+      "identifier": "freq",
+      "displayName": "Frequency",
+      "type": "float",
+      "minValue": 10,
+      "maxValue": 200,
+      "defaultValue": 50
+    },
+    {
+      "identifier": "depth",
+      "displayName": "Depth",
+      "type": "float",
+      "minValue": 0.0,
+      "maxValue": 1.0,
+      "defaultValue": 1.0
+    }
+  ]
+}

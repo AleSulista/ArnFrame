@@ -1,0 +1,35 @@
+{
+  "id": "transmission.megaphone",
+  "displayName": "Megaphone",
+  "category": "transmission",
+  "order": 220,
+  "backend": "avfilter",
+  "chain": "bandpass=f={center}:width_type=h:w={width},acrusher=bits=8:mix={grit}",
+  "prerollMs": 50,
+  "parameters": [
+    {
+      "identifier": "center",
+      "displayName": "Center Freq",
+      "type": "float",
+      "minValue": 300,
+      "maxValue": 4000,
+      "defaultValue": 1500
+    },
+    {
+      "identifier": "width",
+      "displayName": "Band Width",
+      "type": "float",
+      "minValue": 200,
+      "maxValue": 3000,
+      "defaultValue": 1200
+    },
+    {
+      "identifier": "grit",
+      "displayName": "Distortion",
+      "type": "float",
+      "minValue": 0.0,
+      "maxValue": 1.0,
+      "defaultValue": 0.5
+    }
+  ]
+}

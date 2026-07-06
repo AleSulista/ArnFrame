@@ -36,6 +36,7 @@ private slots:
     void textPresetsAreWellFormed();
     void shapeStyleSerialization();
     void effectCatalogIdSerialization();
+    void audioEffectSerialization();
     void rgbSplitEffectParametersSerialization();
     void blockGlitchEffectParametersSerialization();
     void clipSpeedSourceMapping();
@@ -645,6 +646,52 @@ void CoreTest::effectCatalogIdSerialization()
     QCOMPARE(loadedClip.effects.size(), 1);
     QCOMPARE(loadedClip.effects[0].catalogId, QStringLiteral("adjust.contrast"));
     QCOMPARE(loadedClip.effects[0].parameters.value(QStringLiteral("contrast")).toDouble(), 1.4);
+}
+
+// Audio effects live in a separate list from video effects on the clip and must survive a project
+// round-trip independently — a regression here silently drops a clip's sound design on reload.
+void CoreTest::audioEffectSerialization()
+{
+    drift::Project project;
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-audio-fx");
+    clip.type = drift::ClipType::Audio;
+    clip.name = QStringLiteral("Audio");
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(2.0);
+
+    drift::Effect telephone;
+    telephone.name = QStringLiteral("Telephone");
+    telephone.catalogId = QStringLiteral("transmission.telephone");
+    clip.audioEffects.append(telephone);
+
+    drift::Effect bitcrush;
+    bitcrush.name = QStringLiteral("Bitcrush");
+    bitcrush.catalogId = QStringLiteral("texture.bitcrush");
+    bitcrush.parameters.insert(QStringLiteral("bits"), 6.0);
+    bitcrush.parameters.insert(QStringLiteral("mix"), 0.7);
+    clip.audioEffects.append(bitcrush);
+
+    // A video effect on the same clip must not bleed into the audio list and vice versa.
+    drift::Effect contrast;
+    contrast.catalogId = QStringLiteral("adjust.contrast");
+    clip.effects.append(contrast);
+
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
+    QCOMPARE(loadedClip.audioEffects.size(), 2);
+    QCOMPARE(loadedClip.audioEffects[0].catalogId, QStringLiteral("transmission.telephone"));
+    QCOMPARE(loadedClip.audioEffects[1].catalogId, QStringLiteral("texture.bitcrush"));
+    QCOMPARE(loadedClip.audioEffects[1].parameters.value(QStringLiteral("bits")).toDouble(), 6.0);
+    QCOMPARE(loadedClip.audioEffects[1].parameters.value(QStringLiteral("mix")).toDouble(), 0.7);
+    QCOMPARE(loadedClip.effects.size(), 1);
+    QCOMPARE(loadedClip.effects[0].catalogId, QStringLiteral("adjust.contrast"));
 }
 
 void CoreTest::rgbSplitEffectParametersSerialization()

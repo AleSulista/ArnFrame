@@ -3,8 +3,11 @@
 #include "AddonEndpoint.h"
 #include "engine/AddonPackage.h"
 #include "engine/AddonRegistry.h"
+#include "engine/AudioEffectCatalog.h"
+#include "engine/EffectCatalog.h"
 #include "engine/FontCatalog.h"
 #include "engine/StickerCatalog.h"
+#include "engine/TransitionCatalog.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -462,6 +465,12 @@ void AddonManager::reloadForKinds(const QStringList &kinds)
             reloadFontCatalog();
         else if (kind == QLatin1String("stickers"))
             reloadStickerCatalog();
+        else if (kind == QLatin1String("effects"))
+            reloadEffectCatalog();
+        else if (kind == QLatin1String("transitions"))
+            reloadTransitionCatalog();
+        else if (kind == QLatin1String("audio-effects"))
+            reloadAudioEffectCatalog();
         // whisper-model and sam2-model need nothing: sessions are created lazily on next use.
         emit kindChanged(kind);
     }

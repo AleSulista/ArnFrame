@@ -8,6 +8,7 @@
 #include "core/commands/ProjectCommands.h"
 #include "engine/AudioMixer.h"
 #include "engine/ClipReaderPool.h"
+#include "engine/AudioEffectCatalog.h"
 #include "engine/EffectCatalog.h"
 #include "engine/Exporter.h"
 #include "engine/FontCatalog.h"
@@ -588,6 +589,34 @@ QVariantMap effectToMap(const drift::Effect &effect)
     };
 }
 
+// Audio effects use the same per-instance shape as video effects, but read from the audio catalog.
+QVariantMap audioEffectToMap(const drift::Effect &effect)
+{
+    const AudioEffectEntry *def = audioEffectDefForId(effect.catalogId);
+    QVariantList params;
+    if (def) {
+        for (const drift::EffectParamSpec &paramDef : def->parameters) {
+            QVariant value = effect.parameters.value(paramDef.key);
+            if (!value.isValid())
+                value = QVariant(paramDef.defaultValue);
+            params.append(QVariantMap{
+                {QStringLiteral("key"), paramDef.key},
+                {QStringLiteral("label"), paramDef.label},
+                {QStringLiteral("min"), paramDef.min},
+                {QStringLiteral("max"), paramDef.max},
+                {QStringLiteral("isBoolean"), paramDef.isBoolean},
+                {QStringLiteral("value"), value},
+            });
+        }
+    }
+    return {
+        {QStringLiteral("catalogId"), effect.catalogId},
+        {QStringLiteral("label"), def ? def->displayName : effect.name},
+        {QStringLiteral("params"), params},
+        {QStringLiteral("missing"), def == nullptr},
+    };
+}
+
 QVariantList keyframeListToVariant(const drift::KeyframeTrack<double> &track, drift::TimeUs timelineStart)
 {
     QVariantList out;
@@ -855,6 +884,10 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
     for (const drift::Effect &effect : clip.effects)
         effects.append(effectToMap(effect));
 
+    QVariantList audioEffects;
+    for (const drift::Effect &effect : clip.audioEffects)
+        audioEffects.append(audioEffectToMap(effect));
+
     return {
         {QStringLiteral("id"), clip.id},
         {QStringLiteral("name"), clip.name},
@@ -885,6 +918,7 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("fadeOut"), drift::usToSeconds(clip.fadeOutUs)},
         {QStringLiteral("fadeCurve"), drift::fadeCurveToString(clip.fadeCurve)},
         {QStringLiteral("effects"), effects},
+        {QStringLiteral("audioEffects"), audioEffects},
         {QStringLiteral("keyframes"), keyframesToMap(clip)},
     };
 }
@@ -943,6 +977,12 @@ QVariantList AppController::selectedClipEffects() const
 {
     const QVariantMap clip = selectedClipData();
     return clip.value(QStringLiteral("effects")).toList();
+}
+
+QVariantList AppController::selectedClipAudioEffects() const
+{
+    const QVariantMap clip = selectedClipData();
+    return clip.value(QStringLiteral("audioEffects")).toList();
 }
 
 QVariantList AppController::selection() const
@@ -4697,6 +4737,137 @@ void AppController::setEffectParam(int trackIndex, int clipIndex, int effectInde
         clip.effects[effectIndex].parameters.insert(key, value);
     pushProjectEdit(before, QStringLiteral("Edit effect"));
     finishEdit(QStringLiteral("Effect updated"));
+}
+
+QVariantList AppController::audioEffectCatalog() const
+{
+    QVariantList out;
+    for (const AudioEffectEntry &def : ::audioEffectCatalog()) {
+        QVariantList params;
+        for (const drift::EffectParamSpec &p : def.parameters) {
+            params.append(QVariantMap{
+                {QStringLiteral("key"), p.key},
+                {QStringLiteral("label"), p.label},
+                {QStringLiteral("min"), p.min},
+                {QStringLiteral("max"), p.max},
+                {QStringLiteral("default"), p.defaultValue},
+                {QStringLiteral("isBoolean"), p.isBoolean},
+            });
+        }
+        out.append(QVariantMap{
+            {QStringLiteral("id"), def.id},
+            {QStringLiteral("label"), def.displayName},
+            {QStringLiteral("displayName"), def.displayName},
+            {QStringLiteral("category"), def.category},
+            {QStringLiteral("categoryLabel"), audioEffectCategoryLabel(def.category)},
+            {QStringLiteral("params"), params},
+        });
+    }
+    return out;
+}
+
+QVariantList AppController::audioEffectCategories() const
+{
+    QVariantList out;
+    for (const auto &entry : ::audioEffectCategories()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), entry.first},
+            {QStringLiteral("label"), entry.second},
+        });
+    }
+    return out;
+}
+
+void AppController::addAudioEffect(int trackIndex, int clipIndex, const QString &effectId)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const AudioEffectEntry *def = audioEffectDefForId(effectId);
+    if (!def)
+        return;
+
+    drift::Effect effect;
+    effect.name = def->displayName;
+    effect.catalogId = def->id;
+    for (const drift::EffectParamSpec &p : def->parameters)
+        effect.parameters.insert(p.key, p.defaultValue);
+
+    const drift::Project before = m_project;
+    track.clips[clipIndex].audioEffects.append(effect);
+    m_selectedTrack = trackIndex;
+    m_selectedClip = clipIndex;
+    m_selection = {qMakePair(trackIndex, clipIndex)};
+    pushProjectEdit(before, QStringLiteral("Add audio effect"));
+    finishEdit(QStringLiteral("Audio effect added"));
+}
+
+void AppController::removeAudioEffect(int trackIndex, int clipIndex, int effectIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (effectIndex < 0 || effectIndex >= clip.audioEffects.size())
+        return;
+
+    const drift::Project before = m_project;
+    clip.audioEffects.removeAt(effectIndex);
+    pushProjectEdit(before, QStringLiteral("Remove audio effect"));
+    finishEdit(QStringLiteral("Audio effect removed"));
+}
+
+void AppController::previewSetAudioEffectParam(int trackIndex, int clipIndex, int effectIndex,
+                                               const QString &key, double value)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (effectIndex < 0 || effectIndex >= clip.audioEffects.size())
+        return;
+    if (key.isEmpty())
+        return;
+
+    if (!m_previewDragActive)
+        beginPreviewDrag(QStringLiteral("Edit audio effect"));
+
+    clip.audioEffects[effectIndex].parameters.insert(key, value);
+    // Audio effects are heard, not seen: a preview frame won't reflect the change, but keeping the
+    // project mutated live means the next playback buffer picks it up without a commit.
+    emitPreviewFrame();
+}
+
+void AppController::setAudioEffectParam(int trackIndex, int clipIndex, int effectIndex,
+                                        const QString &key, double value)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (effectIndex < 0 || effectIndex >= clip.audioEffects.size())
+        return;
+
+    const drift::Project before = m_project;
+    clip.audioEffects[effectIndex].parameters.insert(key, value);
+    pushProjectEdit(before, QStringLiteral("Edit audio effect"));
+    finishEdit(QStringLiteral("Audio effect updated"));
 }
 
 void AppController::setTrackMuted(int trackIndex, bool muted)
