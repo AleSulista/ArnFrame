@@ -1,0 +1,43 @@
+{
+  "id": "utility.gate",
+  "displayName": "Noise Gate",
+  "category": "utility",
+  "order": 130,
+  "backend": "avfilter",
+  "chain": "agate=threshold={threshold}:ratio={ratio}:attack={attack}:release={release}",
+  "prerollMs": 150,
+  "parameters": [
+    {
+      "identifier": "threshold",
+      "displayName": "Threshold",
+      "type": "float",
+      "minValue": 0.001,
+      "maxValue": 0.2,
+      "defaultValue": 0.02
+    },
+    {
+      "identifier": "ratio",
+      "displayName": "Strength",
+      "type": "float",
+      "minValue": 1,
+      "maxValue": 9,
+      "defaultValue": 3
+    },
+    {
+      "identifier": "attack",
+      "displayName": "Attack (ms)",
+      "type": "float",
+      "minValue": 1,
+      "maxValue": 100,
+      "defaultValue": 10
+    },
+    {
+      "identifier": "release",
+      "displayName": "Release (ms)",
+      "type": "float",
+      "minValue": 20,
+      "maxValue": 1000,
+      "defaultValue": 250
+    }
+  ]
+}

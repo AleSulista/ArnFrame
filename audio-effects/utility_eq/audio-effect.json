@@ -1,0 +1,35 @@
+{
+  "id": "utility.eq",
+  "displayName": "EQ",
+  "category": "utility",
+  "order": 100,
+  "backend": "avfilter",
+  "chain": "bass=g={low}:f=110,equalizer=f=1000:t=q:w=1.2:g={mid},treble=g={high}:f=8000",
+  "prerollMs": 50,
+  "parameters": [
+    {
+      "identifier": "low",
+      "displayName": "Low",
+      "type": "float",
+      "minValue": -12,
+      "maxValue": 12,
+      "defaultValue": 0
+    },
+    {
+      "identifier": "mid",
+      "displayName": "Mid",
+      "type": "float",
+      "minValue": -12,
+      "maxValue": 12,
+      "defaultValue": 0
+    },
+    {
+      "identifier": "high",
+      "displayName": "High",
+      "type": "float",
+      "minValue": -12,
+      "maxValue": 12,
+      "defaultValue": 0
+    }
+  ]
+}
