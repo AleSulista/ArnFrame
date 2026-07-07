@@ -70,7 +70,7 @@ PanelFrame {
 
     function assetVisible(kind) {
         const tabId = tabsModel.get(activeTab).tabId
-        if (tabId === "text" || tabId === "stickers" || tabId === "effects"
+        if (tabId === "text" || tabId === "stickers" || tabId === "shapes" || tabId === "effects"
                 || tabId === "adjustment" || tabId === "settings" || tabId === "sounds"
                 || tabId === "transitions" || tabId === "shortcuts")
             return false
@@ -84,16 +84,18 @@ PanelFrame {
         ListElement { tabId: "sounds"; icon: 1; label: "Sounds" }
         ListElement { tabId: "text"; icon: 2; label: "Text" }
         ListElement { tabId: "stickers"; icon: 3; label: "Stickers" }
-        ListElement { tabId: "effects"; icon: 4; label: "Effects" }
-        ListElement { tabId: "transitions"; icon: 5; label: "Transitions" }
-        ListElement { tabId: "settings"; icon: 6; label: "Settings" }
-        ListElement { tabId: "shortcuts"; icon: 7; label: "Shortcuts" }
+        ListElement { tabId: "shapes"; icon: 4; label: "Shapes" }
+        ListElement { tabId: "effects"; icon: 5; label: "Effects" }
+        ListElement { tabId: "transitions"; icon: 6; label: "Transitions" }
+        ListElement { tabId: "settings"; icon: 7; label: "Settings" }
+        ListElement { tabId: "shortcuts"; icon: 8; label: "Shortcuts" }
     }
     property var tabIcons: [
         Theme.icons.film,
         Theme.icons.headphones,
         Theme.icons.type,
         Theme.icons.smile,
+        Theme.icons.shapes,
         Theme.icons.wand,
         Theme.icons.blend,
         Theme.icons.settings,
@@ -526,10 +528,10 @@ PanelFrame {
                 height: parent.height - Theme.panelHeaderHeight
 
                 // Stickers come from an addon, so these are refreshed on install rather than
-                // being fixed at load: a fresh install has no packs and only the Shapes page.
+                // being fixed at load: a fresh install has no packs and no pages at all.
                 property var categories: EditorState.builtinStickerCategories()
                 property var allStickers: EditorState.builtinStickers()
-                readonly property var pages: categories.concat([{ id: "shapes", label: "Shapes" }])
+                readonly property var pages: categories
                 readonly property bool hasStickers: allStickers.length > 0
                 property int pageIndex: 0
                 readonly property string currentPageId: pages[pageIndex] ? pages[pageIndex].id : ""
@@ -598,13 +600,10 @@ PanelFrame {
                         // A category page with no matching stickers used to render
                         // as a silently blank grid.
                         readonly property var currentStickers:
-                            stickersTab.currentPageId === "shapes"
-                            ? []
-                            : stickersTab.allStickers.filter(function(s) { return s.category === stickersTab.currentPageId })
+                            stickersTab.allStickers.filter(function(s) { return s.category === stickersTab.currentPageId })
 
                         EmptyState {
                             visible: stickersTab.hasStickers
-                                     && stickersTab.currentPageId !== "shapes"
                                      && stickerPageContent.currentStickers.length === 0
                             width: parent.width
                             compact: true
@@ -615,7 +614,6 @@ PanelFrame {
 
                         // Sticker grid for the selected category page.
                         Grid {
-                            visible: stickersTab.currentPageId !== "shapes"
                             width: parent.width
                             columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
                             columnSpacing: Theme.assetCardGap
@@ -693,75 +691,118 @@ PanelFrame {
                                 }
                             }
                         }
+                    }
+                }
+            }
 
-                        // Shapes page.
-                        Grid {
-                            visible: stickersTab.currentPageId === "shapes"
-                            width: parent.width
-                            columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
-                            columnSpacing: Theme.assetCardGap
-                            rowSpacing: Theme.assetCardGap
+            // Shapes tab panel. Shapes used to be a page inside the Stickers tab, where they came
+            // and went with the sticker addon and had no room for categories of their own.
+            Item {
+                id: shapesTab
+                visible: tabsModel.get(activeTab).tabId === "shapes"
+                width: parent.width
+                height: parent.height - Theme.panelHeaderHeight
 
-                            Repeater {
-                                model: EditorState.builtinShapes()
-                                delegate: Column {
-                                    id: shapeCard
-                                    required property var modelData
+                readonly property var categories: EditorState.builtinShapeCategories()
+                readonly property var allShapes: EditorState.builtinShapes()
+                property int pageIndex: 0
+                readonly property string currentCategoryId:
+                    categories[pageIndex] ? categories[pageIndex].id : ""
+
+                Flow {
+                    id: shapePageBar
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.margins: 12
+                    spacing: 6
+
+                    Repeater {
+                        model: shapesTab.categories
+                        delegate: ThemedChip {
+                            required property var modelData
+                            required property int index
+                            text: modelData.label
+                            variant: "secondary"
+                            selected: shapesTab.pageIndex === index
+                            onClicked: shapesTab.pageIndex = index
+                        }
+                    }
+                }
+
+                Flickable {
+                    anchors.top: shapePageBar.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.topMargin: 12
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    contentHeight: shapeGrid.height + 24
+                    clip: true
+                    ScrollBar.vertical: AppScrollBar { }
+
+                    Grid {
+                        id: shapeGrid
+                        width: parent.width - 12
+                        columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
+                        columnSpacing: Theme.assetCardGap
+                        rowSpacing: Theme.assetCardGap
+
+                        Repeater {
+                            model: shapesTab.allShapes.filter(function(s) { return s.category === shapesTab.currentCategoryId })
+                            delegate: Column {
+                                id: shapeCard
+                                required property var modelData
+                                width: Theme.assetCardWidth
+                                spacing: Theme.spacingSm
+
+                                Drag.active: shapeDrag.active
+                                Drag.dragType: Drag.Automatic
+                                Drag.supportedActions: Qt.CopyAction
+                                Drag.keys: ["application/x-drift-shape"]
+                                Drag.mimeData: { "application/x-drift-shape": shapeCard.modelData.id }
+
+                                Rectangle {
                                     width: Theme.assetCardWidth
-                                    spacing: Theme.spacingSm
+                                    height: Theme.assetCardWidth
+                                    radius: Theme.radiusSm
+                                    color: shapeHover.hovered ? Theme.popoverHover : Theme.panelAccent
 
-                                    Drag.active: shapeDrag.active
-                                    Drag.dragType: Drag.Automatic
-                                    Drag.supportedActions: Qt.CopyAction
-                                    Drag.keys: ["application/x-drift-shape"]
-                                    Drag.mimeData: { "application/x-drift-shape": shapeCard.modelData.id }
-
-                                    Rectangle {
-                                        width: Theme.assetCardWidth
-                                        height: Theme.assetCardWidth
-                                        radius: Theme.radiusSm
-                                        // Shape cards had neither hover feedback
-                                        // nor a cursor, unlike the sticker cards
-                                        // in the very same grid.
-                                        color: shapeHover.hovered ? Theme.popoverHover : Theme.panelAccent
-
-                                        Behavior on color {
-                                            ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                                        }
-
-                                        // Matches the sticker cards' inset, which
-                                        // was 12 here and 16 there for no reason.
-                                        ShapePreview {
-                                            anchors.fill: parent
-                                            anchors.margins: Theme.pagePadding
-                                            shapeKind: shapeCard.modelData.id
-                                        }
-
-                                        HoverHandler {
-                                            id: shapeHover
-                                            cursorShape: Qt.PointingHandCursor
-                                        }
-
-                                        ThemedToolTip {
-                                            text: qsTr("%1 — click to add, or drag to the timeline").arg(shapeCard.modelData.label)
-                                            visible: shapeHover.hovered
-                                        }
-
-                                        TapHandler {
-                                            onTapped: EditorState.addShapeClip(shapeCard.modelData.id, -1)
-                                        }
-                                        DragHandler { id: shapeDrag }
+                                    Behavior on color {
+                                        ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
                                     }
 
-                                    Text {
-                                        width: parent.width
-                                        text: modelData.label
-                                        color: Theme.mutedForeground
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeCard
-                                        horizontalAlignment: Text.AlignHCenter
-                                        elide: Text.ElideRight
+                                    ShapePreview {
+                                        anchors.fill: parent
+                                        anchors.margins: Theme.pagePadding
+                                        shapeKind: shapeCard.modelData.id
                                     }
+
+                                    HoverHandler {
+                                        id: shapeHover
+                                        cursorShape: Qt.PointingHandCursor
+                                    }
+
+                                    ThemedToolTip {
+                                        text: qsTr("%1 — click to add, or drag to the timeline").arg(shapeCard.modelData.label)
+                                        visible: shapeHover.hovered
+                                    }
+
+                                    TapHandler {
+                                        onTapped: EditorState.addShapeClip(shapeCard.modelData.id, -1)
+                                    }
+                                    DragHandler { id: shapeDrag }
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: modelData.label
+                                    color: Theme.mutedForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeCard
+                                    horizontalAlignment: Text.AlignHCenter
+                                    elide: Text.ElideRight
                                 }
                             }
                         }

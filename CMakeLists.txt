@@ -118,6 +118,8 @@ add_library(driftcore STATIC
     src/core/TextStyle.cpp
     src/core/ShapeStyle.h
     src/core/ShapeStyle.cpp
+    src/core/ShapePath.h
+    src/core/ShapePath.cpp
     src/core/Track.h
     src/core/Track.cpp
     src/core/Project.h
@@ -289,6 +291,7 @@ qt_add_qml_module(drift
         src/qml/components/SubtitleCueLane.qml
         src/qml/components/ShortcutCaptureField.qml
         src/qml/components/ShapePreview.qml
+        src/qml/components/ColorSwatchField.qml
         src/qml/components/EffectBrowser.qml
         src/qml/components/ThemedSlider.qml
         src/qml/components/ThemedTextField.qml

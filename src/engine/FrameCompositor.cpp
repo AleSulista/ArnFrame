@@ -11,10 +11,12 @@
 #include "TextRaster.h"
 #include "TransitionCatalog.h"
 #include "core/Clip.h"
+#include "core/ShapePath.h"
 #include "core/SubtitleCue.h"
 #include "core/Time.h"
 #include "core/Transition.h"
 
+#include <QBrush>
 #include <QColor>
 #include <QFileInfo>
 #include <QFont>
@@ -233,7 +235,7 @@ QImage decodeClipMediaFrame(const drift::Clip &clip, drift::TimeUs timelineUs, i
     return {};
 }
 
-QImage shapeImageForClip(const drift::Clip &clip, int canvasWidth, int canvasHeight);
+QImage shapeImageForClip(const drift::Clip &clip, int width, int height, double renderScale);
 
 // maxWidth/maxHeight bound the decoded frame; the returned image may be smaller
 // (source-limited) and is scaled to the clip's layout rect at draw time.
@@ -241,7 +243,7 @@ QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int maxWi
                     int projectFps, int maxTimeEchoHistoryFrames)
 {
     if (clip.type == drift::ClipType::Shape)
-        return shapeImageForClip(clip, maxWidth, maxHeight);
+        return shapeImageForClip(clip, maxWidth, maxHeight, 1.0);
 
     if (clip.path.isEmpty())
         return {};
@@ -305,28 +307,62 @@ QImage imageForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int maxWi
     return image;
 }
 
-QImage shapeImageForClip(const drift::Clip &clip, int canvasWidth, int canvasHeight)
+Qt::PenStyle penStyleFor(drift::ShapeStrokeStyle style)
+{
+    switch (style) {
+    case drift::ShapeStrokeStyle::None:
+        return Qt::NoPen;
+    case drift::ShapeStrokeStyle::Solid:
+        return Qt::SolidLine;
+    case drift::ShapeStrokeStyle::Dash:
+        return Qt::DashLine;
+    case drift::ShapeStrokeStyle::Dot:
+        return Qt::DotLine;
+    case drift::ShapeStrokeStyle::DashDot:
+        return Qt::DashDotLine;
+    }
+    return Qt::SolidLine;
+}
+
+QBrush shapeBrush(const drift::ShapeStyle &style, const QRectF &bounds)
+{
+    switch (style.fillKind) {
+    case drift::ShapeFillKind::None:
+        return Qt::NoBrush;
+    case drift::ShapeFillKind::Solid:
+        return style.fill;
+    case drift::ShapeFillKind::LinearGradient: {
+        // Angle sweeps the gradient axis across the shape's own bounding box, so the same angle
+        // reads the same whatever the clip is scaled to.
+        const double radians = qDegreesToRadians(style.gradientAngle);
+        const QPointF centre = bounds.center();
+        const QPointF half(qCos(radians) * bounds.width() / 2.0,
+                           qSin(radians) * bounds.height() / 2.0);
+        QLinearGradient gradient(centre - half, centre + half);
+        gradient.setColorAt(0.0, style.fill);
+        gradient.setColorAt(1.0, style.fillSecondary);
+        return gradient;
+    }
+    case drift::ShapeFillKind::RadialGradient: {
+        QRadialGradient gradient(bounds.center(),
+                                 qMax(bounds.width(), bounds.height()) / 2.0);
+        gradient.setColorAt(0.0, style.fill);
+        gradient.setColorAt(1.0, style.fillSecondary);
+        return gradient;
+    }
+    }
+    return style.fill;
+}
+
+// Rasterized at exactly the destination size: the GPU quad is the layout rect and samples this
+// texture 0..1, so anything smaller is upscaled and the stroke stretches with it.
+QImage shapeImageForClip(const drift::Clip &clip, int width, int height, double renderScale)
 {
     if (clip.type != drift::ClipType::Shape)
         return {};
 
-    const int base = qMin(canvasWidth, canvasHeight);
-    int w = 0;
-    int h = 0;
-    switch (clip.shapeStyle.kind) {
-    case drift::ShapeKind::Rectangle:
-        w = qMax(16, static_cast<int>(canvasWidth * 0.30));
-        h = qMax(16, static_cast<int>(canvasHeight * 0.20));
-        break;
-    case drift::ShapeKind::Square:
-        w = h = qMax(16, static_cast<int>(base * 0.25));
-        break;
-    case drift::ShapeKind::Triangle:
-    case drift::ShapeKind::Pentagon:
-    case drift::ShapeKind::Hexagon:
-        w = h = qMax(16, static_cast<int>(base * 0.30));
-        break;
-    }
+    const int w = qMax(1, width);
+    const int h = qMax(1, height);
 
     QImage image(w, h, QImage::Format_RGBA8888);
     image.fill(Qt::transparent);
@@ -335,45 +371,23 @@ QImage shapeImageForClip(const drift::Clip &clip, int canvasWidth, int canvasHei
     p.setRenderHint(QPainter::Antialiasing);
 
     const drift::ShapeStyle &style = clip.shapeStyle;
-    QPen pen(style.stroke, style.strokeWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
-    p.setPen(pen);
-    p.setBrush(style.fill);
+    // Stroke width and corner radius are authored in project pixels, so they scale with the render
+    // just like the layout rect does — otherwise preview and export disagree.
+    const double strokeWidth =
+        style.strokeStyle == drift::ShapeStrokeStyle::None ? 0.0 : style.strokeWidth * renderScale;
+    const double inset = strokeWidth / 2.0;
+    const QRectF bounds =
+        QRectF(0, 0, w, h).adjusted(inset, inset, -inset, -inset).normalized();
 
-    const QPointF center(w / 2.0, h / 2.0);
-    if (clip.shapeStyle.kind == drift::ShapeKind::Rectangle) {
-        const double inset = style.strokeWidth / 2.0;
-        p.drawRect(QRectF(inset, inset, w - style.strokeWidth, h - style.strokeWidth));
-    } else if (clip.shapeStyle.kind == drift::ShapeKind::Square) {
-        const double side = qMin(w, h) - style.strokeWidth;
-        p.drawRect(QRectF((w - side) / 2.0, (h - side) / 2.0, side, side));
-    } else {
-        int sides = 3;
-        switch (clip.shapeStyle.kind) {
-        case drift::ShapeKind::Triangle:
-            sides = 3;
-            break;
-        case drift::ShapeKind::Pentagon:
-            sides = 5;
-            break;
-        case drift::ShapeKind::Hexagon:
-            sides = 6;
-            break;
-        default:
-            break;
-        }
-        const double radius = qMin(w, h) / 2.0 - style.strokeWidth;
-        QPainterPath path;
-        for (int i = 0; i < sides; ++i) {
-            const double angle = -M_PI_2 + i * 2.0 * M_PI / sides;
-            const QPointF pt(center.x() + radius * qCos(angle), center.y() + radius * qSin(angle));
-            if (i == 0)
-                path.moveTo(pt);
-            else
-                path.lineTo(pt);
-        }
-        path.closeSubpath();
-        p.drawPath(path);
-    }
+    drift::ShapeStyle scaled = style;
+    scaled.cornerRadius = style.cornerRadius * renderScale;
+
+    p.setBrush(shapeBrush(scaled, bounds));
+    p.setPen(strokeWidth <= 0.0
+                 ? QPen(Qt::NoPen)
+                 : QPen(style.stroke, strokeWidth, penStyleFor(style.strokeStyle), Qt::RoundCap,
+                        Qt::RoundJoin));
+    p.drawPath(drift::shapePath(scaled, bounds));
 
     p.end();
     return image;
@@ -565,7 +579,7 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
             layer.effects.append(blur);
         }
     } else if (clip.type == drift::ClipType::Shape) {
-        layer.source = shapeImageForClip(clip, layoutW, layoutH);
+        layer.source = shapeImageForClip(clip, layoutW, layoutH, renderScale);
         layer.effects = resolvedClipEffects(clip, clipTimeUs);
     } else {
         // Bounded by the canvas, not the layout rect — see decodeClipMediaFrame.

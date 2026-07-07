@@ -6,6 +6,7 @@
 
 #include "core/Keyframe.h"
 #include "core/Project.h"
+#include "core/ShapePath.h"
 #include "core/SubtitleCue.h"
 #include "core/TimelineOps.h"
 #include "core/Transition.h"
@@ -35,6 +36,8 @@ private slots:
     void legacyBoldMigratesToFontWeight();
     void textPresetsAreWellFormed();
     void shapeStyleSerialization();
+    void legacyShapeStyleLoadsWithDefaults();
+    void shapeCatalogPathsFitBounds();
     void effectCatalogIdSerialization();
     void effectParamKeyframeSerialization();
     void audioEffectSerialization();
@@ -601,9 +604,20 @@ void CoreTest::shapeStyleSerialization()
     clip.timelineStart = 0;
     clip.timelineDuration = drift::kImageClipDurationUs;
     clip.shapeStyle.kind = drift::ShapeKind::Hexagon;
+    clip.shapeStyle.fillKind = drift::ShapeFillKind::LinearGradient;
     clip.shapeStyle.fill = QColor(10, 20, 30, 200);
+    clip.shapeStyle.fillSecondary = QColor(40, 50, 60, 128);
+    clip.shapeStyle.gradientAngle = 35.0;
     clip.shapeStyle.stroke = QColor(255, 255, 255);
     clip.shapeStyle.strokeWidth = 6.0;
+    clip.shapeStyle.strokeStyle = drift::ShapeStrokeStyle::DashDot;
+    clip.shapeStyle.cornerRadius = 18.0;
+    clip.shapeStyle.points = 9;
+    clip.shapeStyle.innerRatio = 0.33;
+    clip.shapeStyle.headSize = 0.55;
+    clip.shapeStyle.thickness = 0.22;
+    clip.shapeStyle.tailX = 0.7;
+    clip.shapeStyle.tailSize = 0.15;
     clip.transformX.setKeyframe(0, 100.0);
     clip.transformY.setKeyframe(0, 200.0);
     project.tracks()[0].clips.append(clip);
@@ -616,11 +630,83 @@ void CoreTest::shapeStyleSerialization()
     const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
     QCOMPARE(loadedClip.type, drift::ClipType::Shape);
     QCOMPARE(loadedClip.shapeStyle.kind, drift::ShapeKind::Hexagon);
+    QCOMPARE(loadedClip.shapeStyle.fillKind, drift::ShapeFillKind::LinearGradient);
     QCOMPARE(loadedClip.shapeStyle.fill, QColor(10, 20, 30, 200));
+    QCOMPARE(loadedClip.shapeStyle.fillSecondary, QColor(40, 50, 60, 128));
+    QCOMPARE(loadedClip.shapeStyle.gradientAngle, 35.0);
     QCOMPARE(loadedClip.shapeStyle.stroke, QColor(255, 255, 255));
     QCOMPARE(loadedClip.shapeStyle.strokeWidth, 6.0);
+    QCOMPARE(loadedClip.shapeStyle.strokeStyle, drift::ShapeStrokeStyle::DashDot);
+    QCOMPARE(loadedClip.shapeStyle.cornerRadius, 18.0);
+    QCOMPARE(loadedClip.shapeStyle.points, 9);
+    QCOMPARE(loadedClip.shapeStyle.innerRatio, 0.33);
+    QCOMPARE(loadedClip.shapeStyle.headSize, 0.55);
+    QCOMPARE(loadedClip.shapeStyle.thickness, 0.22);
+    QCOMPARE(loadedClip.shapeStyle.tailX, 0.7);
+    QCOMPARE(loadedClip.shapeStyle.tailSize, 0.15);
     QCOMPARE(loadedClip.transformX.evaluateAt(0), 100.0);
     QCOMPARE(loadedClip.transformY.evaluateAt(0), 200.0);
+}
+
+// A project saved before shapes gained gradients, dash styles and geometry knobs carries only the
+// original four keys, and must still load with the new fields at their defaults.
+void CoreTest::legacyShapeStyleLoadsWithDefaults()
+{
+    const QJsonObject json{
+        {QStringLiteral("version"), drift::Project::kCurrentVersion},
+        {QStringLiteral("tracks"),
+         QJsonArray{QJsonObject{
+             {QStringLiteral("type"), QStringLiteral("shape")},
+             {QStringLiteral("clips"),
+              QJsonArray{QJsonObject{
+                  {QStringLiteral("id"), QStringLiteral("legacy-shape")},
+                  {QStringLiteral("type"), QStringLiteral("shape")},
+                  {QStringLiteral("timelineDurationUs"), qint64(drift::kImageClipDurationUs)},
+                  {QStringLiteral("shapeStyle"),
+                   QJsonObject{{QStringLiteral("kind"), QStringLiteral("pentagon")},
+                               {QStringLiteral("fill"), QStringLiteral("#ffa060ff")},
+                               {QStringLiteral("stroke"), QStringLiteral("#ffffffff")},
+                               {QStringLiteral("strokeWidth"), 4.0}}}}}}}}}};
+
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+    QVERIFY(error.isEmpty());
+
+    const drift::ShapeStyle &style = loaded.tracks()[0].clips[0].shapeStyle;
+    const drift::ShapeStyle defaults;
+    QCOMPARE(style.kind, drift::ShapeKind::Pentagon);
+    QCOMPARE(style.fill, QColor(160, 96, 255));
+    QCOMPARE(style.fillKind, defaults.fillKind);
+    QCOMPARE(style.fillSecondary, defaults.fillSecondary);
+    QCOMPARE(style.gradientAngle, defaults.gradientAngle);
+    QCOMPARE(style.strokeStyle, defaults.strokeStyle);
+    QCOMPARE(style.cornerRadius, defaults.cornerRadius);
+    QCOMPARE(style.points, defaults.points);
+    QCOMPARE(style.innerRatio, defaults.innerRatio);
+}
+
+// Guards ~28 hand-written path formulas: a typo shows up as an empty path or one that escapes the
+// layout rect and gets clipped out of the layer.
+void CoreTest::shapeCatalogPathsFitBounds()
+{
+    const QRectF bounds(0, 0, 200, 120);
+    QVERIFY(!drift::shapeCatalog().isEmpty());
+
+    for (const drift::ShapeCatalogEntry &entry : drift::shapeCatalog()) {
+        const QPainterPath path = drift::shapePath(entry.style, bounds);
+        QVERIFY2(!path.isEmpty(), qPrintable(entry.id));
+        QVERIFY2(entry.aspect > 0.0, qPrintable(entry.id));
+
+        // Cubic control points can bow a hair outside the hull, so allow a small tolerance.
+        const QRectF box = path.boundingRect();
+        QVERIFY2(bounds.adjusted(-1, -1, 1, 1).contains(box), qPrintable(entry.id));
+        QVERIFY2(box.width() > bounds.width() * 0.3, qPrintable(entry.id));
+        QVERIFY2(box.height() > bounds.height() * 0.3, qPrintable(entry.id));
+
+        QVERIFY2(!drift::shapeSvgPath(entry.style, bounds).isEmpty(), qPrintable(entry.id));
+        // Ids are what QML and the drag mime data carry, so every one must resolve.
+        QVERIFY2(drift::shapeCatalogEntry(entry.id) != nullptr, qPrintable(entry.id));
+    }
 }
 
 void CoreTest::effectCatalogIdSerialization()

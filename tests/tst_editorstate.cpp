@@ -45,6 +45,7 @@ private slots:
     void effectParamKeyframes();
     void effectRemovalRemapsGraphSelection();
     void denoiseAddsCleanedClipOnTrackAbove();
+    void shapeStylePartialUpdateAndUndo();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -915,6 +916,51 @@ void EditorStateTest::denoiseAddsCleanedClipOnTrackAbove()
     QCOMPARE(project.tracks().at(sourceTrack).clips.at(0).id, QStringLiteral("src-clip"));
 
     QFile::remove(out.path);
+
+void EditorStateTest::shapeStylePartialUpdateAndUndo()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    // "circle" is a catalog id, not a ShapeKind name — it must resolve to an ellipse in a square
+    // box, since every shape now simply fills its layout rect.
+    state.addShapeClip(QStringLiteral("circle"), 0.0);
+    const int track = state.selectedTrack();
+    const int clip = state.selectedClip();
+    QVERIFY(track >= 0);
+    QVERIFY(clip >= 0);
+
+    QVariantMap style = state.selectedClipData().value(QStringLiteral("shapeStyle")).toMap();
+    QCOMPARE(style.value(QStringLiteral("kind")).toString(), QStringLiteral("ellipse"));
+    QCOMPARE(state.selectedClipData().value(QStringLiteral("width")).toDouble(),
+             state.selectedClipData().value(QStringLiteral("height")).toDouble());
+
+    // Partial update only touches the given keys.
+    state.setShapeStyle(track, clip,
+                        QVariantMap{{"fillKind", QStringLiteral("linear")},
+                                    {"fill", QStringLiteral("#ff00ff00")},
+                                    {"strokeStyle", QStringLiteral("dash")}});
+    style = state.selectedClipData().value(QStringLiteral("shapeStyle")).toMap();
+    QCOMPARE(style.value(QStringLiteral("fillKind")).toString(), QStringLiteral("linear"));
+    QCOMPARE(style.value(QStringLiteral("fill")).toString(), QStringLiteral("#ff00ff00"));
+    QCOMPARE(style.value(QStringLiteral("strokeStyle")).toString(), QStringLiteral("dash"));
+    QCOMPARE(style.value(QStringLiteral("strokeWidth")).toDouble(), 4.0); // untouched
+
+    // Out-of-range values are clamped rather than stored.
+    state.setShapeStyle(track, clip, QVariantMap{{"points", 900}, {"innerRatio", -3.0}});
+    style = state.selectedClipData().value(QStringLiteral("shapeStyle")).toMap();
+    QCOMPARE(style.value(QStringLiteral("points")).toInt(), 60);
+    QCOMPARE(style.value(QStringLiteral("innerRatio")).toDouble(), 0.05);
+
+    // Each committed change is its own undo step.
+    state.undo();
+    style = state.selectedClipData().value(QStringLiteral("shapeStyle")).toMap();
+    QCOMPARE(style.value(QStringLiteral("points")).toInt(), 5);
+    QCOMPARE(style.value(QStringLiteral("fillKind")).toString(), QStringLiteral("linear"));
+
+    state.undo();
+    style = state.selectedClipData().value(QStringLiteral("shapeStyle")).toMap();
+    QCOMPARE(style.value(QStringLiteral("fillKind")).toString(), QStringLiteral("solid"));
 }
 
 QTEST_MAIN(EditorStateTest)

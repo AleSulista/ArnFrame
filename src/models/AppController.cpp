@@ -2,6 +2,7 @@
 
 #include "AssetLibrary.h"
 #include "core/Clip.h"
+#include "core/ShapePath.h"
 #include "core/SubtitleCue.h"
 #include "core/TimelineOps.h"
 #include "core/Transition.h"
@@ -444,9 +445,20 @@ QVariantMap shapeStyleToMap(const drift::ShapeStyle &s)
 {
     return {
         {QStringLiteral("kind"), drift::shapeKindToString(s.kind)},
+        {QStringLiteral("fillKind"), drift::shapeFillKindToString(s.fillKind)},
         {QStringLiteral("fill"), s.fill.name(QColor::HexArgb)},
+        {QStringLiteral("fillSecondary"), s.fillSecondary.name(QColor::HexArgb)},
+        {QStringLiteral("gradientAngle"), s.gradientAngle},
         {QStringLiteral("stroke"), s.stroke.name(QColor::HexArgb)},
         {QStringLiteral("strokeWidth"), s.strokeWidth},
+        {QStringLiteral("strokeStyle"), drift::shapeStrokeStyleToString(s.strokeStyle)},
+        {QStringLiteral("cornerRadius"), s.cornerRadius},
+        {QStringLiteral("points"), s.points},
+        {QStringLiteral("innerRatio"), s.innerRatio},
+        {QStringLiteral("headSize"), s.headSize},
+        {QStringLiteral("thickness"), s.thickness},
+        {QStringLiteral("tailX"), s.tailX},
+        {QStringLiteral("tailSize"), s.tailSize},
     };
 }
 
@@ -563,27 +575,13 @@ double clipTransformValue(const drift::KeyframeTrack<double> &track, drift::Time
     return track.evaluateAt(relative);
 }
 
-drift::ShapeStyle shapeStyleForKind(const QString &shapeKind)
+drift::ShapeStyle shapeStyleForKind(const QString &shapeId)
 {
+    if (const drift::ShapeCatalogEntry *entry = drift::shapeCatalogEntry(shapeId))
+        return entry->style;
+
     drift::ShapeStyle style;
-    style.kind = drift::shapeKindFromString(shapeKind);
-    switch (style.kind) {
-    case drift::ShapeKind::Rectangle:
-        style.fill = QColor(0, 180, 255);
-        break;
-    case drift::ShapeKind::Square:
-        style.fill = QColor(255, 120, 64);
-        break;
-    case drift::ShapeKind::Triangle:
-        style.fill = QColor(255, 214, 10);
-        break;
-    case drift::ShapeKind::Pentagon:
-        style.fill = QColor(160, 96, 255);
-        break;
-    case drift::ShapeKind::Hexagon:
-        style.fill = QColor(80, 220, 140);
-        break;
-    }
+    style.kind = drift::shapeKindFromString(shapeId);
     return style;
 }
 
@@ -866,13 +864,20 @@ void applyAssetLayout(drift::Clip &clip, const QVariantMap &asset, int canvasW, 
     fitClipLayoutToCanvas(clip, mediaW, mediaH, canvasW, canvasH);
 }
 
-void applyDefaultVisualLayout(drift::Clip &clip, int canvasW, int canvasH)
+// shapeAspect is the catalog's default width/height for the shape being added; a square shape must
+// get a square box, since every shape now simply fills its layout rect.
+void applyDefaultVisualLayout(drift::Clip &clip, int canvasW, int canvasH, double shapeAspect = 1.6)
 {
     canvasW = qMax(1, canvasW);
     canvasH = qMax(1, canvasH);
     if (clip.type == drift::ClipType::Shape) {
-        const double w = canvasW * 0.30;
-        const double h = canvasH * 0.20;
+        const double aspect = shapeAspect > 0.01 ? shapeAspect : 1.6;
+        double h = canvasH * 0.30;
+        double w = h * aspect;
+        if (w > canvasW * 0.6) {
+            w = canvasW * 0.6;
+            h = w / aspect;
+        }
         setClipLayoutPixels(clip, 0, 0, w, h);
         return;
     }
@@ -3526,16 +3531,50 @@ QVariantList AppController::builtinStickerCategories() const
 
 QVariantList AppController::builtinShapes() const
 {
-    return {
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("rectangle")},
-                    {QStringLiteral("label"), QStringLiteral("Rectangle")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("square")}, {QStringLiteral("label"), QStringLiteral("Square")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("triangle")},
-                    {QStringLiteral("label"), QStringLiteral("Triangle")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("pentagon")},
-                    {QStringLiteral("label"), QStringLiteral("Pentagon")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("hexagon")}, {QStringLiteral("label"), QStringLiteral("Hexagon")}},
-    };
+    QVariantList out;
+    for (const drift::ShapeCatalogEntry &entry : drift::shapeCatalog()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), entry.id},
+            {QStringLiteral("label"), entry.label},
+            {QStringLiteral("category"), entry.category},
+            // Several ids share a kind, so the inspector matches a clip's stored kind on this.
+            {QStringLiteral("kind"), drift::shapeKindToString(entry.style.kind)},
+        });
+    }
+    return out;
+}
+
+QVariantList AppController::builtinShapeCategories() const
+{
+    QVariantList out;
+    for (const drift::ShapeCategory &category : drift::shapeCategories()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), category.id},
+            {QStringLiteral("label"), category.label},
+        });
+    }
+    return out;
+}
+
+QString AppController::shapeSvgPath(const QString &shapeId) const
+{
+    const drift::ShapeCatalogEntry *entry = drift::shapeCatalogEntry(shapeId);
+    drift::ShapeStyle style = entry ? entry->style : shapeStyleForKind(shapeId);
+    const double aspect = entry ? entry->aspect : 1.0;
+
+    // Thumbnails are authored on the 0..100 grid ShapePreview.qml scales from, inset so the 2px
+    // preview stroke is not clipped by the item edge.
+    constexpr double kGrid = 100.0;
+    constexpr double kInset = 3.0;
+    const double boxW = aspect >= 1.0 ? kGrid : kGrid * aspect;
+    const double boxH = aspect >= 1.0 ? kGrid / aspect : kGrid;
+    const QRectF bounds =
+        QRectF((kGrid - boxW) / 2.0, (kGrid - boxH) / 2.0, boxW, boxH)
+            .adjusted(kInset, kInset, -kInset, -kInset);
+
+    // Corner radius is in project pixels; on a 100-unit grid a 32px radius would swallow the shape.
+    style.cornerRadius = style.cornerRadius > 0.0 ? 12.0 : 0.0;
+    return drift::shapeSvgPath(style, bounds);
 }
 
 void AppController::addShapeClip(const QString &shapeKind, double atSeconds)
@@ -3543,9 +3582,10 @@ void AppController::addShapeClip(const QString &shapeKind, double atSeconds)
     addShapeClipAt(shapeKind, -1, atSeconds);
 }
 
-void AppController::addShapeClipAt(const QString &shapeKind, int trackIndex, double atSeconds)
+void AppController::addShapeClipAt(const QString &shapeId, int trackIndex, double atSeconds)
 {
-    const drift::ShapeStyle style = shapeStyleForKind(shapeKind);
+    const drift::ShapeCatalogEntry *entry = drift::shapeCatalogEntry(shapeId);
+    const drift::ShapeStyle style = entry ? entry->style : shapeStyleForKind(shapeId);
     const drift::Project before = m_project;
 
     int target = trackIndex;
@@ -3564,13 +3604,14 @@ void AppController::addShapeClipAt(const QString &shapeKind, int trackIndex, dou
     drift::Clip clip;
     clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     clip.type = drift::ClipType::Shape;
-    clip.name = drift::shapeKindToString(style.kind);
+    clip.name = entry ? entry->label : drift::shapeKindToString(style.kind);
     clip.shapeStyle = style;
     clip.timelineStart = start;
     clip.timelineDuration = drift::kImageClipDurationUs;
     clip.srcIn = 0;
     clip.srcOut = drift::kImageClipDurationUs;
-    applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
+    applyDefaultVisualLayout(clip, m_project.width(), m_project.height(),
+                             entry ? entry->aspect : 1.6);
 
     track.clips.append(clip);
     pushProjectEdit(before, QStringLiteral("Shape added"));
@@ -4963,6 +5004,69 @@ void AppController::setClipFadeCurve(int trackIndex, int clipIndex, const QStrin
     clip.fadeCurve = newCurve;
     pushProjectEdit(before, QStringLiteral("Fade curve changed"));
     finishEdit(QStringLiteral("Fade curve updated"));
+}
+
+void AppController::setShapeStyle(int trackIndex, int clipIndex, const QVariantMap &m)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    if (clipIndex < 0 || clipIndex >= m_project.tracks().at(trackIndex).clips.size())
+        return;
+    if (m_project.tracks().at(trackIndex).clips.at(clipIndex).type != drift::ClipType::Shape)
+        return;
+
+    // Snapshot before taking any reference into m_project: Project holds an implicitly shared
+    // QList, so writing through a reference obtained before the copy would mutate the snapshot too
+    // and the undo step would be a no-op.
+    const drift::Project before = m_project;
+    drift::Clip &clip = m_project.tracks()[trackIndex].clips[clipIndex];
+    drift::ShapeStyle &s = clip.shapeStyle;
+    if (m.contains(QStringLiteral("kind"))) {
+        // The inspector addresses shapes by catalog id, so "circle" resolves to Ellipse here.
+        const QString id = m.value(QStringLiteral("kind")).toString();
+        s.kind = drift::shapeKindFromString(id);
+        if (const drift::ShapeCatalogEntry *entry = drift::shapeCatalogEntry(id))
+            clip.name = entry->label;
+    }
+    if (m.contains(QStringLiteral("fillKind")))
+        s.fillKind = drift::shapeFillKindFromString(m.value(QStringLiteral("fillKind")).toString());
+    if (m.contains(QStringLiteral("fill")))
+        s.fill = QColor(m.value(QStringLiteral("fill")).toString());
+    if (m.contains(QStringLiteral("fillSecondary")))
+        s.fillSecondary = QColor(m.value(QStringLiteral("fillSecondary")).toString());
+    if (m.contains(QStringLiteral("gradientAngle")))
+        s.gradientAngle = m.value(QStringLiteral("gradientAngle")).toDouble();
+    if (m.contains(QStringLiteral("stroke")))
+        s.stroke = QColor(m.value(QStringLiteral("stroke")).toString());
+    if (m.contains(QStringLiteral("strokeWidth")))
+        s.strokeWidth = qBound(0.0, m.value(QStringLiteral("strokeWidth")).toDouble(), 200.0);
+    if (m.contains(QStringLiteral("strokeStyle")))
+        s.strokeStyle =
+            drift::shapeStrokeStyleFromString(m.value(QStringLiteral("strokeStyle")).toString());
+    if (m.contains(QStringLiteral("cornerRadius")))
+        s.cornerRadius = qBound(0.0, m.value(QStringLiteral("cornerRadius")).toDouble(), 2000.0);
+    if (m.contains(QStringLiteral("points")))
+        s.points = qBound(3, m.value(QStringLiteral("points")).toInt(), 60);
+    if (m.contains(QStringLiteral("innerRatio")))
+        s.innerRatio = qBound(0.05, m.value(QStringLiteral("innerRatio")).toDouble(), 0.95);
+    if (m.contains(QStringLiteral("headSize")))
+        s.headSize = qBound(0.05, m.value(QStringLiteral("headSize")).toDouble(), 0.9);
+    if (m.contains(QStringLiteral("thickness")))
+        s.thickness = qBound(0.05, m.value(QStringLiteral("thickness")).toDouble(), 1.0);
+    if (m.contains(QStringLiteral("tailX")))
+        s.tailX = qBound(0.08, m.value(QStringLiteral("tailX")).toDouble(), 0.92);
+    if (m.contains(QStringLiteral("tailSize")))
+        s.tailSize = qBound(0.05, m.value(QStringLiteral("tailSize")).toDouble(), 0.5);
+
+    // Slider drags wrap their stream of updates in beginPreviewDrag/commitPreviewDrag, which
+    // already holds the "before" snapshot — pushing here too would give one undo step per frame.
+    if (m_previewDragActive) {
+        emitPreviewFrame();
+        return;
+    }
+
+    pushProjectEdit(before, QStringLiteral("Shape style changed"));
+    finishEdit(QStringLiteral("Shape style updated"));
 }
 
 void AppController::setClipMask(int trackIndex, int clipIndex, const QVariantMap &maskMap)

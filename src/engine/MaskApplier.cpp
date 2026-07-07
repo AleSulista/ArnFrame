@@ -1,39 +1,17 @@
 #include "MaskApplier.h"
 
+#include "core/ShapePath.h"
+
 #include <QPainter>
 #include <QPainterPath>
 #include <QtMath>
 
 namespace {
 
-QPainterPath regularPolygonPath(const QPointF &center, double radius, int sides, double rotationDeg)
+// Square box of the given radius, centred — masks size their parametric shapes uniformly.
+QRectF squareBounds(const QPointF &center, double radius)
 {
-    QPainterPath path;
-    const double start = qDegreesToRadians(rotationDeg - 90.0);
-    for (int i = 0; i < sides; ++i) {
-        const double angle = start + i * 2.0 * M_PI / sides;
-        const QPointF pt(center.x() + radius * qCos(angle), center.y() + radius * qSin(angle));
-        if (i == 0)
-            path.moveTo(pt);
-        else
-            path.lineTo(pt);
-    }
-    path.closeSubpath();
-    return path;
-}
-
-QPainterPath heartPath(const QPointF &center, double radius)
-{
-    QPainterPath path;
-    const QPointF c = center;
-    const double r = radius;
-    path.moveTo(c.x(), c.y() + r * 0.35);
-    path.cubicTo(c.x() - r * 0.95, c.y() - r * 0.35, c.x() - r * 0.55, c.y() - r * 1.05, c.x(),
-                 c.y() - r * 0.45);
-    path.cubicTo(c.x() + r * 0.55, c.y() - r * 1.05, c.x() + r * 0.95, c.y() - r * 0.35, c.x(),
-                 c.y() + r * 0.35);
-    path.closeSubpath();
-    return path;
+    return QRectF(center.x() - radius, center.y() - radius, radius * 2.0, radius * 2.0);
 }
 
 QPainterPath maskPath(const drift::Mask &mask, int canvasWidth, int canvasHeight)
@@ -54,9 +32,9 @@ QPainterPath maskPath(const drift::Mask &mask, int canvasWidth, int canvasHeight
         return path;
     }
     case drift::MaskShape::Star:
-        return regularPolygonPath(center, qMin(halfW, halfH), 5, mask.rotation);
+        return drift::regularPolygonPath(squareBounds(center, qMin(halfW, halfH)), 5, mask.rotation);
     case drift::MaskShape::Heart:
-        return heartPath(center, qMin(halfW, halfH));
+        return drift::heartPath(squareBounds(center, qMin(halfW, halfH)));
     case drift::MaskShape::Bars: {
         const double barH = halfH;
         QPainterPath path;

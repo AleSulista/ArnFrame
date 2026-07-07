@@ -234,8 +234,10 @@ public:
     Q_INVOKABLE void cancelFaceDetection();
     Q_INVOKABLE void clearFaceTrack(int trackIndex, int clipIndex);
     Q_INVOKABLE bool faceDetectionAvailable();
+    // shapeKind/shapeId is a catalog id from builtinShapes(), which is not always a ShapeKind name:
+    // "circle" and "ellipse" are the same kind with different default aspects.
     Q_INVOKABLE void addShapeClip(const QString &shapeKind, double atSeconds);
-    Q_INVOKABLE void addShapeClipAt(const QString &shapeKind, int trackIndex, double atSeconds);
+    Q_INVOKABLE void addShapeClipAt(const QString &shapeId, int trackIndex, double atSeconds);
     Q_INVOKABLE void addStickerClip(const QString &stickerId, double atSeconds);
     Q_INVOKABLE QVariantList builtinStickers() const;
     Q_INVOKABLE QVariantList builtinStickerCategories() const;
@@ -246,6 +248,9 @@ public:
     Q_INVOKABLE QString emojiFontFamily() const;
     Q_INVOKABLE void addEmojiClip(const QString &emoji, const QString &name, double atSeconds);
     Q_INVOKABLE QVariantList builtinShapes() const;
+    Q_INVOKABLE QVariantList builtinShapeCategories() const;
+    // SVG "d" string for the assets-panel thumbnail, on the 0..100 grid ShapePreview.qml uses.
+    Q_INVOKABLE QString shapeSvgPath(const QString &shapeId) const;
     Q_INVOKABLE QVariantList previewClipsAtPlayhead() const;
     Q_INVOKABLE void beginPreviewDrag(const QString &undoText = QStringLiteral("Edit clip"));
     Q_INVOKABLE void previewSetClipPosition(int trackIndex, int clipIndex, double xPixels, double yPixels);
@@ -330,6 +335,8 @@ public:
     Q_INVOKABLE bool canUnlinkSelection() const;
     Q_INVOKABLE void unlinkSelectedClips();
     Q_INVOKABLE void setClipMask(int trackIndex, int clipIndex, const QVariantMap &mask);
+    // Partial patch: only the keys present are applied, like setTextStyle.
+    Q_INVOKABLE void setShapeStyle(int trackIndex, int clipIndex, const QVariantMap &style);
     Q_INVOKABLE void setClipFade(int trackIndex, int clipIndex, double fadeInSeconds, double fadeOutSeconds);
     Q_INVOKABLE void setClipFadeCurve(int trackIndex, int clipIndex, const QString &curve);
     Q_INVOKABLE void addTransition(int trackIndex, int clipIndex, const QString &kind, double durationSeconds);
