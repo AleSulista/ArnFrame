@@ -916,6 +916,7 @@ void EditorStateTest::denoiseAddsCleanedClipOnTrackAbove()
     QCOMPARE(project.tracks().at(sourceTrack).clips.at(0).id, QStringLiteral("src-clip"));
 
     QFile::remove(out.path);
+}
 
 void EditorStateTest::shapeStylePartialUpdateAndUndo()
 {
