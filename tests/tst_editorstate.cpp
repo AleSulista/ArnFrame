@@ -9,6 +9,8 @@
 #include <QTemporaryDir>
 #include <QTemporaryFile>
 
+#include <QScopeGuard>
+
 #include "models/AppController.h"
 #include "models/AssetLibrary.h"
 
@@ -27,6 +29,7 @@ private slots:
     void addTextClipWithTextDoesNotRequestEdit();
     void undoRedoClipAdd();
     void undoTrackMute();
+    void packagedProjectCarriesDerivedArtifacts();
     void undoBookmarkAdd();
     void moveTrackReordersAndRemapsSelection();
     void addTrackInsertsEmptyTrackByType();
@@ -198,6 +201,60 @@ void EditorStateTest::addTrackInsertsEmptyTrackByType()
     QVERIFY(state.undoAvailable());
     state.undo();
     QCOMPARE(state.tracks().size(), 2);
+}
+
+// Packaging embeds the derived artifacts and repoints the project at the extraction directory, so
+// a matte survives its cache being swept — which is the whole reason the format exists.
+void EditorStateTest::packagedProjectCarriesDerivedArtifacts()
+{
+    // Keeps the extraction directory out of the real app data location.
+    QStandardPaths::setTestModeEnabled(true);
+    const auto restore = qScopeGuard([] { QStandardPaths::setTestModeEnabled(false); });
+
+    QTemporaryDir sources;
+    QVERIFY(sources.isValid());
+    const QString mattePath = sources.filePath(QStringLiteral("matte.mp4"));
+    {
+        QFile matte(mattePath);
+        QVERIFY(matte.open(QIODevice::WriteOnly));
+        matte.write(QByteArray(1024, '\x7f'));
+    }
+
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("Masked"), 0.0);
+    state.setProjectMetadata(QStringLiteral("Packaged"), QStringLiteral("Ada"),
+                             QStringLiteral("With a matte"));
+
+    // No QML-facing setter carries a matte path; the segmentation job writes it directly.
+    drift::Clip &clip = state.project()->tracks()[0].clips[0];
+    clip.mask.shape = drift::MaskShape::Matte;
+    clip.mask.mattePath = mattePath;
+
+    QTemporaryDir out;
+    QVERIFY(out.isValid());
+    const QString bundlePath = out.filePath(QStringLiteral("packaged.drift"));
+
+    QSignalSpy finished(&state, &AppController::packageFinished);
+    state.packageProject(QUrl::fromLocalFile(bundlePath));
+    QVERIFY(finished.wait(30000));
+    QVERIFY2(finished.first().at(0).toBool(), qPrintable(finished.first().at(1).toString()));
+
+    // The matte's own cache is gone, exactly as a sweep would leave it.
+    QVERIFY(QFile::remove(mattePath));
+
+    state.newProject();
+    state.loadProject(QUrl::fromLocalFile(bundlePath));
+
+    QCOMPARE(state.projectMetadata().value(QStringLiteral("title")).toString(),
+             QStringLiteral("Packaged"));
+    QCOMPARE(state.projectMetadata().value(QStringLiteral("author")).toString(),
+             QStringLiteral("Ada"));
+
+    const drift::Clip &loaded = state.project()->tracks().at(0).clips.at(0);
+    QVERIFY(loaded.mask.mattePath != mattePath);
+    QVERIFY2(QFileInfo::exists(loaded.mask.mattePath), qPrintable(loaded.mask.mattePath));
+    QCOMPARE(QFileInfo(loaded.mask.mattePath).size(), 1024);
 }
 
 void EditorStateTest::projectPersistenceRoundTrip()

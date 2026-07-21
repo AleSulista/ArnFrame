@@ -5,6 +5,7 @@
 #include "Time.h"
 
 #include <QColor>
+#include <QDateTime>
 #include <QHash>
 #include <QJsonObject>
 #include <QList>
@@ -38,6 +39,23 @@ public:
 
     QString name() const { return m_name; }
     void setName(const QString &name) { m_name = name; }
+
+    // Stable across saves; names the extraction directory a packaged project unpacks into, so it
+    // must survive a round-trip rather than being reminted per save.
+    QString id() const { return m_id; }
+    void setId(const QString &id) { m_id = id; }
+
+    QString author() const { return m_author; }
+    void setAuthor(const QString &author) { m_author = author; }
+
+    QString description() const { return m_description; }
+    void setDescription(const QString &description) { m_description = description; }
+
+    QDateTime createdAt() const { return m_createdAt; }
+    void setCreatedAt(const QDateTime &createdAt) { m_createdAt = createdAt; }
+
+    QDateTime modifiedAt() const { return m_modifiedAt; }
+    void setModifiedAt(const QDateTime &modifiedAt) { m_modifiedAt = modifiedAt; }
 
     int fps() const { return m_fps; }
     void setFps(int fps) { m_fps = qMax(1, fps); }
@@ -76,6 +94,11 @@ public:
 
 private:
     QString m_name = QStringLiteral("Untitled Project");
+    QString m_id;
+    QString m_author;
+    QString m_description;
+    QDateTime m_createdAt;
+    QDateTime m_modifiedAt;
     int m_fps = 30;
     int m_width = 1920;
     int m_height = 1080;

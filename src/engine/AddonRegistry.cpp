@@ -1,6 +1,7 @@
 #include "AddonRegistry.h"
 
 #include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -171,6 +172,23 @@ QStringList addonRootsForKind(const QString &kind)
         }
     }
     return roots;
+}
+
+const InstalledAddon *addonForPath(const QString &path)
+{
+    if (path.isEmpty())
+        return nullptr;
+
+    const QString clean = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+
+    QMutexLocker lock(&g_mutex);
+    ensureLoadedLocked();
+    for (const InstalledAddon &addon : std::as_const(g_addons)) {
+        const QString root = QDir::cleanPath(addonInstallDir(addon.id));
+        if (clean == root || clean.startsWith(root + QLatin1Char('/')))
+            return &addon;
+    }
+    return nullptr;
 }
 
 void reloadAddonRegistry()

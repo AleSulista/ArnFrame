@@ -98,6 +98,7 @@ std::optional<AudioEffectEntry> loadManifest(const QString &packageDir, QString 
         return std::nullopt;
     }
 
+    entry.packageDir = packageDir;
     return entry;
 }
 

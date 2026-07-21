@@ -2,12 +2,60 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Drift
 
-// Dropdown listing recently opened/saved projects. Emits openFileRequested()
-// when the user wants the full file picker instead of a recent entry.
+// Dropdown listing recently opened/saved projects, and the project-level actions that have no
+// room in the header. The signals are handled by EditorHeader, which owns the file dialogs.
 Popup {
     id: root
 
     signal openFileRequested()
+    signal packageRequested()
+    signal propertiesRequested()
+
+    component ActionRow: Rectangle {
+        id: actionRow
+
+        property alias glyph: rowIcon.glyph
+        property alias text: rowLabel.text
+        signal triggered()
+
+        width: parent ? parent.width : 0
+        height: Theme.controlHeight + Theme.spacingSm
+        radius: Theme.radiusSm
+        color: actionArea.containsMouse ? Theme.accent : "transparent"
+
+        Row {
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.spacingLg
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Theme.spacingLg
+
+            IconGlyph {
+                id: rowIcon
+                iconSize: Theme.iconSizeMd
+                iconColor: Theme.foreground
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Text {
+                id: rowLabel
+                color: Theme.foreground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSm
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+
+        MouseArea {
+            id: actionArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                root.close()
+                actionRow.triggered()
+            }
+        }
+    }
 
     width: Theme.dialogWidthSm
     padding: Theme.spacingMd
@@ -197,44 +245,22 @@ Popup {
             opacity: 0.5
         }
 
-        Rectangle {
-            width: parent.width
-            height: Theme.controlHeight + Theme.spacingSm
-            radius: Theme.radiusSm
-            color: openArea.containsMouse ? Theme.accent : "transparent"
+        ActionRow {
+            glyph: Theme.icons.folder
+            text: qsTr("Open project…")
+            onTriggered: root.openFileRequested()
+        }
 
-            Row {
-                anchors.left: parent.left
-                anchors.leftMargin: Theme.spacingLg
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Theme.spacingLg
+        ActionRow {
+            glyph: Theme.icons.package
+            text: qsTr("Package project…")
+            onTriggered: root.packageRequested()
+        }
 
-                IconGlyph {
-                    glyph: Theme.icons.folder
-                    iconSize: Theme.iconSizeMd
-                    iconColor: Theme.foreground
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                Text {
-                    text: qsTr("Open project…")
-                    color: Theme.foreground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSm
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-            }
-
-            MouseArea {
-                id: openArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    root.close()
-                    root.openFileRequested()
-                }
-            }
+        ActionRow {
+            glyph: Theme.icons.fileText
+            text: qsTr("Project properties…")
+            onTriggered: root.propertiesRequested()
         }
     }
 }

@@ -66,6 +66,10 @@ ApplicationWindow {
         id: addonManagerDialog
     }
 
+    MissingAddonsDialog {
+        id: missingAddonsDialog
+    }
+
     SegmentationWindow {
         id: segmentationWindow
     }
@@ -142,6 +146,17 @@ ApplicationWindow {
                 Toasts.success(qsTr("Export finished."))
             else
                 Toasts.error(qsTr("Export failed. Check the output path and disk space."))
+        }
+
+        function onMissingAddons(addons) {
+            missingAddonsDialog.openFor(addons)
+        }
+
+        function onPackageFinished(ok, message) {
+            if (ok)
+                Toasts.success(message)
+            else
+                Toasts.error(qsTr("Packaging failed: %1").arg(message))
         }
 
         function onSubtitleGenerationFinished(ok, message) {

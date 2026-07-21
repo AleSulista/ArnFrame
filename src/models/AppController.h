@@ -2,6 +2,7 @@
 
 #include "core/Project.h"
 #include "core/Time.h"
+#include "engine/ProjectBundle.h"
 #include "engine/Sam2Segmenter.h"
 #include "ClipListModel.h"
 #include "TimelineModel.h"
@@ -85,6 +86,9 @@ class AppController : public QObject
     Q_PROPERTY(QVariantList actions READ actions NOTIFY shortcutsChanged)
     Q_PROPERTY(QVariantList bookmarks READ bookmarks NOTIFY bookmarksChanged)
     Q_PROPERTY(QString projectName READ projectName WRITE setProjectName NOTIFY projectNameChanged)
+    Q_PROPERTY(QVariantMap projectMetadata READ projectMetadata NOTIFY projectMetadataChanged)
+    Q_PROPERTY(bool packaging READ packaging NOTIFY packagingChanged)
+    Q_PROPERTY(double packageProgress READ packageProgress NOTIFY packageProgressChanged)
     Q_PROPERTY(QString lastMessage READ lastMessage NOTIFY lastMessageChanged)
     Q_PROPERTY(int draggingAssetIndex READ draggingAssetIndex WRITE setDraggingAssetIndex NOTIFY draggingAssetIndexChanged)
     Q_PROPERTY(bool hasUnsavedChanges READ hasUnsavedChanges NOTIFY dirtyChanged)
@@ -400,9 +404,20 @@ public:
     Q_INVOKABLE void redo();
     Q_INVOKABLE double snapTime(double seconds) const;
     Q_INVOKABLE QVariantList waveformPeaks(const QString &path) const;
+    // title / author / description / createdAt / modifiedAt, for the properties dialog.
+    QVariantMap projectMetadata() const;
+    Q_INVOKABLE void setProjectMetadata(const QString &title, const QString &author,
+                                        const QString &description);
+    bool packaging() const { return m_packaging; }
+    double packageProgress() const { return m_packageProgress; }
     Q_INVOKABLE QVariantList subtitleWaveformPeaks(double startSeconds, double durSeconds,
                                                    int sampleCount = 240) const;
+    // Writes a .drift bundle keeping each asset's current storage mode, so a referencing project
+    // stays instant to save and a packaged one stays self-contained.
     Q_INVOKABLE void saveProject(const QUrl &url);
+    // Same container, every source asset embedded. Runs off the GUI thread — it copies the media.
+    Q_INVOKABLE void packageProject(const QUrl &url);
+    Q_INVOKABLE void cancelPackage();
     Q_INVOKABLE void loadProject(const QUrl &url);
     Q_INVOKABLE void newProject();
     Q_INVOKABLE void openRecentProject(const QString &path);
@@ -457,6 +472,13 @@ signals:
     void selectedTransitionDataChanged();
     void bookmarksChanged();
     void projectNameChanged();
+    void projectMetadataChanged();
+    void packagingChanged();
+    void packageProgressChanged();
+    void packageFinished(bool ok, const QString &message);
+    // Addons the freshly opened project needs but that are not installed. Each entry is
+    // id / name / version / kinds, for MissingAddonsDialog.
+    void missingAddons(const QVariantList &addons);
     void lastMessageChanged();
     void draggingAssetIndexChanged();
     void exportFinished(bool success);
@@ -511,9 +533,20 @@ protected:
 
     QByteArray serializeProjectJson() const;
     bool applyProjectJson(const QByteArray &data, QString *error);
+    // Shared by saveProject and packageProject. `embedSource` forces every source asset into the
+    // bundle; otherwise each keeps whatever mode it had, tracked in m_embeddedSources. GUI thread
+    // only — packageProject builds the request here and hands the finished copy to its worker.
+    drift::bundle::WriteRequest buildWriteRequest(bool embedSource) const;
+    void rememberEmbeddedSources(const QList<drift::bundle::MediaEntry> &media);
+    // Repoint every path field the extraction moved. Clips duplicate their asset's path, so this
+    // matches on the value rather than walking by id.
+    void remapProjectPaths(const QHash<QString, QString> &remap);
+    // Drops <AppData>/projects/<id> directories no project in the recents list still refers to.
+    void sweepExtractionDirs();
     // Effects and transitions render as no-ops when their package is absent, which is silent and
     // looks like the project is simply wrong. Called after a load to say so instead.
     void reportMissingCatalogEntries();
+    void reportMissingAddons(const QList<drift::bundle::AddonRef> &addons);
     void setDirty(bool dirty);
     void setCurrentProjectPath(const QString &path);
     void addRecentProject(const QString &path);
@@ -559,6 +592,15 @@ protected:
     // repeatedly, so each pair is deleted as the next supersedes it.
     QString m_denoisePreviewClean;
     QString m_denoisePreviewOriginal;
+    // Source paths that were embedded when this project was last read or written, so a plain Save
+    // keeps a packaged project packaged instead of quietly making it depend on the cache dir.
+    QSet<QString> m_embeddedSources;
+    // Handed to applyProjectJson by loadProject, applied alongside the other load-time path
+    // migrations and cleared there.
+    QHash<QString, QString> m_pendingPathRemap;
+    bool m_packaging = false;
+    double m_packageProgress = 0.0;
+    QAtomicInt m_packageCancel = 0;
     bool m_faceDetecting = false;
     double m_faceDetectProgress = 0.0;
     QString m_faceDetectStatus;

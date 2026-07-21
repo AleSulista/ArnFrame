@@ -26,6 +26,7 @@ struct AudioEffectEntry
     QString chainTemplate;
     int prerollMs = 0;
     QList<drift::EffectParamSpec> parameters;
+    QString packageDir; // where it was loaded from; traces the entry back to its addon
 };
 
 const QList<AudioEffectEntry> &audioEffectCatalog();

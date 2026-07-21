@@ -7,8 +7,10 @@
 #include "core/TimelineOps.h"
 #include "core/Transition.h"
 #include "core/commands/ProjectCommands.h"
+#include "engine/AddonRegistry.h"
 #include "engine/AudioMixer.h"
 #include "engine/ClipReaderPool.h"
+#include "engine/ProjectDependencies.h"
 #include "engine/AudioEffectCatalog.h"
 #include "engine/EffectCatalog.h"
 #include "engine/Exporter.h"
@@ -68,6 +70,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     , m_assetLibrary(assetLibrary)
 {
     m_project.resetToDefaultTimeline();
+    m_project.setAuthor(QSettings().value(QStringLiteral("authorName")).toString());
     if (m_assetLibrary)
         m_assetLibrary->setProject(&m_project);
 
@@ -153,6 +156,33 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     });
 
     detectRecoveryFile();
+    sweepExtractionDirs();
+}
+
+// Every packaged project ever opened leaves its media unpacked under <AppData>/projects/<id>. Drop
+// the ones no project in the recents list can still be pointing at.
+void AppController::sweepExtractionDirs()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (base.isEmpty())
+        return;
+    QDir root(QDir(base).filePath(QStringLiteral("projects")));
+    if (!root.exists())
+        return;
+
+    QSet<QString> live;
+    for (const QVariant &entry : recentProjects()) {
+        const QString path = entry.toMap().value(QStringLiteral("path")).toString();
+        QString error;
+        if (const auto info = drift::bundle::readManifest(path, &error))
+            live.insert(info->projectId);
+    }
+
+    const QFileInfoList dirs = root.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo &dir : dirs) {
+        if (!live.contains(dir.fileName()))
+            QDir(dir.absoluteFilePath()).removeRecursively();
+    }
 }
 
 namespace {
@@ -1389,6 +1419,39 @@ void AppController::setProjectName(const QString &name)
     m_project.setName(name);
     setDirty(true);
     emit projectNameChanged();
+    emit projectMetadataChanged();
+}
+
+QVariantMap AppController::projectMetadata() const
+{
+    return QVariantMap{
+        {QStringLiteral("title"), m_project.name()},
+        {QStringLiteral("author"), m_project.author()},
+        {QStringLiteral("description"), m_project.description()},
+        {QStringLiteral("createdAt"), m_project.createdAt().toLocalTime()},
+        {QStringLiteral("modifiedAt"), m_project.modifiedAt().toLocalTime()},
+    };
+}
+
+void AppController::setProjectMetadata(const QString &title, const QString &author,
+                                       const QString &description)
+{
+    const bool nameChanged = m_project.name() != title;
+    if (!nameChanged && m_project.author() == author && m_project.description() == description)
+        return;
+
+    if (nameChanged)
+        m_project.setName(title);
+    m_project.setAuthor(author);
+    m_project.setDescription(description);
+
+    // The next project starts from whoever the user is now, so they only type it once.
+    QSettings().setValue(QStringLiteral("authorName"), author);
+
+    setDirty(true);
+    if (nameChanged)
+        emit projectNameChanged();
+    emit projectMetadataChanged();
 }
 
 void AppController::setGuidesEnabled(bool enabled)
@@ -6282,6 +6345,12 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
             asset.path = migrated;
     }
 
+    // Media that travelled inside the bundle now lives in this machine's extraction directory, so
+    // the saved absolute paths have to be repointed before anything probes them. Same class of
+    // fix-up as the two migrations around it.
+    remapProjectPaths(m_pendingPathRemap);
+    m_pendingPathRemap.clear();
+
     // Emoji clips point at a raster in this machine's app data cache, which a project opened
     // elsewhere will not have. The glyph sequence is what was saved, so re-derive the path — the
     // render is cached, and without the font addon it comes back empty and the clip fails to load
@@ -6324,8 +6393,42 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
     emit tracksChanged();
     emit bookmarksChanged();
     emit projectNameChanged();
+    emit projectMetadataChanged();
     emit backgroundChanged();
     return true;
+}
+
+drift::bundle::WriteRequest AppController::buildWriteRequest(bool embedSource) const
+{
+    drift::bundle::WriteRequest request;
+    request.document = QJsonDocument::fromJson(serializeProjectJson()).object();
+    request.projectId = m_project.id();
+    request.title = m_project.name();
+    request.author = m_project.author();
+    request.description = m_project.description();
+    request.createdAt = m_project.createdAt();
+    request.modifiedAt = m_project.modifiedAt();
+    request.addons = drift::bundle::collectAddons(m_project);
+    request.media = drift::bundle::collectMedia(m_project, embedSource);
+
+    // Without this a plain Save of a project that arrived as a package would drop its media back
+    // to references into the extraction dir, which the startup sweep is free to delete.
+    if (!embedSource) {
+        for (drift::bundle::MediaEntry &entry : request.media) {
+            if (m_embeddedSources.contains(entry.originalPath))
+                entry.embedded = true;
+        }
+    }
+    return request;
+}
+
+void AppController::rememberEmbeddedSources(const QList<drift::bundle::MediaEntry> &media)
+{
+    m_embeddedSources.clear();
+    for (const drift::bundle::MediaEntry &entry : media) {
+        if (entry.embedded)
+            m_embeddedSources.insert(entry.originalPath);
+    }
 }
 
 void AppController::saveProject(const QUrl &url)
@@ -6335,21 +6438,94 @@ void AppController::saveProject(const QUrl &url)
         setLastMessage(QStringLiteral("Invalid save path"));
         return;
     }
-
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly)) {
-        setLastMessage(QStringLiteral("Failed to save project"));
+    if (m_packaging) {
+        setLastMessage(QStringLiteral("Already saving"));
         return;
     }
 
-    file.write(serializeProjectJson());
-    file.close();
+    m_project.setModifiedAt(QDateTime::currentDateTimeUtc());
+
+    const drift::bundle::WriteRequest request = buildWriteRequest(/*embedSource=*/false);
+    QString error;
+    if (!drift::bundle::write(path, request, {}, &error)) {
+        setLastMessage(error);
+        return;
+    }
+    rememberEmbeddedSources(request.media);
 
     setCurrentProjectPath(path);
     addRecentProject(path);
     setDirty(false);
     deleteRecoveryFile();
+    emit projectMetadataChanged();
     setLastMessage(QStringLiteral("Project saved"));
+}
+
+void AppController::packageProject(const QUrl &url)
+{
+    const QString path = url.toLocalFile();
+    if (path.isEmpty()) {
+        setLastMessage(QStringLiteral("Invalid save path"));
+        return;
+    }
+    if (m_packaging)
+        return;
+
+    m_project.setModifiedAt(QDateTime::currentDateTimeUtc());
+    m_packageCancel = 0;
+    m_packaging = true;
+    m_packageProgress = 0.0;
+    emit packagingChanged();
+    emit packageProgressChanged();
+
+    // The whole request is built here, on the GUI thread: the worker copies gigabytes and must not
+    // be reading the project while the timeline is free to change under it.
+    const drift::bundle::WriteRequest request = buildWriteRequest(/*embedSource=*/true);
+
+    (void)QtConcurrent::run([this, path, request]() {
+        QString error;
+        const auto progress = [this](qint64 done, qint64 total) {
+            if (m_packageCancel.loadRelaxed())
+                return false;
+            const double fraction = total > 0 ? double(done) / double(total) : 0.0;
+            QMetaObject::invokeMethod(
+                this,
+                [this, fraction]() {
+                    m_packageProgress = fraction;
+                    emit packageProgressChanged();
+                },
+                Qt::QueuedConnection);
+            return true;
+        };
+        const bool ok = drift::bundle::write(path, request, progress, &error);
+        QMetaObject::invokeMethod(
+            this,
+            [this, ok, error, path, request]() {
+                m_packaging = false;
+                emit packagingChanged();
+                if (!ok) {
+                    setLastMessage(error);
+                    emit packageFinished(false, error);
+                    return;
+                }
+                rememberEmbeddedSources(request.media);
+                m_packageProgress = 1.0;
+                emit packageProgressChanged();
+                setCurrentProjectPath(path);
+                addRecentProject(path);
+                setDirty(false);
+                deleteRecoveryFile();
+                emit projectMetadataChanged();
+                setLastMessage(QStringLiteral("Project packaged"));
+                emit packageFinished(true, QStringLiteral("Project packaged"));
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void AppController::cancelPackage()
+{
+    m_packageCancel = 1;
 }
 
 void AppController::loadProject(const QUrl &url)
@@ -6360,28 +6536,103 @@ void AppController::loadProject(const QUrl &url)
         return;
     }
 
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        setLastMessage(QStringLiteral("Failed to open project"));
+    QString error;
+    const std::optional<drift::bundle::BundleInfo> info =
+        drift::bundle::readManifest(path, &error);
+    if (!info) {
+        setLastMessage(error);
         return;
     }
 
-    QString error;
-    if (!applyProjectJson(file.readAll(), &error)) {
+    // Named by the project's own id, which survives the round-trip, so reopening the same bundle
+    // lands on the files it already unpacked.
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString destDir =
+        QDir(base).filePath(QStringLiteral("projects/%1/media").arg(info->projectId));
+
+    QHash<QString, QString> remap;
+    if (info->embeddedBytes > 0 && !drift::bundle::extract(path, destDir, {}, &remap, &error)) {
         setLastMessage(error);
         return;
+    }
+
+    m_pendingPathRemap = remap;
+    if (!applyProjectJson(QJsonDocument(info->document).toJson(QJsonDocument::Compact), &error)) {
+        m_pendingPathRemap.clear();
+        setLastMessage(error);
+        return;
+    }
+
+    m_embeddedSources.clear();
+    for (const drift::bundle::MediaEntry &entry : info->media) {
+        if (entry.embedded && entry.role == drift::bundle::MediaRole::Source)
+            m_embeddedSources.insert(remap.value(entry.originalPath, entry.originalPath));
     }
 
     setCurrentProjectPath(path);
     addRecentProject(path);
     deleteRecoveryFile();
     setLastMessage(QStringLiteral("Project loaded"));
+    reportMissingAddons(info->addons);
+}
+
+void AppController::reportMissingAddons(const QList<drift::bundle::AddonRef> &addons)
+{
+    QVariantList missing;
+    for (const drift::bundle::AddonRef &addon : addons) {
+        if (drift::addon::installedAddon(addon.id))
+            continue;
+        missing.append(QVariantMap{
+            {QStringLiteral("id"), addon.id},
+            {QStringLiteral("name"), addon.name.isEmpty() ? addon.id : addon.name},
+            {QStringLiteral("version"), addon.version},
+            {QStringLiteral("kinds"), addon.kinds},
+        });
+    }
+    if (!missing.isEmpty())
+        emit missingAddons(missing);
+}
+
+void AppController::remapProjectPaths(const QHash<QString, QString> &remap)
+{
+    if (remap.isEmpty())
+        return;
+
+    const auto repoint = [&remap](QString &path) {
+        const auto it = remap.constFind(path);
+        if (it == remap.constEnd())
+            return false;
+        path = it.value();
+        return true;
+    };
+
+    for (drift::MediaAsset &asset : m_project.assets()) {
+        if (repoint(asset.path)) {
+            asset.thumbnailPath.clear();
+            asset.filmstripPath.clear();
+        }
+    }
+
+    for (drift::Track &track : m_project.tracks()) {
+        for (drift::Clip &clip : track.clips) {
+            repoint(clip.mask.mattePath);
+            repoint(clip.faceTrackPath);
+            if (repoint(clip.path)) {
+                // Cache renders keyed on the old path; AssetLibrary and
+                // restoreFilmstripsAfterLoad regenerate them for the new one.
+                clip.thumbnailPath.clear();
+                clip.filmstripPath.clear();
+            }
+        }
+    }
 }
 
 void AppController::newProject()
 {
     setPlaying(false);
     m_project.resetToDefaultTimeline();
+    m_project.setAuthor(QSettings().value(QStringLiteral("authorName")).toString());
+    m_embeddedSources.clear();
     if (m_assetLibrary)
         m_assetLibrary->setProject(&m_project);
     m_playback.setProject(&m_project);
@@ -6396,6 +6647,7 @@ void AppController::newProject()
     emit tracksChanged();
     emit bookmarksChanged();
     emit projectNameChanged();
+    emit projectMetadataChanged();
     emit backgroundChanged();
     setLastMessage(QStringLiteral("New project"));
 }
@@ -6463,7 +6715,9 @@ void AppController::setCurrentProjectPath(const QString &path)
 QString AppController::recoveryFilePath()
 {
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    return dir + QStringLiteral("/recovery/autosave.drift.json");
+    // Plain JSON, not a bundle: this is an internal crash snapshot written every few seconds and
+    // never opened through the file dialog, so it must not repack the project's media.
+    return dir + QStringLiteral("/recovery/autosave.json");
 }
 
 void AppController::writeRecoveryFile()

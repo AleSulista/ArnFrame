@@ -13,8 +13,10 @@ Rectangle {
 
     property string projectName: EditorState.projectName
 
+    readonly property var projectFilter: [qsTr("Drift project (*.drift)")]
+
     function openProject() {
-        var url = FileDialogs.openFile(qsTr("Open Project"), [qsTr("Drift project (*.drift.json)")])
+        var url = FileDialogs.openFile(qsTr("Open Project"), root.projectFilter)
         if (url != "")
             EditorState.loadProject(url)
     }
@@ -24,9 +26,17 @@ Rectangle {
             EditorState.saveProject(EditorState.fileUrl(EditorState.currentProjectPath))
             return
         }
-        var url = FileDialogs.saveFile(qsTr("Save Project"), [qsTr("Drift project (*.drift.json)")], "drift.json")
+        var url = FileDialogs.saveFile(qsTr("Save Project"), root.projectFilter, "drift")
         if (url != "")
             EditorState.saveProject(url)
+    }
+
+    // Save As with every source file copied in, so the result opens on a machine that has none of
+    // the media. Always asks for a path: it is a different artefact from the working save.
+    function packageProject() {
+        var url = FileDialogs.saveFile(qsTr("Package Project"), root.projectFilter, "drift")
+        if (url != "")
+            EditorState.packageProject(url)
     }
 
     function exportVideo() {
@@ -55,6 +65,14 @@ Rectangle {
     ExportProgressDialog {
         id: exportProgressDialog
         onClosed: if (EditorState.exportInProgress) root.exportProgressDismissed = true
+    }
+
+    ProjectPropertiesDialog {
+        id: projectPropertiesDialog
+    }
+
+    PackageProgressDialog {
+        id: packageProgressDialog
     }
 
     Rectangle {
@@ -113,6 +131,8 @@ Rectangle {
                     id: recentPopup
                     y: parent.height + Theme.spacingMd
                     onOpenFileRequested: root.openProject()
+                    onPackageRequested: root.packageProject()
+                    onPropertiesRequested: projectPropertiesDialog.openDialog()
                 }
             }
 

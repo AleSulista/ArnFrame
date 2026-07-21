@@ -213,11 +213,16 @@ add_library(driftengine STATIC
     src/engine/MatteWriter.cpp
     src/engine/AudioFileWriter.h
     src/engine/AudioFileWriter.cpp
+    src/engine/ProjectBundle.h
+    src/engine/ProjectBundle.cpp
+    src/engine/ProjectDependencies.h
+    src/engine/ProjectDependencies.cpp
 )
 target_include_directories(driftengine PUBLIC src)
 target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui Qt6::OpenGL FFmpeg::FFmpeg driftcore
     onnxruntime::onnxruntime)
 target_link_libraries(driftengine PRIVATE ${DRIFT_ZSTD_TARGET} OpenSSL::Crypto)
+target_compile_definitions(driftengine PRIVATE DRIFT_VERSION="${PROJECT_VERSION}")
 
 if(WITH_BGREMOVAL)
     target_include_directories(driftengine PRIVATE ${OpenCV_INCLUDE_DIRS})
@@ -307,7 +312,10 @@ qt_add_qml_module(drift
         src/qml/components/ThemedLabel.qml
         src/qml/components/ThemedDialog.qml
         src/qml/components/AddonManagerDialog.qml
+        src/qml/components/MissingAddonsDialog.qml
         src/qml/components/ProjectSetupDialog.qml
+        src/qml/components/ProjectPropertiesDialog.qml
+        src/qml/components/PackageProgressDialog.qml
         src/qml/components/ExportDialog.qml
         src/qml/components/ExportProgressDialog.qml
         src/qml/components/SubtitleProgressDialog.qml

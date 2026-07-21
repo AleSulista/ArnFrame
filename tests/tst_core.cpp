@@ -22,6 +22,7 @@ private slots:
     void keyframeEaseInterpolation();
     void keyframeNearestQuery();
     void projectSerializationRoundTrip();
+    void projectMetadataRoundTrip();
     void clipTransformSerialization();
     void legacyFractionalTransformMigration();
     void volumeKeyframeSerialization();
@@ -108,6 +109,38 @@ void CoreTest::keyframeNearestQuery()
     QCOMPARE(track.nearestKeyframe(drift::secondsToUs(1.01), drift::secondsToUs(0.05)),
              drift::secondsToUs(1.0));
     QCOMPARE(track.nearestKeyframe(drift::secondsToUs(2.0), drift::secondsToUs(0.05)), drift::TimeUs{-1});
+}
+
+void CoreTest::projectMetadataRoundTrip()
+{
+    drift::Project project;
+    const QString id = project.id();
+    QVERIFY(!id.isEmpty());
+
+    project.setName(QStringLiteral("Documentary"));
+    project.setAuthor(QStringLiteral("Ada"));
+    project.setDescription(QStringLiteral("Rough cut"));
+    const QDateTime created(QDate(2026, 3, 4), QTime(5, 6, 7), QTimeZone::UTC);
+    project.setCreatedAt(created);
+    project.setModifiedAt(created.addDays(2));
+
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(project.toJson(), &error);
+    QVERIFY(error.isEmpty());
+    QCOMPARE(loaded.id(), id);
+    QCOMPARE(loaded.name(), QStringLiteral("Documentary"));
+    QCOMPARE(loaded.author(), QStringLiteral("Ada"));
+    QCOMPARE(loaded.description(), QStringLiteral("Rough cut"));
+    QCOMPARE(loaded.createdAt(), created);
+    QCOMPARE(loaded.modifiedAt(), created.addDays(2));
+
+    // An empty timeline routes through resetToDefaultTimeline() during the load, which mints a
+    // fresh id — the saved one has to survive that.
+    QVERIFY(loaded.tracks().size() > 0);
+    QCOMPARE(drift::Project::fromJson(loaded.toJson(), &error).id(), id);
+
+    // Two fresh projects are distinct documents, not the same one.
+    QVERIFY(drift::Project().id() != drift::Project().id());
 }
 
 void CoreTest::projectSerializationRoundTrip()

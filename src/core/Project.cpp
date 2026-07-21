@@ -561,6 +561,9 @@ void Project::resetToDefaultTimeline()
     m_tracks = {
         {.type = TrackType::Video},
     };
+    m_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_createdAt = QDateTime::currentDateTimeUtc();
+    m_modifiedAt = m_createdAt;
 }
 
 TimeUs Project::durationUs() const
@@ -678,6 +681,21 @@ Project Project::fromJson(const QJsonObject &object, QString *errorOut)
         project.m_bookmarks.append(bookmark);
     }
 
+    // After the track block: an empty timeline routes through resetToDefaultTimeline(), which mints
+    // a fresh id and timestamps. Read them last so a saved project keeps its own.
+    const QString savedId = object.value(QStringLiteral("id")).toString();
+    if (!savedId.isEmpty())
+        project.m_id = savedId;
+    project.m_author = object.value(QStringLiteral("author")).toString();
+    project.m_description = object.value(QStringLiteral("description")).toString();
+    const QDateTime created =
+        QDateTime::fromString(object.value(QStringLiteral("createdAt")).toString(), Qt::ISODate);
+    if (created.isValid())
+        project.m_createdAt = created;
+    const QDateTime modified =
+        QDateTime::fromString(object.value(QStringLiteral("modifiedAt")).toString(), Qt::ISODate);
+    project.m_modifiedAt = modified.isValid() ? modified : project.m_createdAt;
+
     if (errorOut)
         errorOut->clear();
     return project;
@@ -724,6 +742,11 @@ QJsonObject Project::toJson() const
     return QJsonObject{
         {QStringLiteral("version"), kCurrentVersion},
         {QStringLiteral("projectName"), m_name},
+        {QStringLiteral("id"), m_id},
+        {QStringLiteral("author"), m_author},
+        {QStringLiteral("description"), m_description},
+        {QStringLiteral("createdAt"), m_createdAt.toString(Qt::ISODate)},
+        {QStringLiteral("modifiedAt"), m_modifiedAt.toString(Qt::ISODate)},
         {QStringLiteral("fps"), m_fps},
         {QStringLiteral("width"), m_width},
         {QStringLiteral("height"), m_height},

@@ -26,6 +26,8 @@ icons=(
   volume-2 volume-off eye eye-off film music image shapes chevron-down chevrons-right x
   message-square moon sun grid-3x3 list arrow-down-a-z grip-vertical
   save arrow-right-to-line arrow-left-to-line tags blend square-dashed puzzle info
+  # Project bundle: package/properties entries in the project menu
+  package file-text
   # Status / feedback (toasts, inline errors, empty states)
   triangle-alert circle-check circle-x loader-circle refresh-cw download
   # Affordances (reset, search, disclosure, editing, locking)

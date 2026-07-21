@@ -41,6 +41,12 @@ target_compile_definitions(tst_addonpackage PRIVATE
     DRIFT_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 add_test(NAME AddonPackage COMMAND tst_addonpackage)
 
+qt_add_executable(tst_projectbundle tst_projectbundle.cpp)
+target_include_directories(tst_projectbundle PRIVATE ../src)
+# zstd directly: the test forges a manifest to exercise the format version gate.
+target_link_libraries(tst_projectbundle PRIVATE Qt6::Test driftengine ${DRIFT_ZSTD_TARGET})
+add_test(NAME ProjectBundle COMMAND tst_projectbundle)
+
 qt_add_executable(tst_engine tst_engine.cpp)
 target_include_directories(tst_engine PRIVATE ../src)
 target_link_libraries(tst_engine PRIVATE Qt6::Test Qt6::Gui Qt6::OpenGL driftengine driftcore)

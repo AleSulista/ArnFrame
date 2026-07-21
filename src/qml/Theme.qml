@@ -333,6 +333,8 @@ QtObject {
         mask: "square-dashed",
         puzzle: "puzzle",
         info: "info",
+        package: "package",
+        fileText: "file-text",
 
         // Status / feedback
         warning: "triangle-alert",

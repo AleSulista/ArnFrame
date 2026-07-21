@@ -42,6 +42,10 @@ const InstalledAddon *installedAddon(const QString &id);
 // Absolute content roots contributed by installed addons for a kind, in install order.
 QStringList addonRootsForKind(const QString &kind);
 
+// The installed addon whose install directory contains `path`, or nullptr. Traces a catalog entry
+// (an effect's packageDir, a font's packageDir, a sticker's file) back to what provided it.
+const InstalledAddon *addonForPath(const QString &path);
+
 void reloadAddonRegistry();
 
 // Record or drop an entry and rewrite installed.json atomically. Both refresh the in-memory
