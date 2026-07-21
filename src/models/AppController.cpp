@@ -5899,9 +5899,45 @@ double AppController::propertyValueAt(int trackIndex, int clipIndex, const QStri
     const drift::Clip &clip = track.clips.at(clipIndex);
     const drift::KeyframeTrack<double> *kt = keyframeTrackForProp(clip, prop);
     if (!kt || kt->isEmpty())
-        return fallback;
+        return propertyBaseValue(trackIndex, clipIndex, prop, fallback);
 
     return kt->evaluateAt(drift::secondsToUs(atSeconds) - clip.timelineStart);
+}
+
+// What an unkeyed property evaluates to. These mirror the defaults the compositor passes to
+// transformValue (FrameCompositor.cpp) — an unkeyed clip fills the canvas at full opacity —
+// so a curve drawn from these sits where the clip actually is rather than at zero.
+double AppController::propertyBaseValue(int trackIndex, int clipIndex, const QString &prop,
+                                        double fallback) const
+{
+    if (prop == QLatin1String("width"))
+        return m_project.width();
+    if (prop == QLatin1String("height"))
+        return m_project.height();
+    if (prop == QLatin1String("opacity") || prop == QLatin1String("volume"))
+        return 1.0;
+    if (prop == QLatin1String("x") || prop == QLatin1String("y")
+        || prop == QLatin1String("rotation")) {
+        return 0.0;
+    }
+
+    // Effect params fall back to the effect's own static value, which is what the compositor
+    // reads for an unkeyed param.
+    if (trackIndex >= 0 && trackIndex < m_project.tracks().size()) {
+        const drift::Track &track = m_project.tracks().at(trackIndex);
+        if (clipIndex >= 0 && clipIndex < track.clips.size()) {
+            const drift::Clip &clip = track.clips.at(clipIndex);
+            int effectIndex = -1;
+            QString paramKey;
+            if (parseEffectProp(prop, &effectIndex, &paramKey)
+                && effectIndex >= 0 && effectIndex < clip.effects.size()) {
+                const QVariant value = clip.effects.at(effectIndex).parameters.value(paramKey);
+                if (value.isValid())
+                    return value.toDouble();
+            }
+        }
+    }
+    return fallback;
 }
 
 QVariantList AppController::clipKeyframes(int trackIndex, int clipIndex, const QString &prop) const

@@ -91,7 +91,7 @@ Item {
 
     // Each series is normalized against its own value range, so curves in wildly
     // different units (px vs. 0–1 opacity) stay comparable when overlaid.
-    function valueRangeFor(id, pts) {
+    function valueRangeFor(id, pts, base) {
         if (id === "opacity")
             return { min: 0, max: 1 }
         if (id === "volume")
@@ -108,10 +108,12 @@ Item {
             lo = Math.min(lo, v)
             hi = Math.max(hi, v)
         }
+        // With no keys there is nothing to fit, so centre the axis on the value the property
+        // actually holds — otherwise a 1920px width would be drawn far off the top of a 0..100 lane.
         if (!isFinite(lo))
-            lo = 0
+            lo = base
         if (!isFinite(hi))
-            hi = 100
+            hi = base
         return {
             min: lo - Math.max(1, Math.abs(lo) * 0.1),
             max: hi + Math.max(1, Math.abs(hi) * 0.1)
@@ -159,12 +161,17 @@ Item {
             // every effect edit.
             if (pts.length === 0 && id.substring(0, 3) === "fx.")
                 continue
-            const range = root.valueRangeFor(id, pts)
+            // What the curve reads as when the property has no keys at all — the level of the
+            // flat line drawn across the clip in that case.
+            const base = EditorState.propertyBaseValue(
+                           EditorState.selectedTrack, EditorState.selectedClip, id, 0)
+            const range = root.valueRangeFor(id, pts, base)
             out.push({
                 prop: id,
                 label: root.chipLabel(id),
                 color: Theme.keyframeCurveColor(id),
                 points: pts,
+                baseValue: base,
                 valueMin: range.min,
                 valueMax: range.max
             })
@@ -284,6 +291,25 @@ Item {
     // Tangent handles need room; below this the lane is an overview and shows keys only.
     readonly property bool curveEditing: laneHeight >= 140
     function isFocused(index) { return index === focusedIndex }
+
+    // Double-click on empty graph inserts a key on the focused curve. The value comes from the
+    // curve itself rather than from the cursor's height, so dropping a node in never changes
+    // the animation — same contract as the speed editor's addPointAt/speedAtPos.
+    function addKeyAt(px) {
+        if (focusedIndex < 0 || focusedIndex >= series.length)
+            return
+        const entry = series[focusedIndex]
+        const seconds = Math.max(
+            clipStart,
+            Math.min(clipStart + clipDuration, EditorState.snapTime(secondsForX(px))))
+        const value = EditorState.propertyValueAt(
+                        EditorState.selectedTrack, EditorState.selectedClip, entry.prop,
+                        seconds, entry.baseValue)
+        EditorState.ensureKeyframeGraphProperty(entry.prop)
+        EditorState.setClipKeyframe(EditorState.selectedTrack, EditorState.selectedClip,
+                                    entry.prop, seconds, value)
+        focusedProp = entry.prop
+    }
 
     // Absolute timeline X — same mapping as clips on the track.
     function xForSeconds(seconds) {
@@ -561,10 +587,11 @@ Item {
                         onPaint: {
                             const ctx = getContext("2d")
                             ctx.clearRect(0, 0, width, height)
+                            const spanX0 = root.xForSeconds(root.clipStart)
+                            const spanX1 = root.xForSeconds(root.clipStart + root.clipDuration)
+
                             for (let s = 0; s < root.series.length; ++s) {
                                 const entry = root.series[s]
-                                if (entry.points.length < 2)
-                                    continue
                                 const live = entry.points.map(function (p, i) {
                                     if (entry.prop !== root.dragProp)
                                         return p
@@ -595,8 +622,23 @@ Item {
                                 ctx.globalAlpha = (root.curveEditing && !focused) ? 0.35 : 1.0
                                 ctx.strokeStyle = String(entry.color)
                                 ctx.beginPath()
-                                ctx.moveTo(root.xForSeconds(sorted[0].seconds),
-                                           root.yForValue(sorted[0].value, entry))
+
+                                // An unkeyed property is a flat line at the value it actually
+                                // holds, so every selected property reads as an editable curve
+                                // spanning the clip rather than as nothing at all.
+                                if (sorted.length === 0) {
+                                    const by = root.yForValue(entry.baseValue, entry)
+                                    ctx.moveTo(spanX0, by)
+                                    ctx.lineTo(spanX1, by)
+                                    ctx.stroke()
+                                    continue
+                                }
+
+                                // Outside the keyed range the value is held flat, which is what
+                                // evaluateAt does — so the drawn line matches playback.
+                                const leadY = root.yForValue(sorted[0].value, entry)
+                                ctx.moveTo(spanX0, leadY)
+                                ctx.lineTo(root.xForSeconds(sorted[0].seconds), leadY)
                                 for (let i = 1; i < sorted.length; ++i) {
                                     const a = sorted[i - 1]
                                     const b = sorted[i]
@@ -619,6 +661,8 @@ Item {
                                     const c2y = root.yForValue(b.value + (b.inDy || 0), entry)
                                     ctx.bezierCurveTo(c1x, c1y, c2x, c2y, bx, by)
                                 }
+                                const tail = sorted[sorted.length - 1]
+                                ctx.lineTo(spanX1, root.yForValue(tail.value, entry))
                                 ctx.stroke()
                             }
                             ctx.globalAlpha = 1.0
@@ -637,6 +681,15 @@ Item {
                             function onFocusedPropChanged() { curveCanvas.requestPaint() }
                             function onLaneHeightChanged() { curveCanvas.requestPaint() }
                         }
+                    }
+
+                    // Below the key dots (z 2) and tangent grips (z 4), so double-clicking an
+                    // existing node grabs it instead of inserting another one on top of it.
+                    MouseArea {
+                        anchors.fill: parent
+                        z: 1
+                        acceptedButtons: Qt.LeftButton
+                        onDoubleClicked: function (mouse) { root.addKeyAt(mouse.x) }
                     }
 
                     Repeater {

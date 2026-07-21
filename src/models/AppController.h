@@ -417,6 +417,10 @@ public:
     Q_INVOKABLE QVariantList clipKeyframes(int trackIndex, int clipIndex, const QString &prop) const;
     Q_INVOKABLE double propertyValueAt(int trackIndex, int clipIndex, const QString &prop,
                                        double atSeconds, double fallback) const;
+    // What the property evaluates to with no keyframes at all — the same implicit defaults
+    // the compositor uses, so an unkeyed curve is drawn where the clip actually sits.
+    Q_INVOKABLE double propertyBaseValue(int trackIndex, int clipIndex, const QString &prop,
+                                         double fallback = 0.0) const;
     // Tangent handles for the curve editor. dx/dy arrive in seconds / property units, relative
     // to the key. `preview` variants coalesce a drag into one undo entry via begin/commitPreviewDrag.
     Q_INVOKABLE void setKeyframeTangents(int trackIndex, int clipIndex, const QString &prop,
