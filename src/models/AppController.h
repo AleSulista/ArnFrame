@@ -20,6 +20,7 @@
 
 class QTimer;
 
+#include "playback/ClipPreviewPlayer.h"
 #include "playback/PlaybackEngine.h"
 
 // QML-facing controller over the core project model and undo stack.
@@ -66,6 +67,19 @@ class AppController : public QObject
     Q_PROPERTY(int segmentRevision READ segmentRevision NOTIFY segmentSessionChanged)
     Q_PROPERTY(QVariantList segmentPoints READ segmentPoints NOTIFY segmentSessionChanged)
     Q_PROPERTY(QSize segmentFrameSize READ segmentFrameSize NOTIFY segmentSessionChanged)
+    Q_PROPERTY(bool speedCurveSessionActive READ speedCurveSessionActive NOTIFY speedCurveSessionChanged)
+    Q_PROPERTY(QVariantList speedCurvePoints READ speedCurvePoints NOTIFY speedCurveChanged)
+    Q_PROPERTY(int speedCurveRevision READ speedCurveRevision NOTIFY speedCurveFrameChanged)
+    Q_PROPERTY(QSize speedCurveFrameSize READ speedCurveFrameSize NOTIFY speedCurveFrameChanged)
+    Q_PROPERTY(double speedCurveSourceDuration READ speedCurveSourceDuration NOTIFY speedCurveSessionChanged)
+    Q_PROPERTY(double speedCurveRetimedDuration READ speedCurveRetimedDuration NOTIFY speedCurveChanged)
+    Q_PROPERTY(double speedCurvePosition READ speedCurvePosition NOTIFY speedCurvePositionChanged)
+    // Where the playhead sits along the *source*, 0..1 — the graph's own axis.
+    Q_PROPERTY(double speedCurveSourcePosition READ speedCurveSourcePosition NOTIFY speedCurvePositionChanged)
+    Q_PROPERTY(bool speedCurvePlaying READ speedCurvePlaying NOTIFY speedCurvePlayingChanged)
+    Q_PROPERTY(QString speedCurveClipName READ speedCurveClipName NOTIFY speedCurveSessionChanged)
+    Q_PROPERTY(QString speedCurveClipPath READ speedCurveClipPath NOTIFY speedCurveSessionChanged)
+    Q_PROPERTY(QString speedCurveFilmstripPath READ speedCurveFilmstripPath NOTIFY speedCurveSessionChanged)
     Q_PROPERTY(bool faceDetecting READ faceDetecting NOTIFY faceDetectingChanged)
     Q_PROPERTY(double faceDetectProgress READ faceDetectProgress NOTIFY faceDetectProgressChanged)
     Q_PROPERTY(QString faceDetectStatus READ faceDetectStatus NOTIFY faceDetectStatusChanged)
@@ -218,6 +232,33 @@ public:
     // cheap decoder.
     Q_INVOKABLE void beginSegmentationSession(int trackIndex, int clipIndex, double seconds);
     Q_INVOKABLE void endSegmentationSession();
+
+    // Speed-curve editing session driving SpeedCurveWindow. The curve is held here as a
+    // candidate and auditioned through a private single-clip player; the project is not touched
+    // until applySpeedCurve mints the retimed copy.
+    Q_INVOKABLE void beginSpeedCurveSession(int trackIndex, int clipIndex);
+    Q_INVOKABLE void endSpeedCurveSession();
+    bool speedCurveSessionActive() const { return m_speedCurveActive; }
+    QVariantList speedCurvePoints() const;
+    Q_INVOKABLE void setSpeedCurvePoints(const QVariantList &points);
+    int speedCurveRevision() const { return m_speedCurveRevision; }
+    QSize speedCurveFrameSize() const { return m_speedCurvePlayer.frameSize(); }
+    double speedCurveSourceDuration() const;
+    double speedCurveRetimedDuration() const;
+    double speedCurvePosition() const;
+    bool speedCurvePlaying() const { return m_speedCurvePlayer.isPlaying(); }
+    QString speedCurveClipName() const { return m_speedCurveClip.name; }
+    QString speedCurveClipPath() const { return m_speedCurveClip.path; }
+    QString speedCurveFilmstripPath() const { return m_speedCurveClip.filmstripPath; }
+    Q_INVOKABLE void playSpeedCurvePreview();
+    Q_INVOKABLE void pauseSpeedCurvePreview();
+    Q_INVOKABLE void seekSpeedCurvePreview(double seconds);
+    double speedCurveSourcePosition() const;
+    // Seeks by graph position rather than by retimed time, so clicking the strip lands on the
+    // frame under the cursor.
+    Q_INVOKABLE void seekSpeedCurvePreviewAtSource(double position);
+    Q_INVOKABLE void applySpeedCurve();
+    Q_INVOKABLE void clearClipSpeedCurve(int trackIndex, int clipIndex);
     Q_INVOKABLE void setSegmentationFrame(double seconds);
     Q_INVOKABLE void addSegmentationPoint(double x, double y, bool include);
     Q_INVOKABLE void removeSegmentationPoint(int index);
@@ -462,6 +503,12 @@ signals:
     void denoisePreviewReady(const QString &originalPath, const QString &cleanPath);
     void denoiseFinished(bool ok, const QString &message);
     void segmentSessionChanged();
+    void speedCurveSessionChanged();
+    void speedCurveChanged();
+    void speedCurveFrameChanged();
+    void speedCurvePositionChanged();
+    void speedCurvePlayingChanged();
+    void speedCurveApplied();
     void faceDetectingChanged();
     void faceDetectProgressChanged();
     void faceDetectStatusChanged();
@@ -584,6 +631,15 @@ protected:
     double m_segmentProgress = 0.0;
     QString m_segmentStatus;
     QAtomicInt m_segmentCancel = 0;
+    // Speed-curve session: the clip being retimed, the candidate ramp, and the player auditioning it.
+    ClipPreviewPlayer m_speedCurvePlayer;
+    drift::Clip m_speedCurveClip;
+    drift::SpeedCurve m_speedCurve;
+    int m_speedCurveTrack = -1;
+    int m_speedCurveClipIndex = -1;
+    int m_speedCurveRevision = 0;
+    bool m_speedCurveActive = false;
+
     bool m_denoising = false;
     double m_denoiseProgress = 0.0;
     QString m_denoiseStatus;

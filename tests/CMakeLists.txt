@@ -10,6 +10,7 @@ add_test(NAME Core COMMAND tst_core)
 qt_add_executable(tst_editorstate
     tst_editorstate.cpp
     ../src/SegmentImageStore.cpp
+    ../src/ClipPreviewImageStore.cpp
     ../src/models/AppController.cpp
     ../src/models/AssetLibrary.cpp
     ../src/models/TimelineModel.cpp
@@ -17,6 +18,7 @@ qt_add_executable(tst_editorstate
     ../src/playback/PlaybackEngine.cpp
     ../src/playback/PlaybackClock.cpp
     ../src/playback/CompositorService.cpp
+    ../src/playback/ClipPreviewPlayer.cpp
 )
 target_include_directories(tst_editorstate PRIVATE ../src)
 target_link_libraries(tst_editorstate PRIVATE Qt6::Test Qt6::Gui Qt6::Multimedia Qt6::Concurrent driftcore driftengine)

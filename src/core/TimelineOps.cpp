@@ -158,13 +158,26 @@ bool splitClipAtOffset(Clip &head, Clip &tail, TimeUs offset)
     if (offset < kMinClipDurationUs || head.timelineDuration - offset < kMinClipDurationUs)
         return false;
 
-    const TimeUs sourceOffset = head.sourceDeltaForTimelineDelta(offset);
-    if (sourceOffset <= 0 || sourceOffset >= (head.srcOut - head.srcIn))
+    const TimeUs sourceSpan = head.srcOut - head.srcIn;
+    const TimeUs sourceOffset =
+        head.hasSpeedCurve() ? head.speedCurve.sourceOffsetForTimelineOffset(offset, sourceSpan)
+                             : head.sourceDeltaForTimelineDelta(offset);
+    if (sourceOffset <= 0 || sourceOffset >= sourceSpan)
         return false;
 
     tail = head;
     tail.timelineStart = head.timelineStart + offset;
     tail.timelineDuration = head.timelineDuration - offset;
+
+    // Curve positions are normalised over the clip's own source range, so each half needs the
+    // parent's ramp resampled onto its shorter range — copying it verbatim would stretch both
+    // halves back over the full shape and change how they play.
+    if (head.hasSpeedCurve()) {
+        const double cut = static_cast<double>(sourceOffset) / sourceSpan;
+        const SpeedCurve parent = head.speedCurve;
+        head.speedCurve = parent.subRange(0.0, cut);
+        tail.speedCurve = parent.subRange(cut, 1.0);
+    }
 
     if (head.reverse) {
         const TimeUs sourceAtSplit = head.srcOut - sourceOffset;
@@ -191,6 +204,10 @@ bool clipsCanMerge(const Clip &left, const Clip &right)
     if (left.reverse != right.reverse)
         return false;
     if (!qFuzzyCompare(left.speed, right.speed))
+        return false;
+    // Two ramps do not concatenate into one: the merged clip would have to carry both shapes
+    // over a single normalised range.
+    if (left.hasSpeedCurve() || right.hasSpeedCurve())
         return false;
     if (left.timelineEnd() != right.timelineStart)
         return false;
@@ -240,6 +257,7 @@ void syncLinkedTiming(Clip &dst, const Clip &src)
     dst.srcIn = src.srcIn;
     dst.srcOut = src.srcOut;
     dst.speed = src.speed;
+    dst.speedCurve = src.speedCurve;
     dst.reverse = src.reverse;
     dst.fadeInUs = src.fadeInUs;
     dst.fadeOutUs = src.fadeOutUs;

@@ -11,6 +11,8 @@
 #include "core/TimelineOps.h"
 #include "core/Transition.h"
 
+#include <cmath>
+
 class CoreTest : public QObject
 {
     Q_OBJECT
@@ -45,6 +47,11 @@ private slots:
     void rgbSplitEffectParametersSerialization();
     void blockGlitchEffectParametersSerialization();
     void clipSpeedSourceMapping();
+    void speedCurveMatchesConstantSpeed();
+    void speedCurveRampRetimesDuration();
+    void speedCurveMappingIsMonotonic();
+    void speedCurveSubRangePreservesShape();
+    void speedCurveSerialization();
     void clipReverseAndFlipSerialization();
     void clipSplitMergeRoundTrip();
     void clipLinkFieldsSerialization();
@@ -957,6 +964,165 @@ void CoreTest::clipSpeedSourceMapping()
     // At timeline start → near srcOut; at +1s timeline with speed 2 → srcOut - 2s
     QCOMPARE(clip.timelineToSourceUs(drift::secondsToUs(1.0)), clip.srcOut);
     QCOMPARE(clip.timelineToSourceUs(drift::secondsToUs(2.0)), clip.srcOut - drift::secondsToUs(2.0));
+}
+
+namespace {
+
+// A ramp with no handles is linear in speed across pos, which keeps the expected values above
+// closed-form rather than something only the implementation can produce.
+drift::SpeedCurve linearRamp(double from, double to)
+{
+    drift::SpeedPoint start;
+    start.pos = 0.0;
+    start.speed = from;
+    start.corner = true;
+    drift::SpeedPoint end;
+    end.pos = 1.0;
+    end.speed = to;
+    end.corner = true;
+
+    drift::SpeedCurve curve;
+    curve.setPoints({start, end});
+    return curve;
+}
+
+drift::Clip curvedClip(const drift::SpeedCurve &curve, double srcInSec, double srcOutSec)
+{
+    drift::Clip clip;
+    clip.timelineStart = drift::secondsToUs(1.0);
+    clip.srcIn = drift::secondsToUs(srcInSec);
+    clip.srcOut = drift::secondsToUs(srcOutSec);
+    clip.speedCurve = curve;
+    clip.syncDurationFromSpeedCurve();
+    return clip;
+}
+
+} // namespace
+
+void CoreTest::speedCurveMatchesConstantSpeed()
+{
+    drift::Clip scalar;
+    scalar.timelineStart = drift::secondsToUs(1.0);
+    scalar.srcIn = drift::secondsToUs(2.0);
+    scalar.srcOut = scalar.srcIn + drift::secondsToUs(8.0);
+    scalar.speed = 2.0;
+    scalar.timelineDuration = drift::secondsToUs(4.0);
+
+    const drift::Clip curved = curvedClip(drift::SpeedCurve::flat(2.0), 2.0, 10.0);
+
+    QCOMPARE(curved.timelineDuration, scalar.timelineDuration);
+    for (int i = 0; i <= 20; ++i) {
+        const drift::TimeUs at = scalar.timelineStart + (scalar.timelineDuration * i) / 20;
+        QVERIFY(qAbs(curved.timelineToSourceUs(at) - scalar.timelineToSourceUs(at)) <= 2);
+    }
+}
+
+void CoreTest::speedCurveRampRetimesDuration()
+{
+    // 1× ramping to 4× over a 10s source: ∫dp/(1+3p) = ln(4)/3.
+    const drift::Clip clip = curvedClip(linearRamp(1.0, 4.0), 0.0, 10.0);
+
+    const double expectedSeconds = 10.0 * std::log(4.0) / 3.0;
+    QVERIFY(qAbs(drift::usToSeconds(clip.timelineDuration) - expectedSeconds) < 0.001);
+
+    // And the inverse: p = (exp(3t/span) - 1) / 3.
+    for (int i = 1; i < 10; ++i) {
+        const double t = expectedSeconds * i / 10.0;
+        const double expectedPos = (std::exp(3.0 * t / 10.0) - 1.0) / 3.0;
+        const drift::TimeUs at = clip.timelineStart + drift::secondsToUs(t);
+        const double actual = drift::usToSeconds(clip.timelineToSourceUs(at) - clip.srcIn) / 10.0;
+        QVERIFY(qAbs(actual - expectedPos) < 0.002);
+    }
+}
+
+void CoreTest::speedCurveMappingIsMonotonic()
+{
+    drift::SpeedPoint a;
+    a.pos = 0.0;
+    a.speed = 4.0;
+    drift::SpeedPoint b;
+    b.pos = 0.4;
+    b.speed = 0.2;
+    drift::SpeedPoint c;
+    c.pos = 1.0;
+    c.speed = 8.0;
+    // Give the dip real tangents, so the flattening and not just the corner case is exercised.
+    b.inDx = -0.1;
+    b.outDx = 0.15;
+
+    drift::SpeedCurve curve;
+    curve.setPoints({a, b, c});
+    const drift::Clip clip = curvedClip(curve, 0.0, 12.0);
+
+    QVERIFY(clip.timelineDuration > 0);
+    drift::TimeUs previous = -1;
+    for (int i = 0; i <= 500; ++i) {
+        const drift::TimeUs at = clip.timelineStart + (clip.timelineDuration * i) / 500;
+        const drift::TimeUs source = clip.timelineToSourceUs(at);
+        QVERIFY(source >= previous);
+        QVERIFY(source >= clip.srcIn && source <= clip.srcOut);
+        previous = source;
+    }
+}
+
+void CoreTest::speedCurveSubRangePreservesShape()
+{
+    const drift::SpeedCurve curve = linearRamp(1.0, 4.0);
+    const drift::SpeedCurve head = curve.subRange(0.0, 0.5);
+    const drift::SpeedCurve tail = curve.subRange(0.5, 1.0);
+
+    for (int i = 0; i <= 10; ++i) {
+        const double f = i / 10.0;
+        QVERIFY(qAbs(head.speedAt(f) - curve.speedAt(f * 0.5)) < 0.01);
+        QVERIFY(qAbs(tail.speedAt(f) - curve.speedAt(0.5 + f * 0.5)) < 0.01);
+    }
+}
+
+void CoreTest::speedCurveSerialization()
+{
+    drift::SpeedPoint mid;
+    mid.pos = 0.5;
+    mid.speed = 0.25;
+    mid.inDx = -0.2;
+    mid.inDy = 0.1;
+    mid.outDx = 0.3;
+    mid.outDy = -0.05;
+    mid.corner = true;
+
+    drift::SpeedPoint start;
+    start.pos = 0.0;
+    start.speed = 1.0;
+    drift::SpeedPoint end;
+    end.pos = 1.0;
+    end.speed = 2.0;
+
+    drift::SpeedCurve curve;
+    curve.setPoints({start, mid, end});
+
+    drift::Project project;
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-curve");
+    clip.type = drift::ClipType::Video;
+    clip.srcIn = 0;
+    clip.srcOut = drift::secondsToUs(6.0);
+    clip.speedCurve = curve;
+    clip.syncDurationFromSpeedCurve();
+    project.tracks()[0].clips.append(clip);
+
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(project.toJson(), &error);
+    QVERIFY(error.isEmpty());
+
+    const drift::Clip &out = loaded.tracks()[0].clips[0];
+    QVERIFY(out.hasSpeedCurve());
+    QCOMPARE(out.speedCurve.points().size(), 3);
+    const drift::SpeedPoint &loadedMid = out.speedCurve.points().at(1);
+    QCOMPARE(loadedMid.pos, 0.5);
+    QCOMPARE(loadedMid.speed, 0.25);
+    QCOMPARE(loadedMid.inDx, -0.2);
+    QCOMPARE(loadedMid.outDx, 0.3);
+    QCOMPARE(loadedMid.corner, true);
+    QCOMPARE(out.speedCurve.retimedDurationUs(out.srcOut - out.srcIn), clip.timelineDuration);
 }
 
 void CoreTest::clipReverseAndFlipSerialization()

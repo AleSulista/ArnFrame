@@ -2009,6 +2009,7 @@ PanelFrame {
 
                     // ----- Speed ---------------------------------------------------------------
                     Column {
+                        id: speedColumn
                         width: tabColumn.width
                         spacing: Theme.spacingXl
                         visible: root.currentTabId === "speed"
@@ -2030,6 +2031,35 @@ PanelFrame {
                             font.pixelSize: Theme.fontSizeXs
                         }
 
+                        // A ramp supersedes the constant rate outright, so the controls below
+                        // are meaningless while one is attached.
+                        property bool hasSpeedCurve: {
+                            void root.clipDataRevision
+                            return !!clip.hasSpeedCurve
+                        }
+
+                        Row {
+                            width: parent.width
+                            spacing: 6
+                            visible: root.clipKind === "video" || root.clipKind === "audio"
+
+                            ThemedButton {
+                                text: qsTr("Speed curve…")
+                                variant: "secondary"
+                                onClicked: root.Window.window.openSpeedCurve(
+                                               EditorState.selectedTrack, EditorState.selectedClip)
+                            }
+
+                            ThemedChip {
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: speedColumn.hasSpeedCurve
+                                text: qsTr("Curve active — remove")
+                                selected: true
+                                onClicked: EditorState.clearClipSpeedCurve(
+                                               EditorState.selectedTrack, EditorState.selectedClip)
+                            }
+                        }
+
                             Row {
                                 width: parent.width
                                 spacing: 6
@@ -2045,7 +2075,9 @@ PanelFrame {
                                     delegate: ThemedChip {
                                         required property var modelData
                                         text: modelData.label
-                                        selected: Math.abs((clip.speed || 1) - modelData.value) < 0.01
+                                        enabled: !speedColumn.hasSpeedCurve
+                                        selected: !speedColumn.hasSpeedCurve
+                                                  && Math.abs((clip.speed || 1) - modelData.value) < 0.01
                                         onClicked: EditorState.setClipSpeed(
                                                        EditorState.selectedTrack, EditorState.selectedClip,
                                                        modelData.value)
@@ -2056,6 +2088,7 @@ PanelFrame {
                         ThemedSlider {
                             id: speedSlider
                             visible: root.clipKind === "video" || root.clipKind === "audio"
+                            enabled: !speedColumn.hasSpeedCurve
                             width: parent.width
                             from: 0.25
                             to: 4.0
@@ -2075,7 +2108,9 @@ PanelFrame {
 
                         Text {
                             visible: root.clipKind === "video" || root.clipKind === "audio"
-                            text: (clip.speed || 1).toFixed(2) + "×"
+                            text: (speedColumn.hasSpeedCurve
+                                   ? qsTr("Variable (curve)")
+                                   : (clip.speed || 1).toFixed(2) + "×")
                                     + (clip.reverse ? qsTr(" (reversed)") : "")
                             color: Theme.mutedForeground
                             font.family: Theme.monoFontFamily

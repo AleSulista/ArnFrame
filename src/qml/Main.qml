@@ -78,6 +78,10 @@ ApplicationWindow {
         id: denoiseWindow
     }
 
+    SpeedCurveWindow {
+        id: speedCurveWindow
+    }
+
     // Opened from the clip inspector; a window rather than a dialog so the timeline stays visible.
     function openSegmentation(track, clip, startSeconds, durationSeconds) {
         segmentationWindow.openFor(track, clip, startSeconds, durationSeconds)
@@ -85,6 +89,10 @@ ApplicationWindow {
 
     function openDenoise(track, clip, durationSeconds) {
         denoiseWindow.openFor(track, clip, durationSeconds)
+    }
+
+    function openSpeedCurve(track, clip) {
+        speedCurveWindow.openFor(track, clip)
     }
 
     // Opened from the header, and from every empty state that a missing addon causes.

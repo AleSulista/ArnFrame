@@ -108,6 +108,8 @@ add_library(driftcore STATIC
     src/core/MediaAsset.cpp
     src/core/Clip.h
     src/core/Clip.cpp
+    src/core/SpeedCurve.h
+    src/core/SpeedCurve.cpp
     src/core/SubtitleCue.h
     src/core/SubtitleCue.cpp
     src/core/Mask.h
@@ -239,6 +241,10 @@ qt_add_executable(drift
     src/SegmentImageProvider.cpp
     src/SegmentImageStore.h
     src/SegmentImageStore.cpp
+    src/ClipPreviewImageProvider.h
+    src/ClipPreviewImageProvider.cpp
+    src/ClipPreviewImageStore.h
+    src/ClipPreviewImageStore.cpp
     src/models/AddonEndpoint.h
     src/models/AddonManager.h
     src/models/AddonManager.cpp
@@ -257,6 +263,8 @@ qt_add_executable(drift
     src/playback/PlaybackEngine.cpp
     src/playback/PlaybackClock.h
     src/playback/PlaybackClock.cpp
+    src/playback/ClipPreviewPlayer.h
+    src/playback/ClipPreviewPlayer.cpp
     src/playback/CompositorService.h
     src/playback/CompositorService.cpp
     src/preview/PreviewItem.h
@@ -283,6 +291,7 @@ qt_add_qml_module(drift
         src/qml/PreviewPanel.qml
         src/qml/SegmentationWindow.qml
         src/qml/DenoiseWindow.qml
+        src/qml/SpeedCurveWindow.qml
         src/qml/PropertiesPanel.qml
         src/qml/TimelinePanel.qml
         src/qml/components/IconGlyph.qml

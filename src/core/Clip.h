@@ -5,6 +5,7 @@
 #include "Mask.h"
 #include "MediaAsset.h"
 #include "ShapeStyle.h"
+#include "SpeedCurve.h"
 #include "SubtitleCue.h"
 #include "TextStyle.h"
 #include "Time.h"
@@ -66,6 +67,10 @@ struct Clip
 
     BlendMode blendMode = BlendMode::Normal;
     double speed = 1.0; // 1.0 = realtime; >1 faster, <1 slower
+    // Variable rate across the clip. When set it supersedes `speed` outright rather than
+    // multiplying with it, so there is only ever one number describing the rate at a given
+    // moment. The source range stays fixed and the timeline duration is what the ramp derives.
+    SpeedCurve speedCurve;
     bool reverse = false; // play source range backward; speed still applies as magnitude
     bool flipH = false;
     bool flipV = false;
@@ -109,10 +114,14 @@ struct Clip
         return static_cast<TimeUs>(llround(static_cast<double>(timelineDelta) * effectiveSpeed()));
     }
 
+    bool hasSpeedCurve() const { return !speedCurve.isEmpty(); }
+
     TimeUs timelineToSourceUs(TimeUs timelineUs) const
     {
         const TimeUs rel = qBound(TimeUs{0}, timelineUs - timelineStart, timelineDuration);
-        const TimeUs offset = sourceDeltaForTimelineDelta(rel);
+        const TimeUs offset =
+            hasSpeedCurve() ? speedCurve.sourceOffsetForTimelineOffset(rel, srcOut - srcIn)
+                            : sourceDeltaForTimelineDelta(rel);
         if (!reverse)
             return srcIn + offset;
 
@@ -131,6 +140,15 @@ struct Clip
             timelineDuration = static_cast<TimeUs>(llround(static_cast<double>(actualSpan) / effectiveSpeed()));
             timelineDuration = qMax(timelineDuration, TimeUs{1});
         }
+    }
+
+    // Curved clips invert the scalar relationship: the source range is what the user framed
+    // and the ramp decides how long it takes to play.
+    void syncDurationFromSpeedCurve()
+    {
+        if (!hasSpeedCurve())
+            return;
+        timelineDuration = qMax(speedCurve.retimedDurationUs(srcOut - srcIn), TimeUs{1});
     }
 
     bool containsTime(TimeUs time) const

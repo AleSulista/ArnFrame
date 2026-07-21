@@ -361,6 +361,7 @@ QJsonObject clipToJson(const Clip &clip)
         {QStringLiteral("emoji"), clip.emoji},
         {QStringLiteral("blendMode"), blendModeToString(clip.blendMode)},
         {QStringLiteral("speed"), clip.speed},
+        {QStringLiteral("speedCurve"), clip.speedCurve.toJson()},
         {QStringLiteral("reverse"), clip.reverse},
         {QStringLiteral("flipH"), clip.flipH},
         {QStringLiteral("flipV"), clip.flipV},
@@ -435,6 +436,7 @@ Clip clipFromJsonV2(const QJsonObject &object, int canvasW = 1920, int canvasH =
     clip.emoji = object.value(QStringLiteral("emoji")).toString();
     clip.blendMode = blendModeFromString(object.value(QStringLiteral("blendMode")).toString());
     clip.speed = object.value(QStringLiteral("speed")).toDouble(1.0);
+    clip.speedCurve = SpeedCurve::fromJson(object.value(QStringLiteral("speedCurve")).toArray());
     clip.reverse = object.value(QStringLiteral("reverse")).toBool(false);
     clip.flipH = object.value(QStringLiteral("flipH")).toBool(false);
     clip.flipV = object.value(QStringLiteral("flipV")).toBool(false);

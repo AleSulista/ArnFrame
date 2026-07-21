@@ -8,6 +8,7 @@
 #include "core/Transition.h"
 
 #include <QtMath>
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <utility>
@@ -50,12 +51,14 @@ double transitionGainForClip(const drift::Track &track, const drift::Clip &clip,
     return 1.0;
 }
 
-// Produce `outFrames` of this clip's audio in output/timeline space, starting at `winStartUs`,
-// with source read, reverse and speed applied exactly as playback does. Timeline positions outside
-// the clip come back as silence, so this is safe to call for a preroll window that runs off the
-// clip's front edge. Returns interleaved stereo of exactly outFrames frames.
-QVector<float> readClipOutputAudio(const drift::Clip &clip, drift::TimeUs winStartUs, int outFrames,
-                                   int sampleRate)
+constexpr drift::TimeUs kTimelineGapToleranceUs = 2'000; // ~2 ms: allow frame rounding between blocks
+
+} // namespace
+
+// Silence outside the clip means this is safe to call for a preroll window that runs off the
+// clip's front edge.
+QVector<float> AudioMixer::readClipAudio(const drift::Clip &clip, drift::TimeUs winStartUs, int outFrames,
+                                         int sampleRate)
 {
     QVector<float> out(outFrames * 2, 0.0f);
     if (outFrames <= 0)
@@ -72,23 +75,27 @@ QVector<float> readClipOutputAudio(const drift::Clip &clip, drift::TimeUs winSta
     const int leadFrames = static_cast<int>(((playStartUs - winStartUs) * sampleRate) / drift::kUsPerSecond);
     const int wantFrames = qMax(1, outFrames - leadFrames);
 
-    const double speed = clip.effectiveSpeed();
-    const drift::TimeUs clipOffsetUs = qMax<drift::TimeUs>(0, playStartUs - clip.timelineStart);
     const drift::TimeUs wantDurUs =
         static_cast<drift::TimeUs>((static_cast<int64_t>(wantFrames) * drift::kUsPerSecond) / sampleRate);
 
-    drift::TimeUs sourceStartUs = 0;
-    int sourceSampleCount = qMax(1, static_cast<int>(std::llround(wantFrames * speed)));
+    // A ramp only means the rate changes from block to block; within one block it is read as
+    // constant, which is what atempo can express anyway. Taken from the curve rather than by
+    // differencing two mapped positions so the final, partly-overhanging block of a clip still
+    // reports its true rate.
+    const double speed =
+        clip.hasSpeedCurve()
+            ? clip.speedCurve.speedAtTimelineOffset(playStartUs - clip.timelineStart,
+                                                    clip.srcOut - clip.srcIn)
+            : clip.effectiveSpeed();
+    const drift::TimeUs sourceSpanUs =
+        qMax<drift::TimeUs>(1, static_cast<drift::TimeUs>(std::llround(wantDurUs * speed)));
+    const int sourceSampleCount =
+        qMax(1, static_cast<int>((sourceSpanUs * sampleRate) / drift::kUsPerSecond));
 
-    if (clip.reverse) {
-        const drift::TimeUs sourceHigh = clip.timelineToSourceUs(playStartUs);
-        const drift::TimeUs sourceLow = clip.timelineToSourceUs(playStartUs + wantDurUs);
-        sourceStartUs = qMin(sourceLow, sourceHigh);
-        const drift::TimeUs sourceSpanUs = qMax<drift::TimeUs>(1, qAbs(sourceHigh - sourceLow));
-        sourceSampleCount = qMax(1, static_cast<int>((sourceSpanUs * sampleRate) / drift::kUsPerSecond));
-    } else {
-        sourceStartUs = clip.srcIn + static_cast<drift::TimeUs>(clipOffsetUs * speed);
-    }
+    // Reverse reads the block ahead of the mapped position and flips it below.
+    const drift::TimeUs sourceStartUs =
+        clip.reverse ? qMax<drift::TimeUs>(0, clip.timelineToSourceUs(playStartUs) - sourceSpanUs)
+                     : clip.timelineToSourceUs(playStartUs);
 
     QVector<float> sourceChunk(sourceSampleCount * 2);
     const int got = ClipReaderPool::instance().readAudioInterleaved(clip.path, sourceStartUs, sourceSampleCount,
@@ -117,7 +124,7 @@ QVector<float> readClipOutputAudio(const drift::Clip &clip, drift::TimeUs winSta
     return out;
 }
 
-constexpr drift::TimeUs kTimelineGapToleranceUs = 2'000; // ~2 ms: allow frame rounding between blocks
+namespace {
 
 void accumulateClipAudio(const drift::Clip &clip, const drift::Track &track, drift::TimeUs timelineStartUs,
                          int sampleCount, int sampleRate, float *mixBuffer,
@@ -149,14 +156,14 @@ void accumulateClipAudio(const drift::Clip &clip, const drift::Track &track, dri
                                 && qAbs(timelineStartUs - lastEndUs) <= kTimelineGapToleranceUs;
         if (!continuous)
             stream.reset();
-        chunk = readClipOutputAudio(clip, timelineStartUs, sampleCount, sampleRate);
+        chunk = AudioMixer::readClipAudio(clip, timelineStartUs, sampleCount, sampleRate);
         if (stream.configure(clip.audioEffects, sampleRate)) {
             stream.feed(chunk.constData(), sampleCount);
             chunk = stream.drain(sampleCount);
         }
         stream.setLastTimelineEndUs(timelineStartUs + blockDurUs);
     } else {
-        chunk = readClipOutputAudio(clip, timelineStartUs, sampleCount, sampleRate);
+        chunk = AudioMixer::readClipAudio(clip, timelineStartUs, sampleCount, sampleRate);
     }
 
     const int frames = qMin(sampleCount, chunk.size() / 2);
