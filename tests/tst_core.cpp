@@ -45,6 +45,7 @@ private slots:
     void shapeCatalogPathsFitBounds();
     void effectCatalogIdSerialization();
     void effectParamKeyframeSerialization();
+    void effectTemplateStackSerialization();
     void audioEffectSerialization();
     void rgbSplitEffectParametersSerialization();
     void blockGlitchEffectParametersSerialization();
@@ -955,6 +956,62 @@ void CoreTest::effectParamKeyframeSerialization()
     const drift::Effect resolved = loadedEffect.resolvedAt(drift::secondsToUs(2.0));
     QCOMPARE(resolved.parameters.value(QStringLiteral("contrast")).toDouble(), 2.5);
     QCOMPARE(resolved.catalogId, QStringLiteral("adjust.contrast"));
+}
+
+// A beat-synced template applies several effects and per-param keyframes in one edit; all of
+// that has to survive save/load so scrubbing after reopen matches what preview showed.
+void CoreTest::effectTemplateStackSerialization()
+{
+    drift::Project project;
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-template");
+    clip.type = drift::ClipType::Video;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(4.0);
+
+    drift::Effect shake;
+    shake.catalogId = QStringLiteral("beat_shake");
+    shake.parameters.insert(QStringLiteral("amount"), 0.0);
+    drift::KeyframeTrack<double> amountTrack;
+    amountTrack.setKeyframe(0, 0.7);
+    amountTrack.setKeyframe(drift::secondsToUs(0.18), 0.0);
+    amountTrack.setKeyframe(drift::secondsToUs(1.0), 0.65);
+    amountTrack.setKeyframe(drift::secondsToUs(1.09), 0.0);
+    shake.paramKeyframes.insert(QStringLiteral("amount"), amountTrack);
+    clip.effects.append(shake);
+
+    drift::Effect strobe;
+    strobe.catalogId = QStringLiteral("strobe_flash");
+    strobe.parameters.insert(QStringLiteral("flash"), 0.0);
+    drift::KeyframeTrack<double> flashTrack;
+    flashTrack.setKeyframe(0, 0.5);
+    flashTrack.setKeyframe(drift::secondsToUs(0.09), 0.0);
+    strobe.paramKeyframes.insert(QStringLiteral("flash"), flashTrack);
+    clip.effects.append(strobe);
+
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
+    QCOMPARE(loadedClip.effects.size(), 2);
+    QCOMPARE(loadedClip.effects[0].catalogId, QStringLiteral("beat_shake"));
+    QCOMPARE(loadedClip.effects[1].catalogId, QStringLiteral("strobe_flash"));
+
+    const drift::KeyframeTrack<double> &loadedAmount =
+        loadedClip.effects[0].paramKeyframes.value(QStringLiteral("amount"));
+    QCOMPARE(loadedAmount.keyframes().size(), 4);
+    QCOMPARE(loadedAmount.keyframes().value(0), 0.7);
+    QCOMPARE(loadedAmount.keyframes().value(drift::secondsToUs(1.0)), 0.65);
+
+    const drift::KeyframeTrack<double> &loadedFlash =
+        loadedClip.effects[1].paramKeyframes.value(QStringLiteral("flash"));
+    QCOMPARE(loadedFlash.keyframes().size(), 2);
+    QCOMPARE(loadedFlash.keyframes().value(0), 0.5);
+    QCOMPARE(loadedClip.effects[1].valueAt(QStringLiteral("flash"), 0).toDouble(), 0.5);
 }
 
 // Audio effects live in a separate list from video effects on the clip and must survive a project

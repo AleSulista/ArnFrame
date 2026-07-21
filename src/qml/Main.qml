@@ -74,6 +74,13 @@ ApplicationWindow {
         id: segmentationWindow
     }
 
+    Connections {
+        target: EditorState
+        function onOpenSegmentationWindowRequested(track, clip, startSeconds, durationSeconds) {
+            segmentationWindow.openFor(track, clip, startSeconds, durationSeconds, true)
+        }
+    }
+
     DenoiseWindow {
         id: denoiseWindow
     }

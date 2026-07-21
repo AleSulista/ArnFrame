@@ -19,6 +19,10 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <optional>
+
+struct EffectTemplateEntry;
+
 class QTimer;
 
 #include "playback/ClipPreviewPlayer.h"
@@ -75,6 +79,7 @@ class AppController : public QObject
     Q_PROPERTY(double denoiseProgress READ denoiseProgress NOTIFY denoiseProgressChanged)
     Q_PROPERTY(QString denoiseStatus READ denoiseStatus NOTIFY denoiseStatusChanged)
     Q_PROPERTY(bool segmentSessionActive READ segmentSessionActive NOTIFY segmentSessionChanged)
+    Q_PROPERTY(bool segmentationForTemplate READ segmentationForTemplate NOTIFY segmentSessionChanged)
     Q_PROPERTY(bool segmentEncoding READ segmentEncoding NOTIFY segmentSessionChanged)
     Q_PROPERTY(int segmentRevision READ segmentRevision NOTIFY segmentSessionChanged)
     Q_PROPERTY(QVariantList segmentPoints READ segmentPoints NOTIFY segmentSessionChanged)
@@ -164,6 +169,7 @@ public:
     double denoiseProgress() const { return m_denoiseProgress; }
     QString denoiseStatus() const { return m_denoiseStatus; }
     bool segmentSessionActive() const { return m_segSessionActive; }
+    bool segmentationForTemplate() const { return m_segForTemplate; }
     bool segmentEncoding() const { return m_segEncoding; }
     int segmentRevision() const { return m_segRevision; }
     QVariantList segmentPoints() const { return m_segPoints; }
@@ -242,8 +248,10 @@ public:
     // Interactive prompting session driving the segmentation window. beginSegmentationSession
     // encodes the reference frame off the GUI thread; point edits after that only re-run the
     // cheap decoder.
-    Q_INVOKABLE void beginSegmentationSession(int trackIndex, int clipIndex, double seconds);
+    Q_INVOKABLE void beginSegmentationSession(int trackIndex, int clipIndex, double seconds,
+                                              bool forTemplate = false);
     Q_INVOKABLE void endSegmentationSession();
+    void openSegmentationForTemplate(int trackIndex, int clipIndex);
 
     // Speed-curve editing session driving SpeedCurveWindow. The curve is held here as a
     // candidate and auditioned through a private single-clip player; the project is not touched
@@ -436,7 +444,10 @@ public:
     Q_INVOKABLE void resetClipTransform(int trackIndex, int clipIndex);
     Q_INVOKABLE QVariantList effectCatalog() const;
     Q_INVOKABLE QVariantList effectCategories() const;
+    Q_INVOKABLE QVariantList effectTemplateCatalog() const;
+    Q_INVOKABLE QVariantList effectTemplateCategories() const;
     Q_INVOKABLE void addEffect(int trackIndex, int clipIndex, const QString &effectId);
+    Q_INVOKABLE void applyEffectTemplate(int trackIndex, int clipIndex, const QString &templateId);
     Q_INVOKABLE void removeEffect(int trackIndex, int clipIndex, int effectIndex);
     Q_INVOKABLE void setEffectParam(int trackIndex, int clipIndex, int effectIndex, const QString &key,
                                     double value);
@@ -542,6 +553,8 @@ signals:
     void denoisePreviewReady(const QString &originalPath, const QString &cleanPath);
     void denoiseFinished(bool ok, const QString &message);
     void segmentSessionChanged();
+    void openSegmentationWindowRequested(int trackIndex, int clipIndex, double startSeconds,
+                                         double durationSeconds);
     void speedCurveSessionChanged();
     void speedCurveChanged();
     void speedCurveFrameChanged();
@@ -590,6 +603,11 @@ protected:
     // Publishes a finished beat analysis into m_beatAnalysis / m_beatSnapTargets.
     void applyBeatAnalysis(const AudioBeatAnalysis &analysis, double startSeconds, double durSeconds,
                            const QByteArray &fingerprint);
+    void applyEffectTemplateInternal(int trackIndex, int clipIndex, const EffectTemplateEntry &entry,
+                                   const QString &mattePath = {},
+                                   drift::TimeUs matteSrcOffsetUs = 0);
+    bool resolveTemplateApplyTarget(int *trackIndex, int *clipIndex) const;
+    bool beatAnalysisReadyForClip(const drift::Clip &clip, const QString &sync) const;
     // Digest of everything the AudioMixer reads; a change means detected beats are stale.
     QByteArray audioLayoutFingerprint() const;
     // Single key lookup for the tangent editors; null when nothing sits at `atSeconds`.
@@ -714,6 +732,7 @@ protected:
     QString m_faceDetectStatus;
     QAtomicInt m_faceDetectCancel = 0;
     bool m_segSessionActive = false;
+    bool m_segForTemplate = false;
     bool m_segEncoding = false;
     int m_segTrack = -1;
     int m_segClip = -1;
@@ -766,6 +785,14 @@ protected:
     QByteArray m_beatAudioFingerprint;
     bool m_beatGridVisible = false;
     bool m_onsetsVisible = false;
+    struct PendingEffectTemplate
+    {
+        int trackIndex = -1;
+        int clipIndex = -1;
+        QString templateId;
+        bool valid() const { return trackIndex >= 0 && clipIndex >= 0 && !templateId.isEmpty(); }
+    };
+    std::optional<PendingEffectTemplate> m_pendingEffectTemplate;
     // Beats and onsets as snap targets, thinned so a dense onset list cannot make every
     // position on the timeline snap to something. Only the visible layers contribute.
     QList<drift::TimeUs> m_beatSnapTargets;

@@ -2,6 +2,8 @@
 
 #include "AssetLibrary.h"
 #include "core/Clip.h"
+#include "core/Mask.h"
+#include "core/SpeedCurve.h"
 #include "core/ShapePath.h"
 #include "core/SubtitleCue.h"
 #include "core/TimelineOps.h"
@@ -13,6 +15,7 @@
 #include "engine/ProjectDependencies.h"
 #include "engine/AudioEffectCatalog.h"
 #include "engine/EffectCatalog.h"
+#include "engine/EffectTemplateCatalog.h"
 #include "engine/Exporter.h"
 #include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
@@ -53,7 +56,7 @@
 #include <QtMath>
 #include <algorithm>
 #include <climits>
-#include <limits>
+#include <optional>
 
 namespace {
 QHash<QString, QString> defaultShortcuts();
@@ -2618,7 +2621,8 @@ void AppController::cancelSegmentation()
         m_segmentCancel.storeRelaxed(1);
 }
 
-void AppController::beginSegmentationSession(int trackIndex, int clipIndex, double seconds)
+void AppController::beginSegmentationSession(int trackIndex, int clipIndex, double seconds,
+                                             bool forTemplate)
 {
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
         return;
@@ -2633,6 +2637,7 @@ void AppController::beginSegmentationSession(int trackIndex, int clipIndex, doub
     m_segTrack = trackIndex;
     m_segClip = clipIndex;
     m_segPoints.clear();
+    m_segForTemplate = forTemplate;
     m_segSessionActive = true;
     emit segmentSessionChanged();
     setSegmentationFrame(seconds);
@@ -2857,7 +2862,10 @@ void AppController::clearClipSpeedCurve(int trackIndex, int clipIndex)
 
 void AppController::endSegmentationSession()
 {
+    if (m_segForTemplate)
+        m_pendingEffectTemplate.reset();
     m_segSessionActive = false;
+    m_segForTemplate = false;
     m_segEncoding = false;
     m_segTrack = -1;
     m_segClip = -1;
@@ -2986,7 +2994,28 @@ void AppController::runSegmentationSession(const QString &outputMode)
 {
     if (!m_segSessionActive || m_segPoints.isEmpty())
         return;
-    segmentClip(m_segTrack, m_segClip, m_segPoints, outputMode);
+    QString mode = outputMode;
+    if (m_segForTemplate && m_pendingEffectTemplate && m_pendingEffectTemplate->valid())
+        mode = QStringLiteral("template");
+    segmentClip(m_segTrack, m_segClip, m_segPoints, mode);
+}
+
+void AppController::openSegmentationForTemplate(int trackIndex, int clipIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Clip &clip = track.clips.at(clipIndex);
+    if (clip.type != drift::ClipType::Video)
+        return;
+
+    const double startSeconds = drift::usToSeconds(clip.timelineStart);
+    const double durationSeconds = drift::usToSeconds(clip.timelineDuration);
+    beginSegmentationSession(trackIndex, clipIndex, startSeconds, true);
+    emit openSegmentationWindowRequested(trackIndex, clipIndex, startSeconds, durationSeconds);
 }
 
 void AppController::segmentClip(int trackIndex, int clipIndex, const QVariantList &points,
@@ -3080,6 +3109,21 @@ void AppController::segmentClip(int trackIndex, int clipIndex, const QVariantLis
                     if (!ok) {
                         setLastMessage(message);
                         emit segmentationFinished(false, message);
+                        return;
+                    }
+                    if (mode == QLatin1String("template")) {
+                        if (m_pendingEffectTemplate && m_pendingEffectTemplate->valid()) {
+                            const EffectTemplateEntry *entry =
+                                effectTemplateForId(m_pendingEffectTemplate->templateId);
+                            const PendingEffectTemplate pending = *m_pendingEffectTemplate;
+                            m_pendingEffectTemplate.reset();
+                            if (entry) {
+                                applyEffectTemplateInternal(pending.trackIndex, pending.clipIndex,
+                                                            *entry, mattePath, srcIn);
+                            }
+                        }
+                        setLastMessage(message);
+                        emit segmentationFinished(true, message);
                         return;
                     }
                     finalizeSegmentation(clipId, mattePath, srcIn, mode);
@@ -6129,6 +6173,546 @@ void AppController::addEffect(int trackIndex, int clipIndex, const QString &effe
     finishEdit(QStringLiteral("Effect added"));
 }
 
+namespace {
+
+drift::Effect effectFromCatalogEntry(const EffectPresetEntry &def,
+                                     const QMap<QString, QVariant> &overrides)
+{
+    drift::Effect effect;
+    effect.name = def.filterName;
+    effect.catalogId = def.meta.id;
+    for (auto it = def.fixedParams.constBegin(); it != def.fixedParams.constEnd(); ++it)
+        effect.parameters.insert(it.key(), it.value());
+    for (const drift::EffectParamSpec &p : def.meta.parameters) {
+        const auto overrideIt = overrides.constFind(p.key);
+        if (overrideIt != overrides.constEnd())
+            effect.parameters.insert(p.key, overrideIt.value());
+        else if (p.isBoolean)
+            effect.parameters.insert(p.key, p.defaultValue > 0.5);
+        else
+            effect.parameters.insert(p.key, p.defaultValue);
+    }
+    return effect;
+}
+
+bool templateSyncNeedsBeats(const QString &sync)
+{
+    return sync == QLatin1String("onset") || sync == QLatin1String("beat")
+           || sync == QLatin1String("bar");
+}
+
+bool clipHasMatte(const drift::Clip &clip)
+{
+    return clip.mask.shape == drift::MaskShape::Matte && !clip.mask.mattePath.isEmpty();
+}
+
+drift::Clip deriveMaskedClip(const drift::Clip &source, const drift::Mask &matte, bool invert,
+                             const QString &suffix)
+{
+    drift::Clip clip = source;
+    clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    clip.linkId.clear();
+    clip.effects.clear();
+    clip.audioEffects.clear();
+    clip.mask = matte;
+    clip.mask.invert = invert;
+    clip.name = (source.name.isEmpty() ? QStringLiteral("Clip") : source.name) + suffix;
+    return clip;
+}
+
+void applyTemplateLayersToClip(drift::Clip &clip, const QList<EffectTemplateLayer> &layers,
+                               const QString &sync, const QList<drift::TimeUs> &syncPoints)
+{
+    const int baseEffectIndex = clip.effects.size();
+    for (const EffectTemplateLayer &layer : layers) {
+        const EffectPresetEntry *def = effectDefForId(layer.effectId);
+        if (!def)
+            continue;
+        clip.effects.append(effectFromCatalogEntry(*def, layer.params));
+    }
+
+    for (int layerIndex = 0; layerIndex < layers.size(); ++layerIndex) {
+        const EffectTemplateLayer &layer = layers.at(layerIndex);
+        if (!layer.pulse.valid)
+            continue;
+
+        const int effectIndex = baseEffectIndex + layerIndex;
+        if (effectIndex >= clip.effects.size())
+            continue;
+
+        const QString prop =
+            QStringLiteral("fx.%1.%2").arg(effectIndex).arg(layer.pulse.param);
+        const drift::TimeUs decayUs =
+            static_cast<drift::TimeUs>(qMax(layer.pulse.decayMs, 0)) * 1000;
+        if (sync == QLatin1String("clip") && syncPoints.size() >= 2) {
+            writeClipPropValue(clip, prop, syncPoints.first(), layer.pulse.peak, false, true);
+            writeClipPropValue(clip, prop, syncPoints.last(), layer.pulse.rest, false, true);
+            continue;
+        }
+        for (drift::TimeUs t : syncPoints) {
+            writeClipPropValue(clip, prop, t, layer.pulse.peak, false, true);
+            writeClipPropValue(clip, prop, t + decayUs, layer.pulse.rest, false, true);
+        }
+    }
+}
+
+void applyTemplateSpeedPulse(drift::Clip &clip, const EffectTemplateSpeedPulse &pulse,
+                             const QString &sync, const QList<drift::TimeUs> &syncPoints)
+{
+    if (!pulse.valid || clip.timelineDuration <= 0)
+        return;
+
+    const double baseSpeed = clip.effectiveSpeed();
+    QList<drift::SpeedPoint> points;
+    points.append({0.0, baseSpeed, 0.0, 0.0, 0.0, 0.0, false});
+    points.append({1.0, baseSpeed, 0.0, 0.0, 0.0, 0.0, false});
+
+    auto addPoint = [&](double pos, double speed) {
+        pos = qBound(0.0, pos, 1.0);
+        for (int i = 0; i < points.size(); ++i) {
+            if (qFuzzyCompare(points[i].pos, pos)) {
+                points[i].speed = speed;
+                return;
+            }
+        }
+        points.append({pos, speed, 0.0, 0.0, 0.0, 0.0, true});
+    };
+
+    const drift::TimeUs decayUs =
+        static_cast<drift::TimeUs>(qMax(pulse.decayMs, 0)) * 1000;
+    const double dur = static_cast<double>(clip.timelineDuration);
+
+    if (sync == QLatin1String("clip") && syncPoints.size() >= 2) {
+        addPoint(0.0, pulse.peak);
+        addPoint(static_cast<double>(syncPoints.last()) / dur, pulse.rest);
+    } else {
+        for (drift::TimeUs t : syncPoints) {
+            addPoint(static_cast<double>(t) / dur, pulse.peak);
+            addPoint(static_cast<double>(t + decayUs) / dur, pulse.rest);
+        }
+    }
+
+    clip.speedCurve.setPoints(points);
+    clip.syncDurationFromSpeedCurve();
+}
+
+const EffectTemplateTrack *trackForRole(const EffectTemplateEntry &entry, const QString &role)
+{
+    for (const EffectTemplateTrack &track : entry.tracks) {
+        if (track.role == role)
+            return &track;
+    }
+    return nullptr;
+}
+
+bool clipsShareTemplateSource(const drift::Clip &a, const drift::Clip &b)
+{
+    return a.path == b.path && a.srcIn == b.srcIn && a.srcOut == b.srcOut
+           && a.timelineStart == b.timelineStart && a.timelineDuration == b.timelineDuration;
+}
+
+bool isDerivedTemplateClipName(const QString &name)
+{
+    return name.endsWith(QStringLiteral(" (fg)")) || name.endsWith(QStringLiteral(" (bg)"))
+           || name.endsWith(QStringLiteral(" (clone)"));
+}
+
+struct TemplateStackRefs
+{
+    int fgTrack = -1;
+    int fgClip = -1;
+    int bgTrack = -1;
+    int bgClip = -1;
+    QList<QPair<int, int>> clones;
+
+    bool valid() const { return fgTrack >= 0 && bgTrack >= 0; }
+};
+
+TemplateStackRefs findExistingTemplateStack(const drift::Project &project, const drift::Clip &source)
+{
+    TemplateStackRefs stack;
+    for (int t = 0; t < project.tracks().size(); ++t) {
+        const drift::Track &track = project.tracks().at(t);
+        for (int c = 0; c < track.clips.size(); ++c) {
+            const drift::Clip &clip = track.clips.at(c);
+            if (!clipsShareTemplateSource(clip, source))
+                continue;
+            if (clip.name.endsWith(QStringLiteral(" (fg)"))) {
+                stack.fgTrack = t;
+                stack.fgClip = c;
+            } else if (clip.name.endsWith(QStringLiteral(" (bg)"))) {
+                stack.bgTrack = t;
+                stack.bgClip = c;
+            } else if (clip.name.endsWith(QStringLiteral(" (clone)"))) {
+                stack.clones.append({t, c});
+            }
+        }
+    }
+    return stack;
+}
+
+void resetTemplateDerivedClip(drift::Clip &clip, double opacity)
+{
+    clip.effects.clear();
+    clip.opacity.setKeyframe(0, opacity);
+    clip.speedCurve = drift::SpeedCurve::flat(1.0);
+    clip.syncDurationFromSpeedCurve();
+}
+
+} // namespace
+
+QVariantList AppController::effectTemplateCatalog() const
+{
+    QVariantList out;
+    for (const EffectTemplateEntry &entry : ::effectTemplateCatalog()) {
+        QVariantList layers;
+        for (const EffectTemplateLayer &layer : entry.layers) {
+            layers.append(QVariantMap{
+                {QStringLiteral("effectId"), layer.effectId},
+            });
+        }
+
+        QVariantList effectThumbnails;
+        QSet<QString> seenEffectIds;
+        const auto appendEffectThumb = [&](const QString &effectId) {
+            if (effectId.isEmpty() || seenEffectIds.contains(effectId))
+                return;
+            const EffectPresetEntry *def = effectDefForId(effectId);
+            if (!def || def->thumbnailPath.isEmpty())
+                return;
+            seenEffectIds.insert(effectId);
+            effectThumbnails.append(def->thumbnailPath);
+        };
+        for (const EffectTemplateLayer &layer : entry.layers)
+            appendEffectThumb(layer.effectId);
+        for (const EffectTemplateTrack &track : entry.tracks) {
+            for (const EffectTemplateLayer &layer : track.layers)
+                appendEffectThumb(layer.effectId);
+        }
+
+        out.append(QVariantMap{
+            {QStringLiteral("id"), entry.id},
+            {QStringLiteral("label"), entry.displayName},
+            {QStringLiteral("displayName"), entry.displayName},
+            {QStringLiteral("category"), entry.category},
+            {QStringLiteral("categoryLabel"), effectTemplateCategoryLabel(entry.category)},
+            {QStringLiteral("sync"), entry.sync},
+            {QStringLiteral("thumbnailPath"), entry.thumbnailPath},
+            {QStringLiteral("effectThumbnails"), effectThumbnails},
+            {QStringLiteral("effectCount"), seenEffectIds.size()},
+            {QStringLiteral("requiresSegmentation"), entry.requiresSegmentation},
+            {QStringLiteral("layers"), layers},
+        });
+    }
+    return out;
+}
+
+QVariantList AppController::effectTemplateCategories() const
+{
+    QVariantList out;
+    for (const auto &entry : ::effectTemplateCategories()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), entry.first},
+            {QStringLiteral("label"), entry.second},
+        });
+    }
+    return out;
+}
+
+bool AppController::beatAnalysisReadyForClip(const drift::Clip &clip, const QString &sync) const
+{
+    if (sync == QLatin1String("clip"))
+        return true;
+    if (m_beatAnalysis.isEmpty() || audioLayoutFingerprint() != m_beatAudioFingerprint)
+        return false;
+
+    const double rangeStart = m_beatAnalysis.value(QStringLiteral("rangeStart")).toDouble();
+    const double rangeDur = m_beatAnalysis.value(QStringLiteral("rangeDuration")).toDouble();
+    const double clipStart = drift::usToSeconds(clip.timelineStart);
+    const double clipEnd =
+        drift::usToSeconds(clip.timelineStart + clip.timelineDuration);
+    if (clipStart < rangeStart - 0.001 || clipEnd > rangeStart + rangeDur + 0.001)
+        return false;
+
+    if (sync == QLatin1String("onset"))
+        return !m_beatAnalysisRaw.onsets.isEmpty();
+    return !m_beatAnalysisRaw.beats.isEmpty();
+}
+
+bool AppController::resolveTemplateApplyTarget(int *trackIndex, int *clipIndex) const
+{
+    if (!trackIndex || !clipIndex)
+        return false;
+    if (*trackIndex < 0 || *trackIndex >= m_project.tracks().size())
+        return false;
+    const drift::Track &track = m_project.tracks().at(*trackIndex);
+    if (*clipIndex < 0 || *clipIndex >= track.clips.size())
+        return false;
+
+    const drift::Clip &selected = track.clips.at(*clipIndex);
+    if (!isDerivedTemplateClipName(selected.name))
+        return false;
+
+    for (int t = 0; t < m_project.tracks().size(); ++t) {
+        const drift::Track &candidateTrack = m_project.tracks().at(t);
+        for (int c = 0; c < candidateTrack.clips.size(); ++c) {
+            const drift::Clip &candidate = candidateTrack.clips.at(c);
+            if (!clipsShareTemplateSource(candidate, selected))
+                continue;
+            if (isDerivedTemplateClipName(candidate.name))
+                continue;
+            *trackIndex = t;
+            *clipIndex = c;
+            return true;
+        }
+    }
+    return false;
+}
+
+void AppController::applyEffectTemplateInternal(int trackIndex, int clipIndex,
+                                                const EffectTemplateEntry &entry,
+                                                const QString &mattePath,
+                                                drift::TimeUs matteSrcOffsetUs)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Clip sourceClip = track.clips[clipIndex];
+    const drift::Project before = m_project;
+
+    drift::Mask matte;
+    if (!mattePath.isEmpty()) {
+        matte.shape = drift::MaskShape::Matte;
+        matte.mattePath = mattePath;
+        matte.matteSrcOffsetUs = matteSrcOffsetUs;
+    } else if (clipHasMatte(sourceClip)) {
+        matte = sourceClip.mask;
+    }
+
+    const bool segmented = entry.requiresSegmentation || entry.usesMultiTrack();
+    const bool haveMatte = matte.shape == drift::MaskShape::Matte && !matte.mattePath.isEmpty();
+
+    QList<drift::TimeUs> syncPoints;
+    const drift::TimeUs clipStart = sourceClip.timelineStart;
+    const drift::TimeUs clipEnd = clipStart + sourceClip.timelineDuration;
+    if (entry.sync == QLatin1String("clip")) {
+        syncPoints.append(0);
+        if (sourceClip.timelineDuration > 0)
+            syncPoints.append(sourceClip.timelineDuration);
+    } else if (entry.sync == QLatin1String("onset")) {
+        for (const AudioOnset &onset : std::as_const(m_beatAnalysisRaw.onsets)) {
+            const drift::TimeUs at = drift::secondsToUs(onset.seconds);
+            if (at >= clipStart && at < clipEnd)
+                syncPoints.append(at - clipStart);
+        }
+    } else {
+        int beatIndex = 0;
+        for (double beatSeconds : std::as_const(m_beatAnalysisRaw.beats)) {
+            const drift::TimeUs at = drift::secondsToUs(beatSeconds);
+            if (at >= clipStart && at < clipEnd) {
+                if (entry.sync == QLatin1String("bar")) {
+                    const int rel = beatIndex - m_beatAnalysisRaw.firstDownbeat;
+                    if (rel >= 0 && rel % m_beatAnalysisRaw.beatsPerBar == 0)
+                        syncPoints.append(at - clipStart);
+                } else {
+                    syncPoints.append(at - clipStart);
+                }
+            }
+            ++beatIndex;
+        }
+    }
+
+    auto applyTrackLayers = [&](drift::Clip &clip, const EffectTemplateTrack &trackDef) {
+        applyTemplateLayersToClip(clip, trackDef.layers, entry.sync, syncPoints);
+        if (trackDef.opacity < 0.999)
+            clip.opacity.setKeyframe(0, trackDef.opacity);
+        applyTemplateSpeedPulse(clip, trackDef.speedPulse, entry.sync, syncPoints);
+    };
+
+    int selectTrack = trackIndex;
+    int selectClip = clipIndex;
+
+    if (segmented && haveMatte) {
+        track.clips[clipIndex].mask = matte;
+
+        const bool sourceHidden = sourceClip.opacity.evaluateAt(0) < 0.05;
+        const TemplateStackRefs existingStack = findExistingTemplateStack(m_project, sourceClip);
+        const bool reuseStack =
+            sourceHidden && existingStack.valid()
+            && existingStack.clones.size() == entry.clones.count;
+
+        if (reuseStack) {
+            track.clips[clipIndex].opacity.setKeyframe(0, 0.0);
+
+            drift::Clip &fgClip = m_project.tracks()[existingStack.fgTrack].clips[existingStack.fgClip];
+            drift::Clip &bgClip = m_project.tracks()[existingStack.bgTrack].clips[existingStack.bgClip];
+            resetTemplateDerivedClip(fgClip, 1.0);
+            resetTemplateDerivedClip(bgClip, 1.0);
+            fgClip.mask = matte;
+            bgClip.mask = matte;
+            bgClip.mask.invert = true;
+
+            selectTrack = existingStack.fgTrack;
+            selectClip = existingStack.fgClip;
+
+            if (const EffectTemplateTrack *bgDef = trackForRole(entry, QStringLiteral("background")))
+                applyTrackLayers(bgClip, *bgDef);
+            if (const EffectTemplateTrack *fgDef = trackForRole(entry, QStringLiteral("foreground")))
+                applyTrackLayers(fgClip, *fgDef);
+
+            for (int i = 0; i < existingStack.clones.size(); ++i) {
+                const auto &ref = existingStack.clones.at(i);
+                drift::Clip &clone = m_project.tracks()[ref.first].clips[ref.second];
+                const double opacity = i < entry.clones.opacities.size()
+                                           ? entry.clones.opacities.at(i)
+                                           : 0.25;
+                resetTemplateDerivedClip(clone, opacity);
+                clone.mask = matte;
+                if (i < entry.clones.scales.size()) {
+                    const double scale = entry.clones.scales.at(i);
+                    const double w = sourceClip.transformW.isEmpty()
+                                           ? static_cast<double>(m_project.width())
+                                           : sourceClip.transformW.evaluateAt(0);
+                    const double h = sourceClip.transformH.isEmpty()
+                                           ? static_cast<double>(m_project.height())
+                                           : sourceClip.transformH.evaluateAt(0);
+                    clone.transformW.setKeyframe(0, w * scale);
+                    clone.transformH.setKeyframe(0, h * scale);
+                }
+                if (const EffectTemplateTrack *cloneDef =
+                        trackForRole(entry, QStringLiteral("clone"))) {
+                    applyTrackLayers(clone, *cloneDef);
+                } else if (i == entry.clones.count - 1) {
+                    const EffectPresetEntry *trail = effectDefForId(QStringLiteral("motion_trail"));
+                    if (trail)
+                        clone.effects.append(effectFromCatalogEntry(*trail, {}));
+                }
+            }
+        } else {
+            // Hide the untouched source; fg/bg/clone layers replace it visually.
+            track.clips[clipIndex].opacity.setKeyframe(0, 0.0);
+
+            const int fgTrack =
+                drift::insertTrackAboveForClipType(m_project, trackIndex, drift::ClipType::Video);
+            m_project.tracks()[fgTrack].clips.append(
+                deriveMaskedClip(sourceClip, matte, false, QStringLiteral(" (fg)")));
+
+            const int bgTrack =
+                drift::insertTrackAboveForClipType(m_project, fgTrack + 1, drift::ClipType::Video);
+            m_project.tracks()[bgTrack].clips.append(
+                deriveMaskedClip(sourceClip, matte, true, QStringLiteral(" (bg)")));
+
+            selectTrack = fgTrack;
+            selectClip = 0;
+
+            if (const EffectTemplateTrack *bgDef = trackForRole(entry, QStringLiteral("background")))
+                applyTrackLayers(m_project.tracks()[bgTrack].clips[0], *bgDef);
+            if (const EffectTemplateTrack *fgDef = trackForRole(entry, QStringLiteral("foreground")))
+                applyTrackLayers(m_project.tracks()[fgTrack].clips[0], *fgDef);
+
+            if (entry.clones.count > 0) {
+                int insertAbove = fgTrack + 1;
+                for (int i = 0; i < entry.clones.count; ++i) {
+                    const int cloneTrack = drift::insertTrackAboveForClipType(
+                        m_project, insertAbove, drift::ClipType::Video);
+                    drift::Clip clone =
+                        deriveMaskedClip(sourceClip, matte, false, QStringLiteral(" (clone)"));
+                    const double opacity = i < entry.clones.opacities.size()
+                                               ? entry.clones.opacities.at(i)
+                                               : 0.25;
+                    clone.opacity.setKeyframe(0, opacity);
+                    if (i < entry.clones.scales.size()) {
+                        const double scale = entry.clones.scales.at(i);
+                        const double w = sourceClip.transformW.isEmpty()
+                                               ? static_cast<double>(m_project.width())
+                                               : sourceClip.transformW.evaluateAt(0);
+                        const double h = sourceClip.transformH.isEmpty()
+                                               ? static_cast<double>(m_project.height())
+                                               : sourceClip.transformH.evaluateAt(0);
+                        clone.transformW.setKeyframe(0, w * scale);
+                        clone.transformH.setKeyframe(0, h * scale);
+                    }
+                    if (const EffectTemplateTrack *cloneDef =
+                            trackForRole(entry, QStringLiteral("clone"))) {
+                        applyTrackLayers(clone, *cloneDef);
+                    } else if (i == entry.clones.count - 1) {
+                        const EffectPresetEntry *trail = effectDefForId(QStringLiteral("motion_trail"));
+                        if (trail)
+                            clone.effects.append(effectFromCatalogEntry(*trail, {}));
+                    }
+                    m_project.tracks()[cloneTrack].clips.append(clone);
+                    insertAbove = cloneTrack + 1;
+                }
+            }
+        }
+    } else if (entry.usesMultiTrack()) {
+        if (const EffectTemplateTrack *fgDef = trackForRole(entry, QStringLiteral("foreground")))
+            applyTrackLayers(track.clips[clipIndex], *fgDef);
+    } else {
+        applyTemplateLayersToClip(track.clips[clipIndex], entry.layers, entry.sync, syncPoints);
+        if (entry.speedPulse.valid)
+            applyTemplateSpeedPulse(track.clips[clipIndex], entry.speedPulse, entry.sync,
+                                    syncPoints);
+    }
+
+    m_selectedTrack = selectTrack;
+    m_selectedClip = selectClip;
+    m_selection = {qMakePair(selectTrack, selectClip)};
+    pushProjectEdit(before, QStringLiteral("Apply effect template"));
+    finishEdit(QStringLiteral("Template applied"));
+}
+
+void AppController::applyEffectTemplate(int trackIndex, int clipIndex, const QString &templateId)
+{
+    const EffectTemplateEntry *entry = effectTemplateForId(templateId);
+    if (!entry)
+        return;
+
+    resolveTemplateApplyTarget(&trackIndex, &clipIndex);
+
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    const drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Clip &clip = track.clips[clipIndex];
+
+    if (templateSyncNeedsBeats(entry->sync) && !beatAnalysisReadyForClip(clip, entry->sync)) {
+        m_pendingEffectTemplate = PendingEffectTemplate{trackIndex, clipIndex, templateId};
+        if (!m_beatAnalysisRunning) {
+            analyzeBeats(drift::usToSeconds(clip.timelineStart),
+                         drift::usToSeconds(clip.timelineDuration));
+        }
+        return;
+    }
+
+    const bool needsSegment =
+        (entry->requiresSegmentation || entry->usesMultiTrack()) && !clipHasMatte(clip);
+    if (needsSegment) {
+        if (!segmentationAvailable()) {
+            setLastMessage(
+                QStringLiteral("This template needs subject segmentation — install the SAM2 addon"));
+            return;
+        }
+        if (m_segmenting) {
+            m_pendingEffectTemplate = PendingEffectTemplate{trackIndex, clipIndex, templateId};
+            return;
+        }
+        m_pendingEffectTemplate = PendingEffectTemplate{trackIndex, clipIndex, templateId};
+        openSegmentationForTemplate(trackIndex, clipIndex);
+        return;
+    }
+
+    m_pendingEffectTemplate.reset();
+    applyEffectTemplateInternal(trackIndex, clipIndex, *entry);
+}
+
 void AppController::removeEffect(int trackIndex, int clipIndex, int effectIndex)
 {
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
@@ -6863,6 +7447,27 @@ void AppController::applyBeatAnalysis(const AudioBeatAnalysis &analysis, double 
     m_beatAudioFingerprint = fingerprint;
     m_beatAnalysisRunning = false;
     emit beatAnalysisChanged();
+
+    if (m_pendingEffectTemplate && m_pendingEffectTemplate->valid()) {
+        const PendingEffectTemplate pending = *m_pendingEffectTemplate;
+        const EffectTemplateEntry *entry = effectTemplateForId(pending.templateId);
+        if (entry && pending.trackIndex >= 0 && pending.trackIndex < m_project.tracks().size()) {
+            const drift::Track &track = m_project.tracks()[pending.trackIndex];
+            if (pending.clipIndex >= 0 && pending.clipIndex < track.clips.size()
+                && beatAnalysisReadyForClip(track.clips[pending.clipIndex], entry->sync)) {
+                const drift::Clip &clip = track.clips[pending.clipIndex];
+                const bool needsSegment =
+                    (entry->requiresSegmentation || entry->usesMultiTrack()) && !clipHasMatte(clip);
+                if (needsSegment) {
+                    if (segmentationAvailable() && !m_segmenting)
+                        openSegmentationForTemplate(pending.trackIndex, pending.clipIndex);
+                } else {
+                    m_pendingEffectTemplate.reset();
+                    applyEffectTemplateInternal(pending.trackIndex, pending.clipIndex, *entry);
+                }
+            }
+        }
+    }
 }
 
 // Beats first — they are the musically meaningful grid — then onsets that do not already

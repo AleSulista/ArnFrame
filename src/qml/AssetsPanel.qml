@@ -71,7 +71,7 @@ PanelFrame {
     function assetVisible(kind) {
         const tabId = tabsModel.get(activeTab).tabId
         if (tabId === "text" || tabId === "stickers" || tabId === "shapes" || tabId === "effects"
-                || tabId === "adjustment" || tabId === "settings" || tabId === "sounds"
+                || tabId === "templates" || tabId === "adjustment" || tabId === "settings" || tabId === "sounds"
                 || tabId === "transitions" || tabId === "shortcuts")
             return false
         const kinds = kindsForTab(tabId)
@@ -86,6 +86,7 @@ PanelFrame {
         ListElement { tabId: "stickers"; icon: 3; label: "Stickers" }
         ListElement { tabId: "shapes"; icon: 4; label: "Shapes" }
         ListElement { tabId: "effects"; icon: 5; label: "Effects" }
+        ListElement { tabId: "templates"; icon: 9; label: "Templates" }
         ListElement { tabId: "transitions"; icon: 6; label: "Transitions" }
         ListElement { tabId: "settings"; icon: 7; label: "Settings" }
         ListElement { tabId: "shortcuts"; icon: 8; label: "Shortcuts" }
@@ -99,7 +100,8 @@ PanelFrame {
         Theme.icons.wand,
         Theme.icons.blend,
         Theme.icons.settings,
-        Theme.icons.keyboard
+        Theme.icons.keyboard,
+        Theme.icons.layers
     ]
     property int activeTab: 0
     property bool sortByKind: false
@@ -1117,6 +1119,12 @@ PanelFrame {
             // Effects browser
             EffectBrowser {
                 visible: tabsModel.get(activeTab).tabId === "effects"
+                width: parent.width
+                height: parent.height - Theme.panelHeaderHeight
+            }
+
+            EffectTemplateBrowser {
+                visible: tabsModel.get(activeTab).tabId === "templates"
                 width: parent.width
                 height: parent.height - Theme.panelHeaderHeight
             }

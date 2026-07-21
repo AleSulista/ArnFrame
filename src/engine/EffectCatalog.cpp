@@ -69,6 +69,7 @@ void rebuildCatalogLocked(const QStringList &packageRoots)
         {QStringLiteral("blurs"), QStringLiteral("Blurs & Distortions")},
         {QStringLiteral("blurs_distortions"), QStringLiteral("Blurs & Distortions")},
         {QStringLiteral("funny"), QStringLiteral("Funny Face")},
+        {QStringLiteral("artistic"), QStringLiteral("Artistic")},
     };
 
     for (const EffectPresetEntry &pkg : g_mergedCatalog) {

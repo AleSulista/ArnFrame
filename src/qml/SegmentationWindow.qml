@@ -21,13 +21,14 @@ Window {
     title: qsTr("Segment clip")
     color: Theme.appBackground
 
-    function openFor(track, clip, startSeconds, durationSeconds) {
+    function openFor(track, clip, startSeconds, durationSeconds, sessionAlreadyStarted) {
         root.trackIndex = track
         root.clipIndex = clip
         root.clipStartSeconds = startSeconds
         root.clipDurationSeconds = durationSeconds
         frameSlider.value = 0
-        EditorState.beginSegmentationSession(track, clip, startSeconds)
+        if (!sessionAlreadyStarted)
+            EditorState.beginSegmentationSession(track, clip, startSeconds)
         root.show()
         root.raise()
         root.requestActivate()
@@ -217,6 +218,7 @@ Window {
                 ThemedComboBox {
                     id: outputBox
                     width: parent.width
+                    visible: !EditorState.segmentationForTemplate
                     enabled: !EditorState.segmenting
                     textRole: "label"
                     valueRole: "value"
@@ -224,6 +226,13 @@ Window {
                         { label: qsTr("Two clips (foreground + background)"), value: "clips" },
                         { label: qsTr("Mask this clip"), value: "mask" }
                     ]
+                }
+
+                ThemedLabel {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    visible: EditorState.segmentationForTemplate
+                    text: qsTr("The matte is used only for this template — no extra tracks are created.")
                 }
             }
 
@@ -240,10 +249,13 @@ Window {
                 variant: "primary"
                 text: EditorState.segmenting
                       ? qsTr("Segmenting… %1%").arg(Math.round(EditorState.segmentProgress * 100))
-                      : qsTr("Segment clip")
+                      : (EditorState.segmentationForTemplate
+                         ? qsTr("Segment & apply template")
+                         : qsTr("Segment clip"))
                 enabled: EditorState.segmentPoints.length > 0 && !EditorState.segmenting
                          && !EditorState.segmentEncoding
-                onClicked: EditorState.runSegmentationSession(outputBox.currentValue)
+                onClicked: EditorState.runSegmentationSession(
+                    EditorState.segmentationForTemplate ? "template" : outputBox.currentValue)
             }
 
             Column {

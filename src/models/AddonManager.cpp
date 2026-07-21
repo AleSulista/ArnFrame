@@ -5,6 +5,7 @@
 #include "engine/AddonRegistry.h"
 #include "engine/AudioEffectCatalog.h"
 #include "engine/EffectCatalog.h"
+#include "engine/EffectTemplateCatalog.h"
 #include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
 #include "engine/StickerCatalog.h"
@@ -474,6 +475,8 @@ void AddonManager::reloadForKinds(const QStringList &kinds)
             reloadTransitionCatalog();
         else if (kind == QLatin1String("audio-effects"))
             reloadAudioEffectCatalog();
+        else if (kind == QLatin1String("effect-templates"))
+            reloadEffectTemplateCatalog();
         // whisper-model, sam2-model and face-model need nothing: sessions are created lazily on
         // next use.
         emit kindChanged(kind);

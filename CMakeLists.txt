@@ -197,6 +197,8 @@ add_library(driftengine STATIC
     src/engine/AudioAtempo.cpp
     src/engine/AudioEffectCatalog.h
     src/engine/AudioEffectCatalog.cpp
+    src/engine/EffectTemplateCatalog.h
+    src/engine/EffectTemplateCatalog.cpp
     src/engine/AudioEffectChain.h
     src/engine/AudioEffectChain.cpp
     src/engine/AudioMixer.h
@@ -310,6 +312,7 @@ qt_add_qml_module(drift
         src/qml/components/ShapePreview.qml
         src/qml/components/ColorSwatchField.qml
         src/qml/components/EffectBrowser.qml
+        src/qml/components/EffectTemplateBrowser.qml
         src/qml/components/ThemedSlider.qml
         src/qml/components/ThemedTextField.qml
         src/qml/components/ThemedNumberField.qml
@@ -414,7 +417,17 @@ function(drift_copy_onnxruntime target)
     endif()
 endfunction()
 
+function(drift_copy_effect_templates target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_SOURCE_DIR}/effect-templates"
+                "$<TARGET_FILE_DIR:${target}>/effect-templates"
+        COMMENT "Copy effect template packages next to ${target}"
+    )
+endfunction()
+
 drift_copy_effects(drift)
+drift_copy_effect_templates(drift)
 drift_copy_transitions(drift)
 drift_copy_audio_effects(drift)
 drift_copy_onnxruntime(drift)
