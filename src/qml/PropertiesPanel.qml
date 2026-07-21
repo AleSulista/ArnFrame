@@ -88,7 +88,7 @@ PanelFrame {
         }
         return false
     }
-    readonly property int transitionTabIndex: 5
+    readonly property int transitionTabIndex: tabIndexOf("transition")
     readonly property var selectedEffects: EditorState.selectedClipEffects
     readonly property var selectedAudioEffects: EditorState.selectedClipAudioEffects
     readonly property string clipKind: hasSelection ? (clip.kind || "") : ""
@@ -329,6 +329,7 @@ PanelFrame {
             root.refreshTransitionFields()
             root.syncSubtitlesTab()
             root.syncShapeTab()
+            root.syncTextTab()
         }
         function onSelectedClipDataChanged() {
             root.clipDataRevision++
@@ -358,6 +359,7 @@ PanelFrame {
     ListModel {
         id: tabsModel
         ListElement { tabId: "general"; icon: 0; label: "General" }
+        ListElement { tabId: "text"; icon: 10; label: "Text" }
         ListElement { tabId: "transform"; icon: 1; label: "Transform" }
         ListElement { tabId: "audio"; icon: 2; label: "Audio" }
         ListElement { tabId: "speed"; icon: 3; label: "Speed & Fade" }
@@ -378,23 +380,19 @@ PanelFrame {
         Theme.icons.mask,
         Theme.icons.wand,
         Theme.icons.messageSquare,
-        Theme.icons.shapes
+        Theme.icons.shapes,
+        Theme.icons.type
     ]
-    readonly property int subtitlesTabIndex: {
+    function tabIndexOf(id) {
         for (let i = 0; i < tabsModel.count; i++) {
-            if (tabsModel.get(i).tabId === "subtitles")
+            if (tabsModel.get(i).tabId === id)
                 return i
         }
         return -1
     }
-
-    readonly property int shapeTabIndex: {
-        for (let i = 0; i < tabsModel.count; i++) {
-            if (tabsModel.get(i).tabId === "shape")
-                return i
-        }
-        return -1
-    }
+    readonly property int subtitlesTabIndex: tabIndexOf("subtitles")
+    readonly property int shapeTabIndex: tabIndexOf("shape")
+    readonly property int textTabIndex: tabIndexOf("text")
 
     function syncSubtitlesTab() {
         if (root.subtitlesTabIndex < 0)
@@ -410,6 +408,12 @@ PanelFrame {
     function syncShapeTab() {
         if (root.shapeTabIndex >= 0 && root.activeTab === root.shapeTabIndex
                 && root.clipKind !== "shape")
+            root.activeTab = 0
+    }
+
+    // Same for the Text tab, which only exists for clips carrying a text style.
+    function syncTextTab() {
+        if (root.textTabIndex >= 0 && root.activeTab === root.textTabIndex && !root.hasTextStyle)
             root.activeTab = 0
     }
 
@@ -503,6 +507,7 @@ PanelFrame {
                         anchors.horizontalCenter: parent.horizontalCenter
                         visible: (model.tabId !== "subtitles" || root.clipKind === "subtitle")
                                  && (model.tabId !== "shape" || root.clipKind === "shape")
+                                 && (model.tabId !== "text" || root.hasTextStyle)
                         glyph: root.tabIcons[model.icon]
                         variant: "ghost"
                         tooltip: model.label
@@ -631,6 +636,113 @@ PanelFrame {
                                 }
                             }
                         }
+
+                        Column {
+                            width: tabColumn.width
+                            spacing: 8
+                            visible: root.clipKind !== "text" && root.clipKind !== "subtitle"
+
+                            Text {
+                                text: qsTr("Trim")
+                                HoverHandler { id: tipHover1217 }
+                                ThemedToolTip { text: qsTr("Which part of the source media this clip plays"); visible: tipHover1217.hovered }
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 8
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: qsTr("In point (s)")
+                                        HoverHandler { id: tipHover1231 }
+                                        ThemedToolTip { text: qsTr("Seconds into the source where this clip starts"); visible: tipHover1231.hovered }
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedNumberField {
+                                        id: inPointField
+                                        to: 86400
+                                        unit: "s"
+                                        width: parent.width
+                                        decimals: 2
+                                        step: 0.1
+                                        from: 0
+                                        onEdited: v => applyTrim(v, root.clip.outPoint)
+                                    }
+                                }
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: qsTr("Out point (s)")
+                                        HoverHandler { id: tipHover1252 }
+                                        ThemedToolTip { text: qsTr("Seconds into the source where this clip ends"); visible: tipHover1252.hovered }
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedNumberField {
+                                        id: outPointField
+                                        to: 86400
+                                        unit: "s"
+                                        width: parent.width
+                                        decimals: 2
+                                        step: 0.1
+                                        from: 0
+                                        onEdited: v => applyTrim(root.clip.inPoint, v)
+                                    }
+                                }
+                            }
+                        }
+
+                        Column {
+                            width: tabColumn.width
+                            spacing: 4
+                            visible: clip.path !== undefined && clip.path.length > 0
+
+                            Text {
+                                text: qsTr("Path")
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            Text {
+                                id: clipPathLabel
+                                text: clip.path || "—"
+                                color: Theme.panelForeground
+                                font.family: Theme.monoFontFamily
+                                font.pixelSize: Theme.fontSizeSm
+                                width: parent.width
+                                wrapMode: Text.WrapAnywhere
+                                // Capped: a deep path used to wrap unbounded and
+                                // dominate the whole General tab.
+                                maximumLineCount: 3
+                                elide: Text.ElideRight
+
+                                HoverHandler { id: pathHover }
+
+                                ThemedToolTip {
+                                    text: clip.path || ""
+                                    visible: pathHover.hovered && (clip.path || "").length > 0
+                                }
+                            }
+                        }
+                    }
+
+                    // ----- Text --------------------------------------------------------------
+                    Column {
+                        width: tabColumn.width
+                        spacing: Theme.spacingXl
+                        visible: root.currentTabId === "text"
 
                         Column {
                             width: tabColumn.width
@@ -1375,106 +1487,6 @@ PanelFrame {
                                     step: 0.05
                                     from: 0
                                     onEdited: v => root.setTextAnim("animOut", "duration", v)
-                                }
-                            }
-                        }
-
-                        Column {
-                            width: tabColumn.width
-                            spacing: 8
-                            visible: root.clipKind !== "text" && root.clipKind !== "subtitle"
-
-                            Text {
-                                text: qsTr("Trim")
-                                HoverHandler { id: tipHover1217 }
-                                ThemedToolTip { text: qsTr("Which part of the source media this clip plays"); visible: tipHover1217.hovered }
-                                color: Theme.mutedForeground
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeXs
-                            }
-
-                            Row {
-                                width: parent.width
-                                spacing: 8
-
-                                Column {
-                                    width: (parent.width - parent.spacing) / 2
-                                    spacing: 4
-                                    Text {
-                                        text: qsTr("In point (s)")
-                                        HoverHandler { id: tipHover1231 }
-                                        ThemedToolTip { text: qsTr("Seconds into the source where this clip starts"); visible: tipHover1231.hovered }
-                                        color: Theme.mutedForeground
-                                        font.pixelSize: Theme.fontSizeXs
-                                        font.family: Theme.fontFamily
-                                    }
-                                    ThemedNumberField {
-                                        id: inPointField
-                                        to: 86400
-                                        unit: "s"
-                                        width: parent.width
-                                        decimals: 2
-                                        step: 0.1
-                                        from: 0
-                                        onEdited: v => applyTrim(v, root.clip.outPoint)
-                                    }
-                                }
-
-                                Column {
-                                    width: (parent.width - parent.spacing) / 2
-                                    spacing: 4
-                                    Text {
-                                        text: qsTr("Out point (s)")
-                                        HoverHandler { id: tipHover1252 }
-                                        ThemedToolTip { text: qsTr("Seconds into the source where this clip ends"); visible: tipHover1252.hovered }
-                                        color: Theme.mutedForeground
-                                        font.pixelSize: Theme.fontSizeXs
-                                        font.family: Theme.fontFamily
-                                    }
-                                    ThemedNumberField {
-                                        id: outPointField
-                                        to: 86400
-                                        unit: "s"
-                                        width: parent.width
-                                        decimals: 2
-                                        step: 0.1
-                                        from: 0
-                                        onEdited: v => applyTrim(root.clip.inPoint, v)
-                                    }
-                                }
-                            }
-                        }
-
-                        Column {
-                            width: tabColumn.width
-                            spacing: 4
-                            visible: clip.path !== undefined && clip.path.length > 0
-
-                            Text {
-                                text: qsTr("Path")
-                                color: Theme.mutedForeground
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeXs
-                            }
-
-                            Text {
-                                id: clipPathLabel
-                                text: clip.path || "—"
-                                color: Theme.panelForeground
-                                font.family: Theme.monoFontFamily
-                                font.pixelSize: Theme.fontSizeSm
-                                width: parent.width
-                                wrapMode: Text.WrapAnywhere
-                                // Capped: a deep path used to wrap unbounded and
-                                // dominate the whole General tab.
-                                maximumLineCount: 3
-                                elide: Text.ElideRight
-
-                                HoverHandler { id: pathHover }
-
-                                ThemedToolTip {
-                                    text: clip.path || ""
-                                    visible: pathHover.hovered && (clip.path || "").length > 0
                                 }
                             }
                         }
