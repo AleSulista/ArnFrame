@@ -21,6 +21,7 @@
 #include "engine/AudioFileWriter.h"
 #include "engine/DeepFilterDenoiser.h"
 #include "engine/MatteWriter.h"
+#include "engine/AudioOnsets.h"
 #include "engine/MediaWaveform.h"
 #include "engine/FaceLandmarker.h"
 #include "engine/FaceTrack.h"
@@ -32,6 +33,7 @@
 
 #include <QColor>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -1584,8 +1586,8 @@ QString AppController::imageUrl(const QString &path) const
 
 double AppController::snapTime(double seconds) const
 {
-    return drift::usToSeconds(
-        drift::snapTime(m_project, drift::secondsToUs(seconds), m_snapEnabled, m_playheadUs));
+    return drift::usToSeconds(drift::snapTime(m_project, drift::secondsToUs(seconds), m_snapEnabled,
+                                              m_playheadUs, m_beatSnapTargets));
 }
 
 drift::TimeUs AppController::clipDurationForAssetIndex(int assetIndex) const
@@ -1678,6 +1680,11 @@ void AppController::finishEdit(const QString &message)
         m_playback.setPlayheadUs(m_playheadUs);
     // Underlying audio may have moved; force the subtitle-lane waveform to recompute.
     m_subtitleWaveformCache.clear();
+    // Beats are expensive and explicitly requested, so they are dropped only when the mix
+    // itself changed — not on every edit. Keyframing is the whole point of having the grid
+    // up, and it runs through here too.
+    if (!m_beatAnalysis.isEmpty() && audioLayoutFingerprint() != m_beatAudioFingerprint)
+        clearBeatAnalysis();
     emit tracksChanged();
     emit selectionChanged();
     emit selectedClipDataChanged();
@@ -2037,7 +2044,7 @@ void AppController::trimClipLeft(int trackIndex, int clipIndex, double newStart)
 
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs snappedStart = drift::snapTime(m_project, drift::secondsToUs(newStart), m_snapEnabled,
-                                                       m_playheadUs);
+                                                       m_playheadUs, m_beatSnapTargets);
     const drift::TimeUs delta = snappedStart - clip.timelineStart;
     if (delta == 0)
         return;
@@ -2118,7 +2125,7 @@ void AppController::trimClipRight(int trackIndex, int clipIndex, double newEnd)
 
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs snappedEnd = drift::snapTime(m_project, drift::secondsToUs(newEnd), m_snapEnabled,
-                                                     m_playheadUs);
+                                                     m_playheadUs, m_beatSnapTargets);
     drift::TimeUs newDuration = snappedEnd - clip.timelineStart;
 
     const bool syntheticVisual = isSyntheticTimelineClip(clip.type);
@@ -2284,7 +2291,8 @@ void AppController::moveClipToTrack(int trackIndex, int clipIndex, int newTrackI
     fromTrack.clips.removeAt(clipIndex);
     drift::Clip moved = clip;
     moved.timelineStart = drift::resolveClipStart(m_project, toTrack, -1, drift::secondsToUs(newStart),
-                                                  moved.timelineDuration, m_snapEnabled, m_playheadUs);
+                                                  moved.timelineDuration, m_snapEnabled, m_playheadUs,
+                                                  m_beatSnapTargets);
     toTrack.clips.append(moved);
 
     syncLinkedPartnersFrom(m_project, moved);
@@ -4574,7 +4582,8 @@ void AppController::setClipStart(int trackIndex, int clipIndex, double start)
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs oldStart = clip.timelineStart;
     clip.timelineStart = drift::resolveClipStart(m_project, track, clipIndex, drift::secondsToUs(start),
-                                                 clip.timelineDuration, m_snapEnabled, m_playheadUs);
+                                                 clip.timelineDuration, m_snapEnabled, m_playheadUs,
+                                                 m_beatSnapTargets);
     applyRippleShift(track, clipIndex, clip.timelineStart - oldStart);
     pushProjectEdit(before, QStringLiteral("Start updated"));
     finishEdit(QStringLiteral("Start updated"));
@@ -6569,6 +6578,192 @@ QVariantList AppController::subtitleWaveformPeaks(double startSeconds, double du
     }
 
     return {};
+}
+
+// Everything the AudioMixer reads, and nothing else — so a transform keyframe edit does not
+// invalidate a beat grid while moving, trimming, retiming or muting the music does.
+QByteArray AppController::audioLayoutFingerprint() const
+{
+    QCryptographicHash hash(QCryptographicHash::Sha1);
+    for (const drift::Track &track : m_project.tracks()) {
+        if (track.type != drift::TrackType::Audio && track.type != drift::TrackType::Video)
+            continue;
+        hash.addData(track.muted ? "m" : "-");
+        for (const drift::Clip &clip : track.clips) {
+            const QString row = QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8|%9")
+                                    .arg(clip.assetId)
+                                    .arg(clip.timelineStart)
+                                    .arg(clip.timelineDuration)
+                                    .arg(clip.srcIn)
+                                    .arg(clip.srcOut)
+                                    .arg(clip.speed)
+                                    .arg(clip.reverse ? 1 : 0)
+                                    .arg(clip.suppressEmbeddedAudio ? 1 : 0)
+                                    .arg(clip.audioEffects.size());
+            hash.addData(row.toUtf8());
+            for (const auto &kv : clip.volume.keyframes().asKeyValueRange())
+                hash.addData(QStringLiteral("v%1:%2").arg(kv.first).arg(kv.second).toUtf8());
+            if (clip.hasSpeedCurve())
+                hash.addData("c");
+        }
+    }
+    return hash.result();
+}
+
+void AppController::analyzeBeats(double startSeconds, double durSeconds)
+{
+    if (durSeconds <= 0.0 || m_beatAnalysisRunning)
+        return;
+
+    // Already showing this exact range — nothing to redo.
+    if (!m_beatAnalysis.isEmpty()
+        && qFuzzyCompare(m_beatAnalysis.value(QStringLiteral("rangeStart")).toDouble() + 1.0,
+                         startSeconds + 1.0)
+        && qFuzzyCompare(m_beatAnalysis.value(QStringLiteral("rangeDuration")).toDouble() + 1.0,
+                         durSeconds + 1.0)) {
+        return;
+    }
+
+    const drift::TimeUs startUs = drift::secondsToUs(startSeconds);
+    const drift::TimeUs durUs = drift::secondsToUs(durSeconds);
+    const quint64 generation = ++m_beatAnalysisGeneration;
+
+    m_beatAnalysisRunning = true;
+    emit beatAnalysisChanged();
+
+    // Snapshot the project so the off-thread mixer never races the live one — same
+    // contract as subtitleWaveformPeaks. The fingerprint is taken from that same snapshot,
+    // so an edit landing mid-analysis is caught by the staleness check rather than being
+    // baked in as the state the result supposedly describes.
+    const drift::Project snap = m_project;
+    const QByteArray fingerprint = audioLayoutFingerprint();
+    (void)QtConcurrent::run([this, snap, startUs, durUs, startSeconds, durSeconds, generation,
+                             fingerprint] {
+        // 22050 rather than the 8000 used for voice peaks: hats and cymbals, the sharpest
+        // onset cues in music, live above 4 kHz.
+        const int rate = 22050;
+        const int frames = static_cast<int>((static_cast<double>(durUs) / 1'000'000.0) * rate);
+        AudioBeatAnalysis analysis;
+        if (frames > 0) {
+            QVector<float> stereo(static_cast<qsizetype>(frames) * 2, 0.0f);
+            AudioMixer mixer;
+            mixer.setProject(&snap);
+            mixer.mix(startUs, frames, rate, stereo.data());
+
+            QVector<float> mono(frames, 0.0f);
+            for (int i = 0; i < frames; ++i)
+                mono[i] = 0.5f * (stereo[i * 2] + stereo[i * 2 + 1]);
+
+            analysis = AudioOnsets::analyze(mono.constData(), frames, rate, startSeconds);
+        }
+        QMetaObject::invokeMethod(
+            this,
+            [this, analysis, startSeconds, durSeconds, generation, fingerprint] {
+                if (generation != m_beatAnalysisGeneration)
+                    return; // the user moved on; this result is for a range nobody is looking at
+                applyBeatAnalysis(analysis, startSeconds, durSeconds, fingerprint);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void AppController::applyBeatAnalysis(const AudioBeatAnalysis &analysis, double startSeconds,
+                                      double durSeconds, const QByteArray &fingerprint)
+{
+    QVariantList beats;
+    for (double b : analysis.beats)
+        beats.append(b);
+
+    QVariantList onsets;
+    for (const AudioOnset &o : analysis.onsets) {
+        onsets.append(QVariantMap{{QStringLiteral("seconds"), o.seconds},
+                                  {QStringLiteral("strength"), o.strength}});
+    }
+
+    m_beatAnalysis = QVariantMap{
+        {QStringLiteral("rangeStart"), startSeconds},
+        {QStringLiteral("rangeDuration"), durSeconds},
+        {QStringLiteral("bpm"), analysis.bpm},
+        {QStringLiteral("confidence"), analysis.confidence},
+        {QStringLiteral("beatsPerBar"), analysis.beatsPerBar},
+        {QStringLiteral("firstDownbeat"), analysis.firstDownbeat},
+        {QStringLiteral("beats"), beats},
+        {QStringLiteral("onsets"), onsets},
+    };
+
+    m_beatAnalysisRaw = analysis;
+    rebuildBeatSnapTargets();
+
+    m_beatAudioFingerprint = fingerprint;
+    m_beatAnalysisRunning = false;
+    emit beatAnalysisChanged();
+}
+
+// Beats first — they are the musically meaningful grid — then onsets that do not already
+// sit within a snap threshold of an accepted target. Without the thinning, a dense onset
+// list would leave no un-snapped position on the timeline.
+void AppController::rebuildBeatSnapTargets()
+{
+    m_beatSnapTargets.clear();
+
+    if (m_beatGridVisible) {
+        for (double b : std::as_const(m_beatAnalysisRaw.beats))
+            m_beatSnapTargets.append(drift::secondsToUs(b));
+    }
+    if (!m_onsetsVisible)
+        return;
+
+    for (const AudioOnset &o : std::as_const(m_beatAnalysisRaw.onsets)) {
+        const drift::TimeUs at = drift::secondsToUs(o.seconds);
+        bool crowded = false;
+        for (drift::TimeUs existing : std::as_const(m_beatSnapTargets)) {
+            if (qAbs(existing - at) < drift::kSnapThresholdUs) {
+                crowded = true;
+                break;
+            }
+        }
+        if (!crowded)
+            m_beatSnapTargets.append(at);
+    }
+}
+
+void AppController::setBeatGridVisible(bool visible)
+{
+    if (m_beatGridVisible == visible)
+        return;
+    m_beatGridVisible = visible;
+    rebuildBeatSnapTargets();
+    emit beatAnalysisChanged();
+}
+
+void AppController::setOnsetsVisible(bool visible)
+{
+    if (m_onsetsVisible == visible)
+        return;
+    m_onsetsVisible = visible;
+    rebuildBeatSnapTargets();
+    emit beatAnalysisChanged();
+}
+
+void AppController::clearBeatAnalysis()
+{
+    // Bump the generation so an in-flight job cannot repopulate what we just cleared.
+    ++m_beatAnalysisGeneration;
+    if (m_beatAnalysis.isEmpty() && !m_beatAnalysisRunning && !m_beatGridVisible
+        && !m_onsetsVisible) {
+        return;
+    }
+    m_beatAnalysis.clear();
+    m_beatAnalysisRaw = {};
+    m_beatSnapTargets.clear();
+    m_beatAudioFingerprint.clear();
+    m_beatAnalysisRunning = false;
+    // The layer toggles come down with the data. Leaving them lit over an empty result
+    // would show two active buttons and nothing drawn, and re-analyzing automatically
+    // would mean a full mix render on every clip nudge.
+    m_beatGridVisible = false;
+    m_onsetsVisible = false;
+    emit beatAnalysisChanged();
 }
 
 void AppController::restoreFilmstripsAfterLoad()

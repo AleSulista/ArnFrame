@@ -11,10 +11,15 @@ constexpr TimeUs kSubtitleClipDurationUs = 30 * kUsPerSecond;
 constexpr TimeUs kMinClipDurationUs = kUsPerSecond / 10;
 constexpr TimeUs kSnapThresholdUs = 150'000;
 
-TimeUs snapTime(const Project &project, TimeUs time, bool snapEnabled, TimeUs playheadUs);
+// `extraTargets` are additional snap positions supplied by the caller — currently the
+// detected beat grid, which is analysis state rather than something the project stores.
+// Core never learns what a beat is; it just snaps to whatever times it is handed.
+TimeUs snapTime(const Project &project, TimeUs time, bool snapEnabled, TimeUs playheadUs,
+                const QList<TimeUs> &extraTargets = {});
 
 TimeUs resolveClipStart(const Project &project, const Track &track, int excludeClipIndex,
-                        TimeUs desiredStart, TimeUs duration, bool snapEnabled, TimeUs playheadUs);
+                        TimeUs desiredStart, TimeUs duration, bool snapEnabled, TimeUs playheadUs,
+                        const QList<TimeUs> &extraTargets = {});
 
 TrackType trackTypeForClipType(ClipType type);
 

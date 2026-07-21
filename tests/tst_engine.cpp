@@ -20,6 +20,7 @@
 #include "engine/AudioEffectCatalog.h"
 #include "engine/AudioEffectChain.h"
 #include "engine/AudioFileWriter.h"
+#include "engine/AudioOnsets.h"
 #include "engine/DeepFilterDenoiser.h"
 #include "engine/EffectCatalog.h"
 #include "engine/EffectPackageLoader.h"
@@ -120,6 +121,8 @@ private slots:
     void audioEffectChainBypassesUnknownEffect();
     void audioEffectStreamIsContinuousAcrossBlocks();
     void audioEffectFlangerProcessesSignal();
+    void onsetsDetectClickTrackTempo();
+    void onsetsIgnoreSilence();
     void denoiseAuxiliaryConstantsRoundTrip();
     void denoisePreservesLengthAndSilence();
     void denoiseRemovesBroadbandNoise();
@@ -2985,6 +2988,67 @@ void EngineTest::audioFileWriterRoundTripsThroughClipReader()
     // 0.5 amplitude sine -> 0.3536 RMS. FLAC is lossless, so this is tight.
     QVERIFY2(std::abs(outRms - 0.3536) < 0.02,
              qPrintable(QStringLiteral("round-tripped RMS %1").arg(outRms)));
+}
+
+void EngineTest::onsetsDetectClickTrackTempo()
+{
+    constexpr int kRate = 22050;
+    constexpr double kPeriod = 0.5; // 120 BPM
+    constexpr int kClicks = 20;
+    constexpr int kFrames = int(kRate * kPeriod * kClicks);
+
+    // Exponentially decaying noise bursts — broadband, so every FFT bin jumps at once.
+    std::vector<float> pcm(kFrames, 0.0f);
+    std::mt19937 rng(1234);
+    std::uniform_real_distribution<float> noise(-1.0f, 1.0f);
+    for (int c = 0; c < kClicks; ++c) {
+        const int at = int(c * kPeriod * kRate);
+        for (int i = 0; i < kRate / 20 && at + i < kFrames; ++i)
+            pcm[size_t(at + i)] = noise(rng) * std::exp(-i / (kRate * 0.01f));
+    }
+
+    const AudioBeatAnalysis a = AudioOnsets::analyze(pcm.data(), kFrames, kRate, 0.0);
+
+    QVERIFY2(std::abs(a.bpm - 120.0) < 2.0,
+             qPrintable(QStringLiteral("bpm %1").arg(a.bpm)));
+    QVERIFY2(a.confidence > 0.5, qPrintable(QStringLiteral("confidence %1").arg(a.confidence)));
+    // Including the click at sample 0 — flux only sees it because analyze() pads the front.
+    QCOMPARE(a.onsets.size(), kClicks);
+    for (int i = 0; i < a.onsets.size(); ++i) {
+        const double expected = i * kPeriod;
+        QVERIFY2(std::abs(a.onsets[i].seconds - expected) < 0.025,
+                 qPrintable(QStringLiteral("onset %1 at %2, expected %3")
+                                .arg(i).arg(a.onsets[i].seconds).arg(expected)));
+    }
+
+    // The grid must line up with the clicks, not merely have the right spacing.
+    QVERIFY(!a.beats.isEmpty());
+    for (double b : a.beats) {
+        const double offset = std::fmod(b + kPeriod / 2, kPeriod) - kPeriod / 2;
+        QVERIFY2(std::abs(offset) < 0.03, qPrintable(QStringLiteral("beat at %1").arg(b)));
+    }
+
+    // Times are absolute: the same PCM offset into the timeline shifts everything.
+    const AudioBeatAnalysis shifted = AudioOnsets::analyze(pcm.data(), kFrames, kRate, 7.5);
+    QVERIFY(std::abs(shifted.onsets.first().seconds - 7.5) < 0.025);
+}
+
+void EngineTest::onsetsIgnoreSilence()
+{
+    constexpr int kRate = 22050;
+    const std::vector<float> silence(kRate * 5, 0.0f);
+
+    const AudioBeatAnalysis a = AudioOnsets::analyze(silence.data(), int(silence.size()), kRate, 0.0);
+    QVERIFY(a.onsets.isEmpty());
+    QCOMPARE(a.bpm, 0.0);
+    QVERIFY(a.beats.isEmpty());
+
+    // Too short to say anything about tempo, even with content.
+    std::vector<float> blip(kRate, 0.0f);
+    for (int i = 0; i < kRate / 40; ++i)
+        blip[size_t(i + 1000)] = 0.8f;
+    const AudioBeatAnalysis b = AudioOnsets::analyze(blip.data(), int(blip.size()), kRate, 0.0);
+    QCOMPARE(b.bpm, 0.0);
 }
 
 QTEST_MAIN(EngineTest)

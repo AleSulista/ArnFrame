@@ -147,6 +147,8 @@ add_library(driftengine STATIC
     src/engine/MediaThumbnail.cpp
     src/engine/MediaWaveform.h
     src/engine/MediaWaveform.cpp
+    src/engine/AudioOnsets.h
+    src/engine/AudioOnsets.cpp
     src/engine/Exporter.h
     src/engine/Exporter.cpp
     src/engine/ClipReader.h

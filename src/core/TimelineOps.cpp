@@ -6,7 +6,8 @@
 
 namespace drift {
 
-TimeUs snapTime(const Project &project, TimeUs time, bool snapEnabled, TimeUs playheadUs)
+TimeUs snapTime(const Project &project, TimeUs time, bool snapEnabled, TimeUs playheadUs,
+                const QList<TimeUs> &extraTargets)
 {
     if (!snapEnabled)
         return qMax<TimeUs>(0, time);
@@ -18,6 +19,7 @@ TimeUs snapTime(const Project &project, TimeUs time, bool snapEnabled, TimeUs pl
             targets.append(clip.timelineEnd());
         }
     }
+    targets.append(extraTargets);
 
     TimeUs best = time;
     TimeUs bestDistance = kSnapThresholdUs;
@@ -33,9 +35,10 @@ TimeUs snapTime(const Project &project, TimeUs time, bool snapEnabled, TimeUs pl
 }
 
 TimeUs resolveClipStart(const Project &project, const Track &track, int excludeClipIndex,
-                        TimeUs desiredStart, TimeUs duration, bool snapEnabled, TimeUs playheadUs)
+                        TimeUs desiredStart, TimeUs duration, bool snapEnabled, TimeUs playheadUs,
+                        const QList<TimeUs> &extraTargets)
 {
-    TimeUs start = snapTime(project, desiredStart, snapEnabled, playheadUs);
+    TimeUs start = snapTime(project, desiredStart, snapEnabled, playheadUs, extraTargets);
 
     struct Interval {
         TimeUs begin;

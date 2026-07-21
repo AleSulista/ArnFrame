@@ -129,6 +129,13 @@ QtObject {
     readonly property color waveformColor: "#ffffffb3" // rgba(255,255,255,0.7) — on dark clip chrome
     // Waveform drawn on panel surfaces (subtitle cue lane, etc.): follows light/dark FG.
     readonly property color panelWaveformColor: darkMode ? "#ffffffb3" : "#212121b3"
+    // Detected beat grid in the keyframe strip. Bar lines get the stronger alpha; the
+    // beats between them the weaker one, so the metre reads at a glance without the grid
+    // competing with the keyframe curves drawn on top of it.
+    readonly property color beatBarColor: darkMode ? "#7ac8ff8c" : "#1f6fb24d"
+    readonly property color beatGridColor: darkMode ? "#7ac8ff47" : "#1f6fb230"
+    // Transients that do not land on the grid — drawn as short vertically-centered bars.
+    readonly property color beatOnsetColor: darkMode ? "#ffffff8c" : "#2121218c"
     // Video clips normally show real thumbnails (always photographic/dark-ish); until
     // thumbnail generation exists, use a fixed dark placeholder so the white filename
     // scrim stays legible in light mode too instead of following panelAccent.

@@ -2,6 +2,7 @@
 
 #include "core/Project.h"
 #include "core/Time.h"
+#include "engine/AudioOnsets.h"
 #include "engine/ProjectBundle.h"
 #include "engine/Sam2Segmenter.h"
 #include "ClipListModel.h"
@@ -46,6 +47,17 @@ class AppController : public QObject
                    NOTIFY keyframeGraphPropertyChanged)
     Q_PROPERTY(QStringList keyframeGraphProperties READ keyframeGraphProperties
                    WRITE setKeyframeGraphProperties NOTIFY keyframeGraphPropertyChanged)
+    // Detected beats / onsets for the keyframe strip. Transient analysis state — never
+    // saved with the project, cleared whenever the underlying audio could have moved.
+    Q_PROPERTY(QVariantMap beatAnalysis READ beatAnalysis NOTIFY beatAnalysisChanged)
+    Q_PROPERTY(bool beatAnalysisRunning READ beatAnalysisRunning NOTIFY beatAnalysisChanged)
+    // The grid and the transients are independently shown and snapped to. Both come out of
+    // one analysis pass — the tempo is derived from the same onset envelope — so these
+    // gate display and snapping, not the DSP.
+    Q_PROPERTY(bool beatGridVisible READ beatGridVisible WRITE setBeatGridVisible
+                   NOTIFY beatAnalysisChanged)
+    Q_PROPERTY(bool onsetsVisible READ onsetsVisible WRITE setOnsetsVisible
+                   NOTIFY beatAnalysisChanged)
     Q_PROPERTY(bool subtitleEditing READ subtitleEditing WRITE setSubtitleEditing NOTIFY subtitleEditingChanged)
     Q_PROPERTY(int selectedSubtitleCue READ selectedSubtitleCue WRITE setSelectedSubtitleCue
                    NOTIFY selectedSubtitleCueChanged)
@@ -453,6 +465,17 @@ public:
     double packageProgress() const { return m_packageProgress; }
     Q_INVOKABLE QVariantList subtitleWaveformPeaks(double startSeconds, double durSeconds,
                                                    int sampleCount = 240) const;
+    // Beat / onset detection over the mixed timeline audio in [startSeconds, +durSeconds).
+    // Explicitly triggered from the keyframe strip: it renders the mix, so it must never
+    // fire off a mere selection change. Result lands in `beatAnalysis`.
+    Q_INVOKABLE void analyzeBeats(double startSeconds, double durSeconds);
+    Q_INVOKABLE void clearBeatAnalysis();
+    QVariantMap beatAnalysis() const { return m_beatAnalysis; }
+    bool beatAnalysisRunning() const { return m_beatAnalysisRunning; }
+    bool beatGridVisible() const { return m_beatGridVisible; }
+    void setBeatGridVisible(bool visible);
+    bool onsetsVisible() const { return m_onsetsVisible; }
+    void setOnsetsVisible(bool visible);
     // Writes a .drift bundle keeping each asset's current storage mode, so a referencing project
     // stays instant to save and a packaged one stays self-contained.
     Q_INVOKABLE void saveProject(const QUrl &url);
@@ -532,6 +555,7 @@ signals:
     void projectMutated();
     void waveformReady(const QString &path);
     void subtitleWaveformReady(double startSeconds, double durSeconds, int sampleCount);
+    void beatAnalysisChanged();
     void guidesChanged();
     void shortcutsChanged();
     void canvasCropModeChanged();
@@ -547,6 +571,13 @@ protected:
     void finishEdit(const QString &message);
     // Keeps the keyframe strip's index-addressed effect series in sync after an effect is removed.
     void dropKeyframeGraphPropertiesForEffect(int removedIndex);
+    // Publishes a finished beat analysis into m_beatAnalysis / m_beatSnapTargets.
+    void applyBeatAnalysis(const AudioBeatAnalysis &analysis, double startSeconds, double durSeconds,
+                           const QByteArray &fingerprint);
+    // Digest of everything the AudioMixer reads; a change means detected beats are stale.
+    QByteArray audioLayoutFingerprint() const;
+    // Recollects m_beatSnapTargets from whichever layers are currently visible.
+    void rebuildBeatSnapTargets();
     void refreshSegmentationPreview();
     void finalizeFaceDetection(const QString &clipId, const QString &trackPath,
                                drift::TimeUs srcOffsetUs);
@@ -704,6 +735,19 @@ protected:
     // span, voice band-passed. Keyed by "<startUs>:<durUs>"; invalidated on edits.
     mutable QHash<QString, QVariantList> m_subtitleWaveformCache;
     mutable QSet<QString> m_subtitleWaveformPending;
+
+    // Beat detection. Only one range is live at a time, so this needs no cache — just a
+    // generation counter so a job whose range the user has since left is dropped on arrival.
+    AudioBeatAnalysis m_beatAnalysisRaw; // kept so snap targets can be rebuilt per layer
+    QVariantMap m_beatAnalysis;          // the same result, shaped for QML
+    bool m_beatAnalysisRunning = false;
+    quint64 m_beatAnalysisGeneration = 0;
+    QByteArray m_beatAudioFingerprint;
+    bool m_beatGridVisible = false;
+    bool m_onsetsVisible = false;
+    // Beats and onsets as snap targets, thinned so a dense onset list cannot make every
+    // position on the timeline snap to something. Only the visible layers contribute.
+    QList<drift::TimeUs> m_beatSnapTargets;
 
     // Save state / autosave / crash recovery.
     QString m_currentProjectPath;

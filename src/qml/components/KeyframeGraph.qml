@@ -187,6 +187,39 @@ Item {
     readonly property real clipStart: clip.start || 0
     readonly property real clipDuration: Math.max(0.1, clip.duration || 1)
 
+    // Beat detection results for whatever range was last analyzed. Analysis is explicit
+    // (the gutter buttons) because it renders the timeline mix — never on selection change.
+    // The grid and the transients are separate layers over that one result.
+    readonly property var beats: EditorState.beatAnalysis
+    readonly property bool analyzed: !!beats && beats.rangeDuration > 0
+    readonly property bool hasGrid: EditorState.beatGridVisible && !!beats && !!beats.beats
+                                    && beats.beats.length > 0
+    readonly property bool hasOnsets: EditorState.onsetsVisible && !!beats && !!beats.onsets
+                                      && beats.onsets.length > 0
+    readonly property real bpm: (beats && beats.bpm) ? beats.bpm : 0
+
+    // Turning a layer on analyzes if this range has not been analyzed yet; analyzeBeats
+    // no-ops when the result is already current.
+    function showBeatLayer(gridLayer) {
+        if (gridLayer)
+            EditorState.beatGridVisible = true
+        else
+            EditorState.onsetsVisible = true
+        EditorState.analyzeBeats(root.clipStart, root.clipDuration)
+    }
+
+    // An onset this close to a grid line is already represented by it — drawing both
+    // would just thicken the same line.
+    function nearAnyBeat(seconds) {
+        if (!beats || !beats.beats)
+            return false
+        for (let i = 0; i < beats.beats.length; ++i) {
+            if (Math.abs(beats.beats[i] - seconds) < 0.06)
+                return true
+        }
+        return false
+    }
+
     height: visible ? 88 : 0
     visible: (propertiesTab === "transform" || propertiesTab === "effects")
              && hasClip && clip && series.length > 0
@@ -228,12 +261,60 @@ Item {
                 anchors.margins: 6
                 spacing: 4
 
-                Text {
-                    text: qsTr("Keys")
-                    color: Theme.mutedForeground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeXs
-                    font.weight: Font.Medium
+                Row {
+                    width: parent.width
+                    spacing: 4
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Keys")
+                        color: Theme.mutedForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeXs
+                        font.weight: Font.Medium
+                    }
+
+                    // Beat grid / tempo.
+                    IconButton {
+                        anchors.verticalCenter: parent.verticalCenter
+                        glyph: Theme.icons.music
+                        variant: "text"
+                        buttonSize: 20
+                        iconSize: 14
+                        active: EditorState.beatGridVisible
+                        enabled: !EditorState.beatAnalysisRunning
+                        tooltip: EditorState.beatAnalysisRunning
+                                 ? qsTr("Analyzing…")
+                                 : (EditorState.beatGridVisible ? qsTr("Hide the beat grid")
+                                                                : qsTr("Detect tempo and show the beat grid"))
+                        onClicked: {
+                            if (EditorState.beatGridVisible)
+                                EditorState.beatGridVisible = false
+                            else
+                                root.showBeatLayer(true)
+                        }
+                    }
+
+                    // Individual transients.
+                    IconButton {
+                        anchors.verticalCenter: parent.verticalCenter
+                        glyph: Theme.icons.audioLines
+                        variant: "text"
+                        buttonSize: 20
+                        iconSize: 14
+                        active: EditorState.onsetsVisible
+                        enabled: !EditorState.beatAnalysisRunning
+                        tooltip: EditorState.beatAnalysisRunning
+                                 ? qsTr("Analyzing…")
+                                 : (EditorState.onsetsVisible ? qsTr("Hide onsets")
+                                                              : qsTr("Detect onsets in the audio under this clip"))
+                        onClicked: {
+                            if (EditorState.onsetsVisible)
+                                EditorState.onsetsVisible = false
+                            else
+                                root.showBeatLayer(false)
+                        }
+                    }
                 }
 
                 // Legend for what the inspector currently has selected — one chip
@@ -262,7 +343,17 @@ Item {
                 Text {
                     width: parent.width
                     wrapMode: Text.WordWrap
-                    text: root.keyCount === 0 ? qsTr("No keys") : (root.keyCount + qsTr(" key(s)"))
+                    text: {
+                        const keys = root.keyCount === 0 ? qsTr("No keys")
+                                                         : (root.keyCount + qsTr(" key(s)"))
+                        if (!EditorState.beatGridVisible || !root.analyzed)
+                            return keys
+                        // The detector publishes no bpm when the tempo estimate was not
+                        // confident — say so, rather than leaving the grid button lit over
+                        // an empty lane. Onsets may still be perfectly usable.
+                        return root.bpm > 0 ? keys + " · " + Math.round(root.bpm) + qsTr(" BPM")
+                                            : keys + qsTr(" · no tempo")
+                    }
                     color: Theme.mutedForeground
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeXs
@@ -324,6 +415,71 @@ Item {
                         height: parent.height
                         color: Theme.primary
                         z: 3
+                    }
+
+                    // Detected beat grid + onset ticks, under the curves and key dots.
+                    Canvas {
+                        id: beatCanvas
+                        anchors.fill: parent
+                        z: 0
+                        visible: root.hasGrid || root.hasOnsets
+
+                        onPaint: {
+                            const ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            const a = root.beats
+                            if (!a)
+                                return
+
+                            if (root.hasGrid) {
+                                const perBar = a.beatsPerBar || 4
+                                const first = a.firstDownbeat || 0
+                                for (let i = 0; i < a.beats.length; ++i) {
+                                    const isBar = ((i - first) % perBar + perBar) % perBar === 0
+                                    const px = Math.round(root.xForSeconds(a.beats[i]))
+                                    if (px < -2 || px > width + 2)
+                                        continue
+                                    ctx.fillStyle = String(isBar ? Theme.beatBarColor
+                                                                 : Theme.beatGridColor)
+                                    ctx.fillRect(px, 0, isBar ? 2 : 1, height)
+                                }
+                            }
+
+                            if (!root.hasOnsets)
+                                return
+
+                            // With the grid up, only transients that miss it — the rest would
+                            // just double-draw lines already there. Height tracks strength.
+                            ctx.fillStyle = String(Theme.beatOnsetColor)
+                            const onsets = a.onsets || []
+                            for (let j = 0; j < onsets.length; ++j) {
+                                if (root.hasGrid && root.nearAnyBeat(onsets[j].seconds))
+                                    continue
+                                const ox = Math.round(root.xForSeconds(onsets[j].seconds))
+                                if (ox < -2 || ox > width + 2)
+                                    continue
+                                // Centered rather than sitting on the floor: a 1px tick down
+                                // at the bottom edge read as chart furniture next to the
+                                // full-height beat lines.
+                                const h = Math.max(6, onsets[j].strength * height * 0.5)
+                                ctx.fillRect(ox - 1, (height - h) / 2, 2, h)
+                            }
+                        }
+
+                        // The canvas is hidden until the first analysis lands, and a
+                        // requestPaint issued while hidden is dropped.
+                        onVisibleChanged: if (visible) requestPaint()
+
+                        Connections {
+                            target: root
+                            function onBeatsChanged() { beatCanvas.requestPaint() }
+                            // Toggling a layer leaves beatAnalysis itself untouched, so
+                            // onBeatsChanged does not fire for it.
+                            function onHasGridChanged() { beatCanvas.requestPaint() }
+                            function onHasOnsetsChanged() { beatCanvas.requestPaint() }
+                            function onPxPerSecondChanged() { beatCanvas.requestPaint() }
+                            function onContentXChanged() { beatCanvas.requestPaint() }
+                        }
                     }
 
                     Canvas {
@@ -416,10 +572,13 @@ Item {
                                     const entry = keyDot.entry
                                     const baseSec = keyDot.modelData.seconds
                                     const baseVal = keyDot.modelData.value
+                                    // snapTime pulls in beats, clip edges and the playhead,
+                                    // and is a no-op when the toolbar's snap toggle is off.
+                                    const rawSec = baseSec + translation.x / root.pxPerSecond
                                     const newSec = Math.max(
                                         root.clipStart,
                                         Math.min(root.clipStart + root.clipDuration,
-                                                 baseSec + translation.x / root.pxPerSecond))
+                                                 EditorState.snapTime(rawSec)))
                                     const newVal = Math.max(
                                         entry.valueMin,
                                         Math.min(entry.valueMax,
