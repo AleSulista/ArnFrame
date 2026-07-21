@@ -792,9 +792,20 @@ QVariantList keyframeListToVariant(const drift::KeyframeTrack<double> &track, dr
 {
     QVariantList out;
     for (auto it = track.keyframes().constBegin(); it != track.keyframes().constEnd(); ++it) {
+        const drift::Keyframe<double> &key = it.value();
+        // Handle dx reaches QML in seconds, matching `seconds`, so the curve editor can work
+        // in one unit throughout instead of converting on every drag.
         out.append(QVariantMap{
             {QStringLiteral("seconds"), drift::usToSeconds(timelineStart + it.key())},
-            {QStringLiteral("value"), it.value()},
+            {QStringLiteral("value"), key.value},
+            {QStringLiteral("inDx"), drift::usToSeconds(static_cast<drift::TimeUs>(key.inDx))},
+            {QStringLiteral("inDy"), key.inDy},
+            {QStringLiteral("outDx"), drift::usToSeconds(static_cast<drift::TimeUs>(key.outDx))},
+            {QStringLiteral("outDy"), key.outDy},
+            {QStringLiteral("corner"), key.corner},
+            {QStringLiteral("hold"), key.hold},
+            {QStringLiteral("easing"), drift::interpolationToString(track.easingAt(it.key()))},
+            {QStringLiteral("custom"), track.hasCustomTangents(it.key())},
         });
     }
     return out;
@@ -802,8 +813,9 @@ QVariantList keyframeListToVariant(const drift::KeyframeTrack<double> &track, dr
 
 QVariantMap keyframeTrackToMap(const drift::KeyframeTrack<double> &track, drift::TimeUs timelineStart)
 {
+    // `interpolation` is per-key now and travels inside each point; the map keeps its shape so
+    // the inspector's bindings do not all have to change at once.
     return {
-        {QStringLiteral("interpolation"), drift::interpolationToString(track.interpolation())},
         {QStringLiteral("points"), keyframeListToVariant(track, timelineStart)},
     };
 }
@@ -898,7 +910,7 @@ void remapKeyframeTrack(drift::KeyframeTrack<T> &dst, const drift::KeyframeTrack
 
     const drift::TimeUs span = from.srcOut - from.srcIn;
     drift::KeyframeTrack<T> out;
-    out.setInterpolation(src.interpolation());
+    // Tangents travel inside each key, so remapping the times carries the shape with them.
     for (auto it = src.keyframes().constBegin(); it != src.keyframes().constEnd(); ++it) {
         const drift::TimeUs sourceOffset =
             from.hasSpeedCurve() ? from.speedCurve.sourceOffsetForTimelineOffset(it.key(), span)
@@ -5832,6 +5844,66 @@ void AppController::previewMoveClipKeyframe(int trackIndex, int clipIndex, const
     emitPreviewFrame();
 }
 
+// Locates a single key for the tangent editors. `atSeconds` is a timeline position; keys are
+// stored clip-relative, and the strip reports them on the timeline, so it converts back here.
+drift::Keyframe<double> *AppController::keyframeAt(int trackIndex, int clipIndex,
+                                                   const QString &prop, double atSeconds)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return nullptr;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return nullptr;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    drift::KeyframeTrack<double> *kt = keyframeTrackForProp(clip, prop, /*createIfMissing=*/false);
+    if (!kt || kt->isEmpty())
+        return nullptr;
+
+    const drift::TimeUs local = drift::secondsToUs(atSeconds) - clip.timelineStart;
+    const drift::TimeUs at = kt->nearestKeyframe(local, drift::kUsPerSecond / 60);
+    if (at < 0)
+        return nullptr;
+    return kt->keyframeRef(at);
+}
+
+// Handles are authored in seconds on the QML side and stored in µs. Directions are enforced
+// here rather than trusted from the caller: an out-handle reaching backwards (or an in-handle
+// forwards) would fold the segment and make the curve multi-valued in time.
+void AppController::applyTangents(drift::Keyframe<double> &key, double inDx, double inDy,
+                                  double outDx, double outDy, bool corner)
+{
+    key.inDx = qMin(0.0, static_cast<double>(drift::secondsToUs(inDx)));
+    key.outDx = qMax(0.0, static_cast<double>(drift::secondsToUs(outDx)));
+    key.inDy = inDy;
+    key.outDy = outDy;
+    key.corner = corner;
+    // A key can be shaped by hand and holding at the same time in the data, but the hold wins
+    // when evaluated, which would silently discard the drag. Dropping it is the honest move.
+    key.hold = false;
+}
+
+// The inspector's live readout. Exposed so QML does not have to carry its own copy of the
+// interpolation math — which is no longer a two-line lerp now that keys have tangents.
+double AppController::propertyValueAt(int trackIndex, int clipIndex, const QString &prop,
+                                      double atSeconds, double fallback) const
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return fallback;
+
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return fallback;
+
+    const drift::Clip &clip = track.clips.at(clipIndex);
+    const drift::KeyframeTrack<double> *kt = keyframeTrackForProp(clip, prop);
+    if (!kt || kt->isEmpty())
+        return fallback;
+
+    return kt->evaluateAt(drift::secondsToUs(atSeconds) - clip.timelineStart);
+}
+
 QVariantList AppController::clipKeyframes(int trackIndex, int clipIndex, const QString &prop) const
 {
     QVariantList out;
@@ -5862,13 +5934,61 @@ void AppController::setKeyframeInterpolation(int trackIndex, int clipIndex, cons
 
     drift::Clip &clip = track.clips[clipIndex];
     drift::KeyframeTrack<double> *kt = keyframeTrackForProp(clip, prop, /*createIfMissing=*/true);
-    if (!kt)
+    if (!kt || kt->isEmpty())
+        return;
+
+    // Presets act on the key at the playhead. Without one there is nothing to shape — the mode
+    // is no longer a property-wide setting that can be armed ahead of the first key.
+    const drift::TimeUs local = m_playheadUs - clip.timelineStart;
+    const drift::TimeUs at = kt->nearestKeyframe(local, drift::kUsPerSecond / 30);
+    if (at < 0)
         return;
 
     const drift::Project before = m_project;
-    kt->setInterpolation(drift::interpolationFromString(mode));
-    pushProjectEdit(before, QStringLiteral("Keyframe interpolation changed"));
-    finishEdit(QStringLiteral("Keyframe interpolation updated"));
+    kt->setEasing(at, drift::interpolationFromString(mode));
+    pushProjectEdit(before, QStringLiteral("Keyframe easing changed"));
+    finishEdit(QStringLiteral("Keyframe easing updated"));
+}
+
+void AppController::setKeyframeTangents(int trackIndex, int clipIndex, const QString &prop,
+                                        double atSeconds, double inDx, double inDy, double outDx,
+                                        double outDy, bool corner)
+{
+    drift::Keyframe<double> *key = keyframeAt(trackIndex, clipIndex, prop, atSeconds);
+    if (!key)
+        return;
+
+    const drift::Project before = m_project;
+    applyTangents(*key, inDx, inDy, outDx, outDy, corner);
+    pushProjectEdit(before, QStringLiteral("Keyframe curve changed"));
+    finishEdit(QStringLiteral("Keyframe curve updated"));
+}
+
+void AppController::previewSetKeyframeTangents(int trackIndex, int clipIndex, const QString &prop,
+                                               double atSeconds, double inDx, double inDy,
+                                               double outDx, double outDy, bool corner)
+{
+    drift::Keyframe<double> *key = keyframeAt(trackIndex, clipIndex, prop, atSeconds);
+    if (!key)
+        return;
+
+    applyTangents(*key, inDx, inDy, outDx, outDy, corner);
+    emit tracksChanged();
+    emit selectedClipDataChanged();
+    emit projectMutated();
+}
+
+void AppController::setKeyframeHold(int trackIndex, int clipIndex, const QString &prop,
+                                    double atSeconds, bool hold)
+{
+    drift::Keyframe<double> *key = keyframeAt(trackIndex, clipIndex, prop, atSeconds);
+    if (!key || key->hold == hold)
+        return;
+
+    const drift::Project before = m_project;
+    key->hold = hold;
+    pushProjectEdit(before, QStringLiteral("Keyframe hold changed"));
+    finishEdit(hold ? QStringLiteral("Keyframe holds") : QStringLiteral("Keyframe interpolates"));
 }
 
 void AppController::resetClipTransform(int trackIndex, int clipIndex)
@@ -6601,8 +6721,18 @@ QByteArray AppController::audioLayoutFingerprint() const
                                     .arg(clip.suppressEmbeddedAudio ? 1 : 0)
                                     .arg(clip.audioEffects.size());
             hash.addData(row.toUtf8());
-            for (const auto &kv : clip.volume.keyframes().asKeyValueRange())
-                hash.addData(QStringLiteral("v%1:%2").arg(kv.first).arg(kv.second).toUtf8());
+            // Tangents shape the volume ramp, so they belong in the digest alongside the values.
+            for (const auto &kv : clip.volume.keyframes().asKeyValueRange()) {
+                hash.addData(QStringLiteral("v%1:%2:%3:%4:%5:%6:%7")
+                                 .arg(kv.first)
+                                 .arg(kv.second.value)
+                                 .arg(kv.second.inDx)
+                                 .arg(kv.second.inDy)
+                                 .arg(kv.second.outDx)
+                                 .arg(kv.second.outDy)
+                                 .arg(kv.second.hold ? 1 : 0)
+                                 .toUtf8());
+            }
             if (clip.hasSpeedCurve())
                 hash.addData("c");
         }

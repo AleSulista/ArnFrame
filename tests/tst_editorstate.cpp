@@ -422,11 +422,37 @@ void EditorStateTest::effectParamKeyframes()
     QCOMPARE(keys.first().toMap().value(QStringLiteral("value")).toDouble(), 0.5);
     QCOMPARE(keys.last().toMap().value(QStringLiteral("seconds")).toDouble(), 2.0);
 
+    // Easing applies to the key at the playhead, not to the whole track, and is reported
+    // back on that key rather than on the track it belongs to.
+    state.setPlayheadSeconds(0.0);
     state.setKeyframeInterpolation(track, clip, prop, QStringLiteral("ease"));
-    params = state.selectedClipData().value(QStringLiteral("effects")).toList()
-                 .first().toMap().value(QStringLiteral("params")).toList();
-    QCOMPARE(params.first().toMap().value(QStringLiteral("keyframes")).toMap()
-                 .value(QStringLiteral("interpolation")).toString(), QStringLiteral("ease"));
+    keys = state.clipKeyframes(track, clip, prop);
+    QCOMPARE(keys.first().toMap().value(QStringLiteral("easing")).toString(),
+             QStringLiteral("ease"));
+    QVERIFY(!keys.first().toMap().value(QStringLiteral("custom")).toBool());
+    // The key at 2.0s was not touched, so it keeps the straight-line default.
+    QCOMPARE(keys.last().toMap().value(QStringLiteral("easing")).toString(),
+             QStringLiteral("linear"));
+
+    // Dragging a tangent puts the key into a shape no preset describes.
+    state.setKeyframeTangents(track, clip, prop, 0.0, 0.0, 0.0, 0.4, 1.7, false);
+    keys = state.clipKeyframes(track, clip, prop);
+    QVERIFY(keys.first().toMap().value(QStringLiteral("custom")).toBool());
+    QVERIFY(std::abs(keys.first().toMap().value(QStringLiteral("outDx")).toDouble() - 0.4) < 1e-6);
+
+    // Hold overrides the tangents when evaluated but does not destroy them, so switching it
+    // back off restores the shape the user drew instead of silently flattening it.
+    state.setKeyframeHold(track, clip, prop, 0.0, true);
+    keys = state.clipKeyframes(track, clip, prop);
+    QVERIFY(keys.first().toMap().value(QStringLiteral("hold")).toBool());
+    QCOMPARE(keys.first().toMap().value(QStringLiteral("easing")).toString(),
+             QStringLiteral("hold"));
+
+    state.setKeyframeHold(track, clip, prop, 0.0, false);
+    keys = state.clipKeyframes(track, clip, prop);
+    QVERIFY(!keys.first().toMap().value(QStringLiteral("hold")).toBool());
+    QVERIFY(std::abs(keys.first().toMap().value(QStringLiteral("outDx")).toDouble() - 0.4) < 1e-6);
+    QVERIFY(keys.first().toMap().value(QStringLiteral("custom")).toBool());
 
     state.removeClipKeyframe(track, clip, prop, 2.0);
     QCOMPARE(state.clipKeyframes(track, clip, prop).size(), 1);

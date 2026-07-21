@@ -22,6 +22,8 @@ private slots:
     void keyframeHoldInterpolation();
     void keyframeLinearInterpolation();
     void keyframeEaseInterpolation();
+    void keyframeBezierTangents();
+    void legacyTrackInterpolationMigratesLosslessly();
     void keyframeNearestQuery();
     void projectSerializationRoundTrip();
     void projectMetadataRoundTrip();
@@ -80,9 +82,10 @@ void CoreTest::timeConversion()
 void CoreTest::keyframeHoldInterpolation()
 {
     drift::KeyframeTrack<double> track;
-    track.setInterpolation(drift::Interpolation::Hold);
     track.setKeyframe(0, 0.0);
     track.setKeyframe(drift::secondsToUs(2.0), 1.0);
+    // Hold is a property of the key you are leaving, not of the whole track.
+    track.setEasing(0, drift::Interpolation::Hold);
     QCOMPARE(track.evaluateAt(drift::secondsToUs(1.5)), 0.0);
     QCOMPARE(track.evaluateAt(drift::secondsToUs(2.0)), 1.0);
 }
@@ -95,18 +98,143 @@ void CoreTest::keyframeLinearInterpolation()
     QCOMPARE(track.evaluateAt(drift::secondsToUs(1.0)), 0.5);
 }
 
+void CoreTest::keyframeBezierTangents()
+{
+    drift::KeyframeTrack<double> track;
+    track.setKeyframe(0, 0.0);
+    track.setKeyframe(drift::secondsToUs(1.0), 10.0);
+
+    // Sharp attack, long settle: the out-handle of the first key held flat and far to the
+    // right pushes the curve above the straight line for most of the segment.
+    drift::Keyframe<double> *first = track.keyframeRef(0);
+    QVERIFY(first != nullptr);
+    first->outDx = drift::secondsToUs(0.8);
+    first->outDy = 9.0;
+    QVERIFY(track.evaluateAt(drift::secondsToUs(0.25)) > 2.5);
+
+    // The endpoints stay pinned no matter what the handles do.
+    QCOMPARE(track.evaluateAt(0), 0.0);
+    QCOMPARE(track.evaluateAt(drift::secondsToUs(1.0)), 10.0);
+
+    // A handle reaching past the segment must not fold the curve back on itself: time still
+    // maps to exactly one value, so the result stays monotonic in a monotonic segment.
+    first->outDx = drift::secondsToUs(5.0);
+    first->outDy = 0.0;
+    double prevValue = -1.0;
+    for (int i = 0; i <= 20; ++i) {
+        const double v = track.evaluateAt(drift::secondsToUs(i / 20.0));
+        QVERIFY2(v >= prevValue - 1e-9, qPrintable(QStringLiteral("folded at %1").arg(i)));
+        prevValue = v;
+    }
+
+    // Custom tangents match no preset, which is what leaves the chips unlit.
+    QVERIFY(track.hasCustomTangents(0));
+    track.setEasing(0, drift::Interpolation::Linear);
+    QVERIFY(!track.hasCustomTangents(0));
+}
+
+void CoreTest::legacyTrackInterpolationMigratesLosslessly()
+{
+    // A project written before keyframes had tangents: one mode for the whole track.
+    const auto legacyJson = [](const QString &mode) {
+        return QJsonObject{
+            {QStringLiteral("interpolation"), mode},
+            {QStringLiteral("keyframes"),
+             QJsonArray{
+                 QJsonObject{{QStringLiteral("timeUs"), 0.0}, {QStringLiteral("value"), 0.0}},
+                 QJsonObject{{QStringLiteral("timeUs"), 1'000'000.0},
+                             {QStringLiteral("value"), 10.0}},
+             }},
+        };
+    };
+
+    // Build a real project, serialize it, then rewrite the keyframe block into the legacy
+    // shape — so the loader is exercised exactly as it would be on an old file.
+    drift::Project project;
+    project.tracks().append(drift::Track{});
+    drift::Clip clip;
+    clip.id = QStringLiteral("c1");
+    clip.timelineDuration = drift::secondsToUs(2.0);
+    drift::Effect effect;
+    effect.catalogId = QStringLiteral("adjust.contrast");
+    drift::KeyframeTrack<double> seed;
+    seed.setKeyframe(0, 0.0);
+    seed.setKeyframe(drift::secondsToUs(1.0), 10.0);
+    effect.paramKeyframes.insert(QStringLiteral("contrast"), seed);
+    clip.effects.append(effect);
+    project.tracks()[0].clips.append(clip);
+    const QJsonObject baseJson = project.toJson();
+
+    struct Case { const char *mode; double at0_25; };
+    const Case cases[] = {
+        {"linear", 2.5},     // straight line
+        {"ease", 1.5625},    // smoothstep(0.25) * 10
+        {"hold", 0.0},       // steps at the next key
+    };
+
+    for (const Case &c : cases) {
+        QJsonObject projectJson = baseJson;
+        QJsonArray tracks = projectJson.value(QStringLiteral("tracks")).toArray();
+        QJsonObject trackJson = tracks[0].toObject();
+        QJsonArray clips = trackJson.value(QStringLiteral("clips")).toArray();
+        QJsonObject clipJson = clips[0].toObject();
+        QJsonArray effects = clipJson.value(QStringLiteral("effects")).toArray();
+        QJsonObject effectJson = effects[0].toObject();
+        QJsonObject params;
+        params.insert(QStringLiteral("contrast"), legacyJson(QString::fromLatin1(c.mode)));
+        effectJson.insert(QStringLiteral("paramKeyframes"), params);
+        effects[0] = effectJson;
+        clipJson.insert(QStringLiteral("effects"), effects);
+        clips[0] = clipJson;
+        trackJson.insert(QStringLiteral("clips"), clips);
+        tracks[0] = trackJson;
+        projectJson.insert(QStringLiteral("tracks"), tracks);
+
+        QString error;
+        const drift::Project loaded = drift::Project::fromJson(projectJson, &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+
+        // The loader may materialise default tracks, so find the clip rather than index into it.
+        const drift::Clip *found = nullptr;
+        for (const drift::Track &t : loaded.tracks()) {
+            for (const drift::Clip &cl : t.clips) {
+                if (!cl.effects.isEmpty())
+                    found = &cl;
+            }
+        }
+        QVERIFY(found != nullptr);
+
+        const drift::KeyframeTrack<double> &kt =
+            found->effects[0].paramKeyframes.value(QStringLiteral("contrast"));
+        QCOMPARE(kt.keyframes().size(), 2);
+        const double got = kt.evaluateAt(drift::secondsToUs(0.25));
+        QVERIFY2(std::abs(got - c.at0_25) < 0.01,
+                 qPrintable(QStringLiteral("%1: got %2, expected %3")
+                                .arg(QString::fromLatin1(c.mode)).arg(got).arg(c.at0_25)));
+    }
+}
+
 void CoreTest::keyframeEaseInterpolation()
 {
     drift::KeyframeTrack<double> track;
-    track.setInterpolation(drift::Interpolation::Ease);
     track.setKeyframe(0, 0.0);
     track.setKeyframe(drift::secondsToUs(1.0), 10.0);
-    // smoothstep(0.25) = 0.15625 → 1.5625, vs linear 2.5
+    track.setEasing(0, drift::Interpolation::Ease);
+    track.setEasing(drift::secondsToUs(1.0), drift::Interpolation::Ease);
+
+    // The Ease preset is flat tangents a third of the way to each neighbour, which is exactly
+    // the smoothstep the old track-wide mode produced: t*t*(3-2t) at t=0.25 is 0.15625.
     const double eased = track.evaluateAt(drift::secondsToUs(0.25));
-    QVERIFY(eased < 2.4);
-    QVERIFY(eased > 1.0);
+    QVERIFY2(std::abs(eased - 1.5625) < 0.01,
+             qPrintable(QStringLiteral("eased %1, expected 1.5625").arg(eased)));
     QCOMPARE(drift::interpolationToString(drift::Interpolation::Ease), QStringLiteral("ease"));
     QCOMPARE(drift::interpolationFromString(QStringLiteral("ease")), drift::Interpolation::Ease);
+
+    // Zero-length handles are a straight line, because x and y then share blend weights.
+    drift::KeyframeTrack<double> linear;
+    linear.setKeyframe(0, 0.0);
+    linear.setKeyframe(drift::secondsToUs(1.0), 10.0);
+    QCOMPARE(linear.evaluateAt(drift::secondsToUs(0.25)), 2.5);
 }
 
 void CoreTest::keyframeNearestQuery()
@@ -794,9 +922,10 @@ void CoreTest::effectParamKeyframeSerialization()
     effect.catalogId = QStringLiteral("adjust.contrast");
     effect.parameters.insert(QStringLiteral("contrast"), 1.4);
     drift::KeyframeTrack<double> track;
-    track.setInterpolation(drift::Interpolation::Ease);
     track.setKeyframe(0, 0.5);
     track.setKeyframe(drift::secondsToUs(2.0), 2.5);
+    track.setEasing(0, drift::Interpolation::Ease);
+    track.setEasing(drift::secondsToUs(2.0), drift::Interpolation::Ease);
     effect.paramKeyframes.insert(QStringLiteral("contrast"), track);
     clip.effects.append(effect);
     project.tracks()[0].clips.append(clip);
@@ -811,7 +940,8 @@ void CoreTest::effectParamKeyframeSerialization()
     const drift::KeyframeTrack<double> &loadedTrack =
         loadedEffect.paramKeyframes.value(QStringLiteral("contrast"));
     QCOMPARE(loadedTrack.keyframes().size(), 2);
-    QVERIFY(loadedTrack.interpolation() == drift::Interpolation::Ease);
+    QVERIFY(loadedTrack.easingAt(0) == drift::Interpolation::Ease);
+    QVERIFY(loadedTrack.easingAt(drift::secondsToUs(2.0)) == drift::Interpolation::Ease);
 
     // valueAt is what the compositor reads: the track wins where it has keys, and an unkeyed
     // param falls back to the static value.

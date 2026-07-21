@@ -108,6 +108,7 @@ add_library(driftcore STATIC
     src/core/MediaAsset.cpp
     src/core/Clip.h
     src/core/Clip.cpp
+    src/core/Bezier.h
     src/core/SpeedCurve.h
     src/core/SpeedCurve.cpp
     src/core/SubtitleCue.h

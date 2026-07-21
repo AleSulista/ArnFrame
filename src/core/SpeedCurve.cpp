@@ -1,5 +1,7 @@
 #include "SpeedCurve.h"
 
+#include "Bezier.h"
+
 #include <QJsonObject>
 #include <QtGlobal>
 
@@ -15,27 +17,8 @@ namespace {
 constexpr int kSamples = 256;
 constexpr double kFlatEpsilon = 1e-9;
 
-double bezier(double a, double b, double c, double d, double t)
-{
-    const double mt = 1.0 - t;
-    return mt * mt * mt * a + 3.0 * mt * mt * t * b + 3.0 * mt * t * t * c + t * t * t * d;
-}
-
-// The curve is single-valued in pos (handles are clamped so it cannot fold back), so the
-// parameter for a given x is found by bisection.
-double parameterForX(double x0, double x1, double x2, double x3, double x)
-{
-    double lo = 0.0;
-    double hi = 1.0;
-    for (int i = 0; i < 24; ++i) {
-        const double mid = 0.5 * (lo + hi);
-        if (bezier(x0, x1, x2, x3, mid) < x)
-            lo = mid;
-        else
-            hi = mid;
-    }
-    return 0.5 * (lo + hi);
-}
+// The cubic helpers live in Bezier.h — keyframes grew tangent handles of their own, and both
+// curve kinds now share one implementation.
 
 } // namespace
 
@@ -94,8 +77,8 @@ void SpeedCurve::rebuild()
         if (b.pos - a.pos <= kFlatEpsilon) {
             speed = b.speed;
         } else {
-            const double t = parameterForX(a.pos, a.pos + a.outDx, b.pos + b.inDx, b.pos, pos);
-            speed = bezier(a.speed, a.speed + a.outDy, b.speed + b.inDy, b.speed, t);
+            const double t = bezierParameterForX(a.pos, a.pos + a.outDx, b.pos + b.inDx, b.pos, pos);
+            speed = cubicBezier(a.speed, a.speed + a.outDy, b.speed + b.inDy, b.speed, t);
         }
         // Handles can overshoot in y even when they behave in x.
         m_speeds[i] = qBound(kMinCurveSpeed, speed, kMaxCurveSpeed);

@@ -10,7 +10,10 @@ Column {
 
     required property var propDef       // {key, label, def, decimals}
     required property var keyframeList  // [{seconds, value}, ...] for this property
-    property string interpolationMode: "linear"
+    // Easing is a property of the key at the playhead, not of the whole track. Hand-dragged
+    // tangents match no preset, which is what leaves every chip unlit.
+    readonly property string interpolationMode:
+        (activeKey && !activeKey.custom) ? (activeKey.easing || "linear") : ""
 
     // When true, the value is edited through a slider + readout instead of a
     // numeric text field. Drags are coalesced into a single undo entry via
@@ -85,38 +88,14 @@ Column {
         return unit.length > 0 ? body + unit : body
     }
 
-    // Linear interpolation over keyframeList, mirroring
-    // drift::KeyframeTrack<double>::evaluateAt's default (Linear) mode.
-    // Hold mode is approximated here by snapping to the previous key.
+    // Asks the engine rather than reimplementing evaluateAt here. This used to be a JS mirror
+    // of the interpolation math that had to be kept in sync with Keyframe.h by hand — which
+    // stopped being tractable once keys grew individual bezier tangents.
     function valueAtPlayhead() {
         if (!keyframeList || keyframeList.length === 0)
             return propDef.def
-
-        const t = EditorState.playheadSeconds
-        const hold = interpolationMode === "hold"
-        const ease = interpolationMode === "ease"
-        let prev = null
-        let next = null
-        for (let i = 0; i < keyframeList.length; ++i) {
-            const kf = keyframeList[i]
-            if (kf.seconds <= t && (!prev || kf.seconds > prev.seconds))
-                prev = kf
-            if (kf.seconds >= t && (!next || kf.seconds < next.seconds))
-                next = kf
-        }
-        if (prev && next) {
-            if (next.seconds === prev.seconds || hold)
-                return prev.value
-            let frac = (t - prev.seconds) / (next.seconds - prev.seconds)
-            if (ease)
-                frac = frac * frac * (3 - 2 * frac)
-            return prev.value + (next.value - prev.value) * frac
-        }
-        if (prev)
-            return prev.value
-        if (next)
-            return next.value
-        return propDef.def
+        return EditorState.propertyValueAt(EditorState.selectedTrack, EditorState.selectedClip,
+                                           propDef.key, EditorState.playheadSeconds, propDef.def)
     }
 
     function keyframeAtPlayhead() {
@@ -159,7 +138,6 @@ Column {
 
     Component.onCompleted: syncEditors()
     onKeyframeListChanged: bumpValue()
-    onInterpolationModeChanged: bumpValue()
 
     Item {
         width: root.width
@@ -241,6 +219,7 @@ Column {
                 text: qsTr("Lin")
                 tooltip: qsTr("Linear — constant rate between keyframes")
                 selected: root.interpolationMode === "linear"
+                enabled: root.activeKey !== null
                 chipHeight: 18
                 horizontalPadding: Theme.spacingSm
                 width: 28
@@ -253,6 +232,7 @@ Column {
                 text: qsTr("Ease")
                 tooltip: qsTr("Ease — accelerates out and decelerates in")
                 selected: root.interpolationMode === "ease"
+                enabled: root.activeKey !== null
                 chipHeight: 18
                 horizontalPadding: Theme.spacingSm
                 width: 36
@@ -265,6 +245,7 @@ Column {
                 text: qsTr("Hold")
                 tooltip: qsTr("Hold — jumps to the next value with no interpolation")
                 selected: root.interpolationMode === "hold"
+                enabled: root.activeKey !== null
                 chipHeight: 18
                 horizontalPadding: Theme.spacingSm
                 width: 34

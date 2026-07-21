@@ -129,6 +129,14 @@ Item {
     property real dragSeconds: 0
     property real dragValue: 0
 
+    // The in-flight tangent, for the same reason: the canvas paints from the frozen series,
+    // so without this the curve would not reshape until the handle was released.
+    property int dragTangentIndex: -1
+    property real dragTangentInDx: 0
+    property real dragTangentInDy: 0
+    property real dragTangentOutDx: 0
+    property real dragTangentOutDy: 0
+
     // [{ prop, label, color, points, valueMin, valueMax }, ...] — selection order.
     readonly property var series: {
         void EditorState.selectedClipData
@@ -184,6 +192,38 @@ Item {
     }
     readonly property int keyCount: keyHandles.length
 
+    // Tangent grips for the focused series only: two per key (in / out), minus the ones that
+    // would dangle off the ends of the curve where there is no neighbouring segment.
+    readonly property var tangentHandles: {
+        const out = []
+        if (!curveEditing || focusedIndex < 0 || focusedIndex >= series.length)
+            return out
+        const entry = series[focusedIndex]
+        const pts = entry.points
+        for (let i = 0; i < pts.length; ++i) {
+            if (pts[i].hold)
+                continue // a step has no tangents to shape
+            if (i > 0)
+                out.push({ pointIndex: i, outgoing: false, color: entry.color, point: pts[i] })
+            if (i < pts.length - 1)
+                out.push({ pointIndex: i, outgoing: true, color: entry.color, point: pts[i] })
+        }
+        return out
+    }
+
+    // A handle with no length still needs to be grabbable, so an unset tangent is drawn at a
+    // default reach into its segment rather than sitting exactly on the key.
+    readonly property real defaultHandleSeconds: 0.12
+    function handleSeconds(point, outgoing) {
+        const raw = outgoing ? (point.outDx || 0) : (point.inDx || 0)
+        if (Math.abs(raw) > 1e-6)
+            return raw
+        return outgoing ? defaultHandleSeconds : -defaultHandleSeconds
+    }
+    function handleValue(point, outgoing) {
+        return point.value + (outgoing ? (point.outDy || 0) : (point.inDy || 0))
+    }
+
     readonly property real clipStart: clip.start || 0
     readonly property real clipDuration: Math.max(0.1, clip.duration || 1)
 
@@ -220,9 +260,30 @@ Item {
         return false
     }
 
-    height: visible ? 88 : 0
+    // Drag the bottom edge to grow the lane. Session-only by design: it is a working
+    // preference, not something worth persisting into settings or the project file.
+    property real laneHeight: 88
+    readonly property real minLaneHeight: 60
+    readonly property real maxLaneHeight: 460
+
+    height: visible ? laneHeight : 0
     visible: (propertiesTab === "transform" || propertiesTab === "effects")
              && hasClip && clip && series.length > 0
+
+    // Curve editing focuses one series: it gets tangent handles and owns the value axis,
+    // while the others stay drawn as dimmed context. Handles from two series normalized to
+    // different ranges are not comparable on screen, so only one can be live at a time.
+    property string focusedProp: ""
+    readonly property int focusedIndex: {
+        for (let i = 0; i < series.length; ++i) {
+            if (series[i].prop === focusedProp)
+                return i
+        }
+        return series.length > 0 ? 0 : -1
+    }
+    // Tangent handles need room; below this the lane is an overview and shows keys only.
+    readonly property bool curveEditing: laneHeight >= 140
+    function isFocused(index) { return index === focusedIndex }
 
     // Absolute timeline X — same mapping as clips on the track.
     function xForSeconds(seconds) {
@@ -326,16 +387,28 @@ Item {
                         model: root.series
                         delegate: ThemedChip {
                             required property var modelData
+                            required property int index
                             text: modelData.label
                             chipHeight: 18
                             horizontalPadding: 3
                             accentColor: modelData.color
-                            tooltip: root.series.length > 1
-                                     ? qsTr("%1 — click to show only this")
+                            tooltip: root.curveEditing
+                                     ? qsTr("%1 — click to edit this curve, double-click to show only it")
                                        .arg(root.propertyLabel(modelData.prop))
-                                     : root.propertyLabel(modelData.prop)
-                            selected: true
-                            onClicked: EditorState.soloKeyframeGraphProperty(modelData.prop)
+                                     : (root.series.length > 1
+                                        ? qsTr("%1 — click to show only this")
+                                          .arg(root.propertyLabel(modelData.prop))
+                                        : root.propertyLabel(modelData.prop))
+                            // While curve editing, the chip doubles as the focus picker, so
+                            // dimming the unfocused ones says which curve the handles belong to.
+                            selected: !root.curveEditing || root.isFocused(index)
+                            onClicked: {
+                                if (root.curveEditing)
+                                    root.focusedProp = modelData.prop
+                                else
+                                    EditorState.soloKeyframeGraphProperty(modelData.prop)
+                            }
+                            onDoubleClicked: EditorState.soloKeyframeGraphProperty(modelData.prop)
                         }
                     }
                 }
@@ -488,29 +561,67 @@ Item {
                         onPaint: {
                             const ctx = getContext("2d")
                             ctx.clearRect(0, 0, width, height)
-                            ctx.lineWidth = 1.5
                             for (let s = 0; s < root.series.length; ++s) {
                                 const entry = root.series[s]
                                 if (entry.points.length < 2)
                                     continue
                                 const live = entry.points.map(function (p, i) {
-                                    return (entry.prop === root.dragProp && i === root.dragIndex)
-                                        ? { seconds: root.dragSeconds, value: root.dragValue }
-                                        : p
+                                    if (entry.prop !== root.dragProp)
+                                        return p
+                                    if (i === root.dragTangentIndex) {
+                                        // Handle being dragged: same key, reshaped.
+                                        return {
+                                            seconds: p.seconds, value: p.value, hold: p.hold,
+                                            inDx: root.dragTangentInDx, inDy: root.dragTangentInDy,
+                                            outDx: root.dragTangentOutDx, outDy: root.dragTangentOutDy
+                                        }
+                                    }
+                                    if (i !== root.dragIndex)
+                                        return p
+                                    // Key being moved: carry its tangents through, so the
+                                    // curve shape does not snap back to linear mid-drag.
+                                    return {
+                                        seconds: root.dragSeconds, value: root.dragValue,
+                                        inDx: p.inDx, inDy: p.inDy,
+                                        outDx: p.outDx, outDy: p.outDy, hold: p.hold
+                                    }
                                 })
                                 const sorted = live.sort((a, b) => a.seconds - b.seconds)
+
+                                // The focused series is the one being edited; the rest are
+                                // context and are drawn thinner and faded.
+                                const focused = root.isFocused(s)
+                                ctx.lineWidth = focused ? 1.8 : 1.2
+                                ctx.globalAlpha = (root.curveEditing && !focused) ? 0.35 : 1.0
                                 ctx.strokeStyle = String(entry.color)
                                 ctx.beginPath()
-                                for (let i = 0; i < sorted.length; ++i) {
-                                    const px = root.xForSeconds(sorted[i].seconds)
-                                    const py = root.yForValue(sorted[i].value, entry)
-                                    if (i === 0)
-                                        ctx.moveTo(px, py)
-                                    else
-                                        ctx.lineTo(px, py)
+                                ctx.moveTo(root.xForSeconds(sorted[0].seconds),
+                                           root.yForValue(sorted[0].value, entry))
+                                for (let i = 1; i < sorted.length; ++i) {
+                                    const a = sorted[i - 1]
+                                    const b = sorted[i]
+                                    const ax = root.xForSeconds(a.seconds)
+                                    const ay = root.yForValue(a.value, entry)
+                                    const bx = root.xForSeconds(b.seconds)
+                                    const by = root.yForValue(b.value, entry)
+
+                                    if (a.hold) {
+                                        // Step: hold the outgoing value, then jump.
+                                        ctx.lineTo(bx, ay)
+                                        ctx.lineTo(bx, by)
+                                        continue
+                                    }
+                                    // Handles are clamped into the segment exactly as the
+                                    // evaluator does, so the drawn curve matches playback.
+                                    const c1x = Math.min(bx, Math.max(ax, ax + root.xForSeconds(a.outDx || 0)))
+                                    const c2x = Math.min(bx, Math.max(ax, bx + root.xForSeconds(b.inDx || 0)))
+                                    const c1y = root.yForValue(a.value + (a.outDy || 0), entry)
+                                    const c2y = root.yForValue(b.value + (b.inDy || 0), entry)
+                                    ctx.bezierCurveTo(c1x, c1y, c2x, c2y, bx, by)
                                 }
                                 ctx.stroke()
                             }
+                            ctx.globalAlpha = 1.0
                         }
                         Connections {
                             target: root
@@ -519,6 +630,12 @@ Item {
                             function onContentXChanged() { curveCanvas.requestPaint() }
                             function onDragSecondsChanged() { curveCanvas.requestPaint() }
                             function onDragValueChanged() { curveCanvas.requestPaint() }
+                            function onDragTangentOutDyChanged() { curveCanvas.requestPaint() }
+                            function onDragTangentOutDxChanged() { curveCanvas.requestPaint() }
+                            function onDragTangentInDyChanged() { curveCanvas.requestPaint() }
+                            function onDragTangentInDxChanged() { curveCanvas.requestPaint() }
+                            function onFocusedPropChanged() { curveCanvas.requestPaint() }
+                            function onLaneHeightChanged() { curveCanvas.requestPaint() }
                         }
                     }
 
@@ -535,6 +652,8 @@ Item {
                             color: modelData.color
                             border.width: 1
                             border.color: "#ffffff"
+                            opacity: (root.curveEditing && !root.isFocused(modelData.seriesIndex))
+                                     ? 0.4 : 1.0
                             x: root.xForSeconds(modelData.seconds) - width / 2 + dragDx
                             y: root.yForValue(modelData.value, entry) - height / 2 + dragDy
                             z: 2
@@ -545,10 +664,17 @@ Item {
                             property real dragDy: 0
                             property real editSeconds: modelData.seconds
 
+                            // Touching a key moves focus to its series, which is what arms
+                            // that curve's tangent handles.
+                            TapHandler {
+                                onTapped: root.focusedProp = keyDot.modelData.prop
+                            }
+
                             DragHandler {
                                 target: null
                                 onActiveChanged: {
                                     if (active) {
+                                        root.focusedProp = keyDot.modelData.prop
                                         keyDot.editSeconds = keyDot.modelData.seconds
                                         root.frozenSeries = root.series
                                         root.dragProp = keyDot.modelData.prop
@@ -598,7 +724,169 @@ Item {
                             }
                         }
                     }
+
+                    // Tangent grips for the focused curve, above the keys so they stay
+                    // grabbable where a handle folds back over its own key.
+                    Repeater {
+                        model: root.tangentHandles
+
+                        delegate: Item {
+                            id: tangent
+                            required property var modelData
+
+                            readonly property var entry: root.series[root.focusedIndex]
+                            readonly property real keyX: root.xForSeconds(modelData.point.seconds)
+                            readonly property real keyY: root.yForValue(modelData.point.value, entry)
+                            readonly property real tipX:
+                                root.xForSeconds(modelData.point.seconds
+                                                 + root.handleSeconds(modelData.point, modelData.outgoing))
+                            readonly property real tipY:
+                                root.yForValue(root.handleValue(modelData.point, modelData.outgoing), entry)
+
+                            anchors.fill: parent
+                            z: 4
+
+                            // Leader line from the key out to the grip.
+                            Rectangle {
+                                x: tangent.keyX
+                                y: tangent.keyY
+                                width: Math.hypot(tangent.tipX - tangent.keyX + tangent.dragDx,
+                                                  tangent.tipY - tangent.keyY + tangent.dragDy)
+                                height: 1
+                                color: tangent.modelData.color
+                                opacity: 0.55
+                                transformOrigin: Item.TopLeft
+                                rotation: Math.atan2(tangent.tipY - tangent.keyY + tangent.dragDy,
+                                                     tangent.tipX - tangent.keyX + tangent.dragDx)
+                                          * 180 / Math.PI
+                            }
+
+                            property real dragDx: 0
+                            property real dragDy: 0
+
+                            Rectangle {
+                                id: grip
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: Theme.panelBackground
+                                border.width: 1.5
+                                border.color: tangent.modelData.color
+                                x: tangent.tipX - width / 2 + tangent.dragDx
+                                y: tangent.tipY - height / 2 + tangent.dragDy
+
+                                HoverHandler { cursorShape: Qt.PointingHandCursor }
+
+                                DragHandler {
+                                    target: null
+                                    onActiveChanged: {
+                                        if (active) {
+                                            // Freeze the model exactly as a key drag does, so the
+                                            // Repeater cannot destroy this delegate mid-grab and
+                                            // so the value axis stops auto-fitting under the cursor.
+                                            const p = tangent.modelData.point
+                                            root.frozenSeries = root.series
+                                            root.dragProp = root.series[root.focusedIndex].prop
+                                            root.dragTangentIndex = tangent.modelData.pointIndex
+                                            root.dragTangentInDx = p.inDx || 0
+                                            root.dragTangentInDy = p.inDy || 0
+                                            root.dragTangentOutDx = p.outDx || 0
+                                            root.dragTangentOutDy = p.outDy || 0
+                                            root.draggingKey = true
+                                            EditorState.beginPreviewDrag(qsTr("Edit keyframe curve"))
+                                        } else {
+                                            EditorState.commitPreviewDrag()
+                                            root.draggingKey = false
+                                            root.dragProp = ""
+                                            root.dragTangentIndex = -1
+                                            tangent.dragDx = 0
+                                            tangent.dragDy = 0
+                                        }
+                                    }
+                                    onTranslationChanged: {
+                                        if (!active)
+                                            return
+                                        const p = tangent.modelData.point
+                                        const outgoing = tangent.modelData.outgoing
+
+                                        const newX = tangent.tipX + translation.x
+                                        const newY = tangent.tipY + translation.y
+                                        // dx keeps its sign: an out-handle may not reach back
+                                        // past its key, nor an in-handle forward past its own.
+                                        let dx = root.secondsForX(newX - tangent.keyX)
+                                        dx = outgoing ? Math.max(0, dx) : Math.min(0, dx)
+                                        const dy = root.valueForY(newY, tangent.entry) - p.value
+
+                                        const inDx = outgoing ? (p.inDx || 0) : dx
+                                        const outDx = outgoing ? dx : (p.outDx || 0)
+                                        let inDy = outgoing ? (p.inDy || 0) : dy
+                                        let outDy = outgoing ? dy : (p.outDy || 0)
+
+                                        // Unless the key is a corner, the far tangent takes the
+                                        // same slope so the curve stays smooth through the key.
+                                        // Its dx has the opposite sign, so its dy flips with it.
+                                        if (!p.corner && Math.abs(dx) > 1e-6) {
+                                            const slope = dy / dx
+                                            if (outgoing)
+                                                inDy = slope * inDx
+                                            else
+                                                outDy = slope * outDx
+                                        }
+
+                                        EditorState.previewSetKeyframeTangents(
+                                            EditorState.selectedTrack, EditorState.selectedClip,
+                                            root.series[root.focusedIndex].prop,
+                                            p.seconds, inDx, inDy, outDx, outDy, p.corner)
+
+                                        root.dragTangentInDx = inDx
+                                        root.dragTangentInDy = inDy
+                                        root.dragTangentOutDx = outDx
+                                        root.dragTangentOutDy = outDy
+                                        tangent.dragDx = newX - tangent.tipX
+                                        tangent.dragDy = newY - tangent.tipY
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
+            }
+        }
+
+    }
+
+    // Bottom edge resize grip. A sibling of the Row rather than a child, so it anchors to the
+    // lane instead of being laid out horizontally beside the graph, and sits above the lane's
+    // content so a drag near the boundary resizes rather than grabbing what is underneath.
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 5
+        z: 100
+        color: resizeHover.hovered || resizeDrag.active ? Theme.primary : "transparent"
+        opacity: 0.6
+
+        HoverHandler {
+            id: resizeHover
+            cursorShape: Qt.SizeVerCursor
+        }
+        DragHandler {
+            id: resizeDrag
+            target: null
+            yAxis.enabled: true
+            xAxis.enabled: false
+            property real startHeight: 0
+            onActiveChanged: {
+                if (active)
+                    startHeight = root.laneHeight
+            }
+            onTranslationChanged: {
+                if (!active)
+                    return
+                root.laneHeight = Math.max(root.minLaneHeight,
+                                           Math.min(root.maxLaneHeight,
+                                                    startHeight + translation.y))
             }
         }
     }

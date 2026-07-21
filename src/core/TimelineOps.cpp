@@ -298,10 +298,14 @@ void shiftTrackValues(KeyframeTrack<double> &track, double delta, double implici
         return;
     }
     KeyframeTrack<double> shifted;
-    shifted.setInterpolation(track.interpolation());
-    const QMap<TimeUs, double> &values = track.keyframes();
-    for (auto it = values.constBegin(); it != values.constEnd(); ++it)
-        shifted.setKeyframe(it.key(), it.value() - delta);
+    // Tangents ride along with each key now, so the whole shape survives the shift; only the
+    // values move. dy is a delta in value units and is therefore unaffected by the offset.
+    const QMap<TimeUs, Keyframe<double>> &values = track.keyframes();
+    for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
+        Keyframe<double> key = it.value();
+        key.value -= delta;
+        shifted.setKeyframe(it.key(), key);
+    }
     track = shifted;
 }
 

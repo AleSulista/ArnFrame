@@ -1595,7 +1595,6 @@ PanelFrame {
                                 width: parent.width
                                 propDef: root.propX
                                 keyframeList: (clip.keyframes && clip.keyframes.x && clip.keyframes.x.points) || []
-                                interpolationMode: (clip.keyframes && clip.keyframes.x && clip.keyframes.x.interpolation) || "linear"
                                 useSlider: true
                                 sliderFrom: -root.canvasW
                                 sliderTo: root.canvasW * 2
@@ -1605,7 +1604,6 @@ PanelFrame {
                                 width: parent.width
                                 propDef: root.propY
                                 keyframeList: (clip.keyframes && clip.keyframes.y && clip.keyframes.y.points) || []
-                                interpolationMode: (clip.keyframes && clip.keyframes.y && clip.keyframes.y.interpolation) || "linear"
                                 useSlider: true
                                 sliderFrom: -root.canvasH
                                 sliderTo: root.canvasH * 2
@@ -1624,7 +1622,6 @@ PanelFrame {
                                 width: parent.width
                                 propDef: root.propWidth
                                 keyframeList: (clip.keyframes && clip.keyframes.width && clip.keyframes.width.points) || []
-                                interpolationMode: (clip.keyframes && clip.keyframes.width && clip.keyframes.width.interpolation) || "linear"
                                 useSlider: true
                                 sliderFrom: 1
                                 sliderTo: Math.max(root.canvasW * 2, 2)
@@ -1634,7 +1631,6 @@ PanelFrame {
                                 width: parent.width
                                 propDef: root.propHeight
                                 keyframeList: (clip.keyframes && clip.keyframes.height && clip.keyframes.height.points) || []
-                                interpolationMode: (clip.keyframes && clip.keyframes.height && clip.keyframes.height.interpolation) || "linear"
                                 useSlider: true
                                 sliderFrom: 1
                                 sliderTo: Math.max(root.canvasH * 2, 2)
@@ -1653,7 +1649,6 @@ PanelFrame {
                                 width: parent.width
                                 propDef: root.propOpacity
                                 keyframeList: (clip.keyframes && clip.keyframes.opacity && clip.keyframes.opacity.points) || []
-                                interpolationMode: (clip.keyframes && clip.keyframes.opacity && clip.keyframes.opacity.interpolation) || "linear"
                                 useSlider: true
                                 sliderFrom: 0
                                 sliderTo: 1
@@ -1664,7 +1659,6 @@ PanelFrame {
                                 width: parent.width
                                 propDef: root.propRotation
                                 keyframeList: (clip.keyframes && clip.keyframes.rotation && clip.keyframes.rotation.points) || []
-                                interpolationMode: (clip.keyframes && clip.keyframes.rotation && clip.keyframes.rotation.interpolation) || "linear"
                                 useSlider: true
                                 sliderFrom: -180
                                 sliderTo: 180
@@ -1763,7 +1757,6 @@ PanelFrame {
                             visible: root.clipKind === "audio" || root.clipKind === "video"
                             propDef: root.propVolume
                             keyframeList: (clip.keyframes && clip.keyframes.volume && clip.keyframes.volume.points) || []
-                            interpolationMode: (clip.keyframes && clip.keyframes.volume && clip.keyframes.volume.interpolation) || "linear"
                             useSlider: true
                             sliderFrom: 0
                             sliderTo: 2
@@ -3341,8 +3334,6 @@ PanelFrame {
                                             })
                                             keyframeList: (paramRow.modelData.keyframes
                                                            && paramRow.modelData.keyframes.points) || []
-                                            interpolationMode: (paramRow.modelData.keyframes
-                                                                && paramRow.modelData.keyframes.interpolation) || "linear"
                                             useSlider: true
                                             sliderFrom: paramRow.modelData.min
                                             sliderTo: paramRow.modelData.max

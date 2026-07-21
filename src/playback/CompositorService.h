@@ -15,14 +15,21 @@ public:
     explicit CompositorWorker(QObject *parent = nullptr);
 
 public slots:
-    void setProject(const drift::Project *project);
-    void composite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options);
+    // The project arrives by value, as a snapshot taken on the GUI thread. The worker must
+    // never hold a pointer into the live project: compositing runs concurrently with editing,
+    // and reading a QMap/QList while the GUI thread rebalances it is a use-after-free.
+    void composite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options,
+                   drift::Project snapshot);
 
 signals:
     void frameReady(const GpuFrameTexture &frame, drift::TimeUs timeUs);
 
 private:
     FrameCompositor m_compositor;
+    // Owns the frame's view of the project for as long as it is being composited. Project is
+    // built entirely from Qt's copy-on-write containers, so holding it costs refcounts, not
+    // copies — and a concurrent edit detaches into a new tree instead of mutating this one.
+    drift::Project m_snapshot;
 };
 
 // Background compositor thread. Frames are delivered to the GUI as live GL
@@ -48,6 +55,12 @@ private slots:
     void onWorkerFrameReady(const GpuFrameTexture &frame, drift::TimeUs timeUs);
 
 private:
+    // Dispatches a composite carrying a fresh snapshot. GUI thread only — that is what makes
+    // taking the copy safe.
+    void dispatch(drift::TimeUs timeUs, const FrameCompositor::RenderOptions &options);
+
+    // Live project, read only on the GUI thread to take snapshots from.
+    const drift::Project *m_project = nullptr;
     std::atomic<bool> m_requestPending{false};
     std::atomic<drift::TimeUs> m_pendingTimeUs{0};
     std::atomic<int> m_pendingPreviewScalePercent{100};
@@ -59,3 +72,4 @@ private:
 };
 
 Q_DECLARE_METATYPE(GpuFrameTexture)
+Q_DECLARE_METATYPE(drift::Project)

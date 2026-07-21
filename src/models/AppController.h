@@ -415,6 +415,18 @@ public:
     Q_INVOKABLE void previewMoveClipKeyframe(int trackIndex, int clipIndex, const QString &prop,
                                              double fromSeconds, double toSeconds, double value);
     Q_INVOKABLE QVariantList clipKeyframes(int trackIndex, int clipIndex, const QString &prop) const;
+    Q_INVOKABLE double propertyValueAt(int trackIndex, int clipIndex, const QString &prop,
+                                       double atSeconds, double fallback) const;
+    // Tangent handles for the curve editor. dx/dy arrive in seconds / property units, relative
+    // to the key. `preview` variants coalesce a drag into one undo entry via begin/commitPreviewDrag.
+    Q_INVOKABLE void setKeyframeTangents(int trackIndex, int clipIndex, const QString &prop,
+                                         double atSeconds, double inDx, double inDy, double outDx,
+                                         double outDy, bool corner);
+    Q_INVOKABLE void previewSetKeyframeTangents(int trackIndex, int clipIndex, const QString &prop,
+                                                double atSeconds, double inDx, double inDy,
+                                                double outDx, double outDy, bool corner);
+    Q_INVOKABLE void setKeyframeHold(int trackIndex, int clipIndex, const QString &prop,
+                                     double atSeconds, bool hold);
     Q_INVOKABLE void setKeyframeInterpolation(int trackIndex, int clipIndex, const QString &prop,
                                               const QString &mode);
     Q_INVOKABLE void resetClipTransform(int trackIndex, int clipIndex);
@@ -576,6 +588,11 @@ protected:
                            const QByteArray &fingerprint);
     // Digest of everything the AudioMixer reads; a change means detected beats are stale.
     QByteArray audioLayoutFingerprint() const;
+    // Single key lookup for the tangent editors; null when nothing sits at `atSeconds`.
+    drift::Keyframe<double> *keyframeAt(int trackIndex, int clipIndex, const QString &prop,
+                                        double atSeconds);
+    static void applyTangents(drift::Keyframe<double> &key, double inDx, double inDy, double outDx,
+                              double outDy, bool corner);
     // Recollects m_beatSnapTargets from whichever layers are currently visible.
     void rebuildBeatSnapTargets();
     void refreshSegmentationPreview();

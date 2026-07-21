@@ -12,13 +12,15 @@ CompositorWorker::CompositorWorker(QObject *parent)
 {
 }
 
-void CompositorWorker::setProject(const drift::Project *project)
+void CompositorWorker::composite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options,
+                                 drift::Project snapshot)
 {
-    m_compositor.setProject(project);
-}
+    // Take ownership before compositing, so the tree being walked is one nothing else holds a
+    // mutable reference to. Releasing the previous snapshot here also keeps it alive for the
+    // whole of the frame that used it.
+    m_snapshot = std::move(snapshot);
+    m_compositor.setProject(&m_snapshot);
 
-void CompositorWorker::composite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options)
-{
     const GpuFrameTexture frame = m_compositor.compositeToTextureAt(timeUs, options);
     if (frame.isValid())
         emit frameReady(frame, timeUs);
@@ -29,7 +31,7 @@ CompositorService::CompositorService(QObject *parent)
     , m_worker(new CompositorWorker)
 {
     qRegisterMetaType<drift::TimeUs>("drift::TimeUs");
-    qRegisterMetaType<const drift::Project *>("const drift::Project*");
+    qRegisterMetaType<drift::Project>("drift::Project");
     qRegisterMetaType<FrameCompositor::RenderOptions>("FrameCompositor::RenderOptions");
     qRegisterMetaType<GpuFrameTexture>("GpuFrameTexture");
     m_worker->moveToThread(&m_thread);
@@ -48,8 +50,19 @@ CompositorService::~CompositorService()
 
 void CompositorService::setProject(const drift::Project *project)
 {
-    QMetaObject::invokeMethod(m_worker, "setProject", Qt::BlockingQueuedConnection,
-                              Q_ARG(const drift::Project *, project));
+    // Kept on this side only. Each composite request carries its own snapshot, so the worker
+    // never learns the live project's address.
+    m_project = project;
+}
+
+void CompositorService::dispatch(drift::TimeUs timeUs, const FrameCompositor::RenderOptions &options)
+{
+    if (!m_project)
+        return;
+    QMetaObject::invokeMethod(m_worker, "composite", Qt::QueuedConnection,
+                              Q_ARG(drift::TimeUs, timeUs),
+                              Q_ARG(FrameCompositor::RenderOptions, options),
+                              Q_ARG(drift::Project, *m_project));
 }
 
 void CompositorService::requestComposite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options)
@@ -64,8 +77,7 @@ void CompositorService::requestComposite(drift::TimeUs timeUs, FrameCompositor::
 
     m_lastDispatchedTimeUs = timeUs;
     m_lastDispatchedOptions = options;
-    QMetaObject::invokeMethod(m_worker, "composite", Qt::QueuedConnection, Q_ARG(drift::TimeUs, timeUs),
-                              Q_ARG(FrameCompositor::RenderOptions, options));
+    dispatch(timeUs, options);
 }
 
 void CompositorService::onWorkerFrameReady(const GpuFrameTexture &frame, drift::TimeUs timeUs)
@@ -92,6 +104,5 @@ void CompositorService::onWorkerFrameReady(const GpuFrameTexture &frame, drift::
     if (m_requestPending.exchange(true, std::memory_order_acq_rel))
         return;
 
-    QMetaObject::invokeMethod(m_worker, "composite", Qt::QueuedConnection, Q_ARG(drift::TimeUs, latest),
-                              Q_ARG(FrameCompositor::RenderOptions, latestOptions));
+    dispatch(latest, latestOptions);
 }

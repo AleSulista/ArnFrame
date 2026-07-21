@@ -16,27 +16,60 @@ QJsonObject keyframesToJson(const KeyframeTrack<double> &track)
 {
     QJsonArray keyframes;
     for (auto it = track.keyframes().constBegin(); it != track.keyframes().constEnd(); ++it) {
-        keyframes.append(QJsonObject{
+        const Keyframe<double> &key = it.value();
+        QJsonObject object{
             {QStringLiteral("timeUs"), static_cast<double>(it.key())},
-            {QStringLiteral("value"), it.value()},
-        });
+            {QStringLiteral("value"), key.value},
+        };
+        // Tangents are omitted when they are the straight-line default, which keeps files
+        // written by the common case no larger than they were before handles existed.
+        if (!qFuzzyIsNull(key.inDx) || !qFuzzyIsNull(key.inDy) || !qFuzzyIsNull(key.outDx)
+            || !qFuzzyIsNull(key.outDy)) {
+            object.insert(QStringLiteral("inDx"), key.inDx);
+            object.insert(QStringLiteral("inDy"), key.inDy);
+            object.insert(QStringLiteral("outDx"), key.outDx);
+            object.insert(QStringLiteral("outDy"), key.outDy);
+        }
+        if (key.corner)
+            object.insert(QStringLiteral("corner"), true);
+        if (key.hold)
+            object.insert(QStringLiteral("hold"), true);
+        keyframes.append(object);
     }
-    return QJsonObject{
-        {QStringLiteral("interpolation"), interpolationToString(track.interpolation())},
-        {QStringLiteral("keyframes"), keyframes},
-    };
+    return QJsonObject{{QStringLiteral("keyframes"), keyframes}};
 }
 
 KeyframeTrack<double> keyframesFromJson(const QJsonObject &object)
 {
     KeyframeTrack<double> track;
-    track.setInterpolation(
-        interpolationFromString(object.value(QStringLiteral("interpolation")).toString()));
+
+    // Projects written before keyframes had tangents carry one interpolation mode for the
+    // whole track. Both legacy shapes are reproduced exactly by handles — Linear by
+    // zero-length ones, Ease by flat tangents at a third of each gap — so the migration is
+    // applied after loading, once every neighbour is known, and changes nothing on screen.
+    const QString legacyMode = object.value(QStringLiteral("interpolation")).toString();
 
     for (const QJsonValue &value : object.value(QStringLiteral("keyframes")).toArray()) {
         const QJsonObject keyframe = value.toObject();
+        Keyframe<double> key;
+        key.value = keyframe.value(QStringLiteral("value")).toDouble(1.0);
+        key.inDx = keyframe.value(QStringLiteral("inDx")).toDouble(0.0);
+        key.inDy = keyframe.value(QStringLiteral("inDy")).toDouble(0.0);
+        key.outDx = keyframe.value(QStringLiteral("outDx")).toDouble(0.0);
+        key.outDy = keyframe.value(QStringLiteral("outDy")).toDouble(0.0);
+        key.corner = keyframe.value(QStringLiteral("corner")).toBool(false);
+        key.hold = keyframe.value(QStringLiteral("hold")).toBool(false);
         track.setKeyframe(static_cast<TimeUs>(keyframe.value(QStringLiteral("timeUs")).toDouble()),
-                          keyframe.value(QStringLiteral("value")).toDouble(1.0));
+                          key);
+    }
+
+    if (!legacyMode.isEmpty()) {
+        const Interpolation mode = interpolationFromString(legacyMode);
+        if (mode != Interpolation::Linear) {
+            const QList<TimeUs> times = track.keyframes().keys();
+            for (TimeUs at : times)
+                track.setEasing(at, mode);
+        }
     }
     return track;
 }
@@ -50,9 +83,9 @@ QJsonArray effectsToJson(const QList<Effect> &effects)
             params.insert(it.key(), QJsonValue::fromVariant(it.value()));
         QJsonObject paramKeyframes;
         for (auto it = effect.paramKeyframes.constBegin(); it != effect.paramKeyframes.constEnd(); ++it) {
-            // A track is created the moment a param is keyed *or* its interpolation is picked, so
-            // an empty non-linear track still carries a user choice worth keeping.
-            if (!it->isEmpty() || it->interpolation() != Interpolation::Linear)
+            // Tangents live on the keys now, so an empty track no longer carries a user choice
+            // worth persisting the way a track-wide interpolation mode used to.
+            if (!it->isEmpty())
                 paramKeyframes.insert(it.key(), keyframesToJson(it.value()));
         }
         QJsonObject object{
@@ -422,12 +455,16 @@ void applyLegacyFractionalLayout(Clip &clip, const KeyframeTrack<double> &posX,
     clip.transformW = singleKeyframe(w);
     clip.transformH = singleKeyframe(h);
 
-    // Preserve interpolation mode from the primary legacy track when present.
+    // Preserve the shape of the primary legacy track. Only Hold actually survives the collapse
+    // to a single key — with nothing to interpolate towards, Linear and Ease are the same
+    // thing — but Hold means "stay here", which still reads on a lone key.
     if (!posX.isEmpty()) {
-        clip.transformX.setInterpolation(posX.interpolation());
-        clip.transformY.setInterpolation(posY.isEmpty() ? posX.interpolation() : posY.interpolation());
-        clip.transformW.setInterpolation(scale.isEmpty() ? posX.interpolation() : scale.interpolation());
-        clip.transformH.setInterpolation(scale.isEmpty() ? posX.interpolation() : scale.interpolation());
+        const Interpolation mode = posX.easingAt(posX.keyframes().firstKey());
+        for (KeyframeTrack<double> *kt :
+             {&clip.transformX, &clip.transformY, &clip.transformW, &clip.transformH}) {
+            if (!kt->isEmpty())
+                kt->setEasing(kt->keyframes().firstKey(), mode);
+        }
     }
 }
 
