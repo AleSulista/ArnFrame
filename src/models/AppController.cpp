@@ -407,6 +407,12 @@ void applyTextAnimationPatch(drift::TextAnimation *anim, const QVariantMap &m)
         anim->durationUs = drift::secondsToUs(qBound(0.0, m.value(QStringLiteral("duration")).toDouble(), 10.0));
     if (m.contains(QStringLiteral("ease")))
         anim->ease = drift::textEaseFromString(m.value(QStringLiteral("ease")).toString());
+    if (m.contains(QStringLiteral("unit")))
+        anim->unit = drift::textAnimUnitFromString(m.value(QStringLiteral("unit")).toString());
+    if (m.contains(QStringLiteral("stagger")))
+        anim->staggerUs = drift::secondsToUs(qBound(0.0, m.value(QStringLiteral("stagger")).toDouble(), 2.0));
+    if (m.contains(QStringLiteral("order")))
+        anim->order = drift::textAnimOrderFromString(m.value(QStringLiteral("order")).toString());
 }
 
 QVariantMap textAnimationToMap(const drift::TextAnimation &a)
@@ -415,6 +421,9 @@ QVariantMap textAnimationToMap(const drift::TextAnimation &a)
         {QStringLiteral("kind"), drift::textAnimKindToString(a.kind)},
         {QStringLiteral("duration"), drift::usToSeconds(a.durationUs)},
         {QStringLiteral("ease"), drift::textEaseToString(a.ease)},
+        {QStringLiteral("unit"), drift::textAnimUnitToString(a.unit)},
+        {QStringLiteral("stagger"), drift::usToSeconds(a.staggerUs)},
+        {QStringLiteral("order"), drift::textAnimOrderToString(a.order)},
     };
 }
 

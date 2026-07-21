@@ -21,6 +21,24 @@ TextRasterResult rasterizeText(const drift::Clip &clip, const QString &text, con
                                double renderScale);
 TextRasterResult rasterizeText(const drift::Clip &clip, const QRectF &layoutRect, double renderScale);
 
+// One reveal span (a character, word or line) of a text clip, rasterized on its own so the
+// compositor can stagger the entrance/exit across the block. Each span is a self-contained texture
+// with its own destination rect; motion still rides on the layer, so the textures stay cacheable.
+struct TextSpanRaster
+{
+    QImage image;
+    QRectF rect;    // destination rect in canvas px (bleed already included)
+    int index = 0;  // reading-order index; -1 marks the static box background
+    int count = 0;  // number of glyph spans (excludes the box)
+};
+
+// Split the styled text into per-`unit` spans (Word / Character / Line) and rasterize each. Returns
+// empty for TextAnimUnit::Block — callers use rasterizeText for the whole-layer path. The optional
+// box background is returned first with index == -1.
+QList<TextSpanRaster> rasterizeTextSpans(const drift::Clip &clip, const QString &text,
+                                         const QRectF &layoutRect, double renderScale,
+                                         drift::TextAnimUnit unit);
+
 // Entrance/exit motion, sampled at a timeline instant. Applied to the *layer* — never to the
 // raster — so the cached texture stays valid for every frame of the animation.
 struct TextAnimSample
@@ -34,6 +52,12 @@ struct TextAnimSample
 
 TextAnimSample sampleTextAnimation(const drift::Clip &clip, drift::TimeUs timelineUs,
                                    const QRectF &layoutRect, double renderScale);
+
+// Entrance/exit motion for a single reveal span, staggered by the animation's unit/stagger/order.
+// spanIndex is the span's reading-order index and spanCount the total glyph-span count.
+TextAnimSample sampleTextSpanAnimation(const drift::Clip &clip, drift::TimeUs timelineUs,
+                                       int spanIndex, int spanCount, const QRectF &layoutRect,
+                                       double renderScale);
 
 // Same, but scoped to a single subtitle cue's [start, end) window so each cue on a subtitle
 // clip plays its own entrance and exit, one after another.

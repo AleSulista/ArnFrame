@@ -613,6 +613,94 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
     return layer;
 }
 
+// The reveal granularity in effect for a text clip: the entrance's unit, or the exit's if the
+// entrance is whole-block. TextAnimUnit::Block means the whole-layer path (buildGpuLayer) is used.
+drift::TextAnimUnit activeSpanUnit(const drift::TextStyle &style)
+{
+    if (style.animIn.kind != drift::TextAnimKind::None && style.animIn.unit != drift::TextAnimUnit::Block)
+        return style.animIn.unit;
+    if (style.animOut.kind != drift::TextAnimKind::None && style.animOut.unit != drift::TextAnimUnit::Block)
+        return style.animOut.unit;
+    return drift::TextAnimUnit::Block;
+}
+
+// Build one GpuItem per reveal span (character / word / line) of a text clip, so the entrance/exit
+// staggers across the block. Mirrors the text branch of buildGpuLayer, but each span is its own
+// layer carrying its own sampled transform. Returns empty for whole-block text (use buildGpuLayer).
+QList<GpuItem> buildTextSpanItems(const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth,
+                                  int projectHeight, double renderScale, drift::TextAnimUnit unit)
+{
+    QList<GpuItem> items;
+
+    const drift::TimeUs clipTimeUs = timelineUs - clip.timelineStart;
+
+    double x = 0.0, y = 0.0, w = 0.0, h = 0.0, rotation = 0.0;
+    layoutRectForClip(clip, timelineUs, projectWidth, projectHeight, renderScale, 1.0, &x, &y, &w, &h,
+                      &rotation);
+    if (w <= 0.5 || h <= 0.5)
+        return items;
+    const QRectF layoutRect(x, y, w, h);
+
+    const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
+    const QList<TextSpanRaster> spans = rasterizeTextSpans(clip, text, layoutRect, renderScale, unit);
+    if (spans.isEmpty())
+        return items;
+
+    const double clipOpacity = opacityForClip(clip, timelineUs);
+    const QList<drift::Effect> baseEffects = resolvedClipEffects(clip, clipTimeUs);
+    int spanCount = 0;
+    for (const TextSpanRaster &s : spans)
+        spanCount = qMax(spanCount, s.count);
+
+    for (const TextSpanRaster &span : spans) {
+        if (span.image.isNull())
+            continue;
+
+        GpuItem item;
+        item.blend = clip.blendMode;
+        GpuLayer &layer = item.layer;
+        layer.source = span.image;
+        layer.effects = baseEffects;
+
+        QRectF destRect = span.rect;
+        double opacity = clipOpacity;
+
+        // index == -1 is the static box background: no per-span motion, always visible behind glyphs.
+        if (span.index >= 0) {
+            const TextAnimSample anim =
+                sampleTextSpanAnimation(clip, timelineUs, span.index, spanCount, layoutRect, renderScale);
+            destRect.translate(anim.dx, anim.dy);
+            if (!qFuzzyCompare(anim.scale, 1.0)) {
+                const QPointF centre = destRect.center();
+                destRect.setSize(destRect.size() * anim.scale);
+                destRect.moveCenter(centre);
+            }
+            opacity *= anim.opacity;
+            if (anim.blurPx > 0.5) {
+                drift::Effect blur;
+                blur.catalogId = QStringLiteral("builtin.effects.gaussian_blur");
+                blur.parameters.insert(QStringLiteral("u_blurRadius"), anim.blurPx);
+                layer.effects.append(blur);
+            }
+            if (opacity <= 0.001)
+                continue; // a span that has not entered (or has fully exited) draws nothing
+        }
+
+        // Clip masks are layer-relative, so applying one here would stamp the whole shape onto every
+        // span. Kinetic text + mask is rare; spans are left unmasked rather than mask each glyph.
+        layer.rect = destRect;
+        layer.rotation = rotation;
+        layer.flipH = clip.flipH;
+        layer.flipV = clip.flipV;
+        layer.opacity = opacity;
+        layer.clipTimeUs = clipTimeUs;
+        layer.faceSlots = faceSlotsForClip(clip, layer.effects, timelineUs);
+        layer.valid = true;
+        items.append(item);
+    }
+    return items;
+}
+
 GpuScene buildGpuScene(const drift::Project &project, drift::TimeUs timelineUs, int width, int height,
                        double renderScale, const FrameCompositor::RenderOptions &options)
 {
@@ -682,6 +770,17 @@ GpuScene buildGpuScene(const drift::Project &project, drift::TimeUs timelineUs, 
             // QML inline editor shows in its stead (true WYSIWYG, single path).
             if (!options.skipClipId.isEmpty() && clip.id == options.skipClipId)
                 continue;
+
+            // Text with a per-span reveal expands into one layer per character/word/line so the
+            // entrance/exit can stagger across the block; everything else is a single layer.
+            if (clip.type == drift::ClipType::Text) {
+                const drift::TextAnimUnit unit = activeSpanUnit(clip.textStyle);
+                if (unit != drift::TextAnimUnit::Block) {
+                    scene.items.append(buildTextSpanItems(clip, timelineUs, projectWidth, projectHeight,
+                                                          renderScale, unit));
+                    continue;
+                }
+            }
 
             GpuItem item;
             item.blend = clip.blendMode;

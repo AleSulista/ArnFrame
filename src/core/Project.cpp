@@ -114,9 +114,15 @@ QJsonObject textStyleToJson(const TextStyle &s)
         {QStringLiteral("animInKind"), textAnimKindToString(s.animIn.kind)},
         {QStringLiteral("animInDurationUs"), static_cast<qint64>(s.animIn.durationUs)},
         {QStringLiteral("animInEase"), textEaseToString(s.animIn.ease)},
+        {QStringLiteral("animInUnit"), textAnimUnitToString(s.animIn.unit)},
+        {QStringLiteral("animInStaggerUs"), static_cast<qint64>(s.animIn.staggerUs)},
+        {QStringLiteral("animInOrder"), textAnimOrderToString(s.animIn.order)},
         {QStringLiteral("animOutKind"), textAnimKindToString(s.animOut.kind)},
         {QStringLiteral("animOutDurationUs"), static_cast<qint64>(s.animOut.durationUs)},
         {QStringLiteral("animOutEase"), textEaseToString(s.animOut.ease)},
+        {QStringLiteral("animOutUnit"), textAnimUnitToString(s.animOut.unit)},
+        {QStringLiteral("animOutStaggerUs"), static_cast<qint64>(s.animOut.staggerUs)},
+        {QStringLiteral("animOutOrder"), textAnimOrderToString(s.animOut.order)},
     };
 }
 
@@ -154,9 +160,17 @@ TextStyle textStyleFromJson(const QJsonObject &o)
     s.animIn.kind = textAnimKindFromString(o.value(QStringLiteral("animInKind")).toString());
     s.animIn.durationUs = o.value(QStringLiteral("animInDurationUs")).toInteger(s.animIn.durationUs);
     s.animIn.ease = textEaseFromString(o.value(QStringLiteral("animInEase")).toString());
+    // Missing keys keep the Block/default reveal, so projects predating per-span animation are
+    // deserialized identically to how they render today.
+    s.animIn.unit = textAnimUnitFromString(o.value(QStringLiteral("animInUnit")).toString());
+    s.animIn.staggerUs = o.value(QStringLiteral("animInStaggerUs")).toInteger(s.animIn.staggerUs);
+    s.animIn.order = textAnimOrderFromString(o.value(QStringLiteral("animInOrder")).toString());
     s.animOut.kind = textAnimKindFromString(o.value(QStringLiteral("animOutKind")).toString());
     s.animOut.durationUs = o.value(QStringLiteral("animOutDurationUs")).toInteger(s.animOut.durationUs);
     s.animOut.ease = textEaseFromString(o.value(QStringLiteral("animOutEase")).toString());
+    s.animOut.unit = textAnimUnitFromString(o.value(QStringLiteral("animOutUnit")).toString());
+    s.animOut.staggerUs = o.value(QStringLiteral("animOutStaggerUs")).toInteger(s.animOut.staggerUs);
+    s.animOut.order = textAnimOrderFromString(o.value(QStringLiteral("animOutOrder")).toString());
     return s;
 }
 

@@ -65,6 +65,14 @@ QString textAnimKindToString(TextAnimKind kind)
         return QStringLiteral("pop");
     case TextAnimKind::Blur:
         return QStringLiteral("blur");
+    case TextAnimKind::Typewriter:
+        return QStringLiteral("typewriter");
+    case TextAnimKind::Rise:
+        return QStringLiteral("rise");
+    case TextAnimKind::Bounce:
+        return QStringLiteral("bounce");
+    case TextAnimKind::Wave:
+        return QStringLiteral("wave");
     }
     return QStringLiteral("none");
 }
@@ -85,6 +93,14 @@ TextAnimKind textAnimKindFromString(const QString &kind)
         return TextAnimKind::Pop;
     if (kind == QStringLiteral("blur"))
         return TextAnimKind::Blur;
+    if (kind == QStringLiteral("typewriter"))
+        return TextAnimKind::Typewriter;
+    if (kind == QStringLiteral("rise"))
+        return TextAnimKind::Rise;
+    if (kind == QStringLiteral("bounce"))
+        return TextAnimKind::Bounce;
+    if (kind == QStringLiteral("wave"))
+        return TextAnimKind::Wave;
     return TextAnimKind::None;
 }
 
@@ -112,6 +128,58 @@ TextEase textEaseFromString(const QString &ease)
     if (ease == QStringLiteral("back"))
         return TextEase::Back;
     return TextEase::EaseOut;
+}
+
+QString textAnimUnitToString(TextAnimUnit unit)
+{
+    switch (unit) {
+    case TextAnimUnit::Word:
+        return QStringLiteral("word");
+    case TextAnimUnit::Character:
+        return QStringLiteral("character");
+    case TextAnimUnit::Line:
+        return QStringLiteral("line");
+    case TextAnimUnit::Block:
+        return QStringLiteral("block");
+    }
+    return QStringLiteral("block");
+}
+
+TextAnimUnit textAnimUnitFromString(const QString &unit)
+{
+    if (unit == QStringLiteral("word"))
+        return TextAnimUnit::Word;
+    if (unit == QStringLiteral("character"))
+        return TextAnimUnit::Character;
+    if (unit == QStringLiteral("line"))
+        return TextAnimUnit::Line;
+    return TextAnimUnit::Block;
+}
+
+QString textAnimOrderToString(TextAnimOrder order)
+{
+    switch (order) {
+    case TextAnimOrder::Backward:
+        return QStringLiteral("backward");
+    case TextAnimOrder::CenterOut:
+        return QStringLiteral("centerOut");
+    case TextAnimOrder::Random:
+        return QStringLiteral("random");
+    case TextAnimOrder::Forward:
+        return QStringLiteral("forward");
+    }
+    return QStringLiteral("forward");
+}
+
+TextAnimOrder textAnimOrderFromString(const QString &order)
+{
+    if (order == QStringLiteral("backward"))
+        return TextAnimOrder::Backward;
+    if (order == QStringLiteral("centerOut"))
+        return TextAnimOrder::CenterOut;
+    if (order == QStringLiteral("random"))
+        return TextAnimOrder::Random;
+    return TextAnimOrder::Forward;
 }
 
 namespace {

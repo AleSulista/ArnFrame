@@ -142,10 +142,14 @@ PanelFrame {
                                              400: "Regular", 500: "Medium", 600: "SemiBold",
                                              700: "Bold", 800: "ExtraBold", 900: "Black"
                                          })
-    readonly property var animKinds: ["none", "fade", "slideUp", "slideDown", "slideLeft", "slideRight", "pop", "blur"]
-    readonly property var animKindLabels: ["None", "Fade", "Slide up", "Slide down", "Slide left", "Slide right", "Pop", "Blur"]
+    readonly property var animKinds: ["none", "fade", "slideUp", "slideDown", "slideLeft", "slideRight", "pop", "blur", "typewriter", "rise", "bounce", "wave"]
+    readonly property var animKindLabels: ["None", "Fade", "Slide up", "Slide down", "Slide left", "Slide right", "Pop", "Blur", "Typewriter", "Rise", "Bounce", "Wave"]
     readonly property var easeKinds: ["linear", "easeOut", "easeInOut", "back"]
     readonly property var easeLabels: ["Linear", "Ease out", "Ease in-out", "Back"]
+    readonly property var animUnits: ["block", "character", "word", "line"]
+    readonly property var animUnitLabels: ["Whole block", "Character", "Word", "Line"]
+    readonly property var animOrders: ["forward", "backward", "centerOut", "random"]
+    readonly property var animOrderLabels: ["Forward", "Backward", "Center out", "Random"]
 
     readonly property bool hasShapeStyle: hasSelection && clipKind === "shape" && !!clip.shapeStyle
     readonly property var shapeStyle: hasShapeStyle ? clip.shapeStyle : ({
@@ -197,6 +201,14 @@ PanelFrame {
         anim[key] = value
         const patch = {}
         patch[which] = anim
+        EditorState.setTextStyle(EditorState.selectedTrack, EditorState.selectedClip, patch)
+    }
+
+    // Reveal granularity / stagger / order are shared by the entrance and exit, so write both.
+    function setTextReveal(key, value) {
+        const anim = {}
+        anim[key] = value
+        const patch = { "animIn": anim, "animOut": anim }
         EditorState.setTextStyle(EditorState.selectedTrack, EditorState.selectedClip, patch)
     }
     property int activeTab: 0
@@ -274,6 +286,8 @@ PanelFrame {
                 animInDurationField.value = s.animIn.duration
             if (animOutDurationField && !animOutDurationField.activeFocus)
                 animOutDurationField.value = s.animOut.duration
+            if (animStaggerField && !animStaggerField.activeFocus)
+                animStaggerField.value = s.animIn.stagger
         }
     }
 
@@ -1487,6 +1501,48 @@ PanelFrame {
                                     step: 0.05
                                     from: 0
                                     onEdited: v => root.setTextAnim("animOut", "duration", v)
+                                }
+                            }
+
+                            // Reveal granularity: stagger the entrance/exit across characters,
+                            // words or lines instead of moving the whole block at once.
+                            Row {
+                                width: parent.width
+                                spacing: 6
+
+                                Text {
+                                    text: qsTr("By")
+                                    width: 20
+                                    color: Theme.mutedForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                ThemedComboBox {
+                                    id: animUnitBox
+                                    width: Math.max(40, (parent.width - 20 - parent.spacing * 3 - 56) / 2)
+                                    model: root.animUnitLabels
+                                    currentIndex: Math.max(0, root.animUnits.indexOf(root.textStyle.animIn.unit))
+                                    onActivated: root.setTextReveal("unit", root.animUnits[currentIndex])
+                                }
+                                ThemedComboBox {
+                                    id: animOrderBox
+                                    width: Math.max(40, (parent.width - 20 - parent.spacing * 3 - 56) / 2)
+                                    model: root.animOrderLabels
+                                    enabled: root.textStyle.animIn.unit !== "block"
+                                    currentIndex: Math.max(0, root.animOrders.indexOf(root.textStyle.animIn.order))
+                                    onActivated: root.setTextReveal("order", root.animOrders[currentIndex])
+                                }
+                                ThemedNumberField {
+                                    id: animStaggerField
+                                    to: 2
+                                    unit: "s"
+                                    width: 56
+                                    decimals: 2
+                                    step: 0.02
+                                    from: 0
+                                    enabled: root.textStyle.animIn.unit !== "block"
+                                    onEdited: v => root.setTextReveal("stagger", v)
                                 }
                             }
                         }
