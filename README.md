@@ -1,18 +1,23 @@
-# CutWire Drift
+# Drift
 
-**Drift** is a free, open-source, beginner-friendly desktop video editor built with **Qt 6**, **QML**, and **FFmpeg**.
+**Create polished videos fast — free, open, and yours.**
 
-The UI layer is in place. Backend work follows a phased plan: a unified compositor, microsecond timeline model, threaded decode, and audio-master playback.
+Drift is a free, open-source desktop video editor from CutWire Studios. It brings the speed and simplicity of modern creator tools to your computer: drop in clips, add effects and stickers, generate captions, and export — with no subscription, no watermark, and no account required.
 
-## Features (current)
+Built with **Qt 6**, **QML**, and **FFmpeg**. Preview and export share one compositor, so what you see is what you get.
 
-- Multi-track timeline (video, audio, text) with drag-drop, trim, split, ripple, snap
-- Project save/load (JSON `.dcut`, version 2 with v1 migration)
-- Undo/redo for timeline edits, track mute/hide, and bookmarks
-- Preview playback with `FrameCompositor`, `PreviewItem` (QSG texture), and `QAudioSink` pull-mode audio
-- Per-clip transforms (position, scale, rotation, opacity) and libavfilter effects in the compositor
-- Media thumbnails, filmstrips, and waveform peaks
-- Headless CLI tools for probing media and rendering single frames
+## Features
+
+- **Multi-track timeline** — trim, split, snap, ripple, mute/hide tracks, and full undo/redo
+- **Effects & transitions** — GPU effects, stylish transitions, and reusable look templates
+- **Stickers, emoji, titles & shapes** — finish the look without leaving the editor
+- **Auto captions** — speech-to-text captions you can edit on the timeline
+- **Cutouts & masks** — isolate subjects, mask clips, and key out green screens
+- **Speed & motion** — speed changes, reverse, fades, and animate to the beat of your music
+- **Audio tools** — mixing, effect chain, and background noise cleanup
+- **Addons** — optional fonts, stickers, effects, and speech models on demand
+- **Project bundles** — package a project with its media for easy sharing and backup
+- **Export** — MP4 (H.264 + AAC) that matches the preview, with quality presets
 
 ## Requirements
 
@@ -25,19 +30,13 @@ The UI layer is in place. Backend work follows a phased plan: a unified composit
 | libzstd | any (addon package decompression) |
 | OpenSSL | 3.x, libcrypto only (addon signature verification) |
 
-ONNX Runtime powers auto-subtitles and is downloaded automatically at configure time; pass
-`-DDRIFT_FETCH_ONNXRUNTIME=OFF` to use a system install instead.
+ONNX Runtime powers auto-subtitles (and related ML features) and is downloaded automatically at configure time; pass `-DDRIFT_FETCH_ONNXRUNTIME=OFF` to use a system install instead.
 
-On Debian/Ubuntu the two new libraries are `libzstd-dev` and `libssl-dev`; on Arch they are
-`zstd` and `openssl`. Neither has a download fallback, so configure fails with a pkg-config
-error if the development headers are absent.
+On Debian/Ubuntu install `libzstd-dev` and `libssl-dev`; on Arch, `zstd` and `openssl`. Neither has a download fallback — configure fails with a pkg-config error if the development headers are missing.
 
-Optional: OpenCV for future background-removal work (`-DWITH_BGREMOVAL=ON`).
-Only `core`, `imgproc`, and `imgcodecs` are linked — not the full OpenCV stack.
+Optional: OpenCV for experimental background-removal builds (`-DWITH_BGREMOVAL=ON`). Only `core`, `imgproc`, and `imgcodecs` are linked.
 
-**Nothing has to be placed by hand.** Fonts, emoji stickers and the Whisper model used to be
-fetched or dropped into the source tree at build time; they are addons now (see below), so a
-clone builds and runs with no assets present.
+**Nothing has to be placed by hand.** Fonts, emoji stickers, and speech models are addons (see below), so a clone builds and runs with no bundled assets.
 
 ## Build
 
@@ -46,7 +45,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j$(nproc)
 ```
 
-Optional background removal:
+Optional OpenCV background removal:
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DWITH_BGREMOVAL=ON
@@ -68,24 +67,15 @@ QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 
 Test targets: `Core`, `EditorState`, `Playback`, `Engine`, `MediaProbe`, `AddonPackage`.
 
-`AddonPackage` verifies against a signed fixture in `tests/data/`, so that file has to be
-checked out with the repo.
+`AddonPackage` verifies against a signed fixture in `tests/data/`, so that file has to be checked out with the repo.
 
 ## Addons
 
-Fonts, emoji stickers and speech models are downloaded at runtime rather than built in, which
-keeps the binary small and lets a user take only what they need. Open the Addon Manager from the
-header (the layers icon), or follow the install prompt in the font picker, the stickers tab or
-the auto-subtitle panel.
+Fonts, emoji stickers, and speech models download at runtime rather than shipping in the binary. That keeps the install small and lets you take only what you need. Open the Addon Manager from the header (layers icon), or follow the install prompt in the font picker, stickers tab, or auto-subtitle panel.
 
-Packages are `.driftpkg` archives — zstd-compressed, Ed25519-signed, verified before anything is
-written into place — installed under `<AppDataLocation>/addons/`. The format, registry and
-installer live in `src/engine/AddonPackage.*`, `src/engine/AddonRegistry.*` and
-`src/models/AddonManager.*`.
+Packages are `.driftpkg` archives — zstd-compressed, Ed25519-signed, and verified before install — under `<AppDataLocation>/addons/`. Format, registry, and installer live in `src/engine/AddonPackage.*`, `src/engine/AddonRegistry.*`, and `src/models/AddonManager.*`.
 
-**Effects and transitions are bundled *and* addons.** They ship next to the binary so the editor
-is usable out of the box, and the `effects.core` / `transitions.core` addons exist so a shader fix
-can be published without an app release. Content resolves highest-priority-first:
+**Effects and transitions are bundled *and* addons.** They ship next to the binary so the editor works out of the box; `effects.core` / `transitions.core` addons can ship shader fixes without an app release. Content resolves highest-priority-first:
 
 ```
 1. $DRIFT_*_DIR          developer override
@@ -94,14 +84,11 @@ can be published without an app release. Content resolves highest-priority-first
 4. <AppDataLocation>     hand-placed
 ```
 
-Catalogs resolve duplicate ids first-root-wins, so an installed `builtin.effects.gaussian_blur`
-supersedes the bundled one. Note the corollary: an addon cannot *remove* a bundled package, since
-the bundled copy simply reappears when the addon no longer defines that id.
+Catalogs resolve duplicate ids first-root-wins, so an installed `builtin.effects.gaussian_blur` supersedes the bundled one. An addon cannot *remove* a bundled package — the bundled copy reappears when the addon no longer defines that id.
 
-Opening a project that uses an effect or transition with no catalog entry reports it rather than
-silently dropping it from the render.
+Opening a project that uses an effect or transition with no catalog entry reports it rather than silently dropping it from the render.
 
-To work against local content instead of downloading, point any of these at a directory:
+To work against local content instead of downloading:
 
 ```bash
 DRIFT_EFFECTS_DIR=/path/to/effects \
@@ -112,13 +99,11 @@ DRIFT_WHISPER_MODEL_DIR=/path/to/whisper-small \
   ./build/drift
 ```
 
-Building and publishing addons is a separate concern and lives in its own repository, along with
-the Cloudflare Worker that serves them.
+Building and publishing addons lives in a separate repository, along with the Cloudflare Worker that serves them.
 
 ### Pointing at a different service
 
-The endpoint and client token are defined once, in `CMakeLists.txt`, and injected as compile
-definitions — `src/models/AddonEndpoint.h` only reads them.
+The endpoint and client token are defined in `CMakeLists.txt` and injected as compile definitions — `src/models/AddonEndpoint.h` only reads them.
 
 ```bash
 cmake -B build -DDRIFT_ADDON_INDEX_URL=https://addons.example.com/v1/index \
@@ -127,14 +112,11 @@ cmake -B build -DDRIFT_ADDON_INDEX_URL=https://addons.example.com/v1/index \
 cmake -B build -DDRIFT_ADDON_INDEX_URL=      # build with no addon service at all
 ```
 
-With the service disabled the manager lists and installs nothing; already-installed, side-loaded
-and `DRIFT_*_DIR` content still works, since none of those involve the service.
+With the service disabled the manager lists and installs nothing; already-installed, side-loaded, and `DRIFT_*_DIR` content still work.
 
-The token is not a secret — it ships in every binary and is trivially extractable. It exists so
-the bucket cannot be crawled or hotlinked, not to protect anything.
+The token is not a secret — it ships in every binary. It exists so the bucket cannot be crawled or hotlinked.
 
-Note that these are CMake *cache* variables: changing the default in `CMakeLists.txt` does not
-affect an existing build directory, so pass `-D...` again or reconfigure from scratch.
+These are CMake *cache* variables: changing the default in `CMakeLists.txt` does not affect an existing build directory, so pass `-D...` again or reconfigure from scratch.
 
 ## CLI tools
 
@@ -155,13 +137,14 @@ Arguments for `renderframe`: `<project.json> <time_us> <output.png>`.
 ```
 src/
   core/           Domain model (Project, Track, Clip, Keyframe, Effect) — no GUI
-  engine/         FFmpeg: ClipReader, FrameCompositor, AudioMixer, EffectProcessor
+  engine/         FFmpeg: ClipReader, FrameCompositor, AudioMixer, EffectProcessor, Exporter
   models/         QML-facing models: AppController, AssetLibrary, TimelineModel, ClipListModel
   playback/       PlaybackEngine, PlaybackClock, CompositorService
   preview/        PreviewItem (QQuickItem → QSGTexture)
   qml/            UI panels and components
 tests/            Unit tests (ctest) + tests/data (signed addon fixture)
 tools/            Headless probe + renderframe
+flatpak/          Flatpak / Flathub packaging
 cmake/            FindFFmpeg.cmake
 ```
 
@@ -170,55 +153,42 @@ cmake/            FindFFmpeg.cmake
 | Target | Role |
 |---|---|
 | `driftcore` | Core domain + JSON persistence |
-| `driftengine` | FFmpeg decode, compositing, effects |
+| `driftengine` | FFmpeg decode, compositing, effects, export |
 | `drift` | Qt Quick application |
 
 ## Architecture (summary)
 
-**Unified frame server** — Preview and (future) export share `FrameCompositor`:
+**Unified frame server** — Preview and export share `FrameCompositor`:
 
 > “Give me the composited RGBA frame + mixed audio at timeline time T (µs).”
 
-**Time model** — All core timeline positions are `int64_t` microseconds (`drift::TimeUs`). QML uses seconds at the boundary via `AppController`.
+**Time model** — Core timeline positions are `int64_t` microseconds (`drift::TimeUs`). QML uses seconds at the boundary via `AppController`.
 
 **Threading**
 
 | Thread | Responsibility |
 |---|---|
-| Main (GUI) | QML, models, undo stack, playhead UI (~60 Hz) |
+| Main (GUI) | QML, models, undo stack, playhead UI |
 | Decode workers | `ClipReaderPool` — one thread per active media path |
-| Compositor | `CompositorService` — triple-buffered frames off the GUI thread |
+| Compositor | `CompositorService` — frames off the GUI thread |
 | Audio (pull) | `QAudioSink` → `PlaybackClock` (audio-master) |
 
 **Data flow (video)**
 
 ```
-Media file → ClipReader → EffectProcessor (libavfilter)
-          → FrameCompositor (transforms, blending, text)
-          → PreviewItem (QSGTexture)  |  Exporter (planned)
+Media file → ClipReader → EffectProcessor
+          → FrameCompositor (transforms, blending, text, masks)
+          → PreviewItem (QSGTexture)  |  Exporter
 ```
 
 **Data flow (audio)**
 
 ```
-Media file → ClipReader → AudioMixer (keyframed volume)
-          → QAudioSink  |  Exporter (planned)
+Media file → ClipReader → AudioMixer (volume, fades, audio effects)
+          → QAudioSink  |  Exporter
 ```
 
-See [AGENTS.md](AGENTS.md) for full architecture, phase status, and contributor/agent guidelines.
-
-## Development phases
-
-| Phase | Focus | Status |
-|---|---|---|
-| **1** | Core model, JSON persistence, undo, models | Complete |
-| **2** | Timeline editing, inspector, save/load | Complete |
-| **3** | Playback, preview, threaded decode, A/V sync | Complete |
-| **4** | Keyframing UI, effect presets, text styling | Not started |
-| **5** | Export via `FrameCompositor`, waveforms, fades | Partial (`TimelineExporter` uses ffmpeg CLI) |
-| **6** | GPU compositing, packaging, advanced effects | Not started |
-
-**MVP** (Phase 5): Import → multi-track edit → export matching preview.
+See [AGENTS.md](AGENTS.md) for architecture details and contributor/agent guidelines.
 
 ## QML entry points
 

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Drift
+GenericName=Video Editor
+Comment=Beginner-friendly open-source video editor
+Exec=drift
+Icon=org.cutwire.Drift
+Terminal=false
+Categories=AudioVideo;Video;AudioVideoEditing;
+Keywords=video;editor;movie;clip;ffmpeg;subtitles;
+StartupWMClass=drift

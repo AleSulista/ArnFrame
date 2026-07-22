@@ -432,6 +432,28 @@ drift_copy_transitions(drift)
 drift_copy_audio_effects(drift)
 drift_copy_onnxruntime(drift)
 
+# --- install (used by packaging, e.g. Flatpak; the dev workflow runs in-place) ---
+include(GNUInstallDirs)
+
+install(TARGETS drift RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# File-based effect/transition/template/audio-effect packages ship next to the binary;
+# the app searches <appDir>/<subdir> (GpuPackageParse::defaultSearchPaths). Installing
+# them here (rather than via the DRIFT_*_DIR env vars) keeps installed addons able to
+# supersede the bundled copies.
+foreach(_assetdir effects transitions effect-templates audio-effects)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/${_assetdir}
+            DESTINATION ${CMAKE_INSTALL_BINDIR})
+endforeach()
+
+# Desktop integration for Flatpak / freedesktop.
+install(FILES flatpak/org.cutwire.Drift.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES flatpak/org.cutwire.Drift.metainfo.xml
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
+install(FILES flatpak/org.cutwire.Drift.svg
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+
 # --- CLI tools (headless engine testing, no GUI) ----------------------------
 add_subdirectory(tools)
 

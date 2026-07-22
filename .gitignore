@@ -29,6 +29,12 @@ resources/stickers/
 *.wav
 *.mp3
 
+# Flatpak build artifacts (build-dir is already covered by build-*/ above)
+.flatpak-builder/
+flatpak/build-dir/
+flatpak/repo/
+flatpak/dist/
+
 # OS
 .DS_Store
 

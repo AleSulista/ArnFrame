@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Copyright 2026 CutWire Studios -->
+<component type="desktop-application">
+  <id>org.cutwire.Drift</id>
+  <name>Drift</name>
+  <summary>Create polished videos fast — free, open, and yours</summary>
+  <description>
+    <p>
+      Drift is a free desktop video editor that feels simple from the first cut.
+      Drop in video, photos, and music, add effects and stickers, generate captions
+      automatically, and export — no subscription, no watermark, and no account
+      required.
+    </p>
+    <p>
+      Great for social videos, explainers, and everyday projects. Cut subjects out of
+      a frame, animate to the beat, style text and shapes, then add fonts and stickers
+      only when you need them.
+    </p>
+    <p>What you get:</p>
+    <ul>
+      <li>Multi-track timeline — trim, split, snap, and undo as you go</li>
+      <li>Effects, transitions, and reusable look templates</li>
+      <li>Stickers, emoji, titles, and shapes for a finished look</li>
+      <li>Auto captions from speech in your video</li>
+      <li>Cut out subjects, mask clips, and key out green screens</li>
+      <li>Speed changes, reverse playback, and fades</li>
+      <li>Animate to the beat of your music</li>
+      <li>Mix audio and clean up background noise</li>
+      <li>Optional addons for fonts, stickers, and extras</li>
+      <li>Project bundles that keep your media together</li>
+    </ul>
+  </description>
+  <!-- Placeholder brand colors; update once Drift has real branding. -->
+  <branding>
+    <color type="primary" scheme_preference="light">#aebfff</color>
+    <color type="primary" scheme_preference="dark">#1c2a6e</color>
+  </branding>
+  <launchable type="desktop-id">org.cutwire.Drift.desktop</launchable>
+  <developer id="org.cutwire">
+    <name>CutWire Studios</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <content_rating type="oars-1.1" />
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+    <category>AudioVideoEditing</category>
+  </categories>
+  <url type="homepage">https://github.com/CutWire-Studios/Drift</url>
+  <url type="bugtracker">https://github.com/CutWire-Studios/Drift/issues</url>
+  <url type="vcs-browser">https://github.com/CutWire-Studios/Drift</url>
+  <!-- TODO: add screenshots once they exist, e.g.:
+  <screenshots>
+    <screenshot type="default" xml:lang="en">
+      <image>https://raw.githubusercontent.com/CutWire-Studios/Drift/main/docs/screenshots/main-window.png</image>
+      <caption>The Drift editor with the timeline, preview, and asset panels</caption>
+    </screenshot>
+  </screenshots>
+  -->
+  <releases>
+    <release version="0.1.0" date="2026-07-23">
+      <description>
+        <p>Initial public release of Drift — a free, open-source desktop video editor for creators.</p>
+      </description>
+    </release>
+  </releases>
+</component>

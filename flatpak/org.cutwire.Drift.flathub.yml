@@ -1,0 +1,67 @@
+app-id: org.cutwire.Drift
+runtime: org.kde.Platform
+runtime-version: "6.11"
+sdk: org.kde.Sdk
+command: drift
+
+finish-args:
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  # Audio playback via QAudioSink (PipeWire/PulseAudio).
+  - --socket=pulseaudio
+  # The Addon Manager fetches signed .driftpkg packages from drift-addons.cutwire.org.
+  - --share=network
+  # OpenGL scene graph and the GPU compositor need direct rendering.
+  - --device=dri
+  # Media import/export goes through xdg-desktop-portal (the app deliberately uses
+  # QApplication so QFileDialog is the native portal picker), so no broad --filesystem
+  # is granted. Add --filesystem=host only if media access proves painful in testing.
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /lib/cmake
+  - /share/aclocal
+  - /share/doc
+  - /share/man
+  - "*.a"
+  - "*.la"
+
+modules:
+  # Pre-built CPU inference build; Drift links it for the Whisper auto-subtitle
+  # transcriber. Built with -DDRIFT_FETCH_ONNXRUNTIME=OFF so the sandboxed build never
+  # downloads it.
+  - name: onnxruntime
+    buildsystem: simple
+    build-commands:
+      - install -d ${FLATPAK_DEST}/include ${FLATPAK_DEST}/lib
+      - cp -a include/. ${FLATPAK_DEST}/include/
+      - cp -a lib/. ${FLATPAK_DEST}/lib/
+    sources:
+      - type: archive
+        url: https://github.com/microsoft/onnxruntime/releases/download/v1.27.0/onnxruntime-linux-x64-1.27.0.tgz
+        sha256: 547e40a48f1fe73e3f812d7c88a948612c23f896b91e4e2ee1e232d7b468246f
+        strip-components: 1
+        only-arches:
+          - x86_64
+      - type: archive
+        url: https://github.com/microsoft/onnxruntime/releases/download/v1.27.0/onnxruntime-linux-aarch64-1.27.0.tgz
+        sha256: 3e4d83ac06924a32a07b6d7f91ce6f852876153fc0bbdf931bf517a140bfbe48
+        strip-components: 1
+        only-arches:
+          - aarch64
+
+  - name: drift
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DDRIFT_FETCH_ONNXRUNTIME=OFF
+      - -DONNXRUNTIME_ROOT=/app
+    sources:
+      # TODO: pin to the real release tag and commit before submitting to Flathub.
+      - type: git
+        url: https://github.com/CutWire-Studios/Drift.git
+        tag: v0.1.0
+        commit: "0000000000000000000000000000000000000000"

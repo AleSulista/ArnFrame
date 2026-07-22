@@ -30,6 +30,9 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QApplication::setApplicationName("CutWire Drift");
     QApplication::setOrganizationName("CutWire Drift");
+    // Associates the window with the installed .desktop entry so shells (notably
+    // Wayland) can find its icon and app metadata.
+    QGuiApplication::setDesktopFileName(QStringLiteral("org.cutwire.Drift"));
 
     // Registering the bundled fonts needs a QGuiApplication, and must happen before the compositor
     // thread starts touching QFontDatabase.
