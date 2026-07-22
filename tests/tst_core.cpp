@@ -1004,13 +1004,13 @@ void CoreTest::effectTemplateStackSerialization()
     const drift::KeyframeTrack<double> &loadedAmount =
         loadedClip.effects[0].paramKeyframes.value(QStringLiteral("amount"));
     QCOMPARE(loadedAmount.keyframes().size(), 4);
-    QCOMPARE(loadedAmount.keyframes().value(0), 0.7);
-    QCOMPARE(loadedAmount.keyframes().value(drift::secondsToUs(1.0)), 0.65);
+    QCOMPARE(loadedAmount.keyframes().value(0).value, 0.7);
+    QCOMPARE(loadedAmount.keyframes().value(drift::secondsToUs(1.0)).value, 0.65);
 
     const drift::KeyframeTrack<double> &loadedFlash =
         loadedClip.effects[1].paramKeyframes.value(QStringLiteral("flash"));
     QCOMPARE(loadedFlash.keyframes().size(), 2);
-    QCOMPARE(loadedFlash.keyframes().value(0), 0.5);
+    QCOMPARE(loadedFlash.keyframes().value(0).value, 0.5);
     QCOMPARE(loadedClip.effects[1].valueAt(QStringLiteral("flash"), 0).toDouble(), 0.5);
 }
 
