@@ -397,7 +397,7 @@ GLuint uploadTexture(QOpenGLExtraFunctions *gl, const QImage &image, bool flipVe
 {
     QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
     if (flipVertically)
-        rgba = rgba.flipped(Qt::Vertical);
+        rgba = rgba.mirrored(false, true);
     GLuint tex = 0;
     gl->glGenTextures(1, &tex);
     gl->glBindTexture(GL_TEXTURE_2D, tex);

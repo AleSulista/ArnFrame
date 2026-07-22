@@ -26,6 +26,10 @@ Slider {
 
     Accessible.role: Accessible.Slider
 
+    // Guard against callers that bind inverted ranges (Qt debug asserts in qBound).
+    onFromChanged: if (from > to) to = from
+    onToChanged: if (to < from) from = to
+
     function findFlickable(item) {
         var node = item
         while (node) {

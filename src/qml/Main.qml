@@ -294,12 +294,18 @@ ApplicationWindow {
                     // percentage constraints self-referential during a resize.
                     // In fullscreen the timeline is hidden, so the normal 30–85%
                     // band would leave a dead strip below the preview.
+                    //
+                    // Never set a fixed minimum larger than the current parent
+                    // size: on the first layout pass width/height are 0, and
+                    // Qt SplitView asserts when maximum < minimum (qBound).
                     SplitView.preferredHeight: window.previewFullscreen
                                                ? outerSplit.height : outerSplit.height * 0.5
                     SplitView.minimumHeight: window.previewFullscreen
-                                             ? outerSplit.height : outerSplit.height * 0.3
+                                             ? outerSplit.height
+                                             : Math.min(outerSplit.height, outerSplit.height * 0.3)
                     SplitView.maximumHeight: window.previewFullscreen
-                                             ? outerSplit.height : outerSplit.height * 0.85
+                                             ? outerSplit.height
+                                             : Math.max(SplitView.minimumHeight, outerSplit.height * 0.85)
                     orientation: Qt.Horizontal
                     spacing: Theme.panelGap
 
@@ -343,24 +349,24 @@ ApplicationWindow {
                     AssetsPanel {
                         id: assetsPanel
                         visible: !window.previewFullscreen
-                        SplitView.preferredWidth: innerSplit.width * 0.25
-                        SplitView.minimumWidth: 200
-                        SplitView.maximumWidth: innerSplit.width * 0.4
+                        SplitView.preferredWidth: Math.max(0, innerSplit.width * 0.25)
+                        // Cap mins to available width so 200+320+240 never exceeds a
+                        // zero/partial first layout pass (Qt asserts max < min).
+                        SplitView.minimumWidth: Math.min(200, Math.max(0, innerSplit.width * 0.2))
                     }
 
                     PreviewPanel {
                         previewFullscreen: window.previewFullscreen
                         onFullscreenRequested: window.togglePreviewFullscreen()
                         SplitView.fillWidth: true
-                        SplitView.minimumWidth: 320
+                        SplitView.minimumWidth: Math.min(320, Math.max(0, innerSplit.width * 0.3))
                     }
 
                     PropertiesPanel {
                         id: propertiesPanel
                         visible: !window.previewFullscreen
-                        SplitView.preferredWidth: innerSplit.width * 0.25
-                        SplitView.minimumWidth: 240
-                        SplitView.maximumWidth: innerSplit.width * 0.4
+                        SplitView.preferredWidth: Math.max(0, innerSplit.width * 0.25)
+                        SplitView.minimumWidth: Math.min(240, Math.max(0, innerSplit.width * 0.2))
                         // "Browse effects" in the empty Effects tab jumps the
                         // assets panel to its Effects library.
                         onBrowseEffectsRequested: assetsPanel.showTab("effects")
@@ -370,9 +376,8 @@ ApplicationWindow {
                 TimelinePanel {
                     visible: !window.previewFullscreen
                     propertiesTab: propertiesPanel.currentTabId
-                    SplitView.preferredHeight: outerSplit.height * 0.5
-                    SplitView.minimumHeight: 140
-                    SplitView.maximumHeight: outerSplit.height * 0.7
+                    SplitView.preferredHeight: Math.max(0, outerSplit.height * 0.5)
+                    SplitView.minimumHeight: Math.min(140, Math.max(0, outerSplit.height * 0.2))
                 }
             }
         }
