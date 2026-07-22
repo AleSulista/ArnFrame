@@ -27,19 +27,16 @@ Dialog {
     width: Math.min(preferredWidth,
                     (Overlay.overlay ? Overlay.overlay.width : preferredWidth) - Theme.dialogMargin)
 
-    // Enter/Return commits, Escape cancels. Both used to be inert: the custom
-    // footer meant standardButtons was NoButton, so no key was wired to accept.
-    Keys.onReturnPressed: function(event) {
-        if (root.acceptOnReturn && root.showAccept && acceptButton.enabled) {
-            root.accept()
-            event.accepted = true
-        }
-    }
-    Keys.onEnterPressed: function(event) {
-        if (root.acceptOnReturn && root.showAccept && acceptButton.enabled) {
-            root.accept()
-            event.accepted = true
-        }
+    // Enter/Return commits accept. A Dialog is a Popup, not an Item, so `Keys`
+    // cannot attach to it (it silently warned and never fired); a Shortcut is a
+    // QObject and works regardless of which control holds focus. Gated on
+    // `visible` so only the open dialog's shortcut is live — no cross-dialog
+    // ambiguity when several are instantiated. Escape is handled by Popup's
+    // closePolicy.
+    Shortcut {
+        sequences: ["Return", "Enter"]
+        enabled: root.visible && root.acceptOnReturn && root.showAccept && acceptButton.enabled
+        onActivated: root.accept()
     }
 
     // Give the dialog focus on open so the key handlers above are live and the

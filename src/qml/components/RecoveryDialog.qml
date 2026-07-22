@@ -63,7 +63,7 @@ ThemedDialog {
                     width: parent.width
                     size: "sm"
                     tone: "muted"
-                    visible: root.info && root.info.savedAt && root.info.savedAt.length > 0
+                    visible: !!(root.info && root.info.savedAt && root.info.savedAt.length > 0)
                     text: qsTr("Auto-saved: %1").arg(root.info ? root.info.savedAt : "")
                 }
 
@@ -76,8 +76,8 @@ ThemedDialog {
                     // Capped so a deep path cannot grow the dialog off-screen.
                     maximumLineCount: 2
                     elide: Text.ElideMiddle
-                    visible: root.info && root.info.originalPath && root.info.originalPath.length > 0
-                    text: root.info ? root.info.originalPath : ""
+                    visible: !!(root.info && root.info.originalPath && root.info.originalPath.length > 0)
+                    text: (root.info && root.info.originalPath) || ""
 
                     HoverHandler { id: pathHover }
 
