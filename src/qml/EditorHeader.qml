@@ -334,13 +334,13 @@ Rectangle {
                         IconGlyph {
                             glyph: Theme.icons.upload
                             iconSize: Theme.iconSizeMd
-                            iconColor: Theme.onMedia
+                            iconColor: Theme.primaryForeground
                             anchors.verticalCenter: parent.verticalCenter
                         }
 
                         Text {
                             text: qsTr("Export")
-                            color: Theme.onMedia
+                            color: Theme.primaryForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSm
                             font.weight: Font.Medium
@@ -353,7 +353,7 @@ Rectangle {
                             visible: exportButton.busy
                             width: visible ? 34 : 0
                             text: Math.round(EditorState.exportProgress * 100) + "%"
-                            color: Theme.onMedia
+                            color: Theme.primaryForeground
                             font.family: Theme.monoFontFamily
                             font.pixelSize: Theme.fontSizeSm
                             horizontalAlignment: Text.AlignRight

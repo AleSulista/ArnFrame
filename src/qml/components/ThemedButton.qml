@@ -42,7 +42,7 @@ Button {
         case "primary":
             if (!enabled)
                 return Qt.darker(Theme.primary, 1.5)
-            return down ? Theme.panelSecondaryForeground
+            return down ? Qt.darker(Theme.primary, 1.12)
                         : (hovered ? Qt.lighter(Theme.primary, 1.08) : Theme.primary)
         case "ghost":
             if (!enabled)

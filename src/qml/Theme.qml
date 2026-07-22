@@ -41,9 +41,9 @@ QtObject {
         panelAccent: "#262626",
         panelAccentForeground: "#ededed",
         panelMuted: "#383838",
-        panelSecondaryBg: "#081a26",
-        panelSecondaryBorder: "#002b47",
-        panelSecondaryForeground: "#44bffd"
+        panelSecondaryBg: "#26200a",
+        panelSecondaryBorder: "#4a3d00",
+        panelSecondaryForeground: "#ffcf4a"
     })
     readonly property var _light: ({
         appBackground: "#ffffff",
@@ -59,9 +59,9 @@ QtObject {
         panelAccent: "#ededed",
         panelAccentForeground: "#0d0d0d",
         panelMuted: "#d4d4d4",
-        panelSecondaryBg: "#e5f5ff",
-        panelSecondaryBorder: "#d6efff",
-        panelSecondaryForeground: "#027dbb"
+        panelSecondaryBg: "#fff6da",
+        panelSecondaryBorder: "#ffe7a3",
+        panelSecondaryForeground: "#9a6f00"
     })
     readonly property var _palette: darkMode ? _dark : _light
 
@@ -86,11 +86,11 @@ QtObject {
     readonly property color panelSecondaryForeground: _palette.panelSecondaryForeground
 
     // --- Colors: shared semantic (identical in both themes) -----------------------
-    readonly property color primary: "#16a9f3"
-    readonly property color primaryForeground: "#ffffff"
+    readonly property color primary: "#F8B81C"
+    readonly property color primaryForeground: "#221900"
     readonly property color destructive: "#e91616"
     readonly property color constructive: "#23d160"
-    readonly property color warning: "#e5a00d"
+    readonly property color warning: "#f97316"
 
     // Keyboard focus indicator. Shared by every focusable control so a Tab pass
     // reads as one system regardless of which control has focus.
@@ -98,9 +98,9 @@ QtObject {
 
     // Export CTA gradient stops (the documented inline-color exception, sourced
     // from here so the button still tracks the token system).
-    readonly property color exportGradientTop: "#37b6f7"
-    readonly property color exportGradientBottom: "#2567ec"
-    readonly property color exportGlow: "#38bdf8"
+    readonly property color exportGradientTop: "#ffcf4a"
+    readonly property color exportGradientBottom: "#f59e0b"
+    readonly property color exportGlow: "#fbbf24"
 
     // Scrims/overlays drawn over media (clip name bands, preview letterbox,
     // thumbnail duration badges). Fixed regardless of app theme because they sit
