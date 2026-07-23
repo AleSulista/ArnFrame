@@ -346,6 +346,7 @@ PanelFrame {
 
     function handleTimelineWheel(wheel) {
         const maxX = Math.max(0, flick.contentWidth - flick.width)
+        const maxY = Math.max(0, flick.contentHeight - flick.height)
         if (wheel.modifiers & Qt.ControlModifier) {
             const t = wheel.x / pxPerSecond
             const viewportX = wheel.x - flick.contentX
@@ -353,9 +354,31 @@ PanelFrame {
             zoom = Math.max(minZoom, Math.min(maxZoom, zoom * factor))
             const newMaxX = Math.max(0, flick.contentWidth - flick.width)
             flick.contentX = Math.max(0, Math.min(newMaxX, t * pxPerSecond - viewportX))
-        } else {
-            const delta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
+            return
+        }
+
+        const dy = wheel.angleDelta.y
+        const dx = wheel.angleDelta.x
+
+        // Shift forces horizontal scrolling regardless of overflow.
+        if (wheel.modifiers & Qt.ShiftModifier) {
+            const delta = dy !== 0 ? dy : dx
             flick.contentX = Math.max(0, Math.min(maxX, flick.contentX - delta))
+            return
+        }
+
+        // Trackpad horizontal component always scrolls horizontally.
+        if (dx !== 0)
+            flick.contentX = Math.max(0, Math.min(maxX, flick.contentX - dx))
+
+        // Vertical wheel scrolls the tracks when they overflow the viewport;
+        // otherwise it falls back to horizontal so short timelines keep the
+        // previous wheel-to-pan behaviour.
+        if (dy !== 0) {
+            if (maxY > 0)
+                flick.contentY = Math.max(0, Math.min(maxY, flick.contentY - dy))
+            else
+                flick.contentX = Math.max(0, Math.min(maxX, flick.contentX - dy))
         }
     }
 
@@ -909,6 +932,12 @@ PanelFrame {
                                                    ? Theme.icons.film : Theme.icons.audioLines
                                         onTriggered: EditorState.setTrackShowWaveform(
                                                          index, !trackLabelRow.trackWaveform)
+                                    }
+                                    MenuSeparator {}
+                                    MenuItem {
+                                        text: qsTr("Delete track")
+                                        icon.name: Theme.icons.trash
+                                        onTriggered: EditorState.removeTrack(index)
                                     }
                                 }
                             }
