@@ -6,6 +6,14 @@ Drift is a free, open-source desktop video editor from CutWire Studios. It bring
 
 Built with **Qt 6**, **QML**, and **FFmpeg**. Preview and export share one compositor, so what you see is what you get.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/main-window.png" alt="The Drift editor with the timeline, preview, and asset panels" width="900">
+</p>
+
+<p align="center"><em>The Drift editor — timeline, preview, and asset panels</em></p>
+
 ## Features
 
 - **Multi-track timeline** — trim, split, snap, ripple, mute/hide tracks, and full undo/redo

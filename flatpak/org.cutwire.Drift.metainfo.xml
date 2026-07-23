@@ -50,14 +50,12 @@
   <url type="homepage">https://github.com/CutWire-Studios/Drift</url>
   <url type="bugtracker">https://github.com/CutWire-Studios/Drift/issues</url>
   <url type="vcs-browser">https://github.com/CutWire-Studios/Drift</url>
-  <!-- TODO: add screenshots once they exist, e.g.:
   <screenshots>
     <screenshot type="default" xml:lang="en">
       <image>https://raw.githubusercontent.com/CutWire-Studios/Drift/main/docs/screenshots/main-window.png</image>
       <caption>The Drift editor with the timeline, preview, and asset panels</caption>
     </screenshot>
   </screenshots>
-  -->
   <releases>
     <release version="0.1.0" date="2026-07-23">
       <description>

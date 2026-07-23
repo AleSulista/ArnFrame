@@ -452,8 +452,13 @@ install(FILES flatpak/org.cutwire.Drift.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES flatpak/org.cutwire.Drift.metainfo.xml
         DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
-install(FILES flatpak/org.cutwire.Drift.svg
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+# 1024px source is intentionally skipped: flatpak build-export rejects icons
+# larger than 512x512.
+foreach(_size 64 128 256 512)
+    install(FILES
+        flatpak/share/icons/hicolor/${_size}x${_size}/apps/org.cutwire.Drift.png
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${_size}x${_size}/apps)
+endforeach()
 
 # --- CLI tools (headless engine testing, no GUI) ----------------------------
 add_subdirectory(tools)
