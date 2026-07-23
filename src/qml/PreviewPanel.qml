@@ -209,7 +209,7 @@ PanelFrame {
                         visible: opacity > 0
                         opacity: EditorState.playback.hasFrame ? 0 : 1
                         text: EditorState.activeAudioClipAtPlayhead().path
-                              ? qsTr("Audio only") : qsTr("No clip at playhead")
+                              ? qsTr("Audio only") : qsTr("No clip at the current time")
                         // Drawn on the letterbox scrim, not a panel surface, so it
                         // follows the on-media tokens in both themes.
                         color: Theme.guideMedium
@@ -1139,7 +1139,7 @@ PanelFrame {
                         ThemedButton {
                             variant: "secondary"
                             text: qsTr("Reset")
-                            tooltip: qsTr("Restore the crop frame to the full canvas")
+                            tooltip: qsTr("Reset crop to the full video size")
                             enabled: cropOverlay.changed
                             onClicked: cropOverlay.reset()
                         }
@@ -1210,7 +1210,7 @@ PanelFrame {
                 HoverHandler { id: timecodeHover }
 
                 ThemedToolTip {
-                    text: qsTr("Playhead / total duration — hh:mm:ss:ff at %1 fps").arg(root.projectFps)
+                    text: qsTr("Current time / total · %1 frames per second").arg(root.projectFps)
                     visible: timecodeHover.hovered
                 }
 
@@ -1262,8 +1262,8 @@ PanelFrame {
                     text: viewport.fitMode ? qsTr("Fit") : qsTr("Fill")
                     checked: !viewport.fitMode
                     tooltip: viewport.fitMode
-                             ? qsTr("Fit: the whole frame is visible. Click for Fill.")
-                             : qsTr("Fill: the frame covers the viewport. Click for Fit.")
+                             ? qsTr("Fit: show the whole picture. Click for Fill.")
+                             : qsTr("Fill: zoom in to cover the preview area. Click for Fit.")
                     onClicked: viewport.fitMode = !viewport.fitMode
                 }
 
@@ -1285,7 +1285,7 @@ PanelFrame {
                     // Display is capitalised; the engine stores the lowercase value.
                     readonly property var values: ["full", "half", "quarter"]
                     model: [qsTr("Full"), qsTr("Half"), qsTr("Quarter")]
-                    tooltip: qsTr("Resolution the preview renders at, playing and paused. Lower is faster.")
+                    tooltip: qsTr("Preview quality — lower is smoother while editing")
                     currentIndex: Math.max(0, values.indexOf(EditorState.playback.previewQuality))
                     onActivated: EditorState.playback.previewQuality = values[currentIndex]
                 }

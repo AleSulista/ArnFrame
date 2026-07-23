@@ -174,7 +174,7 @@ Column {
                     Text {
                         width: parent.width
                         visible: presetCard.modelData.compositorOnly === true
-                        text: qsTr("Compositor")
+                        text: qsTr("Built-in")
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeXs - 1

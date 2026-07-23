@@ -253,7 +253,7 @@ Popup {
 
         ActionRow {
             glyph: Theme.icons.package
-            text: qsTr("Package project…")
+            text: qsTr("Save with media…")
             onTriggered: root.packageRequested()
         }
 

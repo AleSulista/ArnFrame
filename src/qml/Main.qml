@@ -160,7 +160,7 @@ ApplicationWindow {
             if (success)
                 Toasts.success(qsTr("Export finished."))
             else
-                Toasts.error(qsTr("Export failed. Check the output path and disk space."))
+                Toasts.error(qsTr("Export failed. Check the save location and free space on your disk."))
         }
 
         function onMissingAddons(addons) {
@@ -171,16 +171,16 @@ ApplicationWindow {
             if (ok)
                 Toasts.success(message)
             else
-                Toasts.error(qsTr("Packaging failed: %1").arg(message))
+                Toasts.error(qsTr("Couldn't create the shareable copy: %1").arg(message))
         }
 
         function onSubtitleGenerationFinished(ok, message) {
             if (ok)
-                Toasts.success(message.length > 0 ? message : qsTr("Subtitles generated."))
+                Toasts.success(message.length > 0 ? message : qsTr("Captions created."))
             else
                 Toasts.error(message.length > 0
-                             ? qsTr("Subtitle generation failed: %1").arg(message)
-                             : qsTr("Subtitle generation failed."))
+                             ? qsTr("Couldn’t create captions: %1").arg(message)
+                             : qsTr("Couldn’t create captions."))
         }
 
         // `lastMessage` is the backend's general-purpose status line. It used to

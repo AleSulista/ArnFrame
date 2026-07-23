@@ -26,7 +26,7 @@ Column {
         wrapMode: Text.WordWrap
         horizontalAlignment: Text.AlignHCenter
         text: EditorState.selectedClip >= 0
-              ? qsTr("Click a template to apply a beat-synced effect stack to the selection")
+              ? qsTr("Click a template to apply music-synced effects to the selection")
               : qsTr("Select a clip, then click a template to apply")
         color: Theme.mutedForeground
         font.family: Theme.fontFamily
@@ -223,7 +223,7 @@ Column {
                             Text {
                                 id: segBadge
                                 anchors.centerIn: parent
-                                text: qsTr("Cutout")
+                                text: qsTr("Needs cutout")
                                 color: Theme.onMedia
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs

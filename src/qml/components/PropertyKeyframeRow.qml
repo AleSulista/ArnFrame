@@ -207,8 +207,8 @@ Column {
 
                     ThemedToolTip {
                         text: root.graphSelected
-                              ? qsTr("Hide %1 from the keyframe strip").arg(root.propDef.label)
-                              : qsTr("Add %1 to the keyframe strip").arg(root.propDef.label)
+                              ? qsTr("Hide %1 from the motion graph").arg(root.propDef.label)
+                              : qsTr("Add %1 to the motion graph").arg(root.propDef.label)
                         visible: parent.containsMouse
                     }
                 }
@@ -216,8 +216,8 @@ Column {
 
             ThemedChip {
                 id: linChip
-                text: qsTr("Lin")
-                tooltip: qsTr("Linear — constant rate between keyframes")
+                text: qsTr("Straight")
+                tooltip: qsTr("Straight — changes at a steady rate between keyframes")
                 selected: root.interpolationMode === "linear"
                 enabled: root.activeKey !== null
                 chipHeight: 18
@@ -242,8 +242,8 @@ Column {
 
             ThemedChip {
                 id: holdChip
-                text: qsTr("Hold")
-                tooltip: qsTr("Hold — jumps to the next value with no interpolation")
+                text: qsTr("Jump")
+                tooltip: qsTr("Jump — holds the value until the next keyframe")
                 selected: root.interpolationMode === "hold"
                 enabled: root.activeKey !== null
                 chipHeight: 18

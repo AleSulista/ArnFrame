@@ -169,7 +169,7 @@ Item {
                     font.weight: Font.Medium
                 }
                 Text {
-                    text: root.cues.length + qsTr(" cue(s)")
+                    text: root.cues.length + qsTr(" caption(s)")
                     color: Theme.mutedForeground
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeXs

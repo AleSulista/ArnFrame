@@ -18,7 +18,7 @@ Window {
     height: 720
     minimumWidth: 780
     minimumHeight: 520
-    title: qsTr("Segment clip")
+    title: qsTr("Cut out subject")
     color: Theme.appBackground
 
     function openFor(track, clip, startSeconds, durationSeconds, sessionAlreadyStarted) {
@@ -155,7 +155,7 @@ Window {
                     ThemedLabel {
                         id: encodingLabel
                         anchors.centerIn: parent
-                        text: qsTr("Analysing frame…")
+                        text: qsTr("Looking at this moment…")
                     }
                 }
             }
@@ -206,14 +206,14 @@ Window {
 
             ThemedLabel {
                 width: parent.width
-                text: qsTr("Model: %1").arg(EditorState.segmentationModelVariant() || qsTr("not found"))
+                text: qsTr("AI: %1").arg(EditorState.segmentationModelVariant() || qsTr("not installed"))
             }
 
             Column {
                 width: parent.width
                 spacing: Theme.spacingSm
 
-                ThemedLabel { text: qsTr("Output") }
+                ThemedLabel { text: qsTr("Result") }
 
                 ThemedComboBox {
                     id: outputBox
@@ -223,8 +223,8 @@ Window {
                     textRole: "label"
                     valueRole: "value"
                     model: [
-                        { label: qsTr("Two clips (foreground + background)"), value: "clips" },
-                        { label: qsTr("Mask this clip"), value: "mask" }
+                        { label: qsTr("Two clips (subject + background)"), value: "clips" },
+                        { label: qsTr("Hide everything except the subject"), value: "mask" }
                     ]
                 }
 
@@ -232,7 +232,7 @@ Window {
                     width: parent.width
                     wrapMode: Text.WordWrap
                     visible: EditorState.segmentationForTemplate
-                    text: qsTr("The matte is used only for this template — no extra tracks are created.")
+                    text: qsTr("The cutout is only for this effect — no extra tracks are added.")
                 }
             }
 
@@ -248,10 +248,10 @@ Window {
                 width: parent.width
                 variant: "primary"
                 text: EditorState.segmenting
-                      ? qsTr("Segmenting… %1%").arg(Math.round(EditorState.segmentProgress * 100))
+                      ? qsTr("Cutting out… %1%").arg(Math.round(EditorState.segmentProgress * 100))
                       : (EditorState.segmentationForTemplate
-                         ? qsTr("Segment & apply template")
-                         : qsTr("Segment clip"))
+                         ? qsTr("Cut out & apply effect")
+                         : qsTr("Cut out subject"))
                 enabled: EditorState.segmentPoints.length > 0 && !EditorState.segmenting
                          && !EditorState.segmentEncoding
                 onClicked: EditorState.runSegmentationSession(
@@ -288,7 +288,7 @@ Window {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 visible: !EditorState.segmenting
-                text: qsTr("Every frame runs through the model, so a long clip takes a while.")
+                text: qsTr("Each moment is processed, so longer clips take longer.")
             }
         }
     }

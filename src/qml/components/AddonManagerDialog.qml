@@ -7,7 +7,7 @@ import Drift
 ThemedDialog {
     id: root
 
-    title: qsTr("Addons")
+    title: qsTr("Extras")
     preferredWidth: Theme.dialogWidthLg
     showAccept: false
     rejectText: qsTr("Close")
@@ -19,7 +19,7 @@ ThemedDialog {
 
     ThemedDialog {
         id: confirmRemoval
-        title: qsTr("Remove addon?")
+        title: qsTr("Remove this pack?")
         acceptText: qsTr("Remove")
         acceptVariant: "destructive"
         preferredWidth: Theme.dialogWidthSm
@@ -90,7 +90,7 @@ ThemedDialog {
                     { id: "audio-effects", label: qsTr("Audio FX") },
                     { id: "fonts", label: qsTr("Fonts") },
                     { id: "stickers", label: qsTr("Stickers") },
-                    { id: "whisper-model", label: qsTr("AI models") }
+                    { id: "whisper-model", label: qsTr("Speech & AI") }
                 ]
 
                 ThemedChip {
@@ -108,7 +108,7 @@ ThemedDialog {
             anchors.left: parent.left
             anchors.right: parent.right
             visible: Addons.status.length > 0 || Addons.refreshing
-            text: Addons.refreshing ? qsTr("Checking for addons…") : Addons.status
+            text: Addons.refreshing ? qsTr("Checking for extras…") : Addons.status
             color: Addons.refreshing ? Theme.mutedForeground : Theme.destructive
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSm
@@ -155,8 +155,8 @@ ThemedDialog {
                 visible: list.count === 0 && !Addons.refreshing
                 glyph: Addons.status.length > 0 ? Theme.icons.warning : Theme.icons.puzzle
                 title: Addons.status.length > 0
-                       ? qsTr("Can't reach the addon catalogue")
-                       : qsTr("No addons in this category")
+                       ? qsTr("Can't reach the download store")
+                       : qsTr("Nothing in this category")
                 hint: Addons.status.length > 0
                       ? qsTr("Check your connection and try again.")
                       : qsTr("Pick another category above.")
@@ -296,7 +296,7 @@ ThemedDialog {
                         visible: !row.active && row.modelData.installedVersion.length > 0
                         text: qsTr("Remove")
                         variant: "ghost"
-                        tooltip: qsTr("Delete this addon's downloaded data")
+                        tooltip: qsTr("Delete this pack's downloaded data")
                         onClicked: {
                             root.pendingRemovalId = row.modelData.id
                             root.pendingRemovalName = row.modelData.name

@@ -36,7 +36,7 @@ ThemedDialog {
         ThemedLabel {
             width: parent.width
             size: "sm"
-            text: qsTr("Encoded straight from the preview (H.264 + AAC), so the file matches what you see. Presets scale by height and keep your project's aspect ratio.")
+            text: qsTr("Saves what you see in the preview. Pick a quality — the picture shape stays the same.")
         }
 
         ThemedLabel {
@@ -54,7 +54,7 @@ ThemedDialog {
                     required property var modelData
                     text: modelData.label
                     selected: root.presetId === modelData.id
-                    tooltip: qsTr("Export at the %1 preset").arg(modelData.label)
+                    tooltip: qsTr("Export as %1").arg(modelData.label)
                     onClicked: root.presetId = modelData.id
                 }
             }

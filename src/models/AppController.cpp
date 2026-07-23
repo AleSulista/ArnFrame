@@ -1333,14 +1333,14 @@ QVariantList AppController::actions() const
         action(QStringLiteral("redo"), QStringLiteral("Redo")),
         action(QStringLiteral("copy"), QStringLiteral("Copy selection")),
         action(QStringLiteral("cut"), QStringLiteral("Cut selection")),
-        action(QStringLiteral("paste"), QStringLiteral("Paste at playhead")),
+        action(QStringLiteral("paste"), QStringLiteral("Paste at current time")),
         action(QStringLiteral("duplicate"), QStringLiteral("Duplicate selected clip")),
-        action(QStringLiteral("split"), QStringLiteral("Split at playhead")),
+        action(QStringLiteral("split"), QStringLiteral("Split at current time")),
         action(QStringLiteral("merge"), QStringLiteral("Merge adjacent clips")),
-        action(QStringLiteral("unlink"), QStringLiteral("Unlink audio")),
+        action(QStringLiteral("unlink"), QStringLiteral("Separate audio")),
         action(QStringLiteral("clearSelection"), QStringLiteral("Clear selection")),
-        action(QStringLiteral("nudgeLeft"), QStringLiteral("Nudge selection left")),
-        action(QStringLiteral("nudgeRight"), QStringLiteral("Nudge selection right")),
+        action(QStringLiteral("nudgeLeft"), QStringLiteral("Move selection left a little")),
+        action(QStringLiteral("nudgeRight"), QStringLiteral("Move selection right a little")),
         action(QStringLiteral("toggleGuides"), QStringLiteral("Toggle guides")),
     };
 }
@@ -2041,10 +2041,10 @@ void AppController::splitAtPlayhead()
     }
 
     if (splitAny) {
-        pushProjectEdit(before, QStringLiteral("Split at playhead"));
-        finishEdit(QStringLiteral("Split at playhead"));
+        pushProjectEdit(before, QStringLiteral("Split at current time"));
+        finishEdit(QStringLiteral("Split at current time"));
     } else {
-        setLastMessage(QStringLiteral("Nothing to split at playhead"));
+        setLastMessage(QStringLiteral("Nothing to split here — move to a clip first"));
     }
 }
 
@@ -2429,11 +2429,11 @@ void AppController::generateSubtitlesForClip(int trackIndex, int clipIndex, cons
 
     const drift::Clip clip = track.clips.at(clipIndex);
     if (clip.type != drift::ClipType::Video && clip.type != drift::ClipType::Audio) {
-        setLastMessage(QStringLiteral("Select a video or audio clip to transcribe"));
+        setLastMessage(QStringLiteral("Select a video or audio clip to create captions"));
         return;
     }
     if (clip.path.isEmpty() || clip.srcOut <= clip.srcIn) {
-        setLastMessage(QStringLiteral("Clip has no audio to transcribe"));
+        setLastMessage(QStringLiteral("This clip has no sound"));
         return;
     }
 
@@ -2446,7 +2446,7 @@ void AppController::generateSubtitlesForClip(int trackIndex, int clipIndex, cons
     emit subtitleGenStatusChanged();
     m_subtitleGenerating = true;
     emit subtitleGeneratingChanged();
-    setLastMessage(QStringLiteral("Generating subtitles..."));
+    setLastMessage(QStringLiteral("Creating captions..."));
 
     const QString path = clip.path;
     const drift::TimeUs srcIn = clip.srcIn;
@@ -2494,7 +2494,7 @@ void AppController::generateSubtitlesForClip(int trackIndex, int clipIndex, cons
                 Qt::QueuedConnection);
         };
 
-        setProgress(0.02, QStringLiteral("Loading speech model…"));
+        setProgress(0.02, QStringLiteral("Getting speech recognition ready…"));
         drift::WhisperTranscriber &whisper = drift::WhisperTranscriber::instance();
         if (!whisper.available()) {
             qWarning() << "[subtitles] whisper unavailable:" << whisper.lastError();
@@ -2569,7 +2569,7 @@ void AppController::generateSubtitlesForClip(int trackIndex, int clipIndex, cons
             return;
         }
 
-        setProgress(0.96, QStringLiteral("Building subtitle track…"));
+        setProgress(0.96, QStringLiteral("Building caption track…"));
 
         // Map source-relative cue times onto clip-relative timeline time (accounts for
         // speed and reverse), clamped to the clip's duration.
@@ -2630,7 +2630,7 @@ void AppController::beginSegmentationSession(int trackIndex, int clipIndex, doub
     if (clipIndex < 0 || clipIndex >= track.clips.size())
         return;
     if (track.clips.at(clipIndex).type != drift::ClipType::Video) {
-        setLastMessage(QStringLiteral("Select a video clip to segment"));
+        setLastMessage(QStringLiteral("Select a video clip to cut out"));
         return;
     }
 
@@ -2653,11 +2653,11 @@ void AppController::beginSpeedCurveSession(int trackIndex, int clipIndex)
 
     const drift::Clip &clip = track.clips.at(clipIndex);
     if (clip.type != drift::ClipType::Video && clip.type != drift::ClipType::Audio) {
-        setLastMessage(QStringLiteral("Speed curves apply to video and audio clips"));
+        setLastMessage(QStringLiteral("Custom speed works on video and audio clips"));
         return;
     }
     if (clip.path.isEmpty() || clip.srcOut <= clip.srcIn) {
-        setLastMessage(QStringLiteral("Clip has no media to retime"));
+        setLastMessage(QStringLiteral("This clip has no media to speed up or slow down"));
         return;
     }
 
@@ -2810,7 +2810,7 @@ void AppController::applySpeedCurve()
     // The timeline stays editable while the window is open, so the indices captured at the start
     // of the session can point at a different clip by now.
     if (source.id != m_speedCurveClip.id) {
-        setLastMessage(QStringLiteral("The clip being retimed has moved — reopen the speed curve"));
+        setLastMessage(QStringLiteral("That clip moved — open Custom speed again"));
         return;
     }
 
@@ -2831,10 +2831,10 @@ void AppController::applySpeedCurve()
         drift::insertTrackAboveForClipType(m_project, m_speedCurveTrack, source.type);
     m_project.tracks()[newTrack].clips.append(retimed);
 
-    pushProjectEdit(before, QStringLiteral("Speed curve applied"));
-    finishEdit(QStringLiteral("Speed curve applied"));
+    pushProjectEdit(before, QStringLiteral("Custom speed applied"));
+    finishEdit(QStringLiteral("Custom speed applied"));
     selectClip(newTrack, m_project.tracks().at(newTrack).clips.size() - 1);
-    setLastMessage(QStringLiteral("Speed curve applied"));
+    setLastMessage(QStringLiteral("Custom speed applied"));
     emit speedCurveApplied();
 }
 
@@ -3022,7 +3022,7 @@ void AppController::segmentClip(int trackIndex, int clipIndex, const QVariantLis
                                 const QString &outputMode)
 {
     if (m_segmenting) {
-        setLastMessage(QStringLiteral("Segmentation already in progress"));
+        setLastMessage(QStringLiteral("Cutout is already running"));
         return;
     }
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
@@ -3033,15 +3033,15 @@ void AppController::segmentClip(int trackIndex, int clipIndex, const QVariantLis
 
     const drift::Clip clip = track.clips.at(clipIndex);
     if (clip.type != drift::ClipType::Video) {
-        setLastMessage(QStringLiteral("Select a video clip to segment"));
+        setLastMessage(QStringLiteral("Select a video clip to cut out"));
         return;
     }
     if (clip.path.isEmpty() || clip.srcOut <= clip.srcIn) {
-        setLastMessage(QStringLiteral("Clip has no video to segment"));
+        setLastMessage(QStringLiteral("This clip has no video to cut out"));
         return;
     }
     if (points.isEmpty()) {
-        setLastMessage(QStringLiteral("Mark the subject before segmenting"));
+        setLastMessage(QStringLiteral("Click the subject first"));
         return;
     }
 
@@ -3062,11 +3062,11 @@ void AppController::segmentClip(int trackIndex, int clipIndex, const QVariantLis
     m_segmentCancel.storeRelaxed(0);
     m_segmentProgress = 0.0;
     emit segmentProgressChanged();
-    m_segmentStatus = QStringLiteral("Loading model…");
+    m_segmentStatus = QStringLiteral("Getting ready…");
     emit segmentStatusChanged();
     m_segmenting = true;
     emit segmentingChanged();
-    setLastMessage(QStringLiteral("Segmenting clip..."));
+    setLastMessage(QStringLiteral("Cutting out subject..."));
 
     const QString path = clip.path;
     const drift::TimeUs srcIn = clip.srcIn;
@@ -3142,13 +3142,13 @@ void AppController::segmentClip(int trackIndex, int clipIndex, const QVariantLis
         const drift::TimeUs step = drift::kUsPerSecond / fps;
         const int totalFrames = int((srcOut - srcIn + step - 1) / step);
         if (totalFrames <= 0) {
-            finish(false, QStringLiteral("Clip is too short to segment"), {});
+            finish(false, QStringLiteral("Clip is too short to cut out"), {});
             return;
         }
 
         const QString mattePath = drift::newMattePath();
         if (mattePath.isEmpty()) {
-            finish(false, QStringLiteral("Could not create a matte file"), {});
+            finish(false, QStringLiteral("Could not create a cutout file"), {});
             return;
         }
 
@@ -3165,7 +3165,7 @@ void AppController::segmentClip(int trackIndex, int clipIndex, const QVariantLis
         for (int i = 0; i < totalFrames; ++i) {
             if (m_segmentCancel.loadRelaxed() != 0) {
                 writer.abort();
-                finish(false, QStringLiteral("Segmentation cancelled"), {});
+                finish(false, QStringLiteral("Cutout cancelled"), {});
                 return;
             }
 
@@ -3223,7 +3223,7 @@ void AppController::segmentClip(int trackIndex, int clipIndex, const QVariantLis
             }
 
             setProgress(double(i + 1) / totalFrames,
-                        QStringLiteral("Segmenting frame %1 of %2\u2026").arg(i + 1).arg(totalFrames));
+                        QStringLiteral("Processing frame %1 of %2\u2026").arg(i + 1).arg(totalFrames));
         }
 
         if (!writer.finish(&error)) {
@@ -3236,10 +3236,10 @@ void AppController::segmentClip(int trackIndex, int clipIndex, const QVariantLis
         // itself — but a clip that is mostly occluded usually means the wrong subject was marked.
         finish(true,
                occludedFrames > 0
-                   ? QStringLiteral("Segmentation complete — subject hidden for %1 of %2 frames")
+                   ? QStringLiteral("Cutout complete — subject cut out on %1 of %2 frames")
                          .arg(occludedFrames)
                          .arg(totalFrames)
-                   : QStringLiteral("Segmentation complete"),
+                   : QStringLiteral("Cutout complete"),
                mattePath);
     });
 }
@@ -3302,7 +3302,7 @@ void AppController::detectFacesForClip(int trackIndex, int clipIndex)
     m_faceDetectCancel.storeRelaxed(0);
     m_faceDetectProgress = 0.0;
     emit faceDetectProgressChanged();
-    m_faceDetectStatus = QStringLiteral("Loading model…");
+    m_faceDetectStatus = QStringLiteral("Getting ready…");
     emit faceDetectStatusChanged();
     m_faceDetecting = true;
     emit faceDetectingChanged();
@@ -3485,7 +3485,7 @@ void AppController::finalizeSegmentation(const QString &clipId, const QString &m
     if (trackIndex < 0) {
         // The clip was deleted while the job ran; the matte has nothing to attach to.
         QFile::remove(mattePath);
-        setLastMessage(QStringLiteral("Segmented clip no longer exists"));
+        setLastMessage(QStringLiteral("That clip no longer exists"));
         return;
     }
 
@@ -3499,8 +3499,8 @@ void AppController::finalizeSegmentation(const QString &clipId, const QString &m
 
     if (outputMode == QStringLiteral("mask")) {
         m_project.tracks()[trackIndex].clips[clipIndex].mask = matte;
-        pushProjectEdit(before, QStringLiteral("Segmentation"));
-        finishEdit(QStringLiteral("Segmentation"));
+        pushProjectEdit(before, QStringLiteral("Cut out subject"));
+        finishEdit(QStringLiteral("Cut out subject"));
         selectClip(trackIndex, clipIndex);
         return;
     }
@@ -3525,8 +3525,8 @@ void AppController::finalizeSegmentation(const QString &clipId, const QString &m
     const int fgTrack = drift::insertTrackAtTopForClipType(m_project, drift::ClipType::Video);
     m_project.tracks()[fgTrack].clips.append(derive(false, QStringLiteral(" (foreground)")));
 
-    pushProjectEdit(before, QStringLiteral("Segmentation"));
-    finishEdit(QStringLiteral("Segmentation"));
+    pushProjectEdit(before, QStringLiteral("Cut out subject"));
+    finishEdit(QStringLiteral("Cut out subject"));
     selectClip(fgTrack, m_project.tracks().at(fgTrack).clips.size() - 1);
 }
 
@@ -3573,7 +3573,7 @@ bool AppController::renderDenoisedAudio(const QString &path, drift::TimeUs srcIn
     };
 
     drift::DeepFilterDenoiser &dn = drift::DeepFilterDenoiser::instance();
-    setProgress(span01(0.0), QStringLiteral("Loading noise removal model…"));
+    setProgress(span01(0.0), QStringLiteral("Getting noise removal ready…"));
     if (!dn.available())
         return fail(dn.lastError());
 
@@ -3928,10 +3928,10 @@ void AppController::reportMissingCatalogEntries()
     const QString sample = names.mid(0, 3).join(QStringLiteral(", "));
 
     setLastMessage(total == 1
-                       ? QStringLiteral("This project uses \"%1\", which is not installed — it "
-                                        "will not be applied. Check Addons.").arg(sample)
-                       : QStringLiteral("This project uses %1 effects or transitions that are not "
-                                        "installed (%2%3) — they will not be applied. Check Addons.")
+                       ? QStringLiteral("This project uses \"%1\", which isn’t installed — it "
+                                        "won’t show. Open Extras to install it.").arg(sample)
+                       : QStringLiteral("This project uses %1 effects or transitions that aren’t "
+                                        "installed (%2%3) — they won’t show. Open Extras to install them.")
                              .arg(total)
                              .arg(sample, names.size() > 3 ? QStringLiteral(", …") : QString()));
 }
@@ -4239,7 +4239,7 @@ void AppController::applyCanvasCrop(double x, double y, double width, double hei
     drift::rebaseClipLayout(m_project, m_project.width(), m_project.height(), x, y);
     m_project.setResolution(newWidth, newHeight);
     pushProjectEdit(before, QStringLiteral("Crop canvas"));
-    finishEdit(tr("Canvas cropped to %1×%2").arg(newWidth).arg(newHeight));
+    finishEdit(tr("Video size cropped to %1×%2").arg(newWidth).arg(newHeight));
 }
 
 void AppController::setCanvasCropMode(bool active)
@@ -4398,7 +4398,7 @@ void AppController::previewSetClipPosition(int trackIndex, int clipIndex, double
     const bool wroteX = writeKeyframeValue(clip.transformX, relative, xPixels, m_autoKeyEnabled, false);
     const bool wroteY = writeKeyframeValue(clip.transformY, relative, yPixels, m_autoKeyEnabled, false);
     if (!wroteX && !wroteY) {
-        emit transformBlocked(tr("Can't move — auto-key is off"));
+        emit transformBlocked(tr("Turn on Auto keyframes to move this"));
         return;
     }
 
@@ -4424,7 +4424,7 @@ void AppController::previewSetClipSize(int trackIndex, int clipIndex, double wid
     const bool wroteH =
         writeKeyframeValue(clip.transformH, relative, qMax(1.0, heightPixels), m_autoKeyEnabled, false);
     if (!wroteW && !wroteH) {
-        emit transformBlocked(tr("Can't resize — auto-key is off"));
+        emit transformBlocked(tr("Turn on Auto keyframes to resize this"));
         return;
     }
 
@@ -4454,7 +4454,7 @@ void AppController::previewSetClipRect(int trackIndex, int clipIndex, double xPi
     wrote = writeKeyframeValue(clip.transformH, relative, qMax(1.0, heightPixels), m_autoKeyEnabled, false)
             || wrote;
     if (!wrote) {
-        emit transformBlocked(tr("Can't transform — auto-key is off"));
+        emit transformBlocked(tr("Turn on Auto keyframes to change this"));
         return;
     }
 
@@ -4476,7 +4476,7 @@ void AppController::previewSetClipRotation(int trackIndex, int clipIndex, double
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
     if (!writeKeyframeValue(clip.rotation, relative, degrees, m_autoKeyEnabled, false)) {
-        emit transformBlocked(tr("Can't rotate — auto-key is off"));
+        emit transformBlocked(tr("Turn on Auto keyframes to rotate this"));
         return;
     }
 
@@ -4499,7 +4499,7 @@ void AppController::previewSetClipKeyframe(int trackIndex, int clipIndex, const 
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs rel = qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds) - clip.timelineStart);
     if (!writeClipPropValue(clip, prop, rel, value, m_autoKeyEnabled, /*force=*/false)) {
-        emit transformBlocked(tr("Can't edit — auto-key is off"));
+        emit transformBlocked(tr("Turn on Auto keyframes to edit this"));
         return;
     }
 
@@ -6697,7 +6697,7 @@ void AppController::applyEffectTemplate(int trackIndex, int clipIndex, const QSt
     if (needsSegment) {
         if (!segmentationAvailable()) {
             setLastMessage(
-                QStringLiteral("This template needs subject segmentation — install the SAM2 addon"));
+                QStringLiteral("This effect needs a subject cutout — open Extras to install it"));
             return;
         }
         if (m_segmenting) {
@@ -7090,7 +7090,7 @@ void AppController::freezeFrameAtPlayhead()
 {
     const QVariantMap clip = activeVideoClipAtPlayhead();
     if (clip.isEmpty() || clip.value(QStringLiteral("kind")).toString() != QStringLiteral("video")) {
-        setLastMessage(QStringLiteral("No video clip at playhead"));
+        setLastMessage(QStringLiteral("No video at the current time"));
         return;
     }
 
@@ -7098,7 +7098,7 @@ void AppController::freezeFrameAtPlayhead()
     const double sourceTime = sourceTimeForClip(clip);
     const QString thumb = MediaThumbnail::generateAtTime(path, sourceTime);
     if (thumb.isEmpty()) {
-        setLastMessage(QStringLiteral("Failed to capture frame"));
+        setLastMessage(QStringLiteral("Couldn’t capture a still frame"));
         return;
     }
 
@@ -7747,7 +7747,7 @@ void AppController::saveProject(const QUrl &url)
 {
     const QString path = url.toLocalFile();
     if (path.isEmpty()) {
-        setLastMessage(QStringLiteral("Invalid save path"));
+        setLastMessage(QStringLiteral("That save location isn’t valid"));
         return;
     }
     if (m_packaging) {
@@ -7777,7 +7777,7 @@ void AppController::packageProject(const QUrl &url)
 {
     const QString path = url.toLocalFile();
     if (path.isEmpty()) {
-        setLastMessage(QStringLiteral("Invalid save path"));
+        setLastMessage(QStringLiteral("That save location isn’t valid"));
         return;
     }
     if (m_packaging)
@@ -7828,8 +7828,8 @@ void AppController::packageProject(const QUrl &url)
                 setDirty(false);
                 deleteRecoveryFile();
                 emit projectMetadataChanged();
-                setLastMessage(QStringLiteral("Project packaged"));
-                emit packageFinished(true, QStringLiteral("Project packaged"));
+                setLastMessage(QStringLiteral("Shareable copy ready"));
+                emit packageFinished(true, QStringLiteral("Shareable copy ready"));
             },
             Qt::QueuedConnection);
     });
@@ -7844,7 +7844,7 @@ void AppController::loadProject(const QUrl &url)
 {
     const QString path = url.toLocalFile();
     if (path.isEmpty()) {
-        setLastMessage(QStringLiteral("Invalid project path"));
+        setLastMessage(QStringLiteral("That project location isn’t valid"));
         return;
     }
 
@@ -8155,7 +8155,7 @@ void AppController::exportWithPreset(const QUrl &outputUrl, const QString &prese
 {
     const QString outputPath = outputUrl.toLocalFile();
     if (outputPath.isEmpty()) {
-        setLastMessage(QStringLiteral("Invalid export path"));
+        setLastMessage(QStringLiteral("That save location isn’t valid"));
         emit exportFinished(false);
         return;
     }

@@ -13,7 +13,7 @@ ThemedDialog {
     property string aspectMode: "source"
     property string sourceName: ""
 
-    title: qsTr("Project output setup")
+    title: qsTr("Set up your video")
     acceptText: qsTr("Create")
     preferredWidth: Theme.dialogWidthMd
 
@@ -65,8 +65,8 @@ ThemedDialog {
             width: parent.width
             size: "sm"
             text: sourceName.length > 0
-                  ? qsTr("First clip “%1”. Choose the canvas resolution before it is placed.").arg(sourceName)
-                  : qsTr("Choose the canvas resolution before placing the first clip.")
+                  ? qsTr("First clip “%1”. Choose the video size before it is placed.").arg(sourceName)
+                  : qsTr("Choose the video size before adding your first clip.")
         }
 
         ThemedLabel {
@@ -146,7 +146,7 @@ ThemedDialog {
         Column {
             width: parent.width
             spacing: Theme.spacingSm
-            ThemedLabel { text: qsTr("Frame rate") }
+            ThemedLabel { text: qsTr("Frames per second") }
             ThemedNumberField {
                 width: parent.width / 2 - Theme.spacingSm
                 from: 1
@@ -167,7 +167,7 @@ ThemedDialog {
                 tone: "default"
                 size: "sm"
                 font.family: Theme.monoFontFamily
-                text: qsTr("Output: %1×%2 @ %3 fps").arg(root.outWidth).arg(root.outHeight).arg(root.outFps)
+                text: qsTr("Video: %1×%2, %3 frames per second").arg(root.outWidth).arg(root.outHeight).arg(root.outFps)
             }
 
             // Recovering the suggested values previously meant knowing to
@@ -178,7 +178,7 @@ ThemedDialog {
                 text: qsTr("Reset")
                 variant: "ghost"
                 glyph: Theme.icons.reset
-                tooltip: qsTr("Restore the values suggested by the source clip")
+                tooltip: qsTr("Restore the size suggested by your first clip")
                 onClicked: root.applyAspectPreset("source")
             }
         }

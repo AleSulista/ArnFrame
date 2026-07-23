@@ -354,7 +354,7 @@ Item {
 
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: qsTr("Keys")
+                        text: qsTr("Keyframes")
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeXs
@@ -372,8 +372,8 @@ Item {
                         enabled: !EditorState.beatAnalysisRunning
                         tooltip: EditorState.beatAnalysisRunning
                                  ? qsTr("Analyzing…")
-                                 : (EditorState.beatGridVisible ? qsTr("Hide the beat grid")
-                                                                : qsTr("Detect tempo and show the beat grid"))
+                                 : (EditorState.beatGridVisible ? qsTr("Hide the beat markers")
+                                                                : qsTr("Find the beat and show markers"))
                         onClicked: {
                             if (EditorState.beatGridVisible)
                                 EditorState.beatGridVisible = false
@@ -393,8 +393,8 @@ Item {
                         enabled: !EditorState.beatAnalysisRunning
                         tooltip: EditorState.beatAnalysisRunning
                                  ? qsTr("Analyzing…")
-                                 : (EditorState.onsetsVisible ? qsTr("Hide onsets")
-                                                              : qsTr("Detect onsets in the audio under this clip"))
+                                 : (EditorState.onsetsVisible ? qsTr("Hide hits")
+                                                              : qsTr("Find beats and hits in the audio under this clip"))
                         onClicked: {
                             if (EditorState.onsetsVisible)
                                 EditorState.onsetsVisible = false
@@ -443,15 +443,15 @@ Item {
                     width: parent.width
                     wrapMode: Text.WordWrap
                     text: {
-                        const keys = root.keyCount === 0 ? qsTr("No keys")
-                                                         : (root.keyCount + qsTr(" key(s)"))
+                        const keys = root.keyCount === 0 ? qsTr("No keyframes")
+                                                         : (root.keyCount + qsTr(" keyframe(s)"))
                         if (!EditorState.beatGridVisible || !root.analyzed)
                             return keys
                         // The detector publishes no bpm when the tempo estimate was not
                         // confident — say so, rather than leaving the grid button lit over
                         // an empty lane. Onsets may still be perfectly usable.
                         return root.bpm > 0 ? keys + " · " + Math.round(root.bpm) + qsTr(" BPM")
-                                            : keys + qsTr(" · no tempo")
+                                            : keys + qsTr(" · no beat found")
                     }
                     color: Theme.mutedForeground
                     font.family: Theme.fontFamily

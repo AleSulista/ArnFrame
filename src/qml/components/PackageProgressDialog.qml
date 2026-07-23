@@ -7,7 +7,7 @@ import Drift
 ThemedDialog {
     id: root
 
-    title: qsTr("Packaging project")
+    title: qsTr("Preparing shareable copy")
     preferredWidth: 360
     showAccept: false
     rejectText: qsTr("Cancel")
@@ -41,7 +41,7 @@ ThemedDialog {
             horizontalAlignment: Text.AlignHCenter
             size: "xs"
             wrapMode: Text.WordWrap
-            text: qsTr("Copying media into the project file. The result opens on any machine.")
+            text: qsTr("Copying your media into one file so it opens on any computer.")
         }
     }
 }

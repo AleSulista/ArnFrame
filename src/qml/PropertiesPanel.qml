@@ -374,12 +374,12 @@ PanelFrame {
         id: tabsModel
         ListElement { tabId: "general"; icon: 0; label: "General" }
         ListElement { tabId: "text"; icon: 10; label: "Text" }
-        ListElement { tabId: "transform"; icon: 1; label: "Transform" }
+        ListElement { tabId: "transform"; icon: 1; label: "Position & size" }
         ListElement { tabId: "audio"; icon: 2; label: "Audio" }
         ListElement { tabId: "speed"; icon: 3; label: "Speed & Fade" }
-        ListElement { tabId: "blending"; icon: 4; label: "Blending" }
+        ListElement { tabId: "blending"; icon: 4; label: "Layer mix" }
         ListElement { tabId: "transition"; icon: 5; label: "Transition" }
-        ListElement { tabId: "masks"; icon: 6; label: "Masks" }
+        ListElement { tabId: "masks"; icon: 6; label: "Cutouts" }
         ListElement { tabId: "effects"; icon: 7; label: "Effects" }
         ListElement { tabId: "subtitles"; icon: 8; label: "Subtitles" }
         ListElement { tabId: "shape"; icon: 9; label: "Shape" }
@@ -586,7 +586,7 @@ PanelFrame {
                             width: tabColumn.width
                             spacing: 4
                             Text {
-                                text: qsTr("Kind")
+                                text: qsTr("Type")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -610,7 +610,7 @@ PanelFrame {
                                 width: (parent.width - parent.spacing) / 2
                                 spacing: 4
                                 Text {
-                                    text: qsTr("Start (s)")
+                                    text: qsTr("Starts at (s)")
                                     color: Theme.mutedForeground
                                     font.pixelSize: Theme.fontSizeXs
                                     font.family: Theme.fontFamily
@@ -659,7 +659,7 @@ PanelFrame {
                             Text {
                                 text: qsTr("Trim")
                                 HoverHandler { id: tipHover1217 }
-                                ThemedToolTip { text: qsTr("Which part of the source media this clip plays"); visible: tipHover1217.hovered }
+                                ThemedToolTip { text: qsTr("Which part of the original file this clip plays"); visible: tipHover1217.hovered }
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -673,9 +673,9 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: qsTr("In point (s)")
+                                        text: qsTr("From (s)")
                                         HoverHandler { id: tipHover1231 }
-                                        ThemedToolTip { text: qsTr("Seconds into the source where this clip starts"); visible: tipHover1231.hovered }
+                                        ThemedToolTip { text: qsTr("Seconds into the file where this clip starts"); visible: tipHover1231.hovered }
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
@@ -696,9 +696,9 @@ PanelFrame {
                                     width: (parent.width - parent.spacing) / 2
                                     spacing: 4
                                     Text {
-                                        text: qsTr("Out point (s)")
+                                        text: qsTr("To (s)")
                                         HoverHandler { id: tipHover1252 }
-                                        ThemedToolTip { text: qsTr("Seconds into the source where this clip ends"); visible: tipHover1252.hovered }
+                                        ThemedToolTip { text: qsTr("Seconds into the file where this clip ends"); visible: tipHover1252.hovered }
                                         color: Theme.mutedForeground
                                         font.pixelSize: Theme.fontSizeXs
                                         font.family: Theme.fontFamily
@@ -723,7 +723,7 @@ PanelFrame {
                             visible: clip.path !== undefined && clip.path.length > 0
 
                             Text {
-                                text: qsTr("Path")
+                                text: qsTr("File")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -925,7 +925,7 @@ PanelFrame {
                                             // Rejects malformed input instead of silently applying a typo.
                                             readonly property bool validHex:
                                                 /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(text)
-                                            errorText: validHex || text.length === 0 ? "" : qsTr("Use #RRGGBB or #AARRGGBB")
+                                            errorText: validHex || text.length === 0 ? "" : qsTr("Enter a color like #FF0000")
                                             onEditingFinished: if (validHex) root.setTextStyleKey("color", text)
                                         }
                                     }
@@ -1062,7 +1062,7 @@ PanelFrame {
                             Text {
                                 text: qsTr("Outline")
                                 HoverHandler { id: tipHover808 }
-                                ThemedToolTip { text: qsTr("Stroke drawn around each glyph"); visible: tipHover808.hovered }
+                                ThemedToolTip { text: qsTr("Outline around each letter"); visible: tipHover808.hovered }
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -1144,7 +1144,7 @@ PanelFrame {
                                             // Rejects malformed input instead of silently applying a typo.
                                             readonly property bool validHex:
                                                 /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(text)
-                                            errorText: validHex || text.length === 0 ? "" : qsTr("Use #RRGGBB or #AARRGGBB")
+                                            errorText: validHex || text.length === 0 ? "" : qsTr("Enter a color like #FF0000")
                                             onEditingFinished: if (validHex) root.setTextStyleKey("outlineColor", text)
                                         }
                                     }
@@ -1306,7 +1306,7 @@ PanelFrame {
                                     // Rejects malformed input instead of silently applying a typo.
                                     readonly property bool validHex:
                                         /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(text)
-                                    errorText: validHex || text.length === 0 ? "" : qsTr("Use #RRGGBB or #AARRGGBB")
+                                    errorText: validHex || text.length === 0 ? "" : qsTr("Enter a color like #FF0000")
                                     onEditingFinished: if (validHex) root.setTextStyleKey("shadowColor", text)
                                 }
                             }
@@ -1364,7 +1364,7 @@ PanelFrame {
                                     // Rejects malformed input instead of silently applying a typo.
                                     readonly property bool validHex:
                                         /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(text)
-                                    errorText: validHex || text.length === 0 ? "" : qsTr("Use #RRGGBB or #AARRGGBB")
+                                    errorText: validHex || text.length === 0 ? "" : qsTr("Enter a color like #FF0000")
                                     onEditingFinished: if (validHex) root.setTextStyleKey("boxColor", text)
                                 }
                             }
@@ -1571,14 +1571,14 @@ PanelFrame {
                             Text {
                                 width: parent.width
                                 wrapMode: Text.WordWrap
-                                text: qsTr("Scrub the playhead, set a value, then click the diamond to key it. With Auto-key on, dragging a slider or the preview also writes keys.")
+                                text: qsTr("Move to a time, set a value, then click the diamond to add a keyframe. With Auto keyframes on, dragging a slider or the preview also creates them.")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
                             }
 
                             ThemedChip {
-                                text: qsTr("Auto-key")
+                                text: qsTr("Auto keyframes")
                                 selected: EditorState.autoKeyEnabled
                                 onClicked: EditorState.autoKeyEnabled = !EditorState.autoKeyEnabled
                             }
@@ -1729,7 +1729,7 @@ PanelFrame {
                             }
 
                             ThemedButton {
-                                text: qsTr("Reset transform")
+                                text: qsTr("Reset position & size")
                                 onClicked: EditorState.resetClipTransform(
                                                EditorState.selectedTrack, EditorState.selectedClip)
                             }
@@ -1814,7 +1814,7 @@ PanelFrame {
                             ThemedButton {
                                 visible: !denoiseSection.denoiseReady
                                 width: parent.width
-                                text: qsTr("Install noise removal model (≈9 MB)")
+                                text: qsTr("Download noise removal (about 9 MB)")
                                 variant: "primary"
                                 onClicked: root.Window.window.openAddonManager("denoise-model")
                             }
@@ -1847,7 +1847,7 @@ PanelFrame {
                                      && parent.audioFxCatalog.length === 0
                             width: parent.width
                             wrapMode: Text.WordWrap
-                            text: qsTr("No audio effects installed. Get the Audio Effects pack from the Addon Manager.")
+                            text: qsTr("No audio effects installed. Get the Audio Effects pack from Extras.")
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeXs
@@ -2045,8 +2045,8 @@ PanelFrame {
                                      && (root.clipKind === "audio" || root.clipKind === "video")
                             width: parent.width
                             text: EditorState.subtitleGenerating
-                                  ? qsTr("Transcribing… %1%").arg(Math.round(EditorState.subtitleGenProgress * 100))
-                                  : qsTr("Generate subtitles")
+                                  ? qsTr("Creating captions… %1%").arg(Math.round(EditorState.subtitleGenProgress * 100))
+                                  : qsTr("Create captions from speech")
                             enabled: !EditorState.subtitleGenerating
                             onClicked: {
                                 const lang = subtitleLanguageBox.currentValue !== undefined
@@ -2061,7 +2061,7 @@ PanelFrame {
                             visible: !parent.whisperReady
                                      && (root.clipKind === "audio" || root.clipKind === "video")
                             width: parent.width
-                            text: qsTr("Install speech model (≈670 MB)")
+                            text: qsTr("Download speech recognition (about 670 MB)")
                             variant: "primary"
                             onClicked: root.Window.window.openAddonManager("whisper-model")
                         }
@@ -2105,7 +2105,7 @@ PanelFrame {
                             visible: root.clipKind === "video" || root.clipKind === "audio"
 
                             ThemedButton {
-                                text: qsTr("Speed curve…")
+                                text: qsTr("Custom speed…")
                                 variant: "secondary"
                                 onClicked: root.Window.window.openSpeedCurve(
                                                EditorState.selectedTrack, EditorState.selectedClip)
@@ -2114,7 +2114,7 @@ PanelFrame {
                             ThemedChip {
                                 anchors.verticalCenter: parent.verticalCenter
                                 visible: speedColumn.hasSpeedCurve
-                                text: qsTr("Curve active — remove")
+                                text: qsTr("Custom speed active — remove")
                                 selected: true
                                 onClicked: EditorState.clearClipSpeedCurve(
                                                EditorState.selectedTrack, EditorState.selectedClip)
@@ -2170,7 +2170,7 @@ PanelFrame {
                         Text {
                             visible: root.clipKind === "video" || root.clipKind === "audio"
                             text: (speedColumn.hasSpeedCurve
-                                   ? qsTr("Variable (curve)")
+                                   ? qsTr("Custom speed")
                                    : (clip.speed || 1).toFixed(2) + "×")
                                     + (clip.reverse ? qsTr(" (reversed)") : "")
                             color: Theme.mutedForeground
@@ -2288,7 +2288,7 @@ PanelFrame {
                         }
 
                         Text {
-                            text: qsTr("Fade curve")
+                            text: qsTr("Fade style")
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeXs
@@ -2297,7 +2297,7 @@ PanelFrame {
                         ThemedComboBox {
                             id: fadeCurveCombo
                             width: parent.width
-                            model: ["Linear", "Smooth", "Equal power"]
+                            model: [qsTr("Linear"), qsTr("Smooth"), qsTr("Natural")]
                             readonly property var curveIds: ["linear", "smooth", "equalPower"]
                             currentIndex: Math.max(0, curveIds.indexOf(clip.fadeCurve || "smooth"))
                             onActivated: (index) => EditorState.setClipFadeCurve(
@@ -2317,8 +2317,8 @@ PanelFrame {
                             wrapMode: Text.WordWrap
                             visible: !root.hasActiveTransition && !root.canAddOutgoingTransition
                             text: root.clipKind === "video" || root.clipKind === "shape"
-                                  ? "Select a purple overlap between two clips, or drag a clip so it overlaps the next one."
-                                  : "Transitions apply between two clips on a video or shape track."
+                                  ? qsTr("Select where two clips overlap (shown in purple), or drag a clip so it overlaps the next one.")
+                                  : qsTr("Transitions work between two clips on a video or shape track.")
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSm
@@ -2356,8 +2356,8 @@ PanelFrame {
                                 width: parent.width
                                 wrapMode: Text.WordWrap
                                 text: root.activeTransition.overlapping
-                                      ? "Overlap transition. Drag another kind from the Transitions library to replace it."
-                                      : "Outgoing transition to the next clip. Scrub the playhead across the cut to preview."
+                                      ? qsTr("Overlap transition. Drag another kind from Transitions to replace it.")
+                                      : qsTr("Transition to the next clip. Move across the cut to preview it.")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -2367,7 +2367,7 @@ PanelFrame {
                                 width: parent.width
                                 spacing: 4
                                 Text {
-                                    text: qsTr("Kind")
+                                    text: qsTr("Type")
                                     color: Theme.mutedForeground
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeXs
@@ -2513,7 +2513,7 @@ PanelFrame {
 
                         Text {
                             visible: root.clipKind !== "audio"
-                            text: qsTr("Blend mode")
+                            text: qsTr("How layers mix")
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeXs
@@ -2941,7 +2941,7 @@ PanelFrame {
                             ThemedButton {
                                 visible: segmentSection.segmentReady
                                 width: parent.width
-                                text: qsTr("Segment subject…")
+                                text: qsTr("Cut out subject…")
                                 enabled: !EditorState.segmenting
                                 onClicked: {
                                     const data = EditorState.selectedClipData
@@ -2955,7 +2955,7 @@ PanelFrame {
                             ThemedButton {
                                 visible: !segmentSection.segmentReady
                                 width: parent.width
-                                text: qsTr("Install segmentation model (≈190 MB)")
+                                text: qsTr("Download cutout AI (about 190 MB)")
                                 variant: "primary"
                                 onClicked: root.Window.window.openAddonManager("sam2-model")
                             }
@@ -2966,7 +2966,7 @@ PanelFrame {
                         Text {
                             visible: maskShapeBox.visible
                             width: parent.width
-                            text: qsTr("Mask shape")
+                            text: qsTr("Cutout shape")
                             color: Theme.mutedForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeXs
@@ -3000,7 +3000,7 @@ PanelFrame {
                                 "freeform": qsTr("Freeform")
                             })
                             displayText: labels[model[currentIndex]] || model[currentIndex]
-                            tooltip: qsTr("Shape used to mask this clip")
+                            tooltip: qsTr("Shape used to cut out this clip")
                             currentIndex: Math.max(0, model.indexOf((clip.mask && clip.mask.shape) || "none"))
                             onActivated: {
                                 const mask = Object.assign({}, clip.mask || {})
@@ -3014,7 +3014,7 @@ PanelFrame {
                         ThemedButton {
                             visible: maskShapeBox.visible
                                      && ((clip.mask && clip.mask.shape) || "none") !== "none"
-                            text: qsTr("Remove mask")
+                            text: qsTr("Remove cutout")
                             variant: "destructive"
                             glyph: Theme.icons.trash
                             onClicked: {
@@ -3194,7 +3194,7 @@ PanelFrame {
                             ThemedButton {
                                 visible: !faceSection.faceReady
                                 width: parent.width
-                                text: qsTr("Install face model (≈5 MB)")
+                                text: qsTr("Download face detection (about 5 MB)")
                                 variant: "primary"
                                 onClicked: root.Window.window.openAddonManager("face-model")
                             }
@@ -3208,14 +3208,14 @@ PanelFrame {
                             Text {
                                 width: parent.width
                                 wrapMode: Text.WordWrap
-                                text: qsTr("Scrub the playhead, set a value, then click the diamond to key it. With Auto-key on, dragging a slider also writes keys.")
+                                text: qsTr("Move to a time, set a value, then click the diamond to add a keyframe. With Auto keyframes on, dragging a slider also creates them.")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
                             }
 
                             ThemedChip {
-                                text: qsTr("Auto-key")
+                                text: qsTr("Auto keyframes")
                                 selected: EditorState.autoKeyEnabled
                                 onClicked: EditorState.autoKeyEnabled = !EditorState.autoKeyEnabled
                             }

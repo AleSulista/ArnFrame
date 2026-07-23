@@ -57,7 +57,7 @@ ThemedDialog {
             horizontalAlignment: Text.AlignHCenter
             size: "xs"
             wrapMode: Text.WordWrap
-            text: qsTr("Runs on the CPU and can take a few minutes on longer clips.")
+            text: qsTr("This can take a few minutes on longer clips.")
         }
     }
 }

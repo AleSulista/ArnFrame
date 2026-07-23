@@ -12,7 +12,7 @@ ThemedDialog {
     // id -> { fraction, phase }, mirroring AddonManagerDialog.
     property var transfers: ({})
 
-    title: qsTr("Missing addons")
+    title: qsTr("Extra packs needed")
     acceptText: qsTr("Install all")
     rejectText: qsTr("Skip")
     preferredWidth: Theme.dialogWidthMd
@@ -46,8 +46,8 @@ ThemedDialog {
         ThemedLabel {
             width: parent.width
             size: "sm"
-            text: qsTr("This project was saved with addons you don't have. It has opened, but "
-                       + "anything they provide will not be applied until they are installed.")
+            text: qsTr("This project was saved with extra packs you don't have. It has opened, but "
+                       + "anything they provide will not show until they are installed.")
         }
 
         Repeater {

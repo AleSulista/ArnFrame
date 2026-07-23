@@ -73,7 +73,7 @@ void fillPlanarAudio(AVFrame *frame, const float *interleaved, int samples)
 const QList<ExportPreset> &Exporter::presets()
 {
     static const QList<ExportPreset> kPresets = {
-        {QStringLiteral("source"), QStringLiteral("Source resolution"), 0, 0, 16000},
+        {QStringLiteral("source"), QStringLiteral("Same as project"), 0, 0, 16000},
         {QStringLiteral("1080p"), QStringLiteral("1080p"), 1080, 0, 12000},
         {QStringLiteral("720p"), QStringLiteral("720p"), 720, 0, 8000},
         {QStringLiteral("480p"), QStringLiteral("480p"), 480, 0, 4000},

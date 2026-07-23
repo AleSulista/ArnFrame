@@ -233,7 +233,7 @@ Item {
             Text {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("%1 cues").arg(root.cues.length)
+                text: qsTr("%1 captions").arg(root.cues.length)
                 color: Theme.mutedForeground
                 font.family: Theme.monoFontFamily
                 font.pixelSize: Theme.fontSizeXs
@@ -347,7 +347,7 @@ Item {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.WordWrap
-                text: qsTr("No subtitles yet. Move the playhead into this clip and add one below.")
+                text: qsTr("No subtitles yet. Move to a time inside this clip and add one below.")
                 color: Theme.mutedForeground
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeXs
@@ -472,7 +472,7 @@ Item {
                                 glyph: Theme.icons.setStart
                                 variant: "ghost"
                                 enabled: root.localPlayhead >= 0
-                                tooltip: qsTr("Set start to playhead")
+                                tooltip: qsTr("Set start to current time")
                                 onClicked: root.setCueEdgeToPlayhead(root.selectedCueIndex, "start")
                             }
                         }
@@ -505,7 +505,7 @@ Item {
                                 glyph: Theme.icons.setEnd
                                 variant: "ghost"
                                 enabled: root.localPlayhead >= 0
-                                tooltip: qsTr("Set end to playhead")
+                                tooltip: qsTr("Set end to current time")
                                 onClicked: root.setCueEdgeToPlayhead(root.selectedCueIndex, "end")
                             }
                         }
@@ -513,7 +513,7 @@ Item {
                 }
 
                 ThemedButton {
-                    text: qsTr("Delete cue")
+                    text: qsTr("Delete caption")
                     variant: "destructive"
                     glyph: Theme.icons.trash
                     onClicked: {
@@ -533,8 +533,8 @@ Item {
             Text {
                 width: parent.width
                 text: root.localPlayhead >= 0
-                      ? qsTr("Playhead at %1").arg(root.formatCueTime(root.localPlayhead))
-                      : qsTr("Move the playhead into this clip to add a subtitle")
+                      ? qsTr("At %1").arg(root.formatCueTime(root.localPlayhead))
+                      : qsTr("Move to a time inside this clip to add a subtitle")
                 color: Theme.mutedForeground
                 font.family: Theme.monoFontFamily
                 font.pixelSize: Theme.fontSizeXs
@@ -545,7 +545,7 @@ Item {
                 variant: "primary"
                 glyph: Theme.icons.plus
                 enabled: root.localPlayhead >= 0
-                text: qsTr("Add subtitle at playhead")
+                text: qsTr("Add subtitle at current time")
                 onClicked: root.addCueAtPlayhead()
             }
         }

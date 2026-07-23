@@ -61,7 +61,7 @@ Row {
         font.pixelSize: Theme.fontSizeSm
         // Rejects malformed input instead of silently applying a typo.
         readonly property bool validHex: /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(text)
-        errorText: validHex || text.length === 0 ? "" : qsTr("Use #RRGGBB or #AARRGGBB")
+        errorText: validHex || text.length === 0 ? "" : qsTr("Enter a color like #FF0000")
         onEditingFinished: if (validHex) root.edited(text)
     }
 

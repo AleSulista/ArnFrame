@@ -471,13 +471,13 @@ PanelFrame {
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
-                IconButton { glyph: Theme.icons.scissors; variant: "text"; tooltip: qsTr("Split at playhead"); onClicked: EditorState.splitAtPlayhead() }
+                IconButton { glyph: Theme.icons.scissors; variant: "text"; tooltip: qsTr("Split at current time"); onClicked: EditorState.splitAtPlayhead() }
                 IconButton { glyph: Theme.icons.chevronsLeft; variant: "text"; tooltip: qsTr("Split left"); onClicked: EditorState.splitSelectedClipLeft() }
                 IconButton { glyph: Theme.icons.chevronsRight; variant: "text"; tooltip: qsTr("Split right"); onClicked: EditorState.splitSelectedClipRight() }
                 IconButton {
                     glyph: Theme.icons.unlink
                     variant: "text"
-                    tooltip: qsTr("Unlink audio")
+                    tooltip: qsTr("Separate audio")
                     enabled: EditorState.unlinkAvailable
                     onClicked: EditorState.unlinkSelectedClips()
                 }
@@ -489,9 +489,9 @@ PanelFrame {
                     onClicked: EditorState.mergeSelectedClips()
                 }
                 IconButton { glyph: Theme.icons.copy; variant: "text"; tooltip: qsTr("Copy selection"); onClicked: EditorState.copySelection() }
-                IconButton { glyph: Theme.icons.clipboardPaste; variant: "text"; tooltip: qsTr("Paste at playhead"); onClicked: EditorState.pasteAtPlayhead() }
+                IconButton { glyph: Theme.icons.clipboardPaste; variant: "text"; tooltip: qsTr("Paste at current time"); onClicked: EditorState.pasteAtPlayhead() }
                 IconButton { glyph: Theme.icons.copyPlus; variant: "text"; tooltip: qsTr("Duplicate clip"); onClicked: EditorState.duplicateSelectedClip() }
-                IconButton { glyph: Theme.icons.snowflake; variant: "text"; tooltip: qsTr("Freeze frame at playhead"); onClicked: EditorState.freezeFrameAtPlayhead() }
+                IconButton { glyph: Theme.icons.snowflake; variant: "text"; tooltip: qsTr("Freeze frame at current time"); onClicked: EditorState.freezeFrameAtPlayhead() }
                 IconButton { glyph: Theme.icons.trash; variant: "text"; tooltip: qsTr("Delete clip"); onClicked: EditorState.deleteSelectedClip() }
 
                 Rectangle {
@@ -504,7 +504,7 @@ PanelFrame {
                 IconButton {
                     glyph: Theme.icons.bookmark
                     variant: "text"
-                    tooltip: qsTr("Add bookmark at playhead")
+                    tooltip: qsTr("Add bookmark at current time")
                     onClicked: EditorState.addBookmark(EditorState.playheadSeconds, "Mark " + Math.round(EditorState.playheadSeconds))
                 }
                 IconButton {
@@ -605,7 +605,7 @@ PanelFrame {
                     id: rippleButton
                     glyph: Theme.icons.foldHorizontal
                     variant: "text"
-                    tooltip: qsTr("Toggle ripple editing")
+                    tooltip: qsTr("Close gaps when trimming")
                     active: EditorState.rippleEnabled
                     onClicked: EditorState.rippleEnabled = !EditorState.rippleEnabled
                 }
@@ -851,7 +851,7 @@ PanelFrame {
 
                                     ThemedToolTip {
                                         visible: waveMouse.containsMouse
-                                        text: trackLabelRow.trackWaveform ? qsTr("Show filmstrip")
+                                        text: trackLabelRow.trackWaveform ? qsTr("Show thumbnails")
                                                                           : qsTr("Show waveform")
                                     }
 
@@ -927,7 +927,7 @@ PanelFrame {
                                         visible: root.tracks[index].type === "video"
                                         height: visible ? implicitHeight : 0
                                         text: trackLabelRow.trackWaveform
-                                              ? qsTr("Show filmstrip") : qsTr("Show waveform")
+                                              ? qsTr("Show thumbnails") : qsTr("Show waveform")
                                         icon.name: trackLabelRow.trackWaveform
                                                    ? Theme.icons.film : Theme.icons.audioLines
                                         onTriggered: EditorState.setTrackShowWaveform(
@@ -1098,7 +1098,7 @@ PanelFrame {
                             }
 
                             ThemedToolTip {
-                                text: qsTr("Click or drag to move the playhead")
+                                text: qsTr("Click or drag to move the current time")
                                 visible: rulerScrub.containsMouse && !rulerScrub.pressed
                             }
                         }
@@ -1708,7 +1708,7 @@ PanelFrame {
                                                 id: clipContextMenu
 
                                                 MenuItem {
-                                                    text: qsTr("Split at playhead")
+                                                    text: qsTr("Split at current time")
                                                     icon.name: Theme.icons.scissors
                                                     onTriggered: EditorState.splitAtPlayhead()
                                                 }

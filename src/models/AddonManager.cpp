@@ -183,7 +183,7 @@ void AddonManager::refresh(bool force)
         return;
 
     if (!addonServiceConfigured()) {
-        setStatus(QStringLiteral("This build has no addon service configured."));
+        setStatus(QStringLiteral("Downloads aren’t available in this version."));
         return;
     }
 
@@ -206,7 +206,7 @@ void AddonManager::refresh(bool force)
 
         if (reply->error() != QNetworkReply::NoError) {
             // Non-fatal: whatever is installed keeps working, and the cached index still lists it.
-            setStatus(QStringLiteral("Could not reach the addon service: %1").arg(reply->errorString()));
+            setStatus(QStringLiteral("Couldn’t reach the download store: %1").arg(reply->errorString()));
             return;
         }
 
@@ -230,7 +230,7 @@ void AddonManager::applyIndex(const QByteArray &json, bool fromCache)
     const QJsonObject root = QJsonDocument::fromJson(json).object();
     if (root.value(QStringLiteral("schema")).toInt() != 1) {
         if (!fromCache)
-            setStatus(QStringLiteral("The addon service returned something this build cannot read."));
+            setStatus(QStringLiteral("The download store returned something this version can’t read."));
         return;
     }
 

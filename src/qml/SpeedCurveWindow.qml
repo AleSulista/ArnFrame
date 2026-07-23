@@ -31,7 +31,7 @@ Window {
     height: 720
     minimumWidth: 680
     minimumHeight: 560
-    title: qsTr("Speed curve")
+    title: qsTr("Custom speed")
     color: Theme.appBackground
 
     function openFor(track, clip) {
@@ -338,14 +338,14 @@ Window {
             }
 
             ThemedToggleButton {
-                text: qsTr("Corner")
+                text: qsTr("Sharp")
                 enabled: root.selected !== null
                 checked: root.selected !== null && root.selected.corner
                 onClicked: root.setSelectedCorner(true)
             }
 
             ThemedToggleButton {
-                text: qsTr("Continuous")
+                text: qsTr("Smooth")
                 enabled: root.selected !== null
                 checked: root.selected !== null && !root.selected.corner
                 onClicked: root.setSelectedCorner(false)

@@ -90,8 +90,8 @@ Popup {
             compact: true
             glyph: Theme.icons.smile
             title: qsTr("No emoji pack installed")
-            hint: qsTr("The sticker pack carries the font this draws with — install it to reach every emoji.")
-            actionText: qsTr("Open addon manager")
+            hint: qsTr("Install the sticker pack to use emoji.")
+            actionText: qsTr("Get extras")
             actionVariant: "primary"
             onActionTriggered: {
                 root.close()

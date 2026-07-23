@@ -280,7 +280,7 @@ PanelFrame {
                     IconButton {
                         glyph: root.sortByKind ? Theme.icons.sortByKind : Theme.icons.sortByName
                         variant: "ghost"
-                        tooltip: root.sortByKind ? qsTr("Sort by name") : qsTr("Sort by kind")
+                        tooltip: root.sortByKind ? qsTr("Sort by name") : qsTr("Sort by type")
                         onClicked: {
                             if (root.sortByKind)
                                 AssetLibrary.sortByName()
@@ -359,7 +359,7 @@ PanelFrame {
                 Text {
                     width: textTab.contentWidth
                     wrapMode: Text.WordWrap
-                    text: qsTr("Subtitle track — one clip holds many timed captions. Place it on the timeline, trim its duration, then type cues at each moment in the inspector.")
+                    text: qsTr("Subtitle track — one clip holds many timed captions. Place it on the timeline, trim its length, then add caption lines at each moment in the clip panel.")
                     color: Theme.mutedForeground
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeXs
@@ -393,8 +393,8 @@ PanelFrame {
                     width: textTab.contentWidth
                     wrapMode: Text.WordWrap
                     text: textTab.captionTargetReady
-                          ? qsTr("Transcribes the selected clip and drops the cues onto a subtitle clip.")
-                          : qsTr("Select a video (or audio) clip on the timeline first — auto caption runs on the selected clip.")
+                          ? qsTr("Creates captions from the speech in the selected clip.")
+                          : qsTr("Select a video or audio clip on the timeline first.")
                     color: Theme.mutedForeground
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeXs
@@ -437,7 +437,7 @@ PanelFrame {
                     variant: "secondary"
                     glyph: Theme.icons.messageSquare
                     tooltip: textTab.captionTargetReady
-                             ? qsTr("Transcribe the selected clip into subtitle cues")
+                             ? qsTr("Create captions from the selected clip's speech")
                              : qsTr("Select a video or audio clip first")
                     enabled: textTab.captionTargetReady
                     onClicked: {
@@ -461,7 +461,7 @@ PanelFrame {
                         width: parent.width
                         text: EditorState.subtitleGenStatus.length > 0
                               ? EditorState.subtitleGenStatus
-                              : qsTr("Transcribing… %1%").arg(Math.round(EditorState.subtitleGenProgress * 100))
+                              : qsTr("Creating captions… %1%").arg(Math.round(EditorState.subtitleGenProgress * 100))
                         color: Theme.panelForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeXs
@@ -490,7 +490,7 @@ PanelFrame {
                         text: qsTr("Cancel")
                         variant: "destructive"
                         glyph: Theme.icons.x
-                        tooltip: qsTr("Stop transcribing")
+                        tooltip: qsTr("Stop creating captions")
                         onClicked: EditorState.cancelSubtitleGeneration()
                     }
                 }
@@ -498,10 +498,10 @@ PanelFrame {
                 ThemedButton {
                     visible: !textTab.whisperReady
                     width: textTab.contentWidth
-                    text: qsTr("Install speech model (≈670 MB)")
+                    text: qsTr("Download speech recognition (about 670 MB)")
                     variant: "primary"
                     glyph: Theme.icons.download
-                    tooltip: qsTr("Downloads the Whisper speech model used for auto captions")
+                    tooltip: qsTr("Needed for auto captions from speech")
                     onClicked: root.Window.window.openAddonManager("whisper-model")
                 }
             }
@@ -594,7 +594,7 @@ PanelFrame {
                             glyph: Theme.icons.smile
                             title: qsTr("No sticker packs installed")
                             hint: qsTr("Install the emoji pack to add stickers.")
-                            actionText: qsTr("Open addon manager")
+                            actionText: qsTr("Get extras")
                             actionVariant: "primary"
                             onActionTriggered: root.Window.window.openAddonManager("stickers")
                         }
@@ -847,7 +847,7 @@ PanelFrame {
                     ]
 
                     Text {
-                        text: qsTr("Canvas resolution")
+                        text: qsTr("Video size")
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeXs
@@ -857,7 +857,7 @@ PanelFrame {
                         width: parent.width
                         enabled: !EditorState.canvasCropMode
                         model: settingsColumn.canvasPresets.map(function (p) { return p.label })
-                        tooltip: qsTr("Resize the output frame. Clips keep their current size and position.")
+                        tooltip: qsTr("Change the video size. Clips keep their current size and position.")
                         currentIndex: {
                             const presets = settingsColumn.canvasPresets
                             for (var i = 1; i < presets.length; ++i) {
@@ -915,13 +915,13 @@ PanelFrame {
                         width: parent.width
                         variant: EditorState.canvasCropMode ? "primary" : "secondary"
                         glyph: Theme.icons.crop
-                        text: EditorState.canvasCropMode ? qsTr("Cancel crop") : qsTr("Crop canvas")
-                        tooltip: qsTr("Drag the preview edges to reframe the canvas")
+                        text: EditorState.canvasCropMode ? qsTr("Cancel crop") : qsTr("Crop video size")
+                        tooltip: qsTr("Drag the preview edges to change what’s included")
                         onClicked: EditorState.canvasCropMode = !EditorState.canvasCropMode
                     }
 
                     Text {
-                        text: qsTr("Clips are never rescaled by a canvas change — anything outside the new frame is cropped away.")
+                        text: qsTr("Changing size doesn’t shrink your clips — anything outside the new edges is cut off.")
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeXs
@@ -944,21 +944,33 @@ PanelFrame {
                             anchors.verticalCenter: parent.verticalCenter
                             checked: EditorState.guidesEnabled
                             text: qsTr("Enabled")
-                            tooltip: qsTr("Show composition guides over the preview")
+                            tooltip: qsTr("Show alignment guides over the preview")
                             onToggled: EditorState.guidesEnabled = checked
                         }
                         ThemedComboBox {
                             anchors.verticalCenter: parent.verticalCenter
-                            model: ["thirds", "crosshair", "safe"]
+                            textRole: "label"
+                            valueRole: "id"
+                            model: [
+                                { id: "thirds", label: qsTr("Rule of thirds") },
+                                { id: "crosshair", label: qsTr("Center cross") },
+                                { id: "safe", label: qsTr("Safe margins") }
+                            ]
                             enabled: EditorState.guidesEnabled
-                            tooltip: qsTr("Which guide overlay to draw")
-                            currentIndex: Math.max(0, model.indexOf(EditorState.guideType))
-                            onActivated: EditorState.guideType = model[currentIndex]
+                            tooltip: qsTr("Which guide to show")
+                            currentIndex: {
+                                for (var i = 0; i < model.length; ++i) {
+                                    if (model[i].id === EditorState.guideType)
+                                        return i
+                                }
+                                return 0
+                            }
+                            onActivated: EditorState.guideType = model[currentIndex].id
                         }
                     }
 
                     Text {
-                        text: qsTr("Canvas background")
+                        text: qsTr("Background")
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeXs
@@ -967,10 +979,21 @@ PanelFrame {
 
                     ThemedComboBox {
                         id: bgKindCombo
-                        model: ["color", "blur"]
-                        tooltip: qsTr("Fill behind clips that do not cover the whole frame")
-                        currentIndex: Math.max(0, model.indexOf(EditorState.background.kind))
-                        onActivated: EditorState.setBackground({ kind: model[currentIndex] })
+                        textRole: "label"
+                        valueRole: "id"
+                        model: [
+                            { id: "color", label: qsTr("Solid color") },
+                            { id: "blur", label: qsTr("Blur") }
+                        ]
+                        tooltip: qsTr("Fill behind clips that don’t cover the whole screen")
+                        currentIndex: {
+                            for (var i = 0; i < model.length; ++i) {
+                                if (model[i].id === EditorState.background.kind)
+                                    return i
+                            }
+                            return 0
+                        }
+                        onActivated: EditorState.setBackground({ kind: model[currentIndex].id })
                     }
 
 
@@ -992,7 +1015,7 @@ PanelFrame {
                             }
 
                             ThemedToolTip {
-                                text: qsTr("Choose canvas colour")
+                                text: qsTr("Choose background colour")
                                 visible: swatchMouse.containsMouse
                             }
 
@@ -1015,7 +1038,7 @@ PanelFrame {
                             // Rejects malformed input instead of silently passing
                             // a typo through to the compositor.
                             readonly property bool valid: /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(text)
-                            errorText: valid || text.length === 0 ? "" : qsTr("Use #RRGGBB or #AARRGGBB")
+                            errorText: valid || text.length === 0 ? "" : qsTr("Enter a color like #FF0000")
                             onEditingFinished: {
                                 if (valid)
                                     EditorState.setBackground({ kind: "color", color: text })
@@ -1086,7 +1109,7 @@ PanelFrame {
                             width: parent.width
                             compact: true
                             glyph: Theme.icons.keyboard
-                            title: qsTr("No bindable actions")
+                            title: qsTr("No shortcuts available")
                         }
 
                         Repeater {
@@ -1156,7 +1179,7 @@ PanelFrame {
                         // the grid below it at narrow panel widths.
                         maximumLineCount: 3
                         elide: Text.ElideRight
-                        text: qsTr("Drag onto an overlapping region between two clips. Overlaps default to crossfade.")
+                        text: qsTr("Drag onto where two clips overlap. They fade into each other by default.")
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeXs
@@ -1201,7 +1224,7 @@ PanelFrame {
                             glyph: Theme.icons.blend
                             title: qsTr("No transitions available")
                             hint: qsTr("Install a transitions pack to add more.")
-                            actionText: qsTr("Open addon manager")
+                            actionText: qsTr("Get extras")
                             onActionTriggered: root.Window.window.openAddonManager()
                         }
 
@@ -1647,7 +1670,7 @@ PanelFrame {
 
     ColorDialog {
         id: canvasColorDialog
-        title: qsTr("Select Canvas Color")
+        title: qsTr("Choose background colour")
 
         function colorToHex(c) {
             var toHex = function(v) {
