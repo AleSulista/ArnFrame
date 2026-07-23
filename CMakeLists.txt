@@ -346,6 +346,7 @@ qt_add_qml_module(drift
         src/qml/components/ThemedToggleButton.qml
         src/qml/components/ThemedToolTip.qml
         src/qml/components/ThemedContextMenu.qml
+        src/qml/components/ThemedMenuItem.qml
         src/qml/components/LabelledProgressRing.qml
     RESOURCES
         # UI chrome: interface font and Lucide SVG icons (always needed, including before addons).

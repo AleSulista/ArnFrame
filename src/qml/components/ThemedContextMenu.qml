@@ -44,51 +44,7 @@ Menu {
         }
     }
 
-    delegate: MenuItem {
-        id: menuItem
-
-        implicitHeight: Theme.controlHeightSm + Theme.spacingSm
-        hoverEnabled: true
-
-        contentItem: Row {
-            spacing: Theme.spacingLg
-            leftPadding: Theme.spacingLg
-            rightPadding: Theme.spacingLg
-
-            IconGlyph {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: menuItem.icon.name.length > 0
-                width: visible ? implicitWidth : 0
-                glyph: menuItem.icon.name
-                iconSize: Theme.iconSizeMd
-                iconColor: menuItem.enabled ? Theme.panelForeground : Theme.mutedForeground
-                opacity: menuItem.enabled ? 1 : 0.5
-            }
-
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: menuItem.text
-                color: Theme.panelForeground
-                opacity: menuItem.enabled ? 1 : 0.5
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeXs
-                elide: Text.ElideRight
-            }
-        }
-
-        background: Rectangle {
-            radius: Theme.radiusXs
-            color: menuItem.highlighted && menuItem.enabled ? Theme.panelAccent : "transparent"
-
-            Behavior on color {
-                ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-            }
-        }
-
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.NoButton
-            cursorShape: menuItem.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-        }
-    }
+    // Styles Action-based entries. Inline MenuItem children bypass this
+    // delegate, so declare those as ThemedMenuItem (same styling) instead.
+    delegate: ThemedMenuItem {}
 }

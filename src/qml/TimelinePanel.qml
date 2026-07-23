@@ -909,21 +909,21 @@ PanelFrame {
                                 ThemedContextMenu {
                                     id: trackContextMenu
 
-                                    MenuItem {
+                                    ThemedMenuItem {
                                         text: trackLabelRow.trackMuted ? qsTr("Unmute track")
                                                                        : qsTr("Mute track")
                                         icon.name: trackLabelRow.trackMuted ? Theme.icons.volumeHigh
                                                                             : Theme.icons.volumeOff
                                         onTriggered: EditorState.setTrackMuted(index, !trackLabelRow.trackMuted)
                                     }
-                                    MenuItem {
+                                    ThemedMenuItem {
                                         text: trackLabelRow.trackHidden ? qsTr("Show track")
                                                                         : qsTr("Hide track")
                                         icon.name: trackLabelRow.trackHidden ? Theme.icons.eye
                                                                              : Theme.icons.eyeOff
                                         onTriggered: EditorState.setTrackHidden(index, !trackLabelRow.trackHidden)
                                     }
-                                    MenuItem {
+                                    ThemedMenuItem {
                                         visible: root.tracks[index].type === "video"
                                         height: visible ? implicitHeight : 0
                                         text: trackLabelRow.trackWaveform
@@ -934,7 +934,7 @@ PanelFrame {
                                                          index, !trackLabelRow.trackWaveform)
                                     }
                                     MenuSeparator {}
-                                    MenuItem {
+                                    ThemedMenuItem {
                                         text: qsTr("Delete track")
                                         icon.name: Theme.icons.trash
                                         onTriggered: EditorState.removeTrack(index)
@@ -1707,29 +1707,29 @@ PanelFrame {
                                             ThemedContextMenu {
                                                 id: clipContextMenu
 
-                                                MenuItem {
+                                                ThemedMenuItem {
                                                     text: qsTr("Split at current time")
                                                     icon.name: Theme.icons.scissors
                                                     onTriggered: EditorState.splitAtPlayhead()
                                                 }
                                                 MenuSeparator { }
-                                                MenuItem {
+                                                ThemedMenuItem {
                                                     text: qsTr("Cut")
                                                     icon.name: Theme.icons.scissors
                                                     onTriggered: EditorState.cutSelection()
                                                 }
-                                                MenuItem {
+                                                ThemedMenuItem {
                                                     text: qsTr("Copy")
                                                     icon.name: Theme.icons.copy
                                                     onTriggered: EditorState.copySelection()
                                                 }
-                                                MenuItem {
+                                                ThemedMenuItem {
                                                     text: qsTr("Duplicate")
                                                     icon.name: Theme.icons.copyPlus
                                                     onTriggered: EditorState.duplicateSelectedClip()
                                                 }
                                                 MenuSeparator { }
-                                                MenuItem {
+                                                ThemedMenuItem {
                                                     text: qsTr("Delete")
                                                     icon.name: Theme.icons.trash
                                                     onTriggered: EditorState.deleteSelectedClip()

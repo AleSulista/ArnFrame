@@ -11,6 +11,9 @@ TextField {
     readonly property bool hasError: errorText.length > 0
 
     color: Theme.panelForeground
+    // The Basic style defaults placeholderTextColor to a fixed dark gray that
+    // vanishes against panelAccent in dark mode; track the theme instead.
+    placeholderTextColor: Theme.mutedForeground
     font.family: Theme.monoFontFamily
     font.pixelSize: Theme.fontSizeSm
     selectByMouse: true
