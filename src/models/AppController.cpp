@@ -6990,6 +6990,46 @@ void AppController::moveTrack(int fromIndex, int toIndex)
     finishEdit(QStringLiteral("Track moved"));
 }
 
+void AppController::removeTrack(int trackIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    const drift::Project before = m_project;
+    m_project.tracks().removeAt(trackIndex);
+
+    // Indices at or after the removed track shift down by one; anything that
+    // pointed at the removed track itself is now dangling and gets cleared.
+    auto remap = [trackIndex](int index) -> int {
+        if (index < 0)
+            return index;
+        if (index == trackIndex)
+            return -1;
+        if (index > trackIndex)
+            return index - 1;
+        return index;
+    };
+
+    m_selectedTransitionTrack = remap(m_selectedTransitionTrack);
+    for (int i = m_selection.size() - 1; i >= 0; --i) {
+        const int mapped = remap(m_selection.at(i).first);
+        if (mapped < 0)
+            m_selection.removeAt(i);
+        else
+            m_selection[i].first = mapped;
+    }
+    if (m_selection.isEmpty()) {
+        m_selectedTrack = -1;
+        m_selectedClip = -1;
+    } else {
+        m_selectedTrack = m_selection.constLast().first;
+        m_selectedClip = m_selection.constLast().second;
+    }
+
+    pushProjectEdit(before, QStringLiteral("Delete track"));
+    finishEdit(QStringLiteral("Track deleted"));
+}
+
 void AppController::addTrack(const QString &type)
 {
     const QString normalized = type.trimmed().toLower();

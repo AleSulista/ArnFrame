@@ -467,6 +467,7 @@ public:
     Q_INVOKABLE bool trackShowWaveform(int trackIndex) const;
     Q_INVOKABLE void moveTrack(int fromIndex, int toIndex);
     Q_INVOKABLE void addTrack(const QString &type);
+    Q_INVOKABLE void removeTrack(int trackIndex);
     Q_INVOKABLE void addBookmark(double seconds, const QString &label);
     Q_INVOKABLE void removeBookmark(int index);
     Q_INVOKABLE void goToBookmark(int index);
