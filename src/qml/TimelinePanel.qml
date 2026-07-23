@@ -1511,6 +1511,11 @@ PanelFrame {
                                                              || clipItem.trackType === "shape"
                                                              || clipItem.clipData.kind === "image")
                                                 filmstripPath: clipItem.clipData.filmstripPath
+                                                inPoint: clipItem.clipData.inPoint
+                                                outPoint: clipItem.clipData.outPoint
+                                                sourceDuration: clipItem.clipData.sourceDuration
+                                                // Image "strips" are a single poster frame.
+                                                frameCount: clipItem.clipData.kind === "image" ? 1 : 8
                                                 z: 0
                                             }
 

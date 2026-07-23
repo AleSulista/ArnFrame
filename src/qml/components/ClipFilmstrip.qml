@@ -14,6 +14,26 @@ Item {
     property int frameWidth: 120
     property int frameHeight: 68
 
+    // Source window this clip covers, in seconds, plus the full source length. When set, each
+    // tile maps to the source time it represents so the strip shows correct-timestamp frames and
+    // stays anchored to the source when the clip is trimmed. Left at 0 (e.g. the Speed Curve
+    // window) falls back to one plain pass of the strip's frames across the width.
+    property real inPoint: 0
+    property real outPoint: 0
+    property real sourceDuration: 0
+
+    // Strip frame a tile should show. In source-mapped mode the tile's centre is projected into
+    // the clip's [inPoint, outPoint] source window and quantised to one of the baked frames.
+    function frameForIndex(index) {
+        if (root.sourceDuration > 0 && root.outPoint > root.inPoint && root.width > 0) {
+            var clipFraction = (index + 0.5) * root.frameWidth / root.width;
+            var srcSec = root.inPoint + clipFraction * (root.outPoint - root.inPoint);
+            var f = Math.floor(srcSec / root.sourceDuration * root.frameCount);
+            return Math.max(0, Math.min(root.frameCount - 1, f));
+        }
+        return index % root.frameCount;
+    }
+
     // True while the first frame is still decoding.
     readonly property bool loading: filmstripPath.length > 0 && !firstFrameReady
     property bool firstFrameReady: false
@@ -40,9 +60,10 @@ Item {
             x: index * root.frameWidth
             width: root.frameWidth
             height: root.height
-            source: EditorState.imageUrl(root.filmstripPath)
-            sourceClipRect: Qt.rect((index % root.frameCount) * root.frameWidth, 0,
-                                    root.frameWidth, root.frameHeight)
+            // The provider crops the requested frame server-side, so each tile gets a distinct
+            // image rather than sharing one strip URL and slicing it client-side.
+            source: EditorState.filmstripFrameUrl(root.filmstripPath,
+                                                  root.frameForIndex(index), root.frameCount)
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
 

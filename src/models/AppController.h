@@ -522,6 +522,8 @@ public:
     Q_INVOKABLE void cancelExport();
     Q_INVOKABLE QUrl fileUrl(const QString &path) const;
     Q_INVOKABLE QString imageUrl(const QString &path) const;
+    // Same as imageUrl but requests a single frame of a filmstrip strip (see DriftImageProvider).
+    Q_INVOKABLE QString filmstripFrameUrl(const QString &path, int frame, int count) const;
 
 signals:
     // A text clip was added with no text; the preview should open its inline

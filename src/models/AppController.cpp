@@ -1205,6 +1205,10 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
     for (const drift::Effect &effect : clip.audioEffects)
         audioEffects.append(audioEffectToMap(effect));
 
+    // Full source length backs the filmstrip's timestamp mapping (the strip is sampled across
+    // the whole source, so tiles need the total to place srcIn/srcOut within it).
+    const drift::MediaAsset *sourceAsset = m_project.asset(clip.assetId);
+
     return {
         {QStringLiteral("id"), clip.id},
         {QStringLiteral("name"), clip.name},
@@ -1228,6 +1232,7 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("duration"), drift::usToSeconds(clip.timelineDuration)},
         {QStringLiteral("inPoint"), drift::usToSeconds(clip.srcIn)},
         {QStringLiteral("outPoint"), drift::usToSeconds(clip.srcOut)},
+        {QStringLiteral("sourceDuration"), sourceAsset ? drift::usToSeconds(sourceAsset->durationUs) : 0.0},
         {QStringLiteral("assetId"), clip.assetId},
         {QStringLiteral("assetIndex"), assetIndexForClip(clip)},
         {QStringLiteral("linked"), !clip.linkId.isEmpty()
@@ -1597,6 +1602,13 @@ QString AppController::imageUrl(const QString &path) const
     if (path.isEmpty())
         return {};
     return QStringLiteral("image://drift/") + QString::fromUtf8(QUrl::toPercentEncoding(path));
+}
+
+QString AppController::filmstripFrameUrl(const QString &path, int frame, int count) const
+{
+    if (path.isEmpty())
+        return {};
+    return imageUrl(path) + QStringLiteral("?frame=%1&count=%2").arg(frame).arg(count);
 }
 
 double AppController::snapTime(double seconds) const
