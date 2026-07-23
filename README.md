@@ -1,6 +1,23 @@
-# Drift
+<p align="center">
+  <img src="Drift_icon.png" alt="Drift icon" width="128" height="128">
+</p>
 
-**Create polished videos fast — free, open, and yours.**
+<h1 align="center">Drift</h1>
+
+<p align="center">
+  <strong>Create polished videos fast — free, open, and yours.</strong>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="License: GPL-3.0"></a>
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey" alt="Platform: Linux | Windows | macOS">
+</p>
+
+<p align="center">
+  <a href="https://github.com/CutWire-Studios/Drift">GitHub</a> ·
+  <a href="https://github.com/CutWire-Studios/Drift/issues">Issues</a> ·
+  <a href="LICENSE">License</a>
+</p>
 
 Drift is a free, open-source desktop video editor from CutWire Studios. It brings the speed and simplicity of modern creator tools to your computer: drop in clips, add effects and stickers, generate captions, and export — with no subscription, no watermark, and no account required.
 
@@ -196,7 +213,6 @@ Media file → ClipReader → AudioMixer (volume, fades, audio effects)
           → QAudioSink  |  Exporter
 ```
 
-See [AGENTS.md](AGENTS.md) for architecture details and contributor/agent guidelines.
 
 ## QML entry points
 
