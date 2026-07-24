@@ -1366,11 +1366,14 @@ PanelFrame {
                                         readonly property bool timelineFadeHandles: trackType !== "text"
                                                                                     && trackType !== "subtitle"
 
-                                        // Trim handles need room for themselves plus
-                                        // a drag region between them; below that the
-                                        // whole clip stays draggable instead.
-                                        readonly property bool showTrimHandles:
-                                            selected && width >= Theme.clipMinInteractiveWidth * 2
+                                        // Trim handles stay on whenever selected.
+                                        // Width is floored so the clip never becomes
+                                        // an unusable sliver; at that floor both
+                                        // edges stay trimmable and the middle moves.
+                                        readonly property bool showTrimHandles: selected
+                                        readonly property real minDurationSeconds: Math.max(
+                                            Theme.clipMinDurationSeconds,
+                                            Theme.clipMinWidth / root.pxPerSecond)
 
                                         // Name band height, derived once instead of
                                         // being hardcoded at three separate sites,
@@ -1384,11 +1387,11 @@ PanelFrame {
                                         }
 
                                         y: Theme.clipSelectionRingWidth
-                                        // Clamped: went negative at minimum zoom for
-                                        // short clips. The transition region below
-                                        // already clamped; this did not.
-                                        width: Math.max(1, clipData.duration * root.pxPerSecond
-                                                           - 2 * Theme.clipSelectionRingWidth)
+                                        // Floored so short clips stay visible and
+                                        // trimmable even at low zoom.
+                                        width: Math.max(Theme.clipMinWidth,
+                                                        clipData.duration * root.pxPerSecond
+                                                        - 2 * Theme.clipSelectionRingWidth)
                                         height: Math.max(0, parent.height - 2 * Theme.clipSelectionRingWidth)
 
                                         // While dragging, show the same snapped landing outline the
@@ -1663,9 +1666,7 @@ PanelFrame {
                                             z: 2
                                             anchors.fill: parent
                                             hoverEnabled: true
-                                            // Insets make room for the trim handles,
-                                            // but only while the clip is wide enough
-                                            // to keep a usable drag region.
+                                            // Insets make room for the trim handles.
                                             anchors.leftMargin: clipItem.showTrimHandles ? 14 : 0
                                             anchors.rightMargin: clipItem.showTrimHandles ? 14 : 0
                                             enabled: !leftTrimMouse.pressed && !rightTrimMouse.pressed
@@ -1897,9 +1898,14 @@ PanelFrame {
                                                 onPositionChanged: (mouse) => {
                                                     if (!pressed)
                                                         return
-                                                    const timelineX = mapToItem(trackRow, mouse.x, mouse.y).x
+                                                    const end = (clipItem.clipData.start || 0)
+                                                                + (clipItem.clipData.duration || 0)
+                                                    const raw = mapToItem(trackRow, mouse.x, mouse.y).x / root.pxPerSecond
+                                                    // Floor duration so the clip stays at least
+                                                    // clipMinWidth; handles remain draggable to extend.
+                                                    const newStart = Math.min(raw, end - clipItem.minDurationSeconds)
                                                     EditorState.trimClipLeft(trackRow.trackIndex, modelData,
-                                                                           timelineX / root.pxPerSecond)
+                                                                           Math.max(0, newStart))
                                                 }
                                             }
                                         }
@@ -1939,9 +1945,11 @@ PanelFrame {
                                                 onPositionChanged: (mouse) => {
                                                     if (!pressed)
                                                         return
-                                                    const timelineX = mapToItem(trackRow, mouse.x, mouse.y).x
+                                                    const start = clipItem.clipData.start || 0
+                                                    const raw = mapToItem(trackRow, mouse.x, mouse.y).x / root.pxPerSecond
+                                                    const newEnd = Math.max(raw, start + clipItem.minDurationSeconds)
                                                     EditorState.trimClipRight(trackRow.trackIndex, modelData,
-                                                                            timelineX / root.pxPerSecond)
+                                                                            newEnd)
                                                 }
                                             }
                                         }

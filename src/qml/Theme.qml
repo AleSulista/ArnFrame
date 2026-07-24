@@ -264,9 +264,13 @@ QtObject {
     // site so it never swallows a short (25px text/subtitle) row.
     readonly property real clipHeaderBandHeight: 20
     readonly property real clipTrimHandleWidth: 12
-    // Below this width a clip has no room for a trim handle plus a drag region,
-    // so trim handles are suppressed and the whole clip stays draggable.
+    // Floor for a selected clip's on-timeline width so it never shrinks to a
+    // sliver. Sized for two trim handles plus a move strip between them.
     readonly property real clipMinInteractiveWidth: 28
+    readonly property real clipMinWidth: clipMinInteractiveWidth * 2
+    // Matches drift::kMinClipDurationUs (0.1s). Effective min duration is the
+    // larger of this and clipMinWidth / pxPerSecond at the current zoom.
+    readonly property real clipMinDurationSeconds: 0.1
     readonly property real timelineZoomMin: 0.05
 
     // --- Layout: window --------------------------------------------------------
