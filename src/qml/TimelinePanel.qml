@@ -1755,15 +1755,16 @@ PanelFrame {
                                             }
                                         }
 
-                                        // Fade handles live on the (non-clipping) clip item so they
-                                        // render fully at the corners and sit above the move/trim areas.
+                                        // Fade dots sit above trim handles so they stay
+                                        // grabable at the corners (zero fade). Trim the
+                                        // edge below the dots; grab the dots to fade.
                                         Rectangle {
                                             id: fadeInHandle
                                             width: 13
                                             height: 13
                                             radius: 6.5
                                             y: 2
-                                            z: 20
+                                            z: 40
                                             visible: clipItem.timelineFadeHandles && clipItem.selected && clipItem.width > 26
                                             color: Theme.primary
                                             border.color: Theme.onMedia
@@ -1781,9 +1782,14 @@ PanelFrame {
                                                 id: fadeInMouse
                                                 anchors.fill: parent
                                                 anchors.margins: -6
+                                                z: 1
                                                 preventStealing: true
                                                 hoverEnabled: true
                                                 cursorShape: Qt.SizeHorCursor
+                                                onPressed: (mouse) => {
+                                                    mouse.accepted = true
+                                                    EditorState.beginPreviewDrag(qsTr("Adjust fade"))
+                                                }
                                                 onPositionChanged: (mouse) => {
                                                     if (!pressed)
                                                         return
@@ -1795,6 +1801,7 @@ PanelFrame {
                                                                                    clipItem.clipData.fadeOut || 0)
                                                 }
                                                 onReleased: EditorState.commitPreviewDrag()
+                                                onCanceled: EditorState.cancelPreviewDrag()
 
                                                 ThemedToolTip {
                                                     visible: fadeInMouse.pressed || fadeInMouse.containsMouse
@@ -1809,7 +1816,7 @@ PanelFrame {
                                             height: 13
                                             radius: 6.5
                                             y: 2
-                                            z: 20
+                                            z: 40
                                             visible: clipItem.timelineFadeHandles && clipItem.selected && clipItem.width > 26
                                             color: Theme.primary
                                             border.color: Theme.onMedia
@@ -1827,9 +1834,14 @@ PanelFrame {
                                                 id: fadeOutMouse
                                                 anchors.fill: parent
                                                 anchors.margins: -6
+                                                z: 1
                                                 preventStealing: true
                                                 hoverEnabled: true
                                                 cursorShape: Qt.SizeHorCursor
+                                                onPressed: (mouse) => {
+                                                    mouse.accepted = true
+                                                    EditorState.beginPreviewDrag(qsTr("Adjust fade"))
+                                                }
                                                 onPositionChanged: (mouse) => {
                                                     if (!pressed)
                                                         return
@@ -1841,6 +1853,7 @@ PanelFrame {
                                                                                    Math.max(0, (clipItem.width - px) / root.pxPerSecond))
                                                 }
                                                 onReleased: EditorState.commitPreviewDrag()
+                                                onCanceled: EditorState.cancelPreviewDrag()
 
                                                 ThemedToolTip {
                                                     visible: fadeOutMouse.pressed || fadeOutMouse.containsMouse
@@ -1849,7 +1862,6 @@ PanelFrame {
                                             }
                                         }
 
-                                        // Trim handles sit above fade dots so edge drags resize the clip.
                                         Rectangle {
                                             id: leftTrimHandle
                                             width: Theme.clipTrimHandleWidth
@@ -1876,7 +1888,8 @@ PanelFrame {
                                                 anchors.fill: parent
                                                 anchors.leftMargin: -10
                                                 anchors.rightMargin: -4
-                                                anchors.topMargin: -6
+                                                // Leave the top corner for the fade-in dot.
+                                                anchors.topMargin: clipItem.timelineFadeHandles ? 16 : -6
                                                 anchors.bottomMargin: -6
                                                 preventStealing: true
                                                 hoverEnabled: true
@@ -1917,7 +1930,8 @@ PanelFrame {
                                                 anchors.fill: parent
                                                 anchors.leftMargin: -4
                                                 anchors.rightMargin: -10
-                                                anchors.topMargin: -6
+                                                // Leave the top corner for the fade-out dot.
+                                                anchors.topMargin: clipItem.timelineFadeHandles ? 16 : -6
                                                 anchors.bottomMargin: -6
                                                 preventStealing: true
                                                 hoverEnabled: true
