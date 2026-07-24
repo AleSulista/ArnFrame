@@ -91,6 +91,36 @@ Item {
         replaceCues(next)
     }
 
+    // Insert an empty cue directly after `index`. It prefers the gap that follows the cue,
+    // and when the cues are back to back it takes over the second half of `index` instead —
+    // that way only the cue you clicked (+) on is ever re-timed, and everything later stays
+    // in sync with the audio.
+    function insertCueAfter(index) {
+        if (index < 0 || index >= root.cues.length)
+            return
+
+        const list = cloneCues()
+        const cur = list[index]
+        const next = (index + 1 < list.length) ? list[index + 1] : null
+
+        let newStart = cur.end
+        let newEnd = next ? Math.min(next.start, cur.end + root.defaultCueDuration)
+                          : cur.end + root.defaultCueDuration
+        if (!next && root.clipDuration > 0)
+            newEnd = Math.min(newEnd, root.clipDuration)
+
+        if (newEnd - newStart < 0.2) {
+            const mid = (cur.start + cur.end) / 2
+            newStart = mid
+            newEnd = cur.end
+            cur.end = mid
+        }
+
+        list.splice(index + 1, 0, { start: newStart, end: newEnd, text: "" })
+        replaceCues(list)
+        EditorState.selectedSubtitleCue = index + 1
+    }
+
     function selectCue(index) {
         EditorState.selectedSubtitleCue = index
         EditorState.seekToSubtitleCue(root.trackIndex, root.clipIndex, index)
@@ -276,7 +306,7 @@ Item {
 
         ScrollBar.vertical: AppScrollBar { }
 
-        delegate: Rectangle {
+        delegate: Item {
             id: cueDelegate
             required property int index
             required property var modelData
@@ -284,49 +314,93 @@ Item {
             readonly property bool isSelected: index === root.selectedCueIndex
 
             width: ListView.view ? ListView.view.width : 0
-            height: lineCol.implicitHeight + 14
-            radius: Theme.radiusMd
-            color: isSelected ? Theme.panelAccent : "transparent"
-            border.width: (isSelected || isActive) ? 1 : 0
-            border.color: isActive ? Theme.clipSubtitle : Theme.panelBorder
+            height: card.height + (isSelected ? addRow.height : 0)
 
-            Column {
-                id: lineCol
-                x: 12
-                y: 7
-                width: parent.width - 24
-                spacing: 2
+            Rectangle {
+                id: card
+                width: parent.width
+                height: lineCol.implicitHeight + 14
+                radius: Theme.radiusMd
+                color: cueDelegate.isSelected ? Theme.panelAccent : "transparent"
+                border.width: (cueDelegate.isSelected || cueDelegate.isActive) ? 1 : 0
+                border.color: cueDelegate.isActive ? Theme.clipSubtitle : Theme.panelBorder
 
-                Text {
-                    text: root.formatCueTime(cueDelegate.modelData.start) + "  →  "
-                          + root.formatCueTime(cueDelegate.modelData.end)
-                    color: Theme.mutedForeground
-                    font.family: Theme.monoFontFamily
-                    font.pixelSize: Theme.fontSizeXs
-                    opacity: (cueDelegate.isActive || cueDelegate.isSelected) ? 0.9 : 0.4
+                MouseArea {
+                    id: rowHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.selectCue(cueDelegate.index)
                 }
 
-                Text {
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    text: (cueDelegate.modelData.text && cueDelegate.modelData.text.length)
-                          ? cueDelegate.modelData.text : qsTr("(empty)")
-                    font.family: Theme.fontFamily
-                    font.pixelSize: cueDelegate.isActive ? Theme.fontSizeBase : Theme.fontSizeSm
-                    font.weight: cueDelegate.isActive ? Font.DemiBold : Font.Normal
-                    font.italic: !(cueDelegate.modelData.text && cueDelegate.modelData.text.length)
-                    color: cueDelegate.isActive ? Theme.clipSubtitle
-                           : (cueDelegate.isSelected ? Theme.panelForeground : Theme.mutedForeground)
-                    opacity: cueDelegate.isActive ? 1.0 : (cueDelegate.isSelected ? 0.95 : 0.5)
-                    Behavior on opacity { NumberAnimation { duration: 200 } }
-                    Behavior on color { ColorAnimation { duration: 200 } }
+                Column {
+                    id: lineCol
+                    x: 12
+                    y: 7
+                    // The bin's slot is reserved even while it is hidden, so the wrapped
+                    // caption text doesn't reflow as the pointer moves down the list.
+                    width: parent.width - 24 - deleteButton.width
+                    spacing: 2
+
+                    Text {
+                        text: root.formatCueTime(cueDelegate.modelData.start) + "  →  "
+                              + root.formatCueTime(cueDelegate.modelData.end)
+                        color: Theme.mutedForeground
+                        font.family: Theme.monoFontFamily
+                        font.pixelSize: Theme.fontSizeXs
+                        opacity: (cueDelegate.isActive || cueDelegate.isSelected) ? 0.9 : 0.4
+                    }
+
+                    Text {
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        text: (cueDelegate.modelData.text && cueDelegate.modelData.text.length)
+                              ? cueDelegate.modelData.text : qsTr("(empty)")
+                        font.family: Theme.fontFamily
+                        font.pixelSize: cueDelegate.isActive ? Theme.fontSizeBase : Theme.fontSizeSm
+                        font.weight: cueDelegate.isActive ? Font.DemiBold : Font.Normal
+                        font.italic: !(cueDelegate.modelData.text && cueDelegate.modelData.text.length)
+                        color: cueDelegate.isActive ? Theme.clipSubtitle
+                               : (cueDelegate.isSelected ? Theme.panelForeground : Theme.mutedForeground)
+                        opacity: cueDelegate.isActive ? 1.0 : (cueDelegate.isSelected ? 0.95 : 0.5)
+                        Behavior on opacity { NumberAnimation { duration: 200 } }
+                        Behavior on color { ColorAnimation { duration: 200 } }
+                    }
+                }
+
+                IconButton {
+                    id: deleteButton
+                    anchors.right: parent.right
+                    anchors.rightMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    glyph: Theme.icons.trash
+                    variant: "ghost"
+                    iconSize: Theme.iconSizeSm
+                    tooltip: qsTr("Delete this subtitle")
+                    opacity: (rowHover.containsMouse || cueDelegate.isSelected || visualFocus) ? 1 : 0
+                    enabled: opacity > 0
+                    onClicked: root.removeCue(cueDelegate.index)
+
+                    Behavior on opacity { NumberAnimation { duration: Theme.durationFast } }
                 }
             }
 
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.selectCue(cueDelegate.index)
+            // Insertion point for the cue that follows the one being edited.
+            Item {
+                id: addRow
+                anchors.top: card.bottom
+                width: parent.width
+                height: 30
+                visible: cueDelegate.isSelected
+
+                IconButton {
+                    anchors.centerIn: parent
+                    glyph: Theme.icons.plus
+                    variant: "ghost"
+                    iconSize: Theme.iconSizeSm
+                    tooltip: qsTr("Add a subtitle after this one")
+                    onClicked: root.insertCueAfter(cueDelegate.index)
+                }
             }
         }
 
