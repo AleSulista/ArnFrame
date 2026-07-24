@@ -1243,6 +1243,9 @@ void expandSelectionWithLinkedPartners(const drift::Project &project, QList<QPai
 QHash<QString, QString> defaultShortcuts()
 {
     return {
+        {QStringLiteral("newProject"), QStringLiteral("Ctrl+N")},
+        {QStringLiteral("open"), QStringLiteral("Ctrl+O")},
+        {QStringLiteral("save"), QStringLiteral("Ctrl+S")},
         {QStringLiteral("playPause"), QStringLiteral("Space")},
         {QStringLiteral("delete"), QStringLiteral("Delete")},
         {QStringLiteral("undo"), QStringLiteral("Ctrl+Z")},
@@ -1400,6 +1403,9 @@ QVariantList AppController::actions() const
     };
 
     return {
+        action(QStringLiteral("newProject"), QStringLiteral("New project")),
+        action(QStringLiteral("open"), QStringLiteral("Open project")),
+        action(QStringLiteral("save"), QStringLiteral("Save project")),
         action(QStringLiteral("playPause"), QStringLiteral("Play/Pause")),
         action(QStringLiteral("delete"), QStringLiteral("Delete selection")),
         action(QStringLiteral("undo"), QStringLiteral("Undo")),
@@ -7468,7 +7474,15 @@ void AppController::setShortcut(const QString &actionId, const QString &keys)
 
 void AppController::triggerAction(const QString &actionId)
 {
-    if (actionId == QStringLiteral("playPause"))
+    // File ops need QML (dialogs + unsaved-change confirm). Emit so the header
+    // can gate them the same way the project menu does.
+    if (actionId == QStringLiteral("newProject"))
+        emit newProjectRequested();
+    else if (actionId == QStringLiteral("open"))
+        emit openRequested();
+    else if (actionId == QStringLiteral("save"))
+        emit saveRequested();
+    else if (actionId == QStringLiteral("playPause"))
         togglePlayback();
     else if (actionId == QStringLiteral("delete"))
         deleteSelectedClip();
@@ -8389,6 +8403,15 @@ void AppController::discardAutosave()
     // Fresh timeline and clear the autosave snapshot from the previous session.
     newProject();
     setLastMessage(QStringLiteral("Started new session"));
+}
+
+void AppController::discardUnsavedChanges()
+{
+    // Don't Save before quit: clear dirty so aboutToQuit does not write a
+    // recovery file the user just chose to throw away. Timeline is left alone —
+    // the window is closing (or the caller is about to replace the project).
+    setDirty(false);
+    deleteRecoveryFile();
 }
 
 QVariantList AppController::exportPresets() const

@@ -514,6 +514,9 @@ public:
     Q_INVOKABLE void clearRecentProjects();
     Q_INVOKABLE void restoreAutosave();
     Q_INVOKABLE void discardAutosave();
+    // Clears dirty + recovery without mutating the timeline. Used when the user
+    // chooses Don't Save before quitting so the next launch does not offer restore.
+    Q_INVOKABLE void discardUnsavedChanges();
     Q_INVOKABLE QVariantList exportPresets() const; // legacy scale ids/labels
     Q_INVOKABLE QVariantList exportScaleOptions() const;
     Q_INVOKABLE QVariantList exportVideoCodecs() const;
@@ -605,6 +608,10 @@ signals:
     void recentProjectsChanged();
     void projectLayoutChosenChanged();
     void transformBlocked(const QString &reason);
+    // File actions from the shortcut layer — QML owns dialogs and unsaved prompts.
+    void newProjectRequested();
+    void openRequested();
+    void saveRequested();
 
 protected:
     void pushProjectEdit(const drift::Project &before, const QString &text);
