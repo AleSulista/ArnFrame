@@ -427,11 +427,13 @@ void layoutRectForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
         *rotationOut = transformValue(clip.rotation, relative, 0.0);
 }
 
-// The topmost active video/image frame at this time, used to derive a blur fill.
-QImage topmostVisualFrame(const drift::Project &project, drift::TimeUs timelineUs, int width, int height)
+// The bottommost active video/image frame at this time, used to derive a blur fill.
+// Track 0 is topmost, so walk tracks back-to-front and take the first hit.
+QImage bottommostVisualFrame(const drift::Project &project, drift::TimeUs timelineUs, int width, int height)
 {
     const QList<drift::Track> &tracks = project.tracks();
-    for (const drift::Track &track : tracks) {
+    for (int ti = tracks.size() - 1; ti >= 0; --ti) {
+        const drift::Track &track = tracks.at(ti);
         if (track.hidden || track.type == drift::TrackType::Audio)
             continue;
         for (const drift::Clip &clip : track.clips) {
@@ -738,9 +740,9 @@ GpuScene buildGpuScene(const drift::Project &project, drift::TimeUs timelineUs, 
         scene.backgroundColor = Qt::black;
         scene.backgroundBlur = true;
         scene.blurStrengthPx = bg.blurStrength;
-        // The topmost visual frame, decoded once — the CPU path decoded it a
+        // The bottommost visual frame, decoded once — the CPU path decoded it a
         // second time here, effects and all.
-        scene.blurSource = topmostVisualFrame(project, timelineUs, width, height);
+        scene.blurSource = bottommostVisualFrame(project, timelineUs, width, height);
     } else {
         scene.backgroundColor = bg.color.isValid() ? bg.color : QColor(Qt::black);
     }

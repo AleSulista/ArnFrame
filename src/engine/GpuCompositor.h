@@ -67,7 +67,7 @@ struct GpuScene
     QColor backgroundColor = Qt::black;
     bool backgroundBlur = false;
     double blurStrengthPx = 20.0;
-    QImage blurSource; // topmost visual frame, already decoded
+    QImage blurSource; // bottommost visual frame, already decoded
     QList<GpuItem> items; // back-to-front
 };
 
