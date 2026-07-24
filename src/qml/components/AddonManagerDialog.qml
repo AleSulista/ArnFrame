@@ -44,12 +44,23 @@ ThemedDialog {
     // Which addon to scroll to and highlight when opened from an empty state.
     property string highlightId: ""
     property string kindFilter: "all"
+    // The kinds the selected category covers; empty means every kind. A category is not always one
+    // kind — Acceleration spans the runtime and the plugin execution providers.
+    property var kindFilterKinds: []
 
     // id -> { fraction, phase }. Rebuilt wholesale on each signal so the bindings re-evaluate.
     property var transfers: ({})
 
     function openForKind(kind) {
-        root.kindFilter = "all"
+        if (kind === "onnxruntime" || kind === "onnxruntime-ep") {
+            // The runtime has no obvious row to highlight when nothing is installed yet, so land
+            // on the category instead — the picker at the top of it is the point.
+            root.kindFilter = "onnxruntime"
+            root.kindFilterKinds = ["onnxruntime", "onnxruntime-ep"]
+        } else {
+            root.kindFilter = "all"
+            root.kindFilterKinds = []
+        }
         root.highlightId = Addons.firstAddonForKind(kind)
         root.open()
     }
@@ -84,19 +95,24 @@ ThemedDialog {
 
             Repeater {
                 model: [
-                    { id: "all", label: qsTr("All") },
-                    { id: "effects", label: qsTr("Effects") },
-                    { id: "transitions", label: qsTr("Transitions") },
-                    { id: "audio-effects", label: qsTr("Audio FX") },
-                    { id: "fonts", label: qsTr("Fonts") },
-                    { id: "stickers", label: qsTr("Stickers") },
-                    { id: "whisper-model", label: qsTr("Speech & AI") }
+                    { id: "all", label: qsTr("All"), kinds: [] },
+                    { id: "effects", label: qsTr("Effects"), kinds: ["effects"] },
+                    { id: "transitions", label: qsTr("Transitions"), kinds: ["transitions"] },
+                    { id: "audio-effects", label: qsTr("Audio FX"), kinds: ["audio-effects"] },
+                    { id: "fonts", label: qsTr("Fonts"), kinds: ["fonts"] },
+                    { id: "stickers", label: qsTr("Stickers"), kinds: ["stickers"] },
+                    { id: "whisper-model", label: qsTr("Speech & AI"), kinds: ["whisper-model"] },
+                    { id: "onnxruntime", label: qsTr("Acceleration"),
+                      kinds: ["onnxruntime", "onnxruntime-ep"] }
                 ]
 
                 ThemedChip {
                     text: modelData.label
                     selected: root.kindFilter === modelData.id
-                    onClicked: root.kindFilter = modelData.id
+                    onClicked: {
+                        root.kindFilter = modelData.id
+                        root.kindFilterKinds = modelData.kinds
+                    }
                 }
             }
         }
@@ -115,9 +131,81 @@ ThemedDialog {
             wrapMode: Text.WordWrap
         }
 
+        // Which installed runtime the AI features use. It lives here rather than in a settings
+        // page because the thing it chooses between is what this dialog installs.
+        Column {
+            id: accelerationPanel
+            visible: root.kindFilter === "onnxruntime"
+            anchors.top: statusLine.visible ? statusLine.bottom : filters.bottom
+            anchors.topMargin: 12
+            anchors.left: parent.left
+            anchors.right: parent.right
+            spacing: Theme.spacingSm
+
+            // One-shot answers about what is on disk, not bindings, so they are re-read when an
+            // install or removal changes it — the same pattern the feature empty states use.
+            property var options: Addons.accelerationOptions()
+            property bool runtimeReady: Addons.runtimeAvailable()
+            property bool restartRequired: Addons.runtimeRestartRequired()
+
+            Connections {
+                target: Addons
+                function onKindChanged(kind) {
+                    if (kind !== "onnxruntime" && kind !== "onnxruntime-ep")
+                        return
+                    accelerationPanel.options = Addons.accelerationOptions()
+                    accelerationPanel.runtimeReady = Addons.runtimeAvailable()
+                    accelerationPanel.restartRequired = Addons.runtimeRestartRequired()
+                }
+            }
+
+            ThemedLabel {
+                text: qsTr("Acceleration")
+                size: "sm"
+                tone: "default"
+            }
+
+            ThemedComboBox {
+                id: accelerationBox
+                width: 260
+                textRole: "label"
+                valueRole: "value"
+                model: accelerationPanel.options
+                currentIndex: {
+                    var current = Addons.acceleration()
+                    for (var i = 0; i < accelerationPanel.options.length; ++i) {
+                        if (accelerationPanel.options[i].value === current)
+                            return i
+                    }
+                    return 0
+                }
+                onActivated: Addons.setAcceleration(accelerationPanel.options[index].value)
+            }
+
+            ThemedLabel {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                size: "sm"
+                text: accelerationPanel.runtimeReady
+                      ? qsTr("Automatic uses the fastest runtime you have installed and falls back to the CPU when it can't.")
+                      : qsTr("No runtime is installed, so subtitles, object cutout, face tracking and noise removal are unavailable. Install one below.")
+            }
+
+            ThemedLabel {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                size: "sm"
+                visible: accelerationPanel.restartRequired
+                color: Theme.destructive
+                tone: "default"
+                text: qsTr("Restart Drift for this to take effect.")
+            }
+        }
+
         ListView {
             id: list
-            anchors.top: statusLine.visible ? statusLine.bottom : filters.bottom
+            anchors.top: accelerationPanel.visible ? accelerationPanel.bottom
+                                                   : (statusLine.visible ? statusLine.bottom : filters.bottom)
             anchors.topMargin: 12
             anchors.left: parent.left
             anchors.right: parent.right
@@ -125,7 +213,17 @@ ThemedDialog {
             clip: true
             spacing: 8
             model: Addons.catalog.filter(function (addon) {
-                return root.kindFilter === "all" || addon.kind === root.kindFilter
+                if (root.kindFilter === "all")
+                    return true
+                var wanted = root.kindFilterKinds
+                if (!wanted || wanted.length === 0)
+                    wanted = [root.kindFilter]
+                var have = addon.kinds && addon.kinds.length ? addon.kinds : [addon.kind]
+                for (var i = 0; i < wanted.length; ++i) {
+                    if (have.indexOf(wanted[i]) !== -1)
+                        return true
+                }
+                return false
             })
 
             ScrollBar.vertical: AppScrollBar {}

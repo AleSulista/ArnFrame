@@ -55,7 +55,7 @@ Built with **Qt 6**, **QML**, and **FFmpeg**. Preview and export share one compo
 | libzstd | any (addon package decompression) |
 | OpenSSL | 3.x, libcrypto only (addon signature verification) |
 
-ONNX Runtime powers auto-subtitles (and related ML features) and is downloaded automatically at configure time; pass `-DDRIFT_FETCH_ONNXRUNTIME=OFF` to use a system install instead.
+ONNX Runtime powers auto-subtitles (and related ML features). Drift does not link it — only its headers are needed to build, and the library itself is an addon the user installs from the Acceleration category, which is what makes the CPU / CUDA / WebGPU choice theirs rather than the packager's. The headers are downloaded automatically at configure time; pass `-DDRIFT_FETCH_ONNXRUNTIME=OFF` to use a system install instead. A development build also stages a CPU runtime into `<build>/onnxruntime` so it works before anything is installed — `-DDRIFT_BUNDLE_ONNXRUNTIME=OFF` (what the Flatpak manifests use) turns that off, and `DRIFT_ONNXRUNTIME_DIR` points at an extracted release instead.
 
 On Debian/Ubuntu install `libzstd-dev` and `libssl-dev`; on Arch, `zstd` and `openssl`. Neither has a download fallback — configure fails with a pkg-config error if the development headers are missing.
 

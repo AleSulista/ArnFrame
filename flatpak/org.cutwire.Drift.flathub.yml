@@ -29,15 +29,15 @@ cleanup:
   - "*.la"
 
 modules:
-  # Pre-built CPU inference build; Drift links it for the Whisper auto-subtitle
-  # transcriber. Built with -DDRIFT_FETCH_ONNXRUNTIME=OFF so the sandboxed build never
-  # downloads it.
-  - name: onnxruntime
+  # Headers only. Drift does not link ONNX Runtime — it dlopens whichever build the user
+  # installed from the Acceleration category, so the app ships none and neither does this
+  # manifest. The library in this archive is deliberately discarded. Built with
+  # -DDRIFT_FETCH_ONNXRUNTIME=OFF so the sandboxed build never downloads anything itself.
+  - name: onnxruntime-headers
     buildsystem: simple
     build-commands:
-      - install -d ${FLATPAK_DEST}/include ${FLATPAK_DEST}/lib
+      - install -d ${FLATPAK_DEST}/include
       - cp -a include/. ${FLATPAK_DEST}/include/
-      - cp -a lib/. ${FLATPAK_DEST}/lib/
     sources:
       - type: archive
         url: https://github.com/microsoft/onnxruntime/releases/download/v1.27.0/onnxruntime-linux-x64-1.27.0.tgz
@@ -58,6 +58,7 @@ modules:
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
       - -DDRIFT_FETCH_ONNXRUNTIME=OFF
+      - -DDRIFT_BUNDLE_ONNXRUNTIME=OFF
       - -DONNXRUNTIME_ROOT=/app
     sources:
       # TODO: pin to the real release tag and commit before submitting to Flathub.

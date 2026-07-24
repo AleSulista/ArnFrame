@@ -8,6 +8,7 @@
 #include "engine/EffectTemplateCatalog.h"
 #include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
+#include "engine/OrtRuntime.h"
 #include "engine/StickerCatalog.h"
 #include "engine/TransitionCatalog.h"
 
@@ -151,6 +152,9 @@ QVariantList AddonManager::catalog() const
             {QStringLiteral("author"), addon.value(QStringLiteral("author")).toString()},
             {QStringLiteral("license"), addon.value(QStringLiteral("license")).toString()},
             {QStringLiteral("kind"), addon.value(QStringLiteral("kind")).toString()},
+            // A pack can provide several kinds; `kind` is only the headline one. The category
+            // filter needs all of them or an Acceleration pack that also ships an EP disappears.
+            {QStringLiteral("kinds"), kindsOf(addon)},
             {QStringLiteral("version"), version},
             {QStringLiteral("installedVersion"), installed ? installed->version : QString()},
             {QStringLiteral("downloadSize"), addon.value(QStringLiteral("downloadSize")).toDouble()},
@@ -175,6 +179,69 @@ QString AddonManager::firstAddonForKind(const QString &kind) const
             return addon.value(QStringLiteral("id")).toString();
     }
     return {};
+}
+
+bool AddonManager::runtimeAvailable() const
+{
+    return drift::ort::available();
+}
+
+QVariantList AddonManager::accelerationOptions() const
+{
+    // "auto" and "cpu" are always offered: auto is the default, and CPU is what every runtime can
+    // do, so being able to pick it is how a user rules the GPU out when chasing a bad result.
+    const QStringList installed = drift::ort::selectableVariants();
+    const auto row = [&](const QString &value, const QString &label) {
+        return QVariantMap{{QStringLiteral("value"), value},
+                           {QStringLiteral("label"), label},
+                           {QStringLiteral("available"), value == QLatin1String("auto")
+                                                             || installed.contains(value)}};
+    };
+
+    QVariantList rows{row(QStringLiteral("auto"), tr("Automatic")),
+                      row(QStringLiteral("cpu"), tr("CPU"))};
+    for (const QString &variant : installed) {
+        if (variant == QLatin1String("cpu"))
+            continue;
+        if (variant == QLatin1String("cuda"))
+            rows.append(row(variant, tr("NVIDIA GPU (CUDA)")));
+        else if (variant == QLatin1String("webgpu"))
+            rows.append(row(variant, tr("GPU (WebGPU)")));
+        else
+            rows.append(row(variant, variant.toUpper()));
+    }
+    return rows;
+}
+
+QString AddonManager::acceleration() const
+{
+    return drift::ort::preferredVariant();
+}
+
+void AddonManager::setAcceleration(const QString &variant)
+{
+    if (variant == drift::ort::preferredVariant())
+        return;
+    drift::ort::setPreferredVariant(variant);
+
+    // Sessions are built per use and read the preference then, so switching to a plugin EP takes
+    // effect immediately — it layers onto the core already loaded. Switching to a *different core*
+    // does not: that library is loaded once per process.
+    const QString active = drift::ort::activeVariant();
+    if (!active.isEmpty() && variant != active && variant != QLatin1String("auto")) {
+        for (const drift::ort::RuntimeInfo &runtime : drift::ort::installedRuntimes()) {
+            if (runtime.variant == variant) {
+                m_runtimeRestartRequired = true;
+                break;
+            }
+        }
+    }
+    emit kindChanged(QString::fromLatin1(drift::ort::kRuntimeKind));
+}
+
+bool AddonManager::runtimeRestartRequired() const
+{
+    return m_runtimeRestartRequired;
 }
 
 void AddonManager::refresh(bool force)
@@ -234,9 +301,18 @@ void AddonManager::applyIndex(const QByteArray &json, bool fromCache)
         return;
     }
 
+    // One index serves every platform, so rows that carry native code declare which ones they are
+    // for and the rest are dropped before they ever reach the UI. An absent or empty list means
+    // content that runs anywhere, which is everything except the Acceleration addons.
+    const QString platform = currentPlatform();
     m_remote.clear();
-    for (const QJsonValue &value : root.value(QStringLiteral("addons")).toArray())
-        m_remote.append(value.toObject());
+    for (const QJsonValue &value : root.value(QStringLiteral("addons")).toArray()) {
+        const QJsonObject addon = value.toObject();
+        const QJsonArray platforms = addon.value(QStringLiteral("platforms")).toArray();
+        if (!platforms.isEmpty() && !platforms.contains(QJsonValue(platform)))
+            continue;
+        m_remote.append(addon);
+    }
 
     emit catalogChanged();
 }
@@ -477,6 +553,14 @@ void AddonManager::reloadForKinds(const QStringList &kinds)
             reloadAudioEffectCatalog();
         else if (kind == QLatin1String("effect-templates"))
             reloadEffectTemplateCatalog();
+        else if (kind == QLatin1String(drift::ort::kRuntimeKind)
+                 || kind == QLatin1String(drift::ort::kPluginEpKind)) {
+            // Nothing to reload. But a runtime that has already been loaded stays loaded for the
+            // life of the process, so an install or removal only lands on the next launch —
+            // whereas installing the first one, before anything has loaded, works immediately.
+            if (!drift::ort::activeVariant().isEmpty())
+                m_runtimeRestartRequired = true;
+        }
         // whisper-model, sam2-model and face-model need nothing: sessions are created lazily on
         // next use.
         emit kindChanged(kind);

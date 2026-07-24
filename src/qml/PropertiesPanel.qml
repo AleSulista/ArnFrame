@@ -2258,13 +2258,17 @@ PanelFrame {
 
                             // Whether the model is on disk is a one-shot filesystem answer, not a
                             // binding, hence the reset below when an addon of this kind appears.
+                            // The runtime that runs it is a second, separate addon.
                             property bool denoiseReady: EditorState.denoiseAvailable()
+                            property bool runtimeReady: Addons.runtimeAvailable()
 
                             Connections {
                                 target: Addons
                                 function onKindChanged(kind) {
                                     if (kind === "denoise-model")
                                         denoiseSection.denoiseReady = EditorState.denoiseAvailable()
+                                    else if (kind === "onnxruntime")
+                                        denoiseSection.runtimeReady = Addons.runtimeAvailable()
                                 }
                             }
 
@@ -2277,7 +2281,7 @@ PanelFrame {
                             }
 
                             ThemedButton {
-                                visible: denoiseSection.denoiseReady
+                                visible: denoiseSection.denoiseReady && denoiseSection.runtimeReady
                                 width: parent.width
                                 text: qsTr("Remove noise…")
                                 enabled: !EditorState.denoising
@@ -2290,11 +2294,14 @@ PanelFrame {
                             }
 
                             ThemedButton {
-                                visible: !denoiseSection.denoiseReady
+                                visible: !denoiseSection.denoiseReady || !denoiseSection.runtimeReady
                                 width: parent.width
-                                text: qsTr("Download noise removal (about 9 MB)")
+                                text: denoiseSection.runtimeReady
+                                      ? qsTr("Download noise removal (about 9 MB)")
+                                      : qsTr("Set up AI acceleration")
                                 variant: "primary"
-                                onClicked: root.Window.window.openAddonManager("denoise-model")
+                                onClicked: root.Window.window.openAddonManager(
+                                    denoiseSection.runtimeReady ? "denoise-model" : "onnxruntime")
                             }
                         }
 
@@ -2494,15 +2501,22 @@ PanelFrame {
                             font.pixelSize: Theme.fontSizeXs
                         }
 
-                        // The transcriber is an addon; without it there are no languages to list
-                        // and nothing to run, so offer the download in place of the controls.
+                        // The transcriber is an addon, and so is the runtime it needs; without
+                        // both there are no languages to list and nothing to run, so offer the
+                        // download in place of the controls.
                         property bool whisperReady: Addons.hasKind("whisper-model")
+                                                    && Addons.runtimeAvailable()
+                        property bool runtimeReady: Addons.runtimeAvailable()
 
                         Connections {
                             target: Addons
                             function onKindChanged(kind) {
-                                if (kind === "whisper-model")
-                                    subtitleLanguageBox.parent.whisperReady = Addons.hasKind("whisper-model")
+                                if (kind !== "whisper-model" && kind !== "onnxruntime")
+                                    return
+                                const section = subtitleLanguageBox.parent
+                                section.runtimeReady = Addons.runtimeAvailable()
+                                section.whisperReady = Addons.hasKind("whisper-model")
+                                                       && section.runtimeReady
                             }
                         }
 
@@ -2539,9 +2553,12 @@ PanelFrame {
                             visible: !parent.whisperReady
                                      && (root.clipKind === "audio" || root.clipKind === "video")
                             width: parent.width
-                            text: qsTr("Download speech recognition (about 670 MB)")
+                            text: parent.runtimeReady
+                                  ? qsTr("Download speech recognition (about 670 MB)")
+                                  : qsTr("Set up AI acceleration")
                             variant: "primary"
-                            onClicked: root.Window.window.openAddonManager("whisper-model")
+                            onClicked: root.Window.window.openAddonManager(
+                                parent.runtimeReady ? "whisper-model" : "onnxruntime")
                         }
 
                     }
@@ -3399,12 +3416,15 @@ PanelFrame {
                             // the addon registry. That answer is not a binding, hence the reset
                             // below when an addon of this kind appears.
                             property bool segmentReady: EditorState.segmentationAvailable()
+                            property bool runtimeReady: Addons.runtimeAvailable()
 
                             Connections {
                                 target: Addons
                                 function onKindChanged(kind) {
                                     if (kind === "sam2-model")
                                         segmentSection.segmentReady = EditorState.segmentationAvailable()
+                                    else if (kind === "onnxruntime")
+                                        segmentSection.runtimeReady = Addons.runtimeAvailable()
                                 }
                             }
 
@@ -3417,7 +3437,7 @@ PanelFrame {
                             }
 
                             ThemedButton {
-                                visible: segmentSection.segmentReady
+                                visible: segmentSection.segmentReady && segmentSection.runtimeReady
                                 width: parent.width
                                 text: qsTr("Cut out subject…")
                                 enabled: !EditorState.segmenting
@@ -3431,11 +3451,14 @@ PanelFrame {
                             }
 
                             ThemedButton {
-                                visible: !segmentSection.segmentReady
+                                visible: !segmentSection.segmentReady || !segmentSection.runtimeReady
                                 width: parent.width
-                                text: qsTr("Download cutout AI (about 190 MB)")
+                                text: segmentSection.runtimeReady
+                                      ? qsTr("Download cutout AI (about 190 MB)")
+                                      : qsTr("Set up AI acceleration")
                                 variant: "primary"
-                                onClicked: root.Window.window.openAddonManager("sam2-model")
+                                onClicked: root.Window.window.openAddonManager(
+                                    segmentSection.runtimeReady ? "sam2-model" : "onnxruntime")
                             }
                         }
 
@@ -3593,7 +3616,11 @@ PanelFrame {
                             // models/face or DRIFT_FACE_MODEL_DIR, so ask the engine rather than
                             // the addon registry. That answer is not a binding, hence the reset
                             // below when an addon of this kind appears.
+                            // Folded together because every control below is gated on the same
+                            // answer; runtimeReady is kept apart only to say which half is missing.
+                            property bool runtimeReady: Addons.runtimeAvailable()
                             property bool faceReady: EditorState.faceDetectionAvailable()
+                                                     && Addons.runtimeAvailable()
                             property bool hasTrack: {
                                 const data = EditorState.selectedClipData
                                 return data && data.hasFaceTrack === true
@@ -3602,8 +3629,11 @@ PanelFrame {
                             Connections {
                                 target: Addons
                                 function onKindChanged(kind) {
-                                    if (kind === "face-model")
-                                        faceSection.faceReady = EditorState.faceDetectionAvailable()
+                                    if (kind !== "face-model" && kind !== "onnxruntime")
+                                        return
+                                    faceSection.runtimeReady = Addons.runtimeAvailable()
+                                    faceSection.faceReady = EditorState.faceDetectionAvailable()
+                                                            && faceSection.runtimeReady
                                 }
                             }
 
@@ -3672,9 +3702,12 @@ PanelFrame {
                             ThemedButton {
                                 visible: !faceSection.faceReady
                                 width: parent.width
-                                text: qsTr("Download face detection (about 5 MB)")
+                                text: faceSection.runtimeReady
+                                      ? qsTr("Download face detection (about 5 MB)")
+                                      : qsTr("Set up AI acceleration")
                                 variant: "primary"
-                                onClicked: root.Window.window.openAddonManager("face-model")
+                                onClicked: root.Window.window.openAddonManager(
+                                    faceSection.runtimeReady ? "face-model" : "onnxruntime")
                             }
                         }
 

@@ -2,6 +2,7 @@
 
 #include "WhisperTokenizer.h"
 #include "GpuPackageParse.h"
+#include "OrtRuntime.h"
 #include "core/Time.h"
 
 #include <QByteArray>
@@ -248,8 +249,6 @@ struct WhisperTranscriber::Impl
     QString error;
     QString modelDir;
 
-    Ort::Env env{ORT_LOGGING_LEVEL_ERROR, "drift-whisper"};
-    Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     std::unique_ptr<Ort::Session> encoder;
     std::unique_ptr<Ort::Session> decoder;
     std::unique_ptr<Ort::Session> decoderPast;
@@ -438,8 +437,8 @@ std::vector<int> WhisperTranscriber::Impl::decodeWindow(
         {
             const int64_t idShape[2] = {1, static_cast<int64_t>(prompt.size())};
             Ort::Value idTensor = Ort::Value::CreateTensor<int64_t>(
-                mem, const_cast<int64_t *>(prompt.data()), prompt.size(), idShape, 2);
-            Ort::Value encView = floatView(encHidden, mem);
+                ort::cpuMemory(), const_cast<int64_t *>(prompt.data()), prompt.size(), idShape, 2);
+            Ort::Value encView = floatView(encHidden, ort::cpuMemory());
             Ort::Value ins[2] = {std::move(idTensor), std::move(encView)};
             const char *inN[2] = {decInNames[0].c_str(), decInNames[1].c_str()};
             std::vector<const char *> outN;
@@ -487,11 +486,11 @@ std::vector<int> WhisperTranscriber::Impl::decodeWindow(
             std::vector<int64_t> idData{nextToken};
             const int64_t idShape[2] = {1, 1};
             Ort::Value idTensor =
-                Ort::Value::CreateTensor<int64_t>(mem, idData.data(), 1, idShape, 2);
+                Ort::Value::CreateTensor<int64_t>(ort::cpuMemory(), idData.data(), 1, idShape, 2);
             std::vector<int64_t> cacheData{cachePos};
             const int64_t cacheShape[1] = {1};
             Ort::Value cacheTensor =
-                Ort::Value::CreateTensor<int64_t>(mem, cacheData.data(), 1, cacheShape, 1);
+                Ort::Value::CreateTensor<int64_t>(ort::cpuMemory(), cacheData.data(), 1, cacheShape, 1);
 
             std::vector<Ort::Value> ins;
             std::vector<const char *> inN;
@@ -503,7 +502,7 @@ std::vector<int> WhisperTranscriber::Impl::decodeWindow(
                 else if (name == "cache_position")
                     ins.push_back(std::move(cacheTensor));
                 else
-                    ins.push_back(floatView(pastKV.at(name), mem));
+                    ins.push_back(floatView(pastKV.at(name), ort::cpuMemory()));
             }
             std::vector<const char *> outN;
             for (const auto &n : decpOutNames)
@@ -610,8 +609,11 @@ bool WhisperTranscriber::Impl::ensureLoaded()
                                "or set DRIFT_WHISPER_MODEL_DIR.");
         return false;
     }
+    if (!ort::ensureLoaded(&error))
+        return false;
 
     try {
+        Ort::Env &ortEnv = ort::env();
         Ort::SessionOptions opts;
         opts.SetIntraOpNumThreads(std::max(1, QThread::idealThreadCount()));
         // fp16 graph fusions (SimplifiedLayerNormFusion) crash on load; disable them.
@@ -619,11 +621,12 @@ bool WhisperTranscriber::Impl::ensureLoaded()
 
         const QDir dir(modelDir);
         encoder = std::make_unique<Ort::Session>(
-            env, ortPath(dir.filePath(QStringLiteral("encoder_model_fp16.onnx"))).c_str(), opts);
+            ortEnv, ortPath(dir.filePath(QStringLiteral("encoder_model_fp16.onnx"))).c_str(), opts);
         decoder = std::make_unique<Ort::Session>(
-            env, ortPath(dir.filePath(QStringLiteral("decoder_model_fp16.onnx"))).c_str(), opts);
+            ortEnv, ortPath(dir.filePath(QStringLiteral("decoder_model_fp16.onnx"))).c_str(), opts);
         decoderPast = std::make_unique<Ort::Session>(
-            env, ortPath(dir.filePath(QStringLiteral("decoder_with_past_model_fp16.onnx"))).c_str(),
+            ortEnv,
+            ortPath(dir.filePath(QStringLiteral("decoder_with_past_model_fp16.onnx"))).c_str(),
             opts);
 
         encInNames = names(*encoder, true);
@@ -727,7 +730,7 @@ std::vector<float> WhisperTranscriber::Impl::logMel(const float *pcm, int count)
 Ort::Value WhisperTranscriber::Impl::runEncoder(const std::vector<float> &mel)
 {
     const int64_t shape[3] = {1, kNMel, kNFrames};
-    Ort::Value in = Ort::Value::CreateTensor<float>(mem, const_cast<float *>(mel.data()),
+    Ort::Value in = Ort::Value::CreateTensor<float>(ort::cpuMemory(), const_cast<float *>(mel.data()),
                                                     mel.size(), shape, 3);
     const char *inName = encInNames[0].c_str();
     const char *outName = encOutNames[0].c_str();
@@ -844,8 +847,8 @@ WhisperResult WhisperTranscriber::transcribe(
             std::vector<int64_t> ids{kSotToken};
             const int64_t idShape[2] = {1, 1};
             Ort::Value idTensor =
-                Ort::Value::CreateTensor<int64_t>(d->mem, ids.data(), ids.size(), idShape, 2);
-            Ort::Value encView = floatView(encHidden, d->mem);
+                Ort::Value::CreateTensor<int64_t>(ort::cpuMemory(), ids.data(), ids.size(), idShape, 2);
+            Ort::Value encView = floatView(encHidden, ort::cpuMemory());
             std::vector<Ort::Value> ins;
             ins.push_back(std::move(idTensor));
             ins.push_back(std::move(encView));

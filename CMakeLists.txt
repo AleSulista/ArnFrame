@@ -50,20 +50,23 @@ set(DRIFT_ADDON_CLIENT_TOKEN "79a388bba9301cacc81cc6eb0724c81e948e1b27c69aee1b"
 find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets OpenGL Network QuickEffects)
 find_package(FFmpeg REQUIRED)
 
-# ONNX Runtime powers the Whisper auto-subtitle transcriber (src/engine/WhisperTranscriber).
+# ONNX Runtime powers auto subtitles, object segmentation, face tracking and noise removal. The
+# app links none of it: it compiles against the headers and dlopens a runtime at startup
+# (src/engine/OrtRuntime.cpp), so the CPU / CUDA / WebGPU decision belongs to the user and is made
+# by installing an addon, not by whoever configured this build. Only the headers are needed here.
 option(DRIFT_FETCH_ONNXRUNTIME
-    "Download a prebuilt ONNX Runtime when it is not installed (cmake/FetchOnnxRuntime.cmake)" ON)
-# Which prebuilt release to fetch. "cuda" adds the CUDA execution provider, selected at runtime
-# with DRIFT_ORT_EP=cuda; it needs CUDA 13 and cuDNN 9 present on the machine that runs it.
-set(DRIFT_ONNXRUNTIME_EP "cpu" CACHE STRING "ONNX Runtime release to download: cpu or cuda")
-set_property(CACHE DRIFT_ONNXRUNTIME_EP PROPERTY STRINGS cpu cuda)
+    "Download prebuilt ONNX Runtime headers when they are not installed (cmake/FetchOnnxRuntime.cmake)" ON)
+# Stage a CPU runtime into <appDir>/onnxruntime so the build tree can transcribe without going
+# through the addon service. Packaged builds turn this off — they ship no runtime at all.
+option(DRIFT_BUNDLE_ONNXRUNTIME
+    "Stage a CPU ONNX Runtime into the build tree for development" ON)
 find_package(OnnxRuntime QUIET)
-if(OnnxRuntime_FOUND AND DRIFT_ONNXRUNTIME_EP STREQUAL "cuda" AND NOT OnnxRuntime_HAS_CUDA)
-    # A system CPU-only install would otherwise win and silently defeat the request. An install
-    # that does carry the provider (e.g. Arch's onnxruntime-opt-cuda) is kept and used as-is.
-    message(STATUS "System ONNX Runtime has no CUDA provider; downloading a CUDA build instead")
+if(DRIFT_BUNDLE_ONNXRUNTIME AND OnnxRuntime_FOUND AND NOT ONNXRUNTIME_RUNTIME_LIBS
+   AND DRIFT_FETCH_ONNXRUNTIME)
+    # Headers with no library beside them (a headers-only system package) leave the build tree
+    # with nothing to load, which looks exactly like a broken install at runtime.
+    message(STATUS "ONNX Runtime headers found without a library; downloading one to bundle")
     set(OnnxRuntime_FOUND FALSE)
-    set(DRIFT_FETCH_ONNXRUNTIME ON)
 endif()
 if(NOT OnnxRuntime_FOUND AND DRIFT_FETCH_ONNXRUNTIME)
     include(FetchOnnxRuntime)
@@ -71,10 +74,16 @@ if(NOT OnnxRuntime_FOUND AND DRIFT_FETCH_ONNXRUNTIME)
 endif()
 if(NOT OnnxRuntime_FOUND)
     message(FATAL_ERROR
-        "ONNX Runtime not found. Install it and set ONNXRUNTIME_ROOT, "
-        "or enable DRIFT_FETCH_ONNXRUNTIME to download it automatically.")
+        "ONNX Runtime headers not found. Install them and set ONNXRUNTIME_ROOT, "
+        "or enable DRIFT_FETCH_ONNXRUNTIME to download them automatically.")
 endif()
-message(STATUS "ONNX Runtime found: ${OnnxRuntime_LIBRARIES} — auto subtitles enabled")
+message(STATUS "ONNX Runtime headers: ${OnnxRuntime_INCLUDE_DIRS}")
+if(DRIFT_BUNDLE_ONNXRUNTIME AND NOT ONNXRUNTIME_RUNTIME_LIBS)
+    message(WARNING
+        "DRIFT_BUNDLE_ONNXRUNTIME is on but no ONNX Runtime library was found to stage. "
+        "The build tree will have no runtime; install an Acceleration addon or point "
+        "DRIFT_ONNXRUNTIME_DIR at an extracted release.")
+endif()
 
 if(WITH_BGREMOVAL)
     # Link only modules needed for background removal — not the full OpenCV
@@ -208,6 +217,8 @@ add_library(driftengine STATIC
     src/engine/WhisperTranscriber.h
     src/engine/WhisperTranscriber.cpp
     src/engine/OrtSupport.h
+    src/engine/OrtRuntime.h
+    src/engine/OrtRuntime.cpp
     src/engine/Sam2Segmenter.h
     src/engine/Sam2Segmenter.cpp
     src/engine/FaceLandmarker.h
@@ -227,8 +238,8 @@ add_library(driftengine STATIC
 )
 target_include_directories(driftengine PUBLIC src)
 target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui Qt6::OpenGL FFmpeg::FFmpeg driftcore
-    onnxruntime::onnxruntime)
-target_link_libraries(driftengine PRIVATE ${DRIFT_ZSTD_TARGET} OpenSSL::Crypto)
+    onnxruntime::headers)
+target_link_libraries(driftengine PRIVATE ${DRIFT_ZSTD_TARGET} OpenSSL::Crypto ${CMAKE_DL_LIBS})
 target_compile_definitions(driftengine PRIVATE DRIFT_VERSION="${PROJECT_VERSION}")
 
 if(WITH_BGREMOVAL)
@@ -407,15 +418,20 @@ function(drift_copy_audio_effects target)
     )
 endfunction()
 
-# Deploy the ONNX Runtime shared library next to the binary (needed on Windows; harmless
-# elsewhere and keeps the app runnable from the build tree without a system install).
-function(drift_copy_onnxruntime target)
-    if(ONNXRUNTIME_RUNTIME_LIBS)
+# Stage an ONNX Runtime into <appDir>/onnxruntime/lib, which is one of the roots
+# drift::ort::ensureLoaded() searches — the same relationship the bundled effects have with
+# installed effect addons, and ranked the same way: an installed Acceleration addon wins over this.
+# It is a development convenience only; packaged builds set DRIFT_BUNDLE_ONNXRUNTIME=OFF and ship
+# no runtime at all.
+function(drift_bundle_onnxruntime target)
+    if(DRIFT_BUNDLE_ONNXRUNTIME AND ONNXRUNTIME_RUNTIME_LIBS)
         add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:${target}>/onnxruntime/lib"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     ${ONNXRUNTIME_RUNTIME_LIBS}
-                    "$<TARGET_FILE_DIR:${target}>"
-            COMMENT "Copy onnxruntime runtime libs next to ${target}"
+                    "$<TARGET_FILE_DIR:${target}>/onnxruntime/lib"
+            COMMENT "Stage onnxruntime into ${target}'s build tree"
         )
     endif()
 endfunction()
@@ -433,7 +449,7 @@ drift_copy_effects(drift)
 drift_copy_effect_templates(drift)
 drift_copy_transitions(drift)
 drift_copy_audio_effects(drift)
-drift_copy_onnxruntime(drift)
+drift_bundle_onnxruntime(drift)
 
 # --- install (used by packaging, e.g. Flatpak; the dev workflow runs in-place) ---
 include(GNUInstallDirs)

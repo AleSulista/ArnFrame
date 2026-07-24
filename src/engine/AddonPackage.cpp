@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSaveFile>
+#include <QSysInfo>
 
 #include <openssl/evp.h>
 #include <zstd.h>
@@ -83,6 +84,7 @@ bool parseMetadata(const QByteArray &json, PackageInfo *info, QString *error)
     info->author = root.value(QStringLiteral("author")).toString();
     info->license = root.value(QStringLiteral("license")).toString();
     info->minAppVersion = root.value(QStringLiteral("minAppVersion")).toString();
+    info->platform = root.value(QStringLiteral("platform")).toString().trimmed().toLower();
     info->installedSize = quint64(root.value(QStringLiteral("installedSize")).toDouble());
 
     if (info->id.isEmpty() || info->version.isEmpty())
@@ -273,6 +275,26 @@ struct DCtxDeleter
 
 } // namespace
 
+QString currentPlatform()
+{
+#if defined(_WIN32)
+    const QString os = QStringLiteral("win");
+#elif defined(__APPLE__)
+    const QString os = QStringLiteral("osx");
+#else
+    const QString os = QStringLiteral("linux");
+#endif
+
+    // Spelled the way upstream release archives and NuGet runtime identifiers do, so a recipe
+    // names one string rather than translating between two conventions.
+    const QString arch = QSysInfo::buildCpuArchitecture();
+    if (arch == QLatin1String("x86_64") || arch == QLatin1String("amd64"))
+        return os + QStringLiteral("-x64");
+    if (arch == QLatin1String("arm64") || arch == QLatin1String("aarch64"))
+        return os + QStringLiteral("-arm64");
+    return os + QLatin1Char('-') + arch;
+}
+
 std::optional<PackageInfo> readManifest(const QString &packagePath, QString *error)
 {
     QFile file(packagePath);
@@ -298,6 +320,14 @@ bool install(const QString &packagePath, const QString &destDir, const ProgressF
     PackageInfo info;
     if (!readHeader(file, &info, &digest, error))
         return false;
+
+    // Refused here rather than in the manager, because this is also the path a side-loaded file
+    // takes. A native-code package built for another platform installs perfectly and then fails to
+    // load, which is a much harder thing to explain than a refusal.
+    if (!info.platform.isEmpty() && info.platform != currentPlatform()) {
+        return fail(error, QStringLiteral("%1 is built for %2, but this is %3")
+                               .arg(info.id, info.platform, currentPlatform()));
+    }
 
     const QByteArray sizes = file.read(kSizesSize);
     if (sizes.size() != kSizesSize)

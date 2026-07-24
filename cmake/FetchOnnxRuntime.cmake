@@ -1,10 +1,11 @@
 # Download a prebuilt ONNX Runtime release when it is not installed locally.
 # On success sets ONNXRUNTIME_ROOT (and DRIFT_ONNXRUNTIME_FETCHED).
 #
-# DRIFT_ONNXRUNTIME_EP picks which release to pull: "cpu" (default) or "cuda". The CUDA build is
-# a superset — it carries the same CPU kernels plus libonnxruntime_providers_cuda.so — so it is
-# still usable on machines without an NVIDIA GPU, it just weighs several times more. Microsoft
-# only publishes GPU builds for linux-x64 and win-x64.
+# Only the CPU release is ever fetched, and only two things are taken from it: the headers Drift
+# compiles against, and — when DRIFT_BUNDLE_ONNXRUNTIME is on — a runtime for the build tree to
+# load so a dev build works before any addon is installed. The library is never linked; which
+# runtime the shipped app uses is the user's runtime choice, not a configure-time one
+# (src/engine/OrtRuntime.cpp).
 
 if(DRIFT_ONNXRUNTIME_FETCHED)
     return()
@@ -12,26 +13,13 @@ endif()
 
 set(_onnxruntime_version "1.27.0")
 
-string(TOLOWER "${DRIFT_ONNXRUNTIME_EP}" _onnxruntime_ep)
-if(NOT _onnxruntime_ep)
-    set(_onnxruntime_ep "cpu")
-endif()
-if(NOT _onnxruntime_ep MATCHES "^(cpu|cuda)$")
-    message(FATAL_ERROR "DRIFT_ONNXRUNTIME_EP must be 'cpu' or 'cuda', got '${DRIFT_ONNXRUNTIME_EP}'")
-endif()
-
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
         set(_onnxruntime_archive "onnxruntime-linux-aarch64-${_onnxruntime_version}.tgz")
         set(_onnxruntime_sha256 "3e4d83ac06924a32a07b6d7f91ce6f852876153fc0bbdf931bf517a140bfbe48")
     elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-        if(_onnxruntime_ep STREQUAL "cuda")
-            set(_onnxruntime_archive "onnxruntime-linux-x64-gpu_cuda13-${_onnxruntime_version}.tgz")
-            set(_onnxruntime_sha256 "1a3227e1dc2f53d9f877c93278af500b15e26d99aa5ade877692138b3ab7d351")
-        else()
-            set(_onnxruntime_archive "onnxruntime-linux-x64-${_onnxruntime_version}.tgz")
-            set(_onnxruntime_sha256 "547e40a48f1fe73e3f812d7c88a948612c23f896b91e4e2ee1e232d7b468246f")
-        endif()
+        set(_onnxruntime_archive "onnxruntime-linux-x64-${_onnxruntime_version}.tgz")
+        set(_onnxruntime_sha256 "547e40a48f1fe73e3f812d7c88a948612c23f896b91e4e2ee1e232d7b468246f")
     endif()
 elseif(APPLE)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64")
@@ -42,9 +30,6 @@ elseif(WIN32)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
         set(_onnxruntime_archive "onnxruntime-win-arm64-${_onnxruntime_version}.zip")
         set(_onnxruntime_sha256 "a32f2650575b3c20df462e337519fd1cc4105356130d11dba9771c6f374d952f")
-    elseif(_onnxruntime_ep STREQUAL "cuda")
-        set(_onnxruntime_archive "onnxruntime-win-x64-gpu_cuda13-${_onnxruntime_version}.zip")
-        set(_onnxruntime_sha256 "d3e0d908bc9b59dcb59b8f453493f173c087dda105d8c110df0588d22d7c8b3e")
     else()
         set(_onnxruntime_archive "onnxruntime-win-x64-${_onnxruntime_version}.zip")
         set(_onnxruntime_sha256 "c5c81710938e68079ff1a192b04897faabe4b43830d48f39f27ecd4e16138bfc")
@@ -55,22 +40,13 @@ if(NOT _onnxruntime_archive)
     message(FATAL_ERROR
         "Automatic ONNX Runtime download is not supported for "
         "${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}. "
-        "Install ONNX Runtime manually and set ONNXRUNTIME_ROOT, "
-        "or disable DRIFT_WITH_SUBTITLES.")
-endif()
-
-if(_onnxruntime_ep STREQUAL "cuda" AND NOT _onnxruntime_archive MATCHES "gpu_cuda")
-    message(FATAL_ERROR
-        "DRIFT_ONNXRUNTIME_EP=cuda has no prebuilt release for "
-        "${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}.")
+        "Install ONNX Runtime manually and set ONNXRUNTIME_ROOT.")
 endif()
 
 set(_onnxruntime_url
     "https://github.com/microsoft/onnxruntime/releases/download/v${_onnxruntime_version}/${_onnxruntime_archive}")
 
-# Keyed by EP: the prefix glob below picks whatever it finds, so a shared staging directory would
-# hand back a stale CPU extraction after switching to cuda (or the reverse).
-set(_onnxruntime_staging "${CMAKE_BINARY_DIR}/_deps/onnxruntime/${_onnxruntime_ep}")
+set(_onnxruntime_staging "${CMAKE_BINARY_DIR}/_deps/onnxruntime/cpu")
 
 file(GLOB _onnxruntime_prefixes LIST_DIRECTORIES true
     "${_onnxruntime_staging}/onnxruntime-*")
@@ -110,14 +86,15 @@ if(NOT EXISTS "${_onnxruntime_prefix}/include/onnxruntime_cxx_api.h")
         "Failed to extract ONNX Runtime from ${_onnxruntime_archive}")
 endif()
 
-# find_path/find_library cache their results, so a previously-configured build tree would keep
-# resolving to the old prefix after switching DRIFT_ONNXRUNTIME_EP.
+# find_path caches its result, so a build tree configured against a previous prefix would keep
+# resolving to it.
 unset(OnnxRuntime_INCLUDE_DIR CACHE)
-unset(OnnxRuntime_LIBRARY CACHE)
 
 set(ONNXRUNTIME_ROOT "${_onnxruntime_prefix}" CACHE PATH
     "ONNX Runtime install prefix (auto-downloaded)" FORCE)
 set(OnnxRuntime_ROOT "${_onnxruntime_prefix}" CACHE PATH
     "ONNX Runtime install prefix (auto-downloaded)" FORCE)
+set(DRIFT_ONNXRUNTIME_VERSION "${_onnxruntime_version}" CACHE STRING
+    "Version of the fetched ONNX Runtime" FORCE)
 set(DRIFT_ONNXRUNTIME_FETCHED TRUE)
-message(STATUS "ONNX Runtime ${_onnxruntime_version} ready at ${ONNXRUNTIME_ROOT}")
+message(STATUS "ONNX Runtime ${_onnxruntime_version} headers ready at ${ONNXRUNTIME_ROOT}")

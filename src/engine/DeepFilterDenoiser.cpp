@@ -90,8 +90,6 @@ struct DeepFilterDenoiser::Impl
     QString error;
     QString modelDir;
 
-    Ort::Env env{ORT_LOGGING_LEVEL_ERROR, "drift-denoise"};
-    Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     std::unique_ptr<Ort::Session> session;
     std::vector<std::string> inNames, outNames;
 
@@ -205,6 +203,9 @@ bool DeepFilterDenoiser::Impl::ensureLoaded()
         return false;
     loadAttempted = true;
 
+    if (!ort::ensureLoaded(&error))
+        return false;
+
     modelDir = resolveModelDir();
     if (modelDir.isEmpty()) {
         error = QStringLiteral("Noise removal model not found. Install it from the Addon Manager, "
@@ -217,10 +218,11 @@ bool DeepFilterDenoiser::Impl::ensureLoaded()
     if (!initFft())
         return false;
 
+    Ort::Env &ortEnv = ort::env();
     const std::basic_string<ORTCHAR_T> path =
         ort::ortPath(QDir(modelDir).filePath(QLatin1String(kModelFile)));
-    if (!ort::buildSessions(env, "denoise", false, &error, [&](Ort::SessionOptions &opts) {
-            session = std::make_unique<Ort::Session>(env, path.c_str(), opts);
+    if (!ort::buildSessions(ortEnv, "denoise", false, &error, [&](Ort::SessionOptions &opts) {
+            session = std::make_unique<Ort::Session>(ortEnv, path.c_str(), opts);
         })) {
         return false;
     }
@@ -384,10 +386,10 @@ std::vector<float> DeepFilterDenoiser::denoise(const std::vector<float> &pcm,
         const std::array<int64_t, 4> erbShape{1, 1, tin, kErbBands};
         const std::array<int64_t, 4> specShape{1, 2, tin, kDfBins};
         std::vector<Ort::Value> inputs;
-        inputs.emplace_back(Ort::Value::CreateTensor<float>(d->mem, featErb.data(), featErb.size(),
+        inputs.emplace_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), featErb.data(), featErb.size(),
                                                             erbShape.data(), erbShape.size()));
         inputs.emplace_back(Ort::Value::CreateTensor<float>(
-            d->mem, featSpec.data(), featSpec.size(), specShape.data(), specShape.size()));
+            ort::cpuMemory(), featSpec.data(), featSpec.size(), specShape.data(), specShape.size()));
 
         std::vector<Ort::Value> outputs;
         try {

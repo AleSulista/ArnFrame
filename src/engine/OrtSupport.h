@@ -1,5 +1,7 @@
 #pragma once
 
+#include "OrtRuntime.h"
+
 #include <QDebug>
 #include <QString>
 #include <QThread>
@@ -8,11 +10,15 @@
 
 #include <algorithm>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Boilerplate every ONNX Runtime user in the engine needs: path conversion, session name
-// enumeration, and execution-provider selection. Shared so DRIFT_ORT_EP behaves identically
-// everywhere rather than drifting per model.
+// enumeration, and execution-provider selection. Shared so the acceleration choice behaves
+// identically everywhere rather than drifting per model.
+//
+// Loading the library itself is OrtRuntime.h's job, and nothing here may be called before
+// ensureLoaded() has succeeded.
 namespace drift::ort {
 
 inline std::basic_string<ORTCHAR_T> ortPath(const QString &path)
@@ -53,11 +59,33 @@ inline int64_t elementCount(const std::vector<int64_t> &shape)
     return n;
 }
 
-// CUDA is used automatically when the ONNX Runtime build carries the provider and the machine can
-// actually load it. DRIFT_ORT_EP overrides the choice: "cpu" forces CPU, "cuda"/"openvino" force
-// that provider.
+// Which provider to attempt for this session; empty means plain CPU.
 //
-// Whether a failure is worth complaining about depends on who asked. An explicit DRIFT_ORT_EP that
+// On "auto", a registered plugin EP wins over a provider baked into the core: the plugin is only
+// present because someone installed the addon on purpose, whereas CUDA comes along inside every
+// GPU build whether or not the machine has a usable card.
+inline QString providerToTry()
+{
+    const QString requested = preferredVariant();
+    if (requested == QLatin1String("cpu"))
+        return {};
+    if (variantExplicit())
+        return requested;
+
+    const QList<PluginEp> eps = registeredPluginEps();
+    if (!eps.isEmpty())
+        return eps.first().variant;
+
+    const std::vector<std::string> providers = Ort::GetAvailableProviders();
+    if (std::find(providers.begin(), providers.end(), "CUDAExecutionProvider") == providers.end())
+        return {}; // CPU-only core: nothing to try, and nothing worth saying about it
+    return QStringLiteral("cuda");
+}
+
+// Applies that choice. The acceleration preference (or DRIFT_ORT_EP) selects between the CUDA
+// provider carried by a CUDA core, a plugin EP registered on the env, and plain CPU.
+//
+// Whether a failure is worth complaining about depends on who asked. An explicit choice that
 // cannot be honoured must be loud, or identical timings look like "the GPU did not help" when in
 // fact nothing was accelerated. The automatic attempt failing is ordinary — most machines have no
 // CUDA — so that stays at info level.
@@ -68,21 +96,26 @@ inline int64_t elementCount(const std::vector<int64_t> &shape)
 inline void appendRequestedProvider(Ort::SessionOptions &opts, Ort::Env &env, const char *tag,
                                     bool sharedArena = false)
 {
-    const QString requested = QString::fromLocal8Bit(qgetenv("DRIFT_ORT_EP")).trimmed().toLower();
-    if (requested == QLatin1String("cpu"))
+    const QString ep = providerToTry();
+    if (ep.isEmpty())
         return;
-
-    QString ep = requested;
-    if (ep.isEmpty()) {
-        const std::vector<std::string> providers = Ort::GetAvailableProviders();
-        if (std::find(providers.begin(), providers.end(), "CUDAExecutionProvider")
-            == providers.end())
-            return; // CPU-only build: nothing to try, and nothing worth saying about it
-        ep = QStringLiteral("cuda");
-    }
+    const bool explicitEp = variantExplicit();
 
     try {
-        if (ep == QLatin1String("openvino")) {
+        if (const QString epName = pluginEpNameForVariant(ep); !epName.isEmpty()) {
+            std::vector<Ort::ConstEpDevice> devices;
+            for (const Ort::ConstEpDevice &device : env.GetEpDevices()) {
+                if (epName == QLatin1String(device.EpName()))
+                    devices.push_back(device);
+            }
+            if (devices.empty()) {
+                qWarning("[%s] %s is registered but reports no usable device; using CPU.", tag,
+                         qUtf8Printable(epName));
+                return;
+            }
+            opts.AppendExecutionProvider_V2(env, devices,
+                                            std::unordered_map<std::string, std::string>{});
+        } else if (ep == QLatin1String("openvino")) {
             opts.AppendExecutionProvider("OpenVINO", {{"device_type", "GPU"}});
         } else if (ep == QLatin1String("cuda")) {
             OrtCUDAProviderOptions cuda;
@@ -97,18 +130,19 @@ inline void appendRequestedProvider(Ort::SessionOptions &opts, Ort::Env &env, co
                 opts.AddConfigEntry("session.use_env_allocators", "1");
             }
         } else {
-            qWarning("[%s] DRIFT_ORT_EP=%s is not a provider this build knows; using CPU.", tag,
-                     qUtf8Printable(ep));
+            qWarning("[%s] %s is not a provider this runtime offers; using CPU. Install the "
+                     "matching Acceleration addon, or set the preference back to Auto.",
+                     tag, qUtf8Printable(ep));
             return;
         }
         qInfo("[%s] execution provider %s enabled.", tag, qUtf8Printable(ep));
     } catch (const Ort::Exception &e) {
-        if (requested.isEmpty()) {
+        if (!explicitEp) {
             qInfo("[%s] %s is present but could not be initialised (%s); using CPU.", tag,
                   qUtf8Printable(ep), e.what());
         } else {
-            qWarning("[%s] DRIFT_ORT_EP=%s could not be set up (%s). Falling back to CPU; if the "
-                     "message mentions loading a shared library, this ONNX Runtime build has no %s "
+            qWarning("[%s] %s could not be set up (%s). Falling back to CPU; if the message "
+                     "mentions loading a shared library, the installed ONNX Runtime has no %s "
                      "provider.",
                      tag, qUtf8Printable(ep), e.what(), qUtf8Printable(ep));
         }
@@ -133,8 +167,8 @@ inline Ort::SessionOptions defaultSessionOptions(Ort::Env &env, const char *tag,
 // no usable GPU passes every up-front check and then fails every model load. Retrying on CPU is
 // what makes that machine merely slower instead of missing the feature entirely.
 //
-// An explicit DRIFT_ORT_EP is never silently overridden: asking for a provider and quietly getting
-// CPU would hide exactly what the variable was set to investigate.
+// An explicit acceleration choice is never silently overridden: asking for a provider and quietly
+// getting CPU would hide exactly what the setting was changed to investigate.
 //
 // `build` takes a configured Ort::SessionOptions and creates the sessions; it may be called twice,
 // so it must overwrite rather than append to whatever it fills.
@@ -142,7 +176,7 @@ template <typename BuildFn>
 bool buildSessions(Ort::Env &env, const char *tag, bool sharedArena, QString *errorOut,
                    BuildFn &&build)
 {
-    const bool explicitEp = !QString::fromLocal8Bit(qgetenv("DRIFT_ORT_EP")).trimmed().isEmpty();
+    const bool explicitEp = variantExplicit();
     try {
         Ort::SessionOptions opts = defaultSessionOptions(env, tag, sharedArena);
         build(opts);

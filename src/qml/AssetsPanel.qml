@@ -400,9 +400,12 @@ PanelFrame {
                     font.pixelSize: Theme.fontSizeXs
                 }
 
-                // The transcriber ships as an addon; without it there are no languages to
-                // list and nothing to run, so offer the download in place of the controls.
+                // The transcriber ships as an addon, and so does the runtime it needs; without
+                // both there are no languages to list and nothing to run, so offer the download
+                // in place of the controls.
                 property bool whisperReady: Addons.hasKind("whisper-model")
+                                            && Addons.runtimeAvailable()
+                property bool runtimeReady: Addons.runtimeAvailable()
 
                 readonly property string captionClipKind: {
                     const data = EditorState.selectedClipData
@@ -414,8 +417,11 @@ PanelFrame {
                 Connections {
                     target: Addons
                     function onKindChanged(kind) {
-                        if (kind === "whisper-model")
-                            textTab.whisperReady = Addons.hasKind("whisper-model")
+                        if (kind !== "whisper-model" && kind !== "onnxruntime")
+                            return
+                        textTab.runtimeReady = Addons.runtimeAvailable()
+                        textTab.whisperReady = Addons.hasKind("whisper-model")
+                                               && textTab.runtimeReady
                     }
                 }
 
@@ -498,11 +504,14 @@ PanelFrame {
                 ThemedButton {
                     visible: !textTab.whisperReady
                     width: textTab.contentWidth
-                    text: qsTr("Download speech recognition (about 670 MB)")
+                    text: textTab.runtimeReady
+                          ? qsTr("Download speech recognition (about 670 MB)")
+                          : qsTr("Set up AI acceleration")
                     variant: "primary"
                     glyph: Theme.icons.download
                     tooltip: qsTr("Needed for auto captions from speech")
-                    onClicked: root.Window.window.openAddonManager("whisper-model")
+                    onClicked: root.Window.window.openAddonManager(
+                        textTab.runtimeReady ? "whisper-model" : "onnxruntime")
                 }
             }
 

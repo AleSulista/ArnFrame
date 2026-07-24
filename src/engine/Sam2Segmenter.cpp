@@ -90,8 +90,6 @@ struct Sam2Segmenter::Impl
     QString modelDir;
     QString variant;
 
-    Ort::Env env{ORT_LOGGING_LEVEL_ERROR, "drift-sam2"};
-    Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     std::unique_ptr<Ort::Session> vision, decoder, memEncoder, memAttention, pointerTpos;
 
     std::vector<std::string> visionIn, visionOut;
@@ -180,6 +178,10 @@ bool Sam2Segmenter::Impl::ensureLoaded()
                                "or set DRIFT_SAM2_MODEL_DIR.");
         return false;
     }
+    // The runtime is an addon too. Unlike the model it cannot be picked up mid-session — the
+    // library is loaded once per process — which is why the Addon Manager asks for a restart.
+    if (!drift::ort::ensureLoaded(&error))
+        return false;
     loadAttempted = true;
 
     if (!loadConstants(modelDir))
@@ -190,12 +192,13 @@ bool Sam2Segmenter::Impl::ensureLoaded()
         // tokens x 4096 image tokens, fp32). Left alone, each of the five sessions builds its own
         // BFC arena and between them they reserve ~3.4 GB of a 4 GB card, so that allocation fails
         // even though the card looks nearly empty.
-        Ort::SessionOptions opts = drift::ort::defaultSessionOptions(env, "sam2", true);
+        Ort::Env &ortEnv = drift::ort::env();
+        Ort::SessionOptions opts = drift::ort::defaultSessionOptions(ortEnv, "sam2", true);
 
         const QDir dir = graphDir(modelDir);
         auto open = [&](const char *name) {
             return std::make_unique<Ort::Session>(
-                env, ortPath(dir.filePath(QLatin1String(name))).c_str(), opts);
+                ortEnv, ortPath(dir.filePath(QLatin1String(name))).c_str(), opts);
         };
         vision = open("vision_encoder.onnx");
         decoder = open("mask_decoder.onnx");
@@ -293,7 +296,7 @@ Sam2Embedding Sam2Segmenter::encode(const QImage &frame)
 
     try {
         const std::array<int64_t, 4> shape{1, 3, kImageSize, kImageSize};
-        Ort::Value tensor = Ort::Value::CreateTensor<float>(d->mem, input.data(), input.size(),
+        Ort::Value tensor = Ort::Value::CreateTensor<float>(ort::cpuMemory(), input.data(), input.size(),
                                                             shape.data(), shape.size());
         const auto inNames = cstrs(d->visionIn);
         const auto outNames = cstrs(d->visionOut);
@@ -362,15 +365,15 @@ Sam2Result Sam2Segmenter::Impl::runDecoder(const Sam2Embedding &embedding,
         const std::array<int64_t, 3> lbShape{1, 1, pointCount};
 
         std::vector<Ort::Value> inputs;
-        inputs.push_back(Ort::Value::CreateTensor<float>(mem, emb.feats0.data(), emb.feats0.size(),
+        inputs.push_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), emb.feats0.data(), emb.feats0.size(),
                                                          f0Shape.data(), f0Shape.size()));
-        inputs.push_back(Ort::Value::CreateTensor<float>(mem, emb.feats1.data(), emb.feats1.size(),
+        inputs.push_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), emb.feats1.data(), emb.feats1.size(),
                                                          f1Shape.data(), f1Shape.size()));
-        inputs.push_back(Ort::Value::CreateTensor<float>(mem, cond.data(), cond.size(),
+        inputs.push_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), cond.data(), cond.size(),
                                                          f2Shape.data(), f2Shape.size()));
-        inputs.push_back(Ort::Value::CreateTensor<float>(mem, pts.data(), pts.size(), ptShape.data(),
+        inputs.push_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), pts.data(), pts.size(), ptShape.data(),
                                                          ptShape.size()));
-        inputs.push_back(Ort::Value::CreateTensor<int32_t>(mem, lbl.data(), lbl.size(),
+        inputs.push_back(Ort::Value::CreateTensor<int32_t>(ort::cpuMemory(), lbl.data(), lbl.size(),
                                                            lbShape.data(), lbShape.size()));
 
         const auto inNames = cstrs(decIn);
@@ -516,15 +519,15 @@ bool Sam2Segmenter::Track::State::encodeMemory(const Sam2Embedding &embedding,
         const std::array<int64_t, 2> scoreShape{1, 1};
 
         std::vector<Ort::Value> inputs;
-        inputs.push_back(Ort::Value::CreateTensor<float>(d->mem, emb.feats2.data(),
+        inputs.push_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), emb.feats2.data(),
                                                          emb.feats2.size(), f2Shape.data(),
                                                          f2Shape.size()));
-        inputs.push_back(Ort::Value::CreateTensor<float>(d->mem, mask.data(), mask.size(),
+        inputs.push_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), mask.data(), mask.size(),
                                                          maskShape.data(), maskShape.size()));
-        inputs.push_back(Ort::Value::CreateTensor<float>(d->mem, score.data(), score.size(),
+        inputs.push_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), score.data(), score.size(),
                                                          scoreShape.data(), scoreShape.size()));
         // `binarize` is a rank-0 scalar.
-        inputs.push_back(Ort::Value::CreateTensor<float>(d->mem, &binarizeValue, 1, nullptr, 0));
+        inputs.push_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), &binarizeValue, 1, nullptr, 0));
 
         const auto inNames = cstrs(d->memEncIn);
         const auto outNames = cstrs(d->memEncOut);
@@ -607,7 +610,7 @@ bool Sam2Segmenter::Track::State::buildMemory(std::vector<float> *memory,
     std::vector<float> pointerPos;
     try {
         const std::array<int64_t, 1> diffShape{int64_t(diffs.size())};
-        Ort::Value in = Ort::Value::CreateTensor<float>(d->mem, diffs.data(), diffs.size(),
+        Ort::Value in = Ort::Value::CreateTensor<float>(ort::cpuMemory(), diffs.data(), diffs.size(),
                                                         diffShape.data(), diffShape.size());
         const auto inNames = cstrs(d->ptrIn);
         const auto outNames = cstrs(d->ptrOut);
@@ -665,13 +668,13 @@ bool Sam2Segmenter::Track::State::attend(const Sam2Embedding &embedding,
         const std::array<int64_t, 3> memShape{kMemoryTokens, 1, kMemDim};
 
         std::vector<Ort::Value> inputs;
-        inputs.push_back(Ort::Value::CreateTensor<float>(d->mem, feats.data(), feats.size(),
+        inputs.push_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), feats.data(), feats.size(),
                                                          featShape.data(), featShape.size()));
-        inputs.push_back(Ort::Value::CreateTensor<float>(d->mem, pos.data(), pos.size(),
+        inputs.push_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), pos.data(), pos.size(),
                                                          featShape.data(), featShape.size()));
-        inputs.push_back(Ort::Value::CreateTensor<float>(d->mem, mem.data(), mem.size(),
+        inputs.push_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), mem.data(), mem.size(),
                                                          memShape.data(), memShape.size()));
-        inputs.push_back(Ort::Value::CreateTensor<float>(d->mem, memPos.data(), memPos.size(),
+        inputs.push_back(Ort::Value::CreateTensor<float>(ort::cpuMemory(), memPos.data(), memPos.size(),
                                                          memShape.data(), memShape.size()));
 
         const auto inNames = cstrs(d->memAttnIn);

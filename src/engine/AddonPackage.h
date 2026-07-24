@@ -53,11 +53,20 @@ struct PackageInfo
     QString author;
     QString license;
     QString minAppVersion;
+    // Empty for content — a font is a font everywhere. Set only by packages carrying native code
+    // (the ONNX Runtime and execution provider addons), where installing the wrong build produces
+    // a library that cannot be loaded rather than a visible mistake.
+    QString platform; // e.g. "linux-x64", see currentPlatform()
     quint64 installedSize{}; // uncompressed total, for the UI
     QList<PackageProvide> provides;
     QList<PackageFile> files;
     QJsonObject raw;
 };
+
+// This build's platform tag: "<os>-<arch>", e.g. "linux-x64", "win-x64", "osx-arm64". Matches the
+// runtime identifiers Microsoft and NuGet use, so an addon recipe can name upstream's own archive
+// and this string in the same breath.
+QString currentPlatform();
 
 // Header + manifest only; cheap, and does NOT check the signature — nothing here is trustworthy
 // until install() has run. Use it to show what a sideloaded file claims to be, never to decide

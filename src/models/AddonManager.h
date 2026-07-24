@@ -47,6 +47,21 @@ public:
     Q_INVOKABLE bool hasKind(const QString &kind) const;
     Q_INVOKABLE QString firstAddonForKind(const QString &kind) const;
 
+    // --- Acceleration ------------------------------------------------------------------
+    // Whether an ONNX Runtime is installed at all. Every AI feature needs one, so this gates
+    // their empty states alongside the model each of them wants.
+    Q_INVOKABLE bool runtimeAvailable() const;
+
+    // One row per selectable option: value, label, available. Always contains "auto" and "cpu".
+    Q_INVOKABLE QVariantList accelerationOptions() const;
+    Q_INVOKABLE QString acceleration() const;
+    Q_INVOKABLE void setAcceleration(const QString &variant);
+
+    // True once a runtime addon has been installed or removed in a session that had already
+    // loaded one. The library is loaded once per process, so the change only takes effect on the
+    // next launch and the dialog has to say so.
+    Q_INVOKABLE bool runtimeRestartRequired() const;
+
 signals:
     void catalogChanged();
     void statusChanged();
@@ -80,5 +95,6 @@ private:
     // addon looping forever.
     QStringList m_awaitingFreshIndex;
     QSet<QString> m_retried;
+    bool m_runtimeRestartRequired = false;
     QNetworkAccessManager *m_network = nullptr;
 };

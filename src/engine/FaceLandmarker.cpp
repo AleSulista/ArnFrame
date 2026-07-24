@@ -118,8 +118,6 @@ struct FaceLandmarker::Impl
     QString error;
     QString modelDir;
 
-    Ort::Env env{ORT_LOGGING_LEVEL_ERROR, "drift-face"};
-    Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     std::unique_ptr<Ort::Session> detector, landmark;
     std::vector<std::string> detIn, detOut, lmIn, lmOut;
 
@@ -186,19 +184,24 @@ bool FaceLandmarker::Impl::ensureLoaded()
                                "models/face, or set DRIFT_FACE_MODEL_DIR.");
         return false;
     }
+    // The runtime is an addon too. Unlike the model it cannot be picked up mid-session — the
+    // library is loaded once per process — which is why the Addon Manager asks for a restart.
+    if (!drift::ort::ensureLoaded(&error))
+        return false;
     loadAttempted = true;
 
     if (!loadConstants(modelDir))
         return false;
 
+    Ort::Env &ortEnv = drift::ort::env();
     const QDir dir(modelDir);
     QString buildError;
-    const bool built =
-        drift::ort::buildSessions(env, "face", false, &buildError, [&](Ort::SessionOptions &opts) {
+    const bool built = drift::ort::buildSessions(
+        ortEnv, "face", false, &buildError, [&](Ort::SessionOptions &opts) {
             detector = std::make_unique<Ort::Session>(
-                env, ortPath(dir.filePath(QLatin1String(kDetectorFile))).c_str(), opts);
+                ortEnv, ortPath(dir.filePath(QLatin1String(kDetectorFile))).c_str(), opts);
             landmark = std::make_unique<Ort::Session>(
-                env, ortPath(dir.filePath(QLatin1String(kLandmarkFile))).c_str(), opts);
+                ortEnv, ortPath(dir.filePath(QLatin1String(kLandmarkFile))).c_str(), opts);
         });
     if (!built) {
         error = QStringLiteral("Failed to load face model: ") + buildError;
@@ -250,7 +253,7 @@ QList<Detection> FaceLandmarker::Impl::runDetector(const QImage &frame)
     std::vector<Ort::Value> results;
     try {
         const std::array<int64_t, 4> shape{1, 3, n, n};
-        Ort::Value tensor = Ort::Value::CreateTensor<float>(mem, input.data(), input.size(),
+        Ort::Value tensor = Ort::Value::CreateTensor<float>(drift::ort::cpuMemory(), input.data(), input.size(),
                                                             shape.data(), shape.size());
         const auto inNames = cstrs(detIn);
         const auto outNames = cstrs(detOut);
@@ -379,7 +382,7 @@ FaceAnchors FaceLandmarker::Impl::runLandmark(const QImage &frame, const Detecti
     std::vector<Ort::Value> results;
     try {
         const std::array<int64_t, 4> shape{1, 3, n, n};
-        Ort::Value tensor = Ort::Value::CreateTensor<float>(mem, input.data(), input.size(),
+        Ort::Value tensor = Ort::Value::CreateTensor<float>(drift::ort::cpuMemory(), input.data(), input.size(),
                                                             shape.data(), shape.size());
         const auto inNames = cstrs(lmIn);
         const auto outNames = cstrs(lmOut);
