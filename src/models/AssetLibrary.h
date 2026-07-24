@@ -4,6 +4,7 @@
 
 #include <QAbstractListModel>
 #include <QJsonArray>
+#include <QSet>
 #include <QStringList>
 #include <QUrl>
 
@@ -58,16 +59,30 @@ public:
     void loadFromJsonArray(const QJsonArray &assets);
     void clear();
 
+    // Fills hasAudio from MediaProbe off-thread when hasAudioKnown is false.
+    void ensureAudioPresence(const QString &assetId);
+
 signals:
     void countChanged();
+    // Fired when probe/thumb/audio metadata lands so unlink affordances can refresh.
+    void assetMetadataChanged(const QString &assetId);
 
 private:
     void importFiles(const QStringList &paths);
     bool containsPath(const QString &path) const;
     int indexOfPath(const QString &path) const;
     void refreshMediaAt(int index);
+    void startImportJob(const QString &assetId, const QString &absolutePath, bool imageOnly);
+    void startThumbJob(const QString &assetId);
+    void applyImportResult(const QString &assetId, const drift::MediaAsset &filled, bool ok);
+    void applyThumbResult(const QString &assetId, const QString &thumb, const QString &strip);
+    void applyAudioPresence(const QString &assetId, bool hasAudio, int sampleRate, int channels);
+    void emitAssetRowChanged(int index, const QList<int> &roles);
     const drift::MediaAsset *assetAtIndex(int index) const;
     drift::MediaAsset *assetAtIndex(int index);
 
     drift::Project *m_project = nullptr;
+    QSet<QString> m_importPending;
+    QSet<QString> m_thumbPending;
+    QSet<QString> m_audioProbePending;
 };

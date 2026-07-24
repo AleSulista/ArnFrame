@@ -19,7 +19,6 @@
 #include "engine/Exporter.h"
 #include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
-#include "engine/MediaProbe.h"
 #include "engine/MediaThumbnail.h"
 #include "engine/AudioFileWriter.h"
 #include "engine/DeepFilterDenoiser.h"
@@ -90,6 +89,10 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     connect(this, &AppController::selectionChanged, this, &AppController::editCapabilitiesChanged);
     connect(this, &AppController::tracksChanged, this, &AppController::editCapabilitiesChanged);
     connect(this, &AppController::tracksChanged, this, &AppController::selectedClipDataChanged);
+    if (m_assetLibrary) {
+        connect(m_assetLibrary, &AssetLibrary::assetMetadataChanged, this,
+                &AppController::editCapabilitiesChanged);
+    }
 
     m_undoStack.setUndoLimit(kMaxUndoSteps);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, &AppController::undoStackChanged);
@@ -1104,34 +1107,26 @@ void applyDefaultVisualLayout(drift::Clip &clip, int canvasW, int canvasH, doubl
     setClipLayoutPixels(clip, 0, 0, side, side);
 }
 
-bool pathHasAudioStream(const QString &path)
+bool assetHasAudioStreams(const drift::Project &project, AssetLibrary *library, const QString &assetId)
 {
-    if (path.isEmpty())
+    const drift::MediaAsset *asset = project.asset(assetId);
+    if (!asset)
         return false;
 
-    const MediaInfo info = MediaProbe::probe(path);
-    if (!info.ok)
-        return false;
-
-    for (const StreamInfo &stream : info.streams) {
-        if (stream.type == StreamInfo::Type::Audio)
-            return true;
-    }
+    if (asset->hasAudioKnown)
+        return asset->hasAudio;
+    if (asset->channels > 0 || asset->sampleRate > 0)
+        return true;
+    if (library)
+        library->ensureAudioPresence(assetId);
     return false;
 }
 
-bool assetHasAudioStreams(const drift::Project &project, const QString &assetId, const QString &pathFallback = {})
+bool clipHasEmbeddedAudio(const drift::Project &project, AssetLibrary *library, const drift::Clip &clip)
 {
-    const drift::MediaAsset *asset = project.asset(assetId);
-    if (asset) {
-        if (asset->channels > 0 || asset->sampleRate > 0)
-            return true;
-        if (pathHasAudioStream(asset->path))
-            return true;
-    }
-    if (!pathFallback.isEmpty() && pathHasAudioStream(pathFallback))
-        return true;
-    return false;
+    if (clip.type != drift::ClipType::Video || clip.suppressEmbeddedAudio || clip.path.isEmpty())
+        return false;
+    return assetHasAudioStreams(project, library, clip.assetId);
 }
 
 drift::Clip makeAudioCompanionFromVideo(const drift::Clip &videoClip, const QString &linkId = {})
@@ -1156,17 +1151,10 @@ drift::Clip makeAudioCompanionFromVideo(const drift::Clip &videoClip, const QStr
     return audio;
 }
 
-bool clipHasEmbeddedAudio(const drift::Project &project, const drift::Clip &clip)
-{
-    if (clip.type != drift::ClipType::Video || clip.suppressEmbeddedAudio || clip.path.isEmpty())
-        return false;
-    return assetHasAudioStreams(project, clip.assetId, clip.path);
-}
-
 // Split embedded audio onto the audio track (video keeps picture only).
-bool detachEmbeddedAudioFromVideo(drift::Project &project, drift::Clip &videoClip)
+bool detachEmbeddedAudioFromVideo(drift::Project &project, AssetLibrary *library, drift::Clip &videoClip)
 {
-    if (!clipHasEmbeddedAudio(project, videoClip))
+    if (!clipHasEmbeddedAudio(project, library, videoClip))
         return false;
 
     const int audioTrack = drift::ensureTrackForClipType(project, drift::ClipType::Audio, false);
@@ -2934,6 +2922,8 @@ void AppController::endSegmentationSession()
     m_segFrame = QImage();
     m_segEmbedding = drift::Sam2Embedding{};
     ++m_segGeneration;
+    ++m_segSeedGeneration;
+    m_segSeedRunning = false;
     SegmentImageStore::clear();
     ++m_segRevision;
     emit segmentSessionChanged();
@@ -3028,12 +3018,26 @@ void AppController::clearSegmentationPoints()
 void AppController::refreshSegmentationPreview()
 {
     if (m_segPoints.isEmpty() || !m_segEmbedding.valid) {
+        ++m_segSeedGeneration;
         SegmentImageStore::setMask(QImage());
         ++m_segRevision;
         emit segmentSessionChanged();
         return;
     }
 
+    // Coalesce rapid point edits onto one ONNX seed at a time — sessions are not
+    // safe to call concurrently, and only the latest prompt matters.
+    ++m_segSeedGeneration;
+    if (m_segSeedRunning)
+        return;
+
+    m_segSeedRunning = true;
+    const int generation = m_segSeedGeneration;
+    runSegmentationSeed(generation);
+}
+
+void AppController::runSegmentationSeed(int generation)
+{
     drift::Sam2Prompt prompt;
     for (const QVariant &entry : std::as_const(m_segPoints)) {
         const QVariantMap map = entry.toMap();
@@ -3042,13 +3046,30 @@ void AppController::refreshSegmentationPreview()
         prompt.labels.append(map.value(QStringLiteral("include")).toBool() ? 1 : 0);
     }
 
-    const drift::Sam2Result result =
-        drift::Sam2Segmenter::instance().segmentSeed(m_segEmbedding, prompt);
-    SegmentImageStore::setMask(result.ok ? result.mask : QImage());
-    if (!result.ok)
-        setLastMessage(result.error);
-    ++m_segRevision;
-    emit segmentSessionChanged();
+    const drift::Sam2Embedding embedding = m_segEmbedding;
+    (void)QtConcurrent::run([this, embedding, prompt, generation]() {
+        const drift::Sam2Result result = drift::Sam2Segmenter::instance().segmentSeed(embedding, prompt);
+        QMetaObject::invokeMethod(
+            this,
+            [this, result, generation]() {
+                if (!m_segSessionActive) {
+                    m_segSeedRunning = false;
+                    return;
+                }
+                if (generation == m_segSeedGeneration) {
+                    SegmentImageStore::setMask(result.ok ? result.mask : QImage());
+                    if (!result.ok)
+                        setLastMessage(result.error);
+                    ++m_segRevision;
+                    emit segmentSessionChanged();
+                    m_segSeedRunning = false;
+                    return;
+                }
+                // A newer prompt arrived while we were seeding — run again with the latest.
+                runSegmentationSeed(m_segSeedGeneration);
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 void AppController::runSegmentationSession(const QString &outputMode)
@@ -5444,7 +5465,7 @@ bool AppController::canUnlinkSelection() const
         const drift::Clip &clip = m_project.tracks().at(pair.first).clips.at(pair.second);
         if (!clip.linkId.isEmpty())
             return true;
-        if (clipHasEmbeddedAudio(m_project, clip))
+        if (clipHasEmbeddedAudio(m_project, m_assetLibrary, clip))
             return true;
     }
     return false;
@@ -5481,7 +5502,7 @@ void AppController::unlinkSelectedClips()
 
         if (clip.type != drift::ClipType::Video || detachedVideoIds.contains(clip.id))
             continue;
-        if (detachEmbeddedAudioFromVideo(m_project, clip)) {
+        if (detachEmbeddedAudioFromVideo(m_project, m_assetLibrary, clip)) {
             detachedVideoIds.insert(clip.id);
             changed = true;
         }
@@ -7293,34 +7314,49 @@ void AppController::freezeFrameAtPlayhead()
 
     const QString path = clip.value(QStringLiteral("path")).toString();
     const double sourceTime = sourceTimeForClip(clip);
-    const QString thumb = MediaThumbnail::generateAtTime(path, sourceTime);
-    if (thumb.isEmpty()) {
+    if (path.isEmpty()) {
         setLastMessage(QStringLiteral("Couldn’t capture a still frame"));
         return;
     }
 
-    const drift::Project before = m_project;
-    const int trackIndex = drift::ensureTrackForClipType(m_project, drift::ClipType::Image, false);
+    setLastMessage(QStringLiteral("Capturing freeze frame…"));
+    const drift::TimeUs playheadUs = m_playheadUs;
+    (void)QtConcurrent::run([this, path, sourceTime, playheadUs]() {
+        const QString thumb = MediaThumbnail::generateAtTime(path, sourceTime);
+        QMetaObject::invokeMethod(
+            this,
+            [this, thumb, playheadUs]() {
+                if (thumb.isEmpty()) {
+                    setLastMessage(QStringLiteral("Couldn’t capture a still frame"));
+                    return;
+                }
 
-    drift::Track &track = m_project.tracks()[trackIndex];
-    const drift::TimeUs start = drift::resolveClipStart(m_project, track, -1, m_playheadUs,
-                                                        drift::kImageClipDurationUs, m_snapEnabled, m_playheadUs);
+                const drift::Project before = m_project;
+                const int trackIndex = drift::ensureTrackForClipType(m_project, drift::ClipType::Image, false);
 
-    drift::Clip freezeClip;
-    freezeClip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    freezeClip.type = drift::ClipType::Image;
-    freezeClip.name = QStringLiteral("Freeze frame");
-    freezeClip.path = thumb;
-    freezeClip.thumbnailPath = thumb;
-    freezeClip.filmstripPath = thumb;
-    freezeClip.timelineStart = start;
-    freezeClip.timelineDuration = drift::kImageClipDurationUs;
-    freezeClip.srcIn = 0;
-    freezeClip.srcOut = drift::kImageClipDurationUs;
+                drift::Track &track = m_project.tracks()[trackIndex];
+                const drift::TimeUs start = drift::resolveClipStart(m_project, track, -1, playheadUs,
+                                                                    drift::kImageClipDurationUs, m_snapEnabled,
+                                                                    playheadUs);
 
-    track.clips.append(freezeClip);
-    pushProjectEdit(before, QStringLiteral("Freeze frame added"));
-    finishEdit(QStringLiteral("Freeze frame added"));
+                drift::Clip freezeClip;
+                freezeClip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+                freezeClip.type = drift::ClipType::Image;
+                freezeClip.name = QStringLiteral("Freeze frame");
+                freezeClip.path = thumb;
+                freezeClip.thumbnailPath = thumb;
+                freezeClip.filmstripPath = thumb;
+                freezeClip.timelineStart = start;
+                freezeClip.timelineDuration = drift::kImageClipDurationUs;
+                freezeClip.srcIn = 0;
+                freezeClip.srcOut = drift::kImageClipDurationUs;
+
+                track.clips.append(freezeClip);
+                pushProjectEdit(before, QStringLiteral("Freeze frame added"));
+                finishEdit(QStringLiteral("Freeze frame added"));
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 void AppController::copySelection()
@@ -8059,31 +8095,60 @@ void AppController::loadProject(const QUrl &url)
     const QString destDir =
         QDir(base).filePath(QStringLiteral("projects/%1/media").arg(info->projectId));
 
-    QHash<QString, QString> remap;
-    if (info->embeddedBytes > 0 && !drift::bundle::extract(path, destDir, {}, &remap, &error)) {
-        setLastMessage(error);
+    const int generation = ++m_loadGeneration;
+    const drift::bundle::BundleInfo bundle = *info;
+
+    auto finishLoad = [this, path, bundle, generation](const QHash<QString, QString> &remap,
+                                                       const QString &extractError, bool extractOk) {
+        if (generation != m_loadGeneration)
+            return;
+        if (!extractOk) {
+            setLastMessage(extractError);
+            return;
+        }
+
+        m_pendingPathRemap = remap;
+        QString applyError;
+        if (!applyProjectJson(QJsonDocument(bundle.document).toJson(QJsonDocument::Compact),
+                              &applyError)) {
+            m_pendingPathRemap.clear();
+            setLastMessage(applyError);
+            return;
+        }
+
+        m_embeddedSources.clear();
+        for (const drift::bundle::MediaEntry &entry : bundle.media) {
+            if (entry.embedded && entry.role == drift::bundle::MediaRole::Source)
+                m_embeddedSources.insert(remap.value(entry.originalPath, entry.originalPath));
+        }
+
+        setCurrentProjectPath(path);
+        addRecentProject(path);
+        deleteRecoveryFile();
+        setProjectLayoutChosen(true);
+        setLastMessage(QStringLiteral("Project loaded"));
+        reportMissingAddons(bundle.addons);
+    };
+
+    if (bundle.embeddedBytes <= 0) {
+        finishLoad({}, {}, true);
         return;
     }
 
-    m_pendingPathRemap = remap;
-    if (!applyProjectJson(QJsonDocument(info->document).toJson(QJsonDocument::Compact), &error)) {
-        m_pendingPathRemap.clear();
-        setLastMessage(error);
-        return;
-    }
-
-    m_embeddedSources.clear();
-    for (const drift::bundle::MediaEntry &entry : info->media) {
-        if (entry.embedded && entry.role == drift::bundle::MediaRole::Source)
-            m_embeddedSources.insert(remap.value(entry.originalPath, entry.originalPath));
-    }
-
-    setCurrentProjectPath(path);
-    addRecentProject(path);
-    deleteRecoveryFile();
-    setProjectLayoutChosen(true);
-    setLastMessage(QStringLiteral("Project loaded"));
-    reportMissingAddons(info->addons);
+    setLastMessage(QStringLiteral("Unpacking project media…"));
+    (void)QtConcurrent::run([this, path, destDir, generation, finishLoad]() {
+        QString error;
+        QHash<QString, QString> remap;
+        const bool ok = drift::bundle::extract(path, destDir, {}, &remap, &error);
+        QMetaObject::invokeMethod(
+            this,
+            [finishLoad, remap, error, ok, generation, this]() {
+                if (generation != m_loadGeneration)
+                    return;
+                finishLoad(remap, error, ok);
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 void AppController::reportMissingAddons(const QList<drift::bundle::AddonRef> &addons)

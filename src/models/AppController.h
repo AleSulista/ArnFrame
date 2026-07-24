@@ -629,6 +629,7 @@ protected:
     // Recollects m_beatSnapTargets from whichever layers are currently visible.
     void rebuildBeatSnapTargets();
     void refreshSegmentationPreview();
+    void runSegmentationSeed(int generation);
     void finalizeFaceDetection(const QString &clipId, const QString &trackPath,
                                drift::TimeUs srcOffsetUs);
     void finalizeSegmentation(const QString &clipId, const QString &mattePath,
@@ -750,6 +751,9 @@ protected:
     double m_segSeconds = 0.0;
     int m_segRevision = 0;
     int m_segGeneration = 0; // bumped per encode request; stale results are dropped
+    int m_segSeedGeneration = 0; // bumped per seed preview; stale masks are dropped
+    bool m_segSeedRunning = false;
+    int m_loadGeneration = 0; // bumped per loadProject; stale extracts are dropped
     QImage m_segFrame;
     drift::Sam2Embedding m_segEmbedding;
     QVariantList m_segPoints;

@@ -637,7 +637,7 @@ Clip clipFromJsonV1(const QJsonObject &object, const QList<QString> &assetOrder)
 
 QJsonObject assetToJson(const MediaAsset &asset)
 {
-    return QJsonObject{
+    QJsonObject object{
         {QStringLiteral("id"), asset.id},
         {QStringLiteral("name"), asset.name},
         {QStringLiteral("kind"), mediaKindToString(asset.kind)},
@@ -654,6 +654,9 @@ QJsonObject assetToJson(const MediaAsset &asset)
         {QStringLiteral("thumbnailPath"), asset.thumbnailPath},
         {QStringLiteral("filmstripPath"), asset.filmstripPath},
     };
+    if (asset.hasAudioKnown)
+        object.insert(QStringLiteral("hasAudio"), asset.hasAudio);
+    return object;
 }
 
 MediaAsset assetFromJsonV2(const QJsonObject &object)
@@ -674,6 +677,13 @@ MediaAsset assetFromJsonV2(const QJsonObject &object)
     asset.codecName = object.value(QStringLiteral("codecName")).toString();
     asset.thumbnailPath = object.value(QStringLiteral("thumbnailPath")).toString();
     asset.filmstripPath = object.value(QStringLiteral("filmstripPath")).toString();
+    if (object.contains(QStringLiteral("hasAudio"))) {
+        asset.hasAudioKnown = true;
+        asset.hasAudio = object.value(QStringLiteral("hasAudio")).toBool();
+    } else if (asset.channels > 0 || asset.sampleRate > 0) {
+        asset.hasAudioKnown = true;
+        asset.hasAudio = true;
+    }
     return asset;
 }
 

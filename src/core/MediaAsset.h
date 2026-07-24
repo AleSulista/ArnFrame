@@ -29,6 +29,11 @@ struct MediaAsset
     int channels = 0;
     QString codecName;
 
+    // Explicit audio presence from probe. When false, fall back to channels/sampleRate
+    // or a one-shot background probe — never sync MediaProbe from UI getters.
+    bool hasAudio = false;
+    bool hasAudioKnown = false;
+
     QString durationLabel;
     QString thumbnailPath;
     QString filmstripPath;
