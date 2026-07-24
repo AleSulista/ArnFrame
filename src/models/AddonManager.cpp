@@ -145,10 +145,14 @@ QVariantList AddonManager::catalog() const
         for (const QJsonValue &value : addon.value(QStringLiteral("provides")).toArray())
             items += value.toObject().value(QStringLiteral("items")).toInt();
 
+        const QJsonArray platforms = addon.value(QStringLiteral("platforms")).toArray();
+        const QString platform = platforms.isEmpty() ? QString() : platforms.at(0).toString();
+
         rows.append(QVariantMap{
             {QStringLiteral("id"), id},
             {QStringLiteral("name"), addon.value(QStringLiteral("name")).toString()},
             {QStringLiteral("description"), addon.value(QStringLiteral("description")).toString()},
+            {QStringLiteral("details"), addon.value(QStringLiteral("details")).toString()},
             {QStringLiteral("author"), addon.value(QStringLiteral("author")).toString()},
             {QStringLiteral("license"), addon.value(QStringLiteral("license")).toString()},
             {QStringLiteral("kind"), addon.value(QStringLiteral("kind")).toString()},
@@ -162,6 +166,7 @@ QVariantList AddonManager::catalog() const
             {QStringLiteral("items"), items},
             {QStringLiteral("state"), state},
             {QStringLiteral("error"), m_failures.value(id)},
+            {QStringLiteral("platform"), platform},
         });
     }
     return rows;
@@ -198,15 +203,15 @@ QVariantList AddonManager::accelerationOptions() const
                                                              || installed.contains(value)}};
     };
 
-    QVariantList rows{row(QStringLiteral("auto"), tr("Automatic")),
-                      row(QStringLiteral("cpu"), tr("CPU"))};
+    QVariantList rows{row(QStringLiteral("auto"), tr("Automatic (recommended)")),
+                      row(QStringLiteral("cpu"), tr("This computer"))};
     for (const QString &variant : installed) {
         if (variant == QLatin1String("cpu"))
             continue;
         if (variant == QLatin1String("cuda"))
-            rows.append(row(variant, tr("NVIDIA GPU (CUDA)")));
+            rows.append(row(variant, tr("NVIDIA graphics (faster)")));
         else if (variant == QLatin1String("webgpu"))
-            rows.append(row(variant, tr("GPU (WebGPU)")));
+            rows.append(row(variant, tr("Graphics card (faster)")));
         else
             rows.append(row(variant, variant.toUpper()));
     }

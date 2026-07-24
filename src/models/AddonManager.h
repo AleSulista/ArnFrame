@@ -27,7 +27,7 @@ public:
     explicit AddonManager(QObject *parent = nullptr);
     ~AddonManager() override;
 
-    // One row per known addon: id, name, description, author, license, kind, version,
+    // One row per known addon: id, name, description, details, author, license, kind, version,
     // installedVersion, downloadSize, installedSize, items, state.
     // state is one of: available, downloading, installing, installed, update-available, failed.
     QVariantList catalog() const;

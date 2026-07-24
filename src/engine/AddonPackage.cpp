@@ -81,6 +81,7 @@ bool parseMetadata(const QByteArray &json, PackageInfo *info, QString *error)
     info->version = root.value(QStringLiteral("version")).toString();
     info->name = root.value(QStringLiteral("name")).toString();
     info->description = root.value(QStringLiteral("description")).toString();
+    info->details = root.value(QStringLiteral("details")).toString();
     info->author = root.value(QStringLiteral("author")).toString();
     info->license = root.value(QStringLiteral("license")).toString();
     info->minAppVersion = root.value(QStringLiteral("minAppVersion")).toString();

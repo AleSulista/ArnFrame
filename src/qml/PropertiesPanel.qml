@@ -2298,7 +2298,7 @@ PanelFrame {
                                 width: parent.width
                                 text: denoiseSection.runtimeReady
                                       ? qsTr("Download noise removal (about 9 MB)")
-                                      : qsTr("Set up AI acceleration")
+                                      : qsTr("Install AI engine first")
                                 variant: "primary"
                                 onClicked: root.Window.window.openAddonManager(
                                     denoiseSection.runtimeReady ? "denoise-model" : "onnxruntime")
@@ -2555,7 +2555,7 @@ PanelFrame {
                             width: parent.width
                             text: parent.runtimeReady
                                   ? qsTr("Download speech recognition (about 670 MB)")
-                                  : qsTr("Set up AI acceleration")
+                                  : qsTr("Install AI engine first")
                             variant: "primary"
                             onClicked: root.Window.window.openAddonManager(
                                 parent.runtimeReady ? "whisper-model" : "onnxruntime")
@@ -3455,7 +3455,7 @@ PanelFrame {
                                 width: parent.width
                                 text: segmentSection.runtimeReady
                                       ? qsTr("Download cutout AI (about 190 MB)")
-                                      : qsTr("Set up AI acceleration")
+                                      : qsTr("Install AI engine first")
                                 variant: "primary"
                                 onClicked: root.Window.window.openAddonManager(
                                     segmentSection.runtimeReady ? "sam2-model" : "onnxruntime")
@@ -3704,7 +3704,7 @@ PanelFrame {
                                 width: parent.width
                                 text: faceSection.runtimeReady
                                       ? qsTr("Download face detection (about 5 MB)")
-                                      : qsTr("Set up AI acceleration")
+                                      : qsTr("Install AI engine first")
                                 variant: "primary"
                                 onClicked: root.Window.window.openAddonManager(
                                     faceSection.runtimeReady ? "face-model" : "onnxruntime")

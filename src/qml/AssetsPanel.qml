@@ -506,7 +506,7 @@ PanelFrame {
                     width: textTab.contentWidth
                     text: textTab.runtimeReady
                           ? qsTr("Download speech recognition (about 670 MB)")
-                          : qsTr("Set up AI acceleration")
+                          : qsTr("Install AI engine first")
                     variant: "primary"
                     glyph: Theme.icons.download
                     tooltip: qsTr("Needed for auto captions from speech")

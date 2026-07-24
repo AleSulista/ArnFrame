@@ -17,6 +17,12 @@ ThemedDialog {
     property string pendingRemovalId: ""
     property string pendingRemovalName: ""
 
+    // Deeper tech notes for a catalogue row — kept out of the list so beginners see the
+    // short description, while power users can open this on demand.
+    property string detailsName: ""
+    property string detailsBody: ""
+    property string detailsMeta: ""
+
     ThemedDialog {
         id: confirmRemoval
         title: qsTr("Remove this pack?")
@@ -41,11 +47,40 @@ ThemedDialog {
         onRejected: root.pendingRemovalId = ""
     }
 
+    ThemedDialog {
+        id: detailsDialog
+        title: root.detailsName
+        showAccept: false
+        rejectText: qsTr("Close")
+        preferredWidth: Theme.dialogWidthMd
+
+        contentItem: Column {
+            width: parent ? parent.width : Theme.dialogWidthMd
+            spacing: Theme.spacingLg
+
+            ThemedLabel {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                size: "sm"
+                tone: "default"
+                text: root.detailsBody
+            }
+
+            ThemedLabel {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                size: "sm"
+                visible: root.detailsMeta.length > 0
+                text: root.detailsMeta
+            }
+        }
+    }
+
     // Which addon to scroll to and highlight when opened from an empty state.
     property string highlightId: ""
     property string kindFilter: "all"
     // The kinds the selected category covers; empty means every kind. A category is not always one
-    // kind — Acceleration spans the runtime and the plugin execution providers.
+    // kind — AI Engine spans the core engines and the graphics speed-boost packs.
     property var kindFilterKinds: []
 
     // id -> { fraction, phase }. Rebuilt wholesale on each signal so the bindings re-evaluate.
@@ -57,6 +92,17 @@ ThemedDialog {
             // on the category instead — the picker at the top of it is the point.
             root.kindFilter = "onnxruntime"
             root.kindFilterKinds = ["onnxruntime", "onnxruntime-ep"]
+        } else if (kind === "whisper-model" || kind === "denoise-model"
+                   || kind === "sam2-model" || kind === "face-model") {
+            root.kindFilter = "whisper-model"
+            root.kindFilterKinds = ["whisper-model", "denoise-model", "sam2-model", "face-model"]
+        } else if (kind === "effects" || kind === "effect-templates") {
+            root.kindFilter = "effects"
+            root.kindFilterKinds = ["effects"]
+        } else if (kind === "transitions" || kind === "audio-effects"
+                   || kind === "fonts" || kind === "stickers") {
+            root.kindFilter = kind
+            root.kindFilterKinds = [kind]
         } else {
             root.kindFilter = "all"
             root.kindFilterKinds = []
@@ -101,8 +147,9 @@ ThemedDialog {
                     { id: "audio-effects", label: qsTr("Audio FX"), kinds: ["audio-effects"] },
                     { id: "fonts", label: qsTr("Fonts"), kinds: ["fonts"] },
                     { id: "stickers", label: qsTr("Stickers"), kinds: ["stickers"] },
-                    { id: "whisper-model", label: qsTr("Speech & AI"), kinds: ["whisper-model"] },
-                    { id: "onnxruntime", label: qsTr("Acceleration"),
+                    { id: "whisper-model", label: qsTr("AI tools"),
+                      kinds: ["whisper-model", "denoise-model", "sam2-model", "face-model"] },
+                    { id: "onnxruntime", label: qsTr("AI engine"),
                       kinds: ["onnxruntime", "onnxruntime-ep"] }
                 ]
 
@@ -131,7 +178,7 @@ ThemedDialog {
             wrapMode: Text.WordWrap
         }
 
-        // Which installed runtime the AI features use. It lives here rather than in a settings
+        // Which installed AI engine the features use. It lives here rather than in a settings
         // page because the thing it chooses between is what this dialog installs.
         Column {
             id: accelerationPanel
@@ -160,7 +207,7 @@ ThemedDialog {
             }
 
             ThemedLabel {
-                text: qsTr("Acceleration")
+                text: qsTr("How AI runs")
                 size: "sm"
                 tone: "default"
             }
@@ -187,8 +234,8 @@ ThemedDialog {
                 wrapMode: Text.WordWrap
                 size: "sm"
                 text: accelerationPanel.runtimeReady
-                      ? qsTr("Automatic uses the fastest runtime you have installed and falls back to the CPU when it can't.")
-                      : qsTr("No runtime is installed, so subtitles, object cutout, face tracking and noise removal are unavailable. Install one below.")
+                      ? qsTr("Automatic picks the fastest option you have installed, and uses this computer if the graphics card can't help.")
+                      : qsTr("Install an AI Engine below to unlock auto captions, subject cutout, funny face effects, and noise removal.")
             }
 
             ThemedLabel {
@@ -302,12 +349,44 @@ ThemedDialog {
                         spacing: Theme.spacingLg
 
                         ThemedLabel {
-                            width: Math.min(implicitWidth, body.width - versionLabel.width - parent.spacing)
+                            id: nameLabel
+                            width: Math.min(implicitWidth,
+                                            body.width - versionLabel.width
+                                            - (infoButton.visible ? infoButton.width + parent.spacing : 0)
+                                            - parent.spacing)
+                            anchors.verticalCenter: parent.verticalCenter
                             text: row.modelData.name
                             tone: "default"
                             size: "base"
                             font.weight: Font.Medium
                             elide: Text.ElideRight
+                        }
+
+                        IconButton {
+                            id: infoButton
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: !!(row.modelData.details && row.modelData.details.length > 0)
+                            width: visible ? buttonSize : 0
+                            height: visible ? buttonSize : 0
+                            buttonSize: 22
+                            iconSize: Theme.iconSizeSm
+                            glyph: Theme.icons.info
+                            tooltip: qsTr("Technical details")
+                            onClicked: {
+                                root.detailsName = row.modelData.name
+                                root.detailsBody = row.modelData.details
+                                var meta = []
+                                if (row.modelData.id)
+                                    meta.push(row.modelData.id)
+                                if (row.modelData.author)
+                                    meta.push(row.modelData.author)
+                                if (row.modelData.license)
+                                    meta.push(row.modelData.license)
+                                if (row.modelData.platform)
+                                    meta.push(row.modelData.platform)
+                                root.detailsMeta = meta.join(" · ")
+                                detailsDialog.open()
+                            }
                         }
 
                         ThemedLabel {

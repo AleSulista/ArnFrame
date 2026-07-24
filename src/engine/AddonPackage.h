@@ -50,6 +50,8 @@ struct PackageInfo
     QString version; // semver
     QString name;
     QString description;
+    // Optional deeper notes for power users; empty when the pack has nothing technical to add.
+    QString details;
     QString author;
     QString license;
     QString minAppVersion;
