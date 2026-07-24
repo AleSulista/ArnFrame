@@ -395,7 +395,7 @@ PanelFrame {
             root.transitionDataRevision++
             root.refreshInspectorFields()
             root.refreshTransitionFields()
-            root.syncSubtitlesTab()
+            root.focusSubtitlesTab()
             root.syncShapeTab()
             root.syncTextTab()
         }
@@ -421,7 +421,7 @@ PanelFrame {
     Component.onCompleted: {
         root.refreshInspectorFields()
         root.refreshTransitionFields()
-        root.syncSubtitlesTab()
+        root.focusSubtitlesTab()
     }
 
     ListModel {
@@ -462,12 +462,21 @@ PanelFrame {
     readonly property int shapeTabIndex: tabIndexOf("shape")
     readonly property int textTabIndex: tabIndexOf("text")
 
-    function syncSubtitlesTab() {
-        if (root.subtitlesTabIndex < 0)
-            return
-        if (root.clipKind === "subtitle")
+    // Selecting a subtitle clip opens its cue editor. Only ever called on a *selection* change:
+    // every project edit emits selectedClipDataChanged too, and forcing the tab from there yanked
+    // the panel back to the cues (taking the keyframe strip with it) on every keyframe touch.
+    function focusSubtitlesTab() {
+        if (root.subtitlesTabIndex >= 0 && root.clipKind === "subtitle")
             root.activeTab = root.subtitlesTabIndex
-        else if (root.activeTab === root.subtitlesTabIndex)
+        else
+            root.syncSubtitlesTab()
+    }
+
+    // The Subtitles tab only exists for subtitle clips, so leaving it selected would show a blank
+    // pane once the selection moves off one.
+    function syncSubtitlesTab() {
+        if (root.subtitlesTabIndex >= 0 && root.activeTab === root.subtitlesTabIndex
+                && root.clipKind !== "subtitle")
             root.activeTab = 0
     }
 
