@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ClipReader.h"
 #include "core/Time.h"
 
 #include <QImage>
@@ -37,6 +38,8 @@ public:
     void warmVideoFrames(const QList<VideoRequest> &requests);
 
     QImage readVideoFrame(const QString &path, drift::TimeUs sourceUs, int maxWidth, int maxHeight);
+    // Preview path: NV12 for cheaper GPU upload. Falls back empty when decode fails.
+    Nv12Frame readVideoFrameNv12(const QString &path, drift::TimeUs sourceUs, int maxWidth, int maxHeight);
     int readAudioInterleaved(const QString &path, drift::TimeUs sourceStartUs, int sampleCount,
                              int outputSampleRate, float *interleavedStereoOut);
     void retainActivePaths(const QSet<QString> &videoPaths, const QSet<QString> &audioPaths);

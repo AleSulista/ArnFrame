@@ -11,6 +11,7 @@
 #include "GpuEffectDefinition.h"
 #include "core/Time.h"
 
+#include <QByteArray>
 #include <QImage>
 #include <QMap>
 #include <QMutex>
@@ -23,9 +24,12 @@
 
 #include <QThread>
 
+#include <cstdint>
 #include <functional>
+#include <list>
 #include <map>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 class QOffscreenSurface;
@@ -110,7 +114,13 @@ public:
     // lives in cannot go back to the general pool while the scene graph samples
     // it. Rotating through a few targets gives the scene graph time to finish
     // with one before it is drawn into again.
+    // Waits on the slot's previous publish fence before returning it for redraw.
     GlTarget &acquirePresentTarget(int width, int height);
+
+    // After composing into a present target: flush + fence. Call before publishing
+    // the texture id so the scene graph never samples a half-drawn frame, without
+    // the full-pipeline stall of glFinish.
+    void markPresentReady(GlTarget &presentTarget);
 
     // Compile (once) and return an arbitrary fragment shader program, keyed by id.
     // Used for the compositor's own shaders, which are not package-defined.
@@ -123,6 +133,8 @@ public:
 private:
     bool ensureReady();
     bool initGlObjects();
+    void waitPresentFence(int slotIndex);
+    void destroyImageUploadCache();
 
     QMutex m_initMutex;
     bool m_initTried = false;
@@ -136,7 +148,23 @@ private:
 
     static constexpr int kPresentRingSize = 3;
     GlTarget m_presentRing[kPresentRingSize];
+    GLsync m_presentFence[kPresentRingSize] = {};
     int m_presentNext = 0;
+
+    // QImage::cacheKey() → uploaded texture. Stills/text/shapes and decoder cache
+    // hits skip CPU→GPU upload; callers blit into a pooled FBO for exclusive use.
+    struct CachedUpload
+    {
+        qint64 cacheKey = 0;
+        GLuint texture = 0;
+        int width = 0;
+        int height = 0;
+    };
+    std::unordered_map<qint64, std::list<CachedUpload>::iterator> m_imageUploadIndex;
+    std::list<CachedUpload> m_imageUploadLru;
+    static constexpr size_t kMaxCachedUploads = 48;
+
+    friend GLuint cachedUploadTexture(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QImage &image);
 };
 
 GlRuntime &runtime();
@@ -153,6 +181,17 @@ GLuint staticTexture(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QString &pa
 // black at fallbackSize.
 GlTarget promoteImageToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QImage &image,
                               const QSize &fallbackSize);
+
+// Like promoteImageToTarget, but reuses a cached GL texture when QImage::cacheKey
+// matches a recent upload (decoder/still cache hits). Always returns a fresh
+// pooled FBO the caller may mutate and release.
+GlTarget promoteImageToTargetCached(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QImage &image,
+                                    const QSize &fallbackSize);
+
+// NV12 (semi-planar Y + interleaved UV) → RGBA FBO via a convert shader. `nv12`
+// is height*width Y bytes followed by height/2*width UV bytes.
+GlTarget promoteNv12ToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QByteArray &nv12,
+                             int width, int height);
 
 void setPackageUniforms(QOpenGLShaderProgram *program, const QMap<QString, QVariant> &parameters,
                         const QSize &resolution, drift::TimeUs timeUs, double progress);

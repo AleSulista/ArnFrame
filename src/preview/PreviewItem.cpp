@@ -37,17 +37,25 @@ QSGNode *PreviewItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
     if (m_textureId == 0 || m_textureSize.isEmpty() || !window()) {
         node->setTexture(nullptr);
         node->setRect(boundingRect());
+        m_boundTextureId = 0;
+        m_boundTextureSize = {};
         return node;
     }
 
-    // Wraps the compositor's framebuffer texture — no copy, no upload. The GL
-    // object stays owned by the engine's presentation ring, so the scene graph
-    // must not take ownership of it; setOwnsTexture only frees this wrapper.
-    QSGTexture *texture = QNativeInterface::QSGOpenGLTexture::fromNative(
-        static_cast<GLuint>(m_textureId), window(), m_textureSize);
-    node->setTexture(texture);
-    node->setOwnsTexture(true);
-    node->setFiltering(QSGTexture::Linear);
+    const bool needNewWrapper =
+        !node->texture() || m_boundTextureId != m_textureId || m_boundTextureSize != m_textureSize;
+    if (needNewWrapper) {
+        // Wraps the compositor's framebuffer texture — no copy, no upload. The GL
+        // object stays owned by the engine's presentation ring, so the scene graph
+        // must not take ownership of it; setOwnsTexture only frees this wrapper.
+        QSGTexture *texture = QNativeInterface::QSGOpenGLTexture::fromNative(
+            static_cast<GLuint>(m_textureId), window(), m_textureSize);
+        node->setTexture(texture);
+        node->setOwnsTexture(true);
+        node->setFiltering(QSGTexture::Linear);
+        m_boundTextureId = m_textureId;
+        m_boundTextureSize = m_textureSize;
+    }
 
     // No flip: the compositor promotes every source into its framebuffer such
     // that row 0 holds the image's top row (which is why toImage(false) comes out

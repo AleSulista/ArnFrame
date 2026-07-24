@@ -247,6 +247,8 @@ void PlaybackEngine::pause()
 
 void PlaybackEngine::refreshFrame()
 {
+    // Edits / seeks take a fresh project snapshot; the play loop reuses one.
+    m_compositor.invalidateSnapshot();
     // Use the same RenderOptions as the play loop so paused/scrubbed frames
     // match what playback shows (preview scale + temporal-effect history).
     m_compositor.requestComposite(m_playheadUs, playbackRenderOptions());
@@ -309,9 +311,9 @@ FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
     } else {
         options.previewScale = 1.0;
     }
-    // Keep full temporal history in preview so effects like time_echo match
-    // pause and play (and stay closer to export). Scale alone handles cost.
-    options.maxTimeEchoHistoryFrames = -1;
+    // During playback, cap temporal history so time_echo cannot multiply decode
+    // work unboundedly. Paused/scrubbed frames keep full history for fidelity.
+    options.maxTimeEchoHistoryFrames = m_playing ? 12 : -1;
 
     if (m_project && m_previewRenderWidth > 0 && m_previewRenderHeight > 0
         && m_previewQuality == QStringLiteral("full")) {

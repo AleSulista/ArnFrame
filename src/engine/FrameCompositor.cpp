@@ -501,6 +501,31 @@ QImage gpuSourceForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int m
     return CompositorFrameHistory::applyTimeEcho(samples, decay, blendMode);
 }
 
+// Prefer NV12 for plain video (preview upload path); fall back to RGBA QImage
+// when time_echo needs CPU blending or NV12 decode fails.
+void fillGpuLayerPixels(GpuLayer &layer, const drift::Clip &clip, drift::TimeUs timelineUs, int maxWidth,
+                        int maxHeight, int projectFps, int maxTimeEchoHistoryFrames)
+{
+    if (clip.path.isEmpty())
+        return;
+
+    const drift::Effect *timeEcho = findTimeEchoEffect(clip.effects);
+    if (!timeEcho && clip.type == drift::ClipType::Video) {
+        const drift::TimeUs sourceUs = clip.timelineToSourceUs(timelineUs);
+        const Nv12Frame nv12 =
+            ClipReaderPool::instance().readVideoFrameNv12(clip.path, sourceUs, maxWidth, maxHeight);
+        if (nv12.isValid()) {
+            layer.nv12 = nv12.data;
+            layer.nv12Width = nv12.width;
+            layer.nv12Height = nv12.height;
+            return;
+        }
+    }
+
+    layer.source = gpuSourceForClip(clip, timelineUs, maxWidth, maxHeight, projectFps,
+                                    maxTimeEchoHistoryFrames);
+}
+
 // The word the playhead sits on, for styles whose accent rule follows the speech. -1 for every
 // other rule, which keeps their raster time-independent and therefore cached across the clip.
 int karaokeWordIndex(const drift::Clip &clip, drift::TimeUs timelineUs)
@@ -606,12 +631,12 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
         layer.effects = resolvedClipEffects(clip, clipTimeUs);
     } else {
         // Bounded by the canvas, not the layout rect — see decodeClipMediaFrame.
-        layer.source = gpuSourceForClip(clip, timelineUs, canvasWidth, canvasHeight, projectFps,
-                                        maxTimeEchoHistoryFrames);
+        fillGpuLayerPixels(layer, clip, timelineUs, canvasWidth, canvasHeight, projectFps,
+                           maxTimeEchoHistoryFrames);
         layer.effects = resolvedClipEffects(clip, clipTimeUs);
     }
 
-    if (layer.source.isNull())
+    if (!layer.hasPixels())
         return layer;
 
     layer.mask = clip.mask;

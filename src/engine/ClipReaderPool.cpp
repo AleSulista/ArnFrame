@@ -11,6 +11,7 @@ ClipReaderPool &ClipReaderPool::instance()
     static bool registered = false;
     if (!registered) {
         qRegisterMetaType<drift::TimeUs>("drift::TimeUs");
+        qRegisterMetaType<Nv12Frame>("Nv12Frame");
         registered = true;
     }
     return pool;
@@ -72,9 +73,8 @@ void ClipReaderPool::warmVideoFrames(const QList<VideoRequest> &requests)
             QMutexLocker lock(&m_mutex);
             worker = ensureWorker(m_videoWorkers, request.path);
         }
-        // Fire and forget: the worker decodes into its reader's cache on its own
-        // thread while we queue the next one.
-        QMetaObject::invokeMethod(worker, "decodeVideo", Qt::QueuedConnection,
+        // Prefer NV12 warm — matches the live-preview decode path.
+        QMetaObject::invokeMethod(worker, "decodeVideoNv12", Qt::QueuedConnection,
                                   Q_ARG(drift::TimeUs, request.sourceUs), Q_ARG(int, request.maxWidth),
                                   Q_ARG(int, request.maxHeight));
     }
@@ -104,6 +104,29 @@ QImage ClipReaderPool::readVideoFrame(const QString &path, drift::TimeUs sourceU
     // a hardcoded 1/30 s, which missed on every clip that isn't 30 fps.
     QMetaObject::invokeMethod(worker, "prefetchNextVideo", Qt::QueuedConnection, Q_ARG(int, maxWidth),
                               Q_ARG(int, maxHeight));
+
+    return frame;
+}
+
+Nv12Frame ClipReaderPool::readVideoFrameNv12(const QString &path, drift::TimeUs sourceUs, int maxWidth,
+                                             int maxHeight)
+{
+    if (path.isEmpty())
+        return {};
+
+    ClipReaderWorker *worker = nullptr;
+    {
+        QMutexLocker lock(&m_mutex);
+        worker = ensureWorker(m_videoWorkers, path);
+    }
+
+    Nv12Frame frame;
+    QMetaObject::invokeMethod(worker, "decodeVideoNv12", Qt::BlockingQueuedConnection,
+                              Q_RETURN_ARG(Nv12Frame, frame), Q_ARG(drift::TimeUs, sourceUs),
+                              Q_ARG(int, maxWidth), Q_ARG(int, maxHeight));
+
+    QMetaObject::invokeMethod(worker, "prefetchNextVideoNv12", Qt::QueuedConnection,
+                              Q_ARG(int, maxWidth), Q_ARG(int, maxHeight));
 
     return frame;
 }

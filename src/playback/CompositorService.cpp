@@ -5,6 +5,11 @@
 
 namespace {
 constexpr drift::TimeUs kMaxPreviewFrameStalenessUs = 100'000;
+constexpr double kAdaptiveScaleMin = 0.25;
+constexpr double kAdaptiveScaleStepDown = 0.75;
+constexpr double kAdaptiveScaleStepUp = 1.15;
+constexpr int kStaleBeforeScaleDown = 2;
+constexpr int kOnTimeBeforeScaleUp = 8;
 }
 
 CompositorWorker::CompositorWorker(QObject *parent)
@@ -13,13 +18,13 @@ CompositorWorker::CompositorWorker(QObject *parent)
 }
 
 void CompositorWorker::composite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options,
-                                 drift::Project snapshot)
+                                 std::shared_ptr<const drift::Project> snapshot)
 {
-    // Take ownership before compositing, so the tree being walked is one nothing else holds a
-    // mutable reference to. Releasing the previous snapshot here also keeps it alive for the
-    // whole of the frame that used it.
+    // Keep the shared tree alive for the whole frame; setProject only borrows.
     m_snapshot = std::move(snapshot);
-    m_compositor.setProject(&m_snapshot);
+    if (!m_snapshot)
+        return;
+    m_compositor.setProject(m_snapshot.get());
 
     const GpuFrameTexture frame = m_compositor.compositeToTextureAt(timeUs, options);
     if (frame.isValid())
@@ -31,7 +36,7 @@ CompositorService::CompositorService(QObject *parent)
     , m_worker(new CompositorWorker)
 {
     qRegisterMetaType<drift::TimeUs>("drift::TimeUs");
-    qRegisterMetaType<drift::Project>("drift::Project");
+    qRegisterMetaType<std::shared_ptr<const drift::Project>>("std::shared_ptr<const drift::Project>");
     qRegisterMetaType<FrameCompositor::RenderOptions>("FrameCompositor::RenderOptions");
     qRegisterMetaType<GpuFrameTexture>("GpuFrameTexture");
     m_worker->moveToThread(&m_thread);
@@ -50,27 +55,74 @@ CompositorService::~CompositorService()
 
 void CompositorService::setProject(const drift::Project *project)
 {
-    // Kept on this side only. Each composite request carries its own snapshot, so the worker
-    // never learns the live project's address.
     m_project = project;
+    invalidateSnapshot();
+}
+
+void CompositorService::invalidateSnapshot()
+{
+    ++m_liveGeneration;
+    m_sharedSnapshot.reset();
+}
+
+double CompositorService::adaptiveScaleFactor() const
+{
+    return m_adaptiveScale;
+}
+
+FrameCompositor::RenderOptions CompositorService::effectiveOptions(
+    FrameCompositor::RenderOptions options) const
+{
+    options.previewScale =
+        qBound(0.1, options.previewScale * m_adaptiveScale, 1.0);
+    return options;
+}
+
+void CompositorService::noteFrameStale(bool stale)
+{
+    if (stale) {
+        m_onTimeStreak = 0;
+        ++m_staleStreak;
+        if (m_staleStreak >= kStaleBeforeScaleDown && m_adaptiveScale > kAdaptiveScaleMin + 1e-6) {
+            m_adaptiveScale = qMax(kAdaptiveScaleMin, m_adaptiveScale * kAdaptiveScaleStepDown);
+            m_staleStreak = 0;
+        }
+        return;
+    }
+
+    m_staleStreak = 0;
+    ++m_onTimeStreak;
+    if (m_onTimeStreak >= kOnTimeBeforeScaleUp && m_adaptiveScale < 1.0 - 1e-6) {
+        m_adaptiveScale = qMin(1.0, m_adaptiveScale * kAdaptiveScaleStepUp);
+        m_onTimeStreak = 0;
+    }
 }
 
 void CompositorService::dispatch(drift::TimeUs timeUs, const FrameCompositor::RenderOptions &options)
 {
     if (!m_project)
         return;
+
+    if (!m_sharedSnapshot || m_snapshotGeneration != m_liveGeneration) {
+        // One COW snapshot per generation; subsequent ticks only bump the shared_ptr.
+        m_sharedSnapshot = std::make_shared<drift::Project>(*m_project);
+        m_snapshotGeneration = m_liveGeneration;
+    }
+
     QMetaObject::invokeMethod(m_worker, "composite", Qt::QueuedConnection,
                               Q_ARG(drift::TimeUs, timeUs),
                               Q_ARG(FrameCompositor::RenderOptions, options),
-                              Q_ARG(drift::Project, *m_project));
+                              Q_ARG(std::shared_ptr<const drift::Project>, m_sharedSnapshot));
 }
 
 void CompositorService::requestComposite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options)
 {
     options.previewScale = qBound(0.1, options.previewScale, 1.0);
+    options = effectiveOptions(options);
     m_pendingTimeUs.store(timeUs, std::memory_order_release);
-    m_pendingPreviewScalePercent.store(qBound(10, static_cast<int>(std::lround(options.previewScale * 100.0)), 100),
-                                       std::memory_order_release);
+    m_pendingPreviewScalePercent.store(
+        qBound(10, static_cast<int>(std::lround(options.previewScale * 100.0)), 100),
+        std::memory_order_release);
     m_pendingMaxTimeEchoHistoryFrames.store(options.maxTimeEchoHistoryFrames, std::memory_order_release);
     if (m_requestPending.exchange(true, std::memory_order_acq_rel))
         return;
@@ -86,9 +138,11 @@ void CompositorService::onWorkerFrameReady(const GpuFrameTexture &frame, drift::
     FrameCompositor::RenderOptions latestOptions;
     latestOptions.previewScale =
         static_cast<double>(m_pendingPreviewScalePercent.load(std::memory_order_acquire)) / 100.0;
-    latestOptions.maxTimeEchoHistoryFrames = m_pendingMaxTimeEchoHistoryFrames.load(std::memory_order_acquire);
+    latestOptions.maxTimeEchoHistoryFrames =
+        m_pendingMaxTimeEchoHistoryFrames.load(std::memory_order_acquire);
 
     const bool stale = latest > timeUs && latest - timeUs > kMaxPreviewFrameStalenessUs;
+    noteFrameStale(stale);
     if (!stale)
         emit frameReady(frame);
 

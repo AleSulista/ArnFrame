@@ -26,6 +26,15 @@ QImage ClipReaderWorker::decodeVideo(drift::TimeUs sourceUs, int maxWidth, int m
     return frame;
 }
 
+Nv12Frame ClipReaderWorker::decodeVideoNv12(drift::TimeUs sourceUs, int maxWidth, int maxHeight)
+{
+    QMutexLocker lock(&m_mutex);
+    Nv12Frame frame;
+    if (!m_reader.readVideoFrameAtNv12(sourceUs, frame, maxWidth, maxHeight))
+        return {};
+    return frame;
+}
+
 int ClipReaderWorker::decodeAudio(drift::TimeUs sourceStartUs, int sampleCount, int outputSampleRate,
                                   float *interleavedStereoOut)
 {
@@ -37,4 +46,10 @@ void ClipReaderWorker::prefetchNextVideo(int maxWidth, int maxHeight)
 {
     QMutexLocker lock(&m_mutex);
     m_reader.prefetchNextVideoFrame(maxWidth, maxHeight);
+}
+
+void ClipReaderWorker::prefetchNextVideoNv12(int maxWidth, int maxHeight)
+{
+    QMutexLocker lock(&m_mutex);
+    m_reader.prefetchNextVideoFrameNv12(maxWidth, maxHeight);
 }

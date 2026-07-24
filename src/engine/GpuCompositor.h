@@ -6,6 +6,7 @@
 #include "core/Time.h"
 #include "engine/FaceLandmarker.h"
 
+#include <QByteArray>
 #include <QColor>
 #include <QImage>
 #include <QList>
@@ -19,12 +20,17 @@ struct GpuEffectDefinition;
 }
 
 // A single textured layer: the clip's source pixels plus everything needed to
-// place it on the canvas. `source` is CPU pixels (a decoded video frame, or a
-// QPainter raster of a text/shape clip); the GPU does the scaling, rotation,
-// masking and blending.
+// place it on the canvas. Prefer `nv12` when set (half the upload bandwidth vs
+// RGBA); otherwise `source` is CPU RGBA (decoded video, or a QPainter raster of
+// a text/shape clip). The GPU does the scaling, rotation, masking and blending.
 struct GpuLayer
 {
-    QImage source; // null => fully transparent layer
+    QImage source; // null => fully transparent layer (unless nv12 is set)
+    // Semi-planar NV12: Y plane (w*h) then interleaved UV (w*(h/2)). When
+    // non-empty, the compositor uploads Y/UV and converts on the GPU.
+    QByteArray nv12;
+    int nv12Width = 0;
+    int nv12Height = 0;
     QList<drift::Effect> effects;
     drift::Mask mask;
     QImage matte; // MaskShape::Matte only: this frame's coverage map, decoded by FrameCompositor
@@ -38,6 +44,8 @@ struct GpuLayer
     // by value: the scene outlives the cache lookup that produced them.
     QList<drift::FaceAnchors> faceSlots;
     bool valid = false;
+
+    bool hasPixels() const { return !nv12.isEmpty() || !source.isNull(); }
 };
 
 // One drawable in the scene: either a plain layer, or a transition that mixes

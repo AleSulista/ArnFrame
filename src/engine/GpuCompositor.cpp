@@ -207,10 +207,15 @@ GLuint maskTexture(GlRuntime &rt, QOpenGLExtraFunctions *gl, const drift::Mask &
 GlTarget buildLayerTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const GpuLayer &layer,
                           const QSize &canvasSize)
 {
-    if (!layer.valid || layer.source.isNull())
+    if (!layer.valid || !layer.hasPixels())
         return {};
 
-    GlTarget target = promoteImageToTarget(rt, gl, layer.source, layer.source.size());
+    GlTarget target;
+    if (!layer.nv12.isEmpty() && layer.nv12Width > 0 && layer.nv12Height > 0) {
+        target = promoteNv12ToTarget(rt, gl, layer.nv12, layer.nv12Width, layer.nv12Height);
+    } else {
+        target = promoteImageToTargetCached(rt, gl, layer.source, layer.source.size());
+    }
     if (!target.isValid())
         return {};
 
@@ -265,7 +270,7 @@ void drawLayerOnCanvas(GlRuntime &rt, QOpenGLExtraFunctions *gl, GlTarget &canva
     GLuint maskTex = 0;
     float maskInvert = 0.f;
     if (!layer.matte.isNull()) {
-        matteTarget = promoteImageToTarget(rt, gl, layer.matte, layer.matte.size());
+        matteTarget = promoteImageToTargetCached(rt, gl, layer.matte, layer.matte.size());
         maskTex = matteTarget.isValid() ? matteTarget.texture() : 0;
         maskInvert = layer.mask.invert ? 1.f : 0.f;
     } else {
@@ -427,7 +432,7 @@ void fillBackground(GlRuntime &rt, QOpenGLExtraFunctions *gl, GlTarget &canvas, 
     gl->glClear(GL_COLOR_BUFFER_BIT);
     coverTarget.fbo->release();
 
-    GlTarget src = promoteImageToTarget(rt, gl, scene.blurSource, srcSize);
+    GlTarget src = promoteImageToTargetCached(rt, gl, scene.blurSource, srcSize);
     if (!src.isValid()) {
         rt.releaseTarget(std::move(coverTarget));
         return;
@@ -585,10 +590,9 @@ GpuFrameTexture renderToTexture(const GpuScene &scene)
 
         composeOnGlThread(rt, scene, canvas);
 
-        // The scene graph samples this texture from its own context. Finish the
-        // draw before publishing it, or it may sample a half-rendered frame.
-        if (auto *gl = rt.functions())
-            gl->glFinish();
+        // Fence + short client wait instead of glFinish: only this present slot's
+        // work must complete before the scene graph samples the texture.
+        rt.markPresentReady(canvas);
 
         out.textureId = canvas.texture();
         out.size = canvas.size();

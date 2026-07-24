@@ -25,6 +25,22 @@ void main() {
 }
 )";
 
+// BT.709 limited-range NV12 → straight RGBA (opaque).
+constexpr const char *kNv12FragShader = R"(#version 330 core
+in vec2 v_texCoord;
+out vec4 fragColor;
+uniform sampler2D u_y;
+uniform sampler2D u_uv;
+void main() {
+    float y = texture(u_y, v_texCoord).r;
+    vec2 uv = texture(u_uv, v_texCoord).rg - vec2(0.5);
+    float r = y + 1.5748 * uv.y;
+    float g = y - 0.1873 * uv.x - 0.4681 * uv.y;
+    float b = y + 1.8556 * uv.x;
+    fragColor = vec4(clamp(vec3(r, g, b), 0.0, 1.0), 1.0);
+}
+)";
+
 // Fullscreen triangle strip with standard GL UVs (v=0 at bottom / NDC bottom).
 // Source QImages are copied into an FBO once so every pass samples FBO-backed
 // textures only (same Y layout). Readback uses toImage(false).
@@ -232,6 +248,15 @@ void GlRuntime::shutdown()
         [this] {
             if (!context->makeCurrent(surface.get()))
                 return;
+            if (auto *gl = context->extraFunctions()) {
+                for (int i = 0; i < kPresentRingSize; ++i) {
+                    if (m_presentFence[i]) {
+                        gl->glDeleteSync(m_presentFence[i]);
+                        m_presentFence[i] = nullptr;
+                    }
+                }
+                destroyImageUploadCache();
+            }
             for (GlTarget &target : m_presentRing)
                 target.fbo.reset();
             m_targetPool.clear();
@@ -305,13 +330,48 @@ void GlRuntime::releaseTarget(GlTarget &&target)
     ++m_pooledTargets;
 }
 
+void GlRuntime::waitPresentFence(int slotIndex)
+{
+    if (slotIndex < 0 || slotIndex >= kPresentRingSize)
+        return;
+    GLsync &fence = m_presentFence[slotIndex];
+    if (!fence)
+        return;
+    auto *gl = functions();
+    if (!gl) {
+        fence = nullptr;
+        return;
+    }
+    // Only wait for this slot's prior publish — not the whole GPU pipeline.
+    gl->glClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64(100'000'000)); // 100 ms
+    gl->glDeleteSync(fence);
+    fence = nullptr;
+}
+
+void GlRuntime::destroyImageUploadCache()
+{
+    auto *gl = functions();
+    for (CachedUpload &entry : m_imageUploadLru) {
+        if (gl && entry.texture)
+            gl->glDeleteTextures(1, &entry.texture);
+        entry.texture = 0;
+    }
+    m_imageUploadLru.clear();
+    m_imageUploadIndex.clear();
+}
+
 GlTarget &GlRuntime::acquirePresentTarget(int width, int height)
 {
     const int w = qMax(1, width);
     const int h = qMax(1, height);
 
-    GlTarget &slot = m_presentRing[m_presentNext];
+    const int slotIndex = m_presentNext;
+    GlTarget &slot = m_presentRing[slotIndex];
     m_presentNext = (m_presentNext + 1) % kPresentRingSize;
+
+    // The scene graph may still be sampling this ring slot from a previous publish.
+    // Wait for that fence before redrawing into the same FBO.
+    waitPresentFence(slotIndex);
 
     if (!slot.isValid() || slot.width != w || slot.height != h) {
         QOpenGLFramebufferObjectFormat fmt;
@@ -321,6 +381,33 @@ GlTarget &GlRuntime::acquirePresentTarget(int width, int height)
         slot.height = h;
     }
     return slot;
+}
+
+void GlRuntime::markPresentReady(GlTarget &presentTarget)
+{
+    auto *gl = functions();
+    if (!gl || !presentTarget.isValid())
+        return;
+
+    int slotIndex = -1;
+    for (int i = 0; i < kPresentRingSize; ++i) {
+        if (&m_presentRing[i] == &presentTarget) {
+            slotIndex = i;
+            break;
+        }
+    }
+    if (slotIndex < 0)
+        return;
+
+    waitPresentFence(slotIndex);
+    gl->glFlush();
+    m_presentFence[slotIndex] = gl->glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    // Ensure the just-inserted fence has completed before the texture id is
+    // published to the scene graph (avoids sampling a half-drawn frame).
+    if (m_presentFence[slotIndex]) {
+        gl->glClientWaitSync(m_presentFence[slotIndex], GL_SYNC_FLUSH_COMMANDS_BIT,
+                             GLuint64(16'000'000)); // ~1 frame @ 60 Hz
+    }
 }
 
 QOpenGLShaderProgram *GlRuntime::builtinProgram(const QString &id, const char *vertexSource,
@@ -454,6 +541,37 @@ GLuint staticTexture(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QString &pa
     return tex;
 }
 
+GLuint cachedUploadTexture(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QImage &image)
+{
+    if (image.isNull() || !gl)
+        return 0;
+
+    const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
+    const qint64 key = rgba.cacheKey();
+    auto indexIt = rt.m_imageUploadIndex.find(key);
+    if (indexIt != rt.m_imageUploadIndex.end()) {
+        // LRU touch.
+        rt.m_imageUploadLru.splice(rt.m_imageUploadLru.begin(), rt.m_imageUploadLru, indexIt->second);
+        return indexIt->second->texture;
+    }
+
+    const GLuint tex = uploadTexture(gl, rgba);
+    if (!tex)
+        return 0;
+
+    while (rt.m_imageUploadLru.size() >= GlRuntime::kMaxCachedUploads) {
+        GlRuntime::CachedUpload &old = rt.m_imageUploadLru.back();
+        rt.m_imageUploadIndex.erase(old.cacheKey);
+        if (old.texture)
+            gl->glDeleteTextures(1, &old.texture);
+        rt.m_imageUploadLru.pop_back();
+    }
+
+    rt.m_imageUploadLru.push_front(GlRuntime::CachedUpload{key, tex, rgba.width(), rgba.height()});
+    rt.m_imageUploadIndex[key] = rt.m_imageUploadLru.begin();
+    return tex;
+}
+
 GlTarget promoteImageToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QImage &image,
                               const QSize &fallbackSize)
 {
@@ -473,6 +591,96 @@ GlTarget promoteImageToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QI
         rt.releaseTarget(std::move(target));
         return {};
     }
+    return target;
+}
+
+GlTarget promoteImageToTargetCached(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QImage &image,
+                                    const QSize &fallbackSize)
+{
+    if (image.isNull())
+        return promoteImageToTarget(rt, gl, image, fallbackSize);
+
+    const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
+    GlTarget target = rt.acquireTarget(rgba.width(), rgba.height());
+    if (!target.isValid())
+        return {};
+
+    const GLuint uploaded = cachedUploadTexture(rt, gl, rgba);
+    if (!uploaded) {
+        rt.releaseTarget(std::move(target));
+        return {};
+    }
+    const bool ok = blitTextureToTarget(rt, gl, uploaded, target);
+    // uploaded stays in the LRU cache — do not delete.
+    if (!ok) {
+        rt.releaseTarget(std::move(target));
+        return {};
+    }
+    return target;
+}
+
+GlTarget promoteNv12ToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QByteArray &nv12,
+                             int width, int height)
+{
+    if (!gl || width <= 0 || height <= 0 || (height % 2) != 0 || (width % 2) != 0)
+        return {};
+
+    const qsizetype yBytes = qsizetype(width) * height;
+    const qsizetype uvBytes = qsizetype(width) * (height / 2);
+    if (nv12.size() < yBytes + uvBytes)
+        return {};
+
+    GlTarget target = rt.acquireTarget(width, height);
+    if (!target.isValid())
+        return {};
+
+    QOpenGLShaderProgram *program =
+        rt.builtinProgram(QStringLiteral("__nv12__"), kQuadVertexShader, kNv12FragShader);
+    if (!program) {
+        rt.releaseTarget(std::move(target));
+        return {};
+    }
+
+    GLuint textures[2] = {0, 0};
+    gl->glGenTextures(2, textures);
+
+    gl->glBindTexture(GL_TEXTURE_2D, textures[0]);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE,
+                     nv12.constData());
+
+    gl->glBindTexture(GL_TEXTURE_2D, textures[1]);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, width / 2, height / 2, 0, GL_RG, GL_UNSIGNED_BYTE,
+                     nv12.constData() + yBytes);
+
+    target.fbo->bind();
+    gl->glViewport(0, 0, width, height);
+    gl->glDisable(GL_BLEND);
+    gl->glClearColor(0.f, 0.f, 0.f, 0.f);
+    gl->glClear(GL_COLOR_BUFFER_BIT);
+    program->bind();
+    program->setUniformValue("u_y", 0);
+    program->setUniformValue("u_uv", 1);
+    gl->glActiveTexture(GL_TEXTURE0);
+    gl->glBindTexture(GL_TEXTURE_2D, textures[0]);
+    gl->glActiveTexture(GL_TEXTURE1);
+    gl->glBindTexture(GL_TEXTURE_2D, textures[1]);
+    gl->glBindVertexArray(rt.vao);
+    gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    gl->glBindVertexArray(0);
+    program->release();
+    target.fbo->release();
+
+    gl->glDeleteTextures(2, textures);
     return target;
 }
 

@@ -22,9 +22,11 @@ public slots:
     void openPath(const QString &path);
     void closePath();
     QImage decodeVideo(drift::TimeUs sourceUs, int maxWidth, int maxHeight);
+    Nv12Frame decodeVideoNv12(drift::TimeUs sourceUs, int maxWidth, int maxHeight);
     int decodeAudio(drift::TimeUs sourceStartUs, int sampleCount, int outputSampleRate,
                     float *interleavedStereoOut);
     void prefetchNextVideo(int maxWidth, int maxHeight);
+    void prefetchNextVideoNv12(int maxWidth, int maxHeight);
 
 private:
     ClipReader m_reader;

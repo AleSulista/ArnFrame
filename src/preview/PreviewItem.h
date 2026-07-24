@@ -31,4 +31,9 @@ protected:
 private:
     int m_textureId = 0;
     QSize m_textureSize;
+    // Last native id wrapped into the scene-graph node. Reused across geometry
+    // updates so fromNative is only called when the compositor publishes a new
+    // presentation-ring slot.
+    int m_boundTextureId = 0;
+    QSize m_boundTextureSize;
 };

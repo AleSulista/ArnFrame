@@ -77,6 +77,58 @@ QImage frameToRgba(const AVFrame *frame, SwsContext *&sws, int targetWidth, int 
     return copy;
 }
 
+Nv12Frame frameToNv12(const AVFrame *frame, SwsContext *&sws, int targetWidth, int targetHeight)
+{
+    Nv12Frame out;
+    if (!frame || targetWidth <= 0 || targetHeight <= 0)
+        return out;
+    if (isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format)))
+        return out;
+
+    // NV12 requires even dimensions.
+    targetWidth &= ~1;
+    targetHeight &= ~1;
+    if (targetWidth < 2 || targetHeight < 2)
+        return out;
+
+    sws = sws_getCachedContext(sws, frame->width, frame->height,
+                               static_cast<AVPixelFormat>(frame->format), targetWidth, targetHeight,
+                               AV_PIX_FMT_NV12, SWS_BILINEAR, nullptr, nullptr, nullptr);
+    if (!sws)
+        return out;
+
+    AVFrame *nv12 = av_frame_alloc();
+    if (!nv12)
+        return out;
+
+    nv12->format = AV_PIX_FMT_NV12;
+    nv12->width = targetWidth;
+    nv12->height = targetHeight;
+    if (av_frame_get_buffer(nv12, 0) < 0) {
+        av_frame_free(&nv12);
+        return out;
+    }
+
+    sws_scale(sws, frame->data, frame->linesize, 0, frame->height, nv12->data, nv12->linesize);
+
+    const qsizetype yBytes = qsizetype(targetWidth) * targetHeight;
+    const qsizetype uvBytes = qsizetype(targetWidth) * (targetHeight / 2);
+    out.data.resize(yBytes + uvBytes);
+    // Copy plane-by-plane in case linesize > width.
+    for (int y = 0; y < targetHeight; ++y) {
+        memcpy(out.data.data() + qsizetype(y) * targetWidth, nv12->data[0] + y * nv12->linesize[0],
+               size_t(targetWidth));
+    }
+    for (int y = 0; y < targetHeight / 2; ++y) {
+        memcpy(out.data.data() + yBytes + qsizetype(y) * targetWidth,
+               nv12->data[1] + y * nv12->linesize[1], size_t(targetWidth));
+    }
+    out.width = targetWidth;
+    out.height = targetHeight;
+    av_frame_free(&nv12);
+    return out;
+}
+
 drift::TimeUs ptsToUs(const AVFrame *frame, const AVRational &timeBase)
 {
     if (!frame || frame->pts == AV_NOPTS_VALUE)
@@ -99,6 +151,10 @@ void ClipReader::teardownVideoDecoder()
         sws_freeContext(m_sws);
         m_sws = nullptr;
     }
+    if (m_swsNv12) {
+        sws_freeContext(m_swsNv12);
+        m_swsNv12 = nullptr;
+    }
     if (m_videoCtx)
         avcodec_free_context(&m_videoCtx);
     if (m_hwDeviceCtx)
@@ -110,6 +166,7 @@ void ClipReader::teardownVideoDecoder()
     m_decodeW = 0;
     m_decodeH = 0;
     m_videoCache.clear();
+    m_nv12Cache.clear();
 }
 
 QSize ClipReader::decodeSizeFor(int maxWidth, int maxHeight) const
@@ -145,6 +202,7 @@ void ClipReader::applyDecodeSize(const QSize &size)
     m_decodeW = size.width();
     m_decodeH = size.height();
     m_videoCache.clear();
+    m_nv12Cache.clear();
 }
 
 drift::TimeUs ClipReader::frameToleranceUs() const
@@ -190,6 +248,42 @@ void ClipReader::storeCachedFrame(drift::TimeUs ptsUs, const QImage &image)
     m_videoCache.prepend(CachedFrame{ptsUs, image});
     while (m_videoCache.size() > kMaxCachedFrames)
         m_videoCache.removeLast();
+}
+
+bool ClipReader::lookupCachedNv12(drift::TimeUs sourceUs, Nv12Frame &out) const
+{
+    const drift::TimeUs tolerance = frameToleranceUs();
+    drift::TimeUs bestDelta = tolerance + 1;
+    int bestIndex = -1;
+    for (int i = 0; i < m_nv12Cache.size(); ++i) {
+        const drift::TimeUs delta = qAbs(m_nv12Cache.at(i).ptsUs - sourceUs);
+        if (delta <= tolerance && delta < bestDelta) {
+            bestDelta = delta;
+            bestIndex = i;
+        }
+    }
+    if (bestIndex < 0)
+        return false;
+
+    out = m_nv12Cache.at(bestIndex).frame;
+    return out.isValid();
+}
+
+void ClipReader::storeCachedNv12(drift::TimeUs ptsUs, const Nv12Frame &frame)
+{
+    if (!frame.isValid())
+        return;
+
+    for (int i = 0; i < m_nv12Cache.size(); ++i) {
+        if (m_nv12Cache.at(i).ptsUs == ptsUs) {
+            m_nv12Cache.move(i, 0);
+            return;
+        }
+    }
+
+    m_nv12Cache.prepend(CachedNv12{ptsUs, frame});
+    while (m_nv12Cache.size() > kMaxCachedFrames)
+        m_nv12Cache.removeLast();
 }
 
 void ClipReader::close()
@@ -418,6 +512,31 @@ bool ClipReader::convertFrame(const AVFrame *frame, QImage &out, int targetWidth
     return true;
 }
 
+bool ClipReader::convertFrameNv12(const AVFrame *frame, Nv12Frame &out, int targetWidth, int targetHeight)
+{
+    if (!frame)
+        return false;
+
+    const AVFrame *swFrame = frame;
+    AVFrame *transferred = nullptr;
+    if ((m_hwAccelActive && frame->format == m_hwPixFmt)
+        || isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format))) {
+        transferred = av_frame_alloc();
+        if (!transferred)
+            return false;
+        if (av_hwframe_transfer_data(transferred, frame, 0) < 0) {
+            av_frame_free(&transferred);
+            return false;
+        }
+        swFrame = transferred;
+    }
+
+    out = frameToNv12(swFrame, m_swsNv12, targetWidth, targetHeight);
+    if (transferred)
+        av_frame_free(&transferred);
+    return out.isValid();
+}
+
 bool ClipReader::ensureAudioDecoder()
 {
     if (!m_fmt || m_audioStream < 0)
@@ -627,15 +746,163 @@ bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int maxWi
     return decodeVideoFrameAtOnce(sourceUs, out, maxWidth, maxHeight, nullptr);
 }
 
+bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &out, int maxWidth,
+                                            int maxHeight, bool *hwFailure)
+{
+    if (hwFailure)
+        *hwFailure = false;
+    if (!ensureVideoDecoder())
+        return false;
+
+    applyDecodeSize(decodeSizeFor(maxWidth, maxHeight));
+
+    if (lookupCachedNv12(sourceUs, out))
+        return true;
+
+    const drift::TimeUs tolerance = frameToleranceUs();
+    const bool needSeek = !m_videoPositioned || sourceUs < m_lastVideoPtsUs - tolerance
+                          || sourceUs - m_lastVideoPtsUs > kForwardSeekThresholdUs;
+    if (needSeek && !seekVideoStream(sourceUs))
+        return false;
+
+    AVPacket *packet = av_packet_alloc();
+    AVFrame *frame = av_frame_alloc();
+    AVFrame *best = av_frame_alloc();
+    if (!packet || !frame || !best) {
+        av_frame_free(&best);
+        av_frame_free(&frame);
+        av_packet_free(&packet);
+        return false;
+    }
+
+    const AVRational timeBase = m_fmt->streams[m_videoStream]->time_base;
+    drift::TimeUs bestDelta = INT64_MAX;
+    drift::TimeUs bestPtsUs = 0;
+    bool found = false;
+    bool done = false;
+    bool sawHwFailure = false;
+
+    auto markHwFailure = [&]() {
+        if (m_hwAccelActive) {
+            sawHwFailure = true;
+            done = true;
+        }
+    };
+
+    while (!done && av_read_frame(m_fmt, packet) >= 0) {
+        if (packet->stream_index != m_videoStream) {
+            av_packet_unref(packet);
+            continue;
+        }
+
+        int sendRc = avcodec_send_packet(m_videoCtx, packet);
+        av_packet_unref(packet);
+        if (sendRc == AVERROR(EAGAIN)) {
+            // Fall through to receive.
+        } else if (sendRc < 0) {
+            markHwFailure();
+            continue;
+        }
+
+        while (!done) {
+            const int rc = avcodec_receive_frame(m_videoCtx, frame);
+            if (rc == AVERROR(EAGAIN) || rc == AVERROR_EOF)
+                break;
+            if (rc < 0) {
+                av_frame_unref(frame);
+                markHwFailure();
+                break;
+            }
+
+            const drift::TimeUs ptsUs = ptsToUs(frame, timeBase);
+            m_lastVideoPtsUs = ptsUs;
+            const drift::TimeUs delta = qAbs(ptsUs - sourceUs);
+            if (delta < bestDelta) {
+                bestDelta = delta;
+                bestPtsUs = ptsUs;
+                av_frame_unref(best);
+                if (av_frame_ref(best, frame) < 0) {
+                    av_frame_unref(frame);
+                    done = true;
+                    break;
+                }
+                found = true;
+            }
+            av_frame_unref(frame);
+
+            if (ptsUs >= sourceUs) {
+                done = true;
+                break;
+            }
+        }
+    }
+
+    Nv12Frame converted;
+    bool convertedOk = false;
+    if (found && !sawHwFailure) {
+        convertedOk = convertFrameNv12(best, converted, m_decodeW, m_decodeH);
+        if (!convertedOk && m_hwAccelActive
+            && (best->format == m_hwPixFmt
+                || isHardwarePixelFormat(static_cast<AVPixelFormat>(best->format)))) {
+            sawHwFailure = true;
+        }
+    }
+
+    av_frame_unref(best);
+    av_frame_free(&best);
+    av_frame_unref(frame);
+    av_frame_free(&frame);
+    av_packet_free(&packet);
+
+    if (sawHwFailure) {
+        if (hwFailure)
+            *hwFailure = true;
+        m_videoPositioned = false;
+        return false;
+    }
+
+    if (convertedOk) {
+        out = converted;
+        storeCachedNv12(bestPtsUs, converted);
+        m_videoPositioned = true;
+        return true;
+    }
+
+    m_videoPositioned = false;
+    return false;
+}
+
+bool ClipReader::readVideoFrameAtNv12(drift::TimeUs sourceUs, Nv12Frame &out, int maxWidth, int maxHeight)
+{
+    bool hwFailure = false;
+    if (decodeVideoFrameAtOnceNv12(sourceUs, out, maxWidth, maxHeight, &hwFailure))
+        return true;
+
+    if (!hwFailure)
+        return false;
+
+    if (!fallbackFromHardwareDecoder())
+        return false;
+
+    return decodeVideoFrameAtOnceNv12(sourceUs, out, maxWidth, maxHeight, nullptr);
+}
+
 void ClipReader::prefetchNextVideoFrame(int maxWidth, int maxHeight)
 {
     if (!m_videoPositioned || m_sourceFrameDurationUs <= 0)
         return;
 
-    // Decode the frame after the current position into the cache, so the next
-    // request hits while the caller is busy compositing this one.
     QImage ignored;
     readVideoFrameAt(m_lastVideoPtsUs + m_sourceFrameDurationUs, ignored, maxWidth, maxHeight);
+}
+
+void ClipReader::prefetchNextVideoFrameNv12(int maxWidth, int maxHeight)
+{
+    if (!m_videoPositioned || m_sourceFrameDurationUs <= 0)
+        return;
+
+    Nv12Frame ignored;
+    readVideoFrameAtNv12(m_lastVideoPtsUs + m_sourceFrameDurationUs, ignored, maxWidth, maxHeight);
 }
 
 int ClipReader::readAudioInterleaved(drift::TimeUs sourceStartUs, int sampleCount, int outputSampleRate,
