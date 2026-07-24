@@ -8329,13 +8329,59 @@ void AppController::discardAutosave()
 QVariantList AppController::exportPresets() const
 {
     QVariantList out;
-    for (const ExportPreset &preset : Exporter::presets()) {
+    for (const ExportScalePreset &preset : Exporter::scalePresets()) {
         out.append(QVariantMap{
             {QStringLiteral("id"), preset.id},
             {QStringLiteral("label"), preset.label},
         });
     }
     return out;
+}
+
+QVariantList AppController::exportScaleOptions() const
+{
+    return Exporter::scaleOptions(m_project.width(), m_project.height());
+}
+
+QVariantList AppController::exportVideoCodecs() const
+{
+    return Exporter::videoCodecs();
+}
+
+QVariantList AppController::exportAudioCodecs() const
+{
+    return Exporter::audioCodecs();
+}
+
+QVariantMap AppController::exportDefaultSettings() const
+{
+    const ExportSettings s = Exporter::defaultSettings();
+    return QVariantMap{
+        {QStringLiteral("targetHeight"), s.targetHeight},
+        {QStringLiteral("videoCodecId"), s.videoCodecId},
+        {QStringLiteral("rateControl"), s.rateControl},
+        {QStringLiteral("crf"), s.crf},
+        {QStringLiteral("videoBitrateKbps"), s.videoBitrateKbps},
+        {QStringLiteral("videoPreset"), s.videoPreset},
+        {QStringLiteral("audioCodecId"), s.audioCodecId},
+        {QStringLiteral("audioBitrateKbps"), s.audioBitrateKbps},
+    };
+}
+
+QString AppController::exportPreferredContainer(const QString &videoCodecId,
+                                                const QString &audioCodecId) const
+{
+    return Exporter::preferredContainer(videoCodecId, audioCodecId);
+}
+
+QStringList AppController::exportSaveFilters(const QString &container) const
+{
+    return Exporter::saveFilters(container);
+}
+
+QString AppController::exportDefaultSuffix(const QString &container) const
+{
+    return Exporter::defaultSuffix(container);
 }
 
 double AppController::exportProgress() const
@@ -8351,10 +8397,20 @@ void AppController::cancelExport()
 
 void AppController::exportProject(const QUrl &outputUrl)
 {
-    exportWithPreset(outputUrl, QStringLiteral("source"));
+    exportWithSettings(outputUrl, exportDefaultSettings());
 }
 
 void AppController::exportWithPreset(const QUrl &outputUrl, const QString &presetId)
+{
+    QVariantMap map = exportDefaultSettings();
+    if (const ExportScalePreset *preset = Exporter::scalePresetById(presetId)) {
+        map.insert(QStringLiteral("targetHeight"), preset->targetHeight);
+        map.insert(QStringLiteral("videoBitrateKbps"), preset->videoBitrateKbps);
+    }
+    exportWithSettings(outputUrl, map);
+}
+
+void AppController::exportWithSettings(const QUrl &outputUrl, const QVariantMap &settings)
 {
     const QString outputPath = outputUrl.toLocalFile();
     if (outputPath.isEmpty()) {
@@ -8368,8 +8424,7 @@ void AppController::exportWithPreset(const QUrl &outputUrl, const QString &prese
         return;
     }
 
-    const ExportPreset *presetPtr = Exporter::presetById(presetId);
-    const ExportPreset preset = presetPtr ? *presetPtr : Exporter::presets().first();
+    const ExportSettings exportSettings = Exporter::settingsFromMap(settings);
 
     // Stop playback so the decode pool isn't driven from two threads at once.
     setPlaying(false);
@@ -8384,10 +8439,10 @@ void AppController::exportWithPreset(const QUrl &outputUrl, const QString &prese
     // Snapshot the project so edits during export can't race the encoder.
     const drift::Project snapshot = m_project;
 
-    (void)QtConcurrent::run([this, snapshot, preset, outputPath]() {
+    (void)QtConcurrent::run([this, snapshot, exportSettings, outputPath]() {
         QString error;
         const bool ok = Exporter::run(
-            snapshot, preset, outputPath, &error, [this](double fraction) {
+            snapshot, exportSettings, outputPath, &error, [this](double fraction) {
                 QMetaObject::invokeMethod(
                     this,
                     [this, fraction]() {

@@ -133,6 +133,14 @@ ComboBox {
         // ItemDelegate defaults to hoverEnabled: false in Controls.Basic, so the
         // hover fill below never rendered.
         hoverEnabled: true
+        // Objects may expose `available: false` (export codecs) to gray out rows.
+        enabled: {
+            if (modelData && modelData.available !== undefined)
+                return !!modelData.available
+            if (model && model.available !== undefined)
+                return !!model.available
+            return true
+        }
 
         contentItem: Text {
             text: root.textRole ? (modelData[root.textRole] !== undefined
@@ -140,6 +148,7 @@ ComboBox {
                                    : (model[root.textRole] !== undefined ? model[root.textRole] : modelData))
                                 : modelData
             color: Theme.panelForeground
+            opacity: comboDelegate.enabled ? 1 : 0.4
             font: root.font
             elide: Text.ElideRight
             verticalAlignment: Text.AlignVCenter
@@ -158,7 +167,7 @@ ComboBox {
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.NoButton
-            cursorShape: Qt.PointingHandCursor
+            cursorShape: comboDelegate.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
         }
     }
 }

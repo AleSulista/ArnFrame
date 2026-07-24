@@ -514,9 +514,18 @@ public:
     Q_INVOKABLE void clearRecentProjects();
     Q_INVOKABLE void restoreAutosave();
     Q_INVOKABLE void discardAutosave();
-    Q_INVOKABLE QVariantList exportPresets() const;
+    Q_INVOKABLE QVariantList exportPresets() const; // legacy scale ids/labels
+    Q_INVOKABLE QVariantList exportScaleOptions() const;
+    Q_INVOKABLE QVariantList exportVideoCodecs() const;
+    Q_INVOKABLE QVariantList exportAudioCodecs() const;
+    Q_INVOKABLE QVariantMap exportDefaultSettings() const;
+    Q_INVOKABLE QString exportPreferredContainer(const QString &videoCodecId,
+                                                const QString &audioCodecId) const;
+    Q_INVOKABLE QStringList exportSaveFilters(const QString &container) const;
+    Q_INVOKABLE QString exportDefaultSuffix(const QString &container) const;
     Q_INVOKABLE void exportProject(const QUrl &outputUrl);
     Q_INVOKABLE void exportWithPreset(const QUrl &outputUrl, const QString &presetId);
+    Q_INVOKABLE void exportWithSettings(const QUrl &outputUrl, const QVariantMap &settings);
     Q_INVOKABLE void cancelExport();
     Q_INVOKABLE QUrl fileUrl(const QString &path) const;
     Q_INVOKABLE QString imageUrl(const QString &path) const;

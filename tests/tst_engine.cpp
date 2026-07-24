@@ -2677,13 +2677,45 @@ void EngineTest::exporterProducesPlayableFileWithBackground()
     project.setBackground(background);
 
     const QString out = dir.filePath(QStringLiteral("out.mp4"));
-    const ExportPreset *preset = Exporter::presetById(QStringLiteral("source"));
-    QVERIFY(preset);
+    ExportSettings settings = Exporter::defaultSettings();
+    settings.targetHeight = 0;
+    settings.videoCodecId = QStringLiteral("h264");
+    settings.audioCodecId = QStringLiteral("aac");
+    settings.rateControl = QStringLiteral("crf");
+    settings.crf = 23;
+
+    // Prefer an available video codec if h264 is missing.
+    if (!Exporter::videoCodecById(settings.videoCodecId).value(QStringLiteral("available")).toBool()) {
+        bool found = false;
+        for (const QVariant &v : Exporter::videoCodecs()) {
+            const QVariantMap m = v.toMap();
+            if (m.value(QStringLiteral("available")).toBool()) {
+                settings.videoCodecId = m.value(QStringLiteral("id")).toString();
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            QSKIP("No video encoder available in this FFmpeg build");
+    }
+    if (!Exporter::audioCodecById(settings.audioCodecId).value(QStringLiteral("available")).toBool()) {
+        bool found = false;
+        for (const QVariant &v : Exporter::audioCodecs()) {
+            const QVariantMap m = v.toMap();
+            if (m.value(QStringLiteral("available")).toBool()) {
+                settings.audioCodecId = m.value(QStringLiteral("id")).toString();
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            QSKIP("No audio encoder available in this FFmpeg build");
+    }
 
     QString error;
-    const bool ok = Exporter::run(project, *preset, out, &error);
+    const bool ok = Exporter::run(project, settings, out, &error);
     if (!ok && error.contains(QStringLiteral("encoder")))
-        QSKIP("H.264/AAC encoder not available in this FFmpeg build");
+        QSKIP("Selected encoder not available in this FFmpeg build");
     QVERIFY2(ok, qPrintable(error));
     QVERIFY(QFileInfo(out).size() > 0);
 
