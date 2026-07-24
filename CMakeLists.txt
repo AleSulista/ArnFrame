@@ -342,6 +342,7 @@ qt_add_qml_module(drift
         src/qml/components/AddonManagerDialog.qml
         src/qml/components/MissingAddonsDialog.qml
         src/qml/components/ProjectSetupDialog.qml
+        src/qml/components/LayoutChooserDialog.qml
         src/qml/components/ProjectPropertiesDialog.qml
         src/qml/components/PackageProgressDialog.qml
         src/qml/components/ExportDialog.qml

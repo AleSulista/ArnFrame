@@ -862,6 +862,19 @@ PanelFrame {
                         font.pixelSize: Theme.fontSizeXs
                     }
 
+                    ThemedButton {
+                        width: parent.width
+                        variant: "secondary"
+                        glyph: Theme.icons.ratio
+                        text: qsTr("Choose layout…")
+                        tooltip: qsTr("Pick a platform template (YouTube, Instagram, TikTok, …) and quality")
+                        enabled: !EditorState.canvasCropMode
+                        onClicked: {
+                            if (typeof Window !== "undefined" && Window.window && Window.window.openLayoutChooser)
+                                Window.window.openLayoutChooser()
+                        }
+                    }
+
                     ThemedComboBox {
                         width: parent.width
                         enabled: !EditorState.canvasCropMode

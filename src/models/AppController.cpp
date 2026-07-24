@@ -4367,6 +4367,8 @@ bool AppController::timelineHasVisualClips() const
 
 bool AppController::shouldConfigureProjectForAsset(int assetIndex) const
 {
+    if (m_projectLayoutChosen)
+        return false;
     if (!m_assetLibrary)
         return false;
     const QVariantMap asset = m_assetLibrary->assetAt(assetIndex);
@@ -4384,6 +4386,19 @@ bool AppController::shouldConfigureProjectForAsset(int assetIndex) const
         }
     }
     return true;
+}
+
+void AppController::markProjectLayoutChosen()
+{
+    setProjectLayoutChosen(true);
+}
+
+void AppController::setProjectLayoutChosen(bool chosen)
+{
+    if (m_projectLayoutChosen == chosen)
+        return;
+    m_projectLayoutChosen = chosen;
+    emit projectLayoutChosenChanged();
 }
 
 QVariantMap AppController::suggestedProjectSetupForAsset(int assetIndex) const
@@ -8066,6 +8081,7 @@ void AppController::loadProject(const QUrl &url)
     setCurrentProjectPath(path);
     addRecentProject(path);
     deleteRecoveryFile();
+    setProjectLayoutChosen(true);
     setLastMessage(QStringLiteral("Project loaded"));
     reportMissingAddons(info->addons);
 }
@@ -8136,6 +8152,10 @@ void AppController::newProject()
     setCurrentProjectPath(QString());
     setDirty(false);
     deleteRecoveryFile();
+    // Always notify — even when already false — so the layout chooser reopens
+    // after "Decide later" + New Project.
+    m_projectLayoutChosen = false;
+    emit projectLayoutChosenChanged();
     emit snapEnabledChanged();
     emit rippleEnabledChanged();
     emit tracksChanged();
@@ -8295,6 +8315,7 @@ void AppController::restoreAutosave()
     m_recoveryAvailable = false;
     m_recoveryInfo.clear();
     emit recoveryChanged();
+    setProjectLayoutChosen(true);
     setLastMessage(QStringLiteral("Recovered unsaved work"));
 }
 

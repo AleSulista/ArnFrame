@@ -50,12 +50,30 @@ ApplicationWindow {
         projectSetupDialog.openForAsset(assetIndex, runner)
     }
 
+    function promptLayoutChooserIfNeeded() {
+        if (EditorState.recoveryAvailable || EditorState.projectLayoutChosen)
+            return
+        if (layoutChooserDialog.visible || recoveryDialog.visible)
+            return
+        layoutChooserDialog.openChooser()
+    }
+
+    // Settings / header: reopen platform layout picker anytime.
+    function openLayoutChooser() {
+        layoutChooserDialog.openFromSettings()
+    }
+
     ProjectSetupDialog {
         id: projectSetupDialog
     }
 
+    LayoutChooserDialog {
+        id: layoutChooserDialog
+    }
+
     RecoveryDialog {
         id: recoveryDialog
+        onClosed: Qt.callLater(window.promptLayoutChooserIfNeeded)
     }
 
     SubtitleProgressDialog {
@@ -128,6 +146,7 @@ ApplicationWindow {
             if (!EditorState.recoveryAvailable) {
                 stop()
                 attempts = 0
+                Qt.callLater(window.promptLayoutChooserIfNeeded)
                 return
             }
             promptRecoveryIfNeeded()
@@ -136,9 +155,18 @@ ApplicationWindow {
         }
     }
 
+    Timer {
+        id: layoutChooserOpenTimer
+        interval: 120
+        repeat: false
+        onTriggered: window.promptLayoutChooserIfNeeded()
+    }
+
     Component.onCompleted: {
         if (EditorState.recoveryAvailable)
             recoveryOpenTimer.start()
+        else
+            layoutChooserOpenTimer.start()
     }
 
     onVisibilityChanged: {
@@ -151,6 +179,13 @@ ApplicationWindow {
         function onRecoveryChanged() {
             if (EditorState.recoveryAvailable)
                 recoveryOpenTimer.start()
+            else
+                Qt.callLater(window.promptLayoutChooserIfNeeded)
+        }
+
+        function onProjectLayoutChosenChanged() {
+            if (!EditorState.projectLayoutChosen)
+                layoutChooserOpenTimer.restart()
         }
 
         // --- Error and status surfacing -------------------------------------

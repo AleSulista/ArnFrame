@@ -37,6 +37,7 @@ icons=(
   align-start-vertical align-center-vertical align-end-vertical
   # Timeline / media
   captions list-video move-horizontal audio-lines video
+  smartphone monitor square ratio
   # Shortcuts tab and canvas crop tool
   keyboard crop minimize
   # Keyframe row: add/remove a key at the playhead

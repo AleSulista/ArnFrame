@@ -379,6 +379,19 @@ QtObject {
 
         // Media
         captions: "captions",
-        listVideo: "list-video"
+        listVideo: "list-video",
+        smartphone: "smartphone",
+        monitor: "monitor",
+        square: "square",
+        ratio: "ratio",
+
+        // Brand marks (layout chooser)
+        brandYoutube: "brand-youtube",
+        brandInstagram: "brand-instagram",
+        brandFacebook: "brand-facebook",
+        brandTiktok: "brand-tiktok",
+        brandSnapchat: "brand-snapchat",
+        brandX: "brand-x",
+        brandLinkedin: "brand-linkedin"
     })
 }

@@ -126,6 +126,8 @@ class AppController : public QObject
     Q_PROPERTY(QVariantList recentProjects READ recentProjects NOTIFY recentProjectsChanged)
     Q_PROPERTY(bool unlinkAvailable READ canUnlinkSelection NOTIFY editCapabilitiesChanged)
     Q_PROPERTY(bool mergeAvailable READ canMergeSelection NOTIFY editCapabilitiesChanged)
+    // False until the user picks a launch layout (or decides later via first-clip setup / load).
+    Q_PROPERTY(bool projectLayoutChosen READ projectLayoutChosen NOTIFY projectLayoutChosenChanged)
 
 public:
     explicit AppController(AssetLibrary *assetLibrary, QObject *parent = nullptr);
@@ -331,6 +333,8 @@ public:
     Q_INVOKABLE bool timelineHasVisualClips() const;
     Q_INVOKABLE bool shouldConfigureProjectForAsset(int assetIndex) const;
     Q_INVOKABLE QVariantMap suggestedProjectSetupForAsset(int assetIndex) const;
+    bool projectLayoutChosen() const { return m_projectLayoutChosen; }
+    Q_INVOKABLE void markProjectLayoutChosen();
     Q_INVOKABLE void selectClip(int trackIndex, int clipIndex);
     Q_INVOKABLE void addToSelection(int trackIndex, int clipIndex);
     Q_INVOKABLE void setSelection(const QVariantList &pairs);
@@ -590,6 +594,7 @@ signals:
     void currentProjectPathChanged();
     void recoveryChanged();
     void recentProjectsChanged();
+    void projectLayoutChosenChanged();
     void transformBlocked(const QString &reason);
 
 protected:
@@ -800,6 +805,10 @@ protected:
     QTimer *m_autosaveTimer = nullptr;
     bool m_recoveryAvailable = false;
     QVariantMap m_recoveryInfo;
+    // Launch layout picker / first-clip setup completed for this empty project.
+    bool m_projectLayoutChosen = false;
+
+    void setProjectLayoutChosen(bool chosen);
 
     static constexpr int kMaxUndoSteps = 50;
     static constexpr int kAutosaveIntervalMs = 15000;
