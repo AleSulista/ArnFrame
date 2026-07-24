@@ -307,11 +307,34 @@ qt_add_qml_module(drift
         src/qml/EditorHeader.qml
         src/qml/AssetsPanel.qml
         src/qml/PreviewPanel.qml
+        src/qml/components/preview/TransformOverlay.qml
+        src/qml/components/preview/CropOverlay.qml
+        src/qml/components/preview/PreviewToolbar.qml
         src/qml/SegmentationWindow.qml
         src/qml/DenoiseWindow.qml
         src/qml/SpeedCurveWindow.qml
         src/qml/PropertiesPanel.qml
+        src/qml/components/properties/GeneralInspector.qml
+        src/qml/components/properties/TextInspector.qml
+        src/qml/components/properties/TransformInspector.qml
+        src/qml/components/properties/AudioInspector.qml
+        src/qml/components/properties/SpeedFadeInspector.qml
+        src/qml/components/properties/TransitionInspector.qml
+        src/qml/components/properties/BlendingInspector.qml
+        src/qml/components/properties/ShapeInspector.qml
+        src/qml/components/properties/MasksInspector.qml
+        src/qml/components/properties/EffectsInspector.qml
+        src/qml/components/assets/TextAssetsTab.qml
+        src/qml/components/assets/StickersTab.qml
+        src/qml/components/assets/ShapesTab.qml
+        src/qml/components/assets/SoundsTab.qml
+        src/qml/components/assets/SettingsTab.qml
+        src/qml/components/assets/ShortcutsTab.qml
+        src/qml/components/assets/MediaAssetsTab.qml
         src/qml/TimelinePanel.qml
+        src/qml/components/timeline/TimelineToolbar.qml
+        src/qml/components/timeline/TrackHeaderColumn.qml
+        src/qml/components/timeline/TimelineClipItem.qml
         src/qml/components/IconGlyph.qml
         src/qml/components/IconButton.qml
         src/qml/components/PanelFrame.qml

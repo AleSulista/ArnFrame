@@ -1,0 +1,623 @@
+import QtQuick
+import QtQuick.Controls.Basic
+import Drift
+import ".."
+
+// A single clip on a timeline track: background/fade canvas, filmstrip or
+// waveform, name/effects band, drag-to-move, trim handles and fade dots, plus
+// the clip context menu. Positioning and edits are delegated back to the panel
+// (pxPerSecond, snap/landing helpers, trackIndexAtY) and to EditorState.
+Item {
+    id: clipItem
+
+    // Owning TimelinePanel (pxPerSecond, clipColor, trackIndexAtY, landing
+    // preview + effect-drop state, tracks) and the enclosing column.
+    // trackRow is the Repeater parent (the track Rectangle) — do not take it as a
+    // property named trackRow or the call-site binding shadows the outer id.
+    property var panel
+    readonly property var trackRow: parent
+    property var timelineColumn
+    // Filled by Repeater when used as a delegate (AOT-safe).
+    required property int index
+    property int trackIndex
+    property int clipIndex: index
+
+    property var clipData: panel.tracks[trackIndex].clips[clipIndex]
+    property bool selected: (EditorState.selection,
+                             EditorState.selectionContains(trackIndex, clipIndex))
+    property string trackType: panel.tracks[trackIndex].type
+    property bool showWaveform: panel.tracks[trackIndex].showWaveform === true
+    property var clipEffects: clipData.effects || []
+    property bool effectDropTarget: panel.effectDropTrackIndex === trackIndex
+                                    && panel.effectDropClipIndex === clipIndex
+    readonly property bool timelineFadeHandles: trackType !== "text"
+                                                && trackType !== "subtitle"
+
+    // Trim handles stay on whenever selected.
+    // Width is floored so the clip never becomes
+    // an unusable sliver; at that floor both
+    // edges stay trimmable and the middle moves.
+    readonly property bool showTrimHandles: selected
+    readonly property real minDurationSeconds: Math.max(
+        Theme.clipMinDurationSeconds,
+        Theme.clipMinWidth / panel.pxPerSecond)
+
+    // Name band height, derived once instead of
+    // being hardcoded at three separate sites,
+    // and clamped so it can never swallow a
+    // short (25px) text or subtitle row.
+    readonly property real headerBandHeight: {
+        const wanted = clipEffects.length > 0
+            ? Theme.clipHeaderBandHeight * 1.6
+            : Theme.clipHeaderBandHeight
+        return Math.min(wanted, Math.max(0, height * 0.5))
+    }
+
+    y: Theme.clipSelectionRingWidth
+    // Floored so short clips stay visible and
+    // trimmable even at low zoom.
+    width: Math.max(Theme.clipMinWidth,
+                    clipData.duration * panel.pxPerSecond
+                    - 2 * Theme.clipSelectionRingWidth)
+    height: Math.max(0, trackRow.height - 2 * Theme.clipSelectionRingWidth)
+
+    // While dragging, show the same snapped landing outline the
+    // library drop uses, on whichever track the clip is over.
+    function updateMovePreview() {
+        if (!clipMouse.drag.active)
+            return
+        const desired = Math.max(0, (x - Theme.clipSelectionRingWidth) / panel.pxPerSecond)
+        const pos = mapToItem(timelineColumn, width / 2, height / 2)
+        const targetTrack = panel.trackIndexAtY(pos.y)
+        panel.showLandingPreview(targetTrack >= 0 ? targetTrack : trackIndex,
+                                 desired, clipData.duration)
+    }
+    onXChanged: updateMovePreview()
+    onYChanged: updateMovePreview()
+
+    Binding {
+        target: clipItem
+        property: "x"
+        when: !clipMouse.drag.active
+        value: clipItem.clipData.start * panel.pxPerSecond + Theme.clipSelectionRingWidth
+    }
+
+    Binding {
+        target: clipItem
+        property: "y"
+        when: !clipMouse.drag.active
+        value: Theme.clipSelectionRingWidth
+    }
+
+    Rectangle {
+        id: clipBackground
+        anchors.fill: parent
+        radius: Theme.radiusSm
+        // Lightens on hover — previously nothing
+        // in the clip reacted to the pointer.
+        color: {
+            const base = panel.clipColor(
+                clipItem.trackType === "shape" ? "graphic" : clipItem.trackType)
+            return clipMouse.containsMouse ? Qt.lighter(base, 1.15) : base
+        }
+        border.width: clipItem.effectDropTarget
+                      ? Theme.borderWidthFocus
+                      : (clipItem.selected ? Theme.clipSelectionRingWidth : 0)
+        border.color: clipItem.effectDropTarget ? Theme.clipEffect : Theme.primary
+        clip: true
+
+        Behavior on color {
+            ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+        Behavior on border.width {
+            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            visible: clipItem.effectDropTarget
+            color: Qt.rgba(Theme.clipEffect.r, Theme.clipEffect.g, Theme.clipEffect.b, 0.28)
+            z: 4
+        }
+
+        // Fade ramp overlay (always visible so fades read at a glance).
+        Canvas {
+            id: fadeCanvas
+            anchors.fill: parent
+            z: 2
+            property real fadeInPx: Math.min(width, (clipItem.clipData.fadeIn || 0) * panel.pxPerSecond)
+            property real fadeOutPx: Math.min(width, (clipItem.clipData.fadeOut || 0) * panel.pxPerSecond)
+            onFadeInPxChanged: requestPaint()
+            onFadeOutPxChanged: requestPaint()
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.reset()
+                ctx.fillStyle = "rgba(0,0,0,0.38)"
+                ctx.strokeStyle = "rgba(255,255,255,0.9)"
+                ctx.lineWidth = 1.5
+                if (fadeInPx > 0.5) {
+                    ctx.beginPath()
+                    ctx.moveTo(0, 0)
+                    ctx.lineTo(fadeInPx, 0)
+                    ctx.lineTo(0, height)
+                    ctx.closePath()
+                    ctx.fill()
+                    ctx.beginPath()
+                    ctx.moveTo(0, height)
+                    ctx.lineTo(fadeInPx, 0)
+                    ctx.stroke()
+                }
+                if (fadeOutPx > 0.5) {
+                    ctx.beginPath()
+                    ctx.moveTo(width, 0)
+                    ctx.lineTo(width - fadeOutPx, 0)
+                    ctx.lineTo(width, height)
+                    ctx.closePath()
+                    ctx.fill()
+                    ctx.beginPath()
+                    ctx.moveTo(width, height)
+                    ctx.lineTo(width - fadeOutPx, 0)
+                    ctx.stroke()
+                }
+            }
+        }
+
+        ClipFilmstrip {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.topMargin: (clipItem.trackType === "video"
+                                || clipItem.trackType === "audio"
+                                || clipItem.trackType === "shape")
+                               ? clipItem.headerBandHeight
+                               : 0
+            visible: clipItem.clipData.filmstripPath
+                     && clipItem.clipData.filmstripPath.length > 0
+                     && !clipItem.showWaveform
+                     && (clipItem.trackType === "video"
+                         || clipItem.trackType === "shape"
+                         || clipItem.clipData.kind === "image")
+            filmstripPath: clipItem.clipData.filmstripPath
+            inPoint: clipItem.clipData.inPoint
+            outPoint: clipItem.clipData.outPoint
+            sourceDuration: clipItem.clipData.sourceDuration
+            // Image "strips" are a single poster frame.
+            frameCount: clipItem.clipData.kind === "image" ? 1 : 8
+            z: 0
+        }
+
+        Rectangle {
+            visible: clipItem.trackType === "video"
+                     || clipItem.trackType === "audio"
+                     || clipItem.trackType === "shape"
+            width: parent.width
+            height: clipItem.headerBandHeight
+            color: Theme.scrimColor
+            z: 1
+
+            Column {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: 6
+                anchors.rightMargin: 6
+                spacing: 1
+
+                Text {
+                    width: parent.width
+                    text: clipItem.clipData.name
+                    color: Theme.onMedia
+                    font.pixelSize: Theme.fontSizeTiny
+                    font.family: Theme.fontFamily
+                    elide: Text.ElideRight
+                }
+
+                Text {
+                    width: parent.width
+                    visible: clipItem.clipEffects.length > 0
+                    text: {
+                        const names = []
+                        for (var i = 0; i < clipItem.clipEffects.length; i++)
+                            names.push(clipItem.clipEffects[i].label || qsTr("Effect"))
+                        return names.join(" · ")
+                    }
+                    color: Theme.panelSecondaryForeground
+                    font.pixelSize: Theme.fontSizeTiny
+                    font.family: Theme.fontFamily
+                    elide: Text.ElideRight
+                }
+            }
+        }
+
+        Column {
+            visible: clipItem.trackType === "text"
+                     || clipItem.trackType === "subtitle"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            // Clamped so the label width cannot
+            // go negative on very narrow clips.
+            anchors.leftMargin: Math.min(Theme.spacingLg, parent.width / 4)
+            anchors.rightMargin: Math.min(Theme.spacingLg, parent.width / 4)
+            spacing: 1
+
+            Text {
+                width: parent.width
+                text: clipItem.trackType === "subtitle"
+                      ? (clipItem.clipData.name
+                         || qsTr("Subtitles"))
+                      : (clipItem.clipData.textContent
+                         || clipItem.clipData.name)
+                color: Theme.onMedia
+                font.pixelSize: Theme.fontSizeXs
+                font.family: Theme.fontFamily
+                elide: Text.ElideRight
+            }
+
+            Text {
+                width: parent.width
+                visible: clipItem.clipEffects.length > 0
+                text: {
+                    const names = []
+                    for (var i = 0; i < clipItem.clipEffects.length; i++)
+                        names.push(clipItem.clipEffects[i].label || qsTr("Effect"))
+                    return names.join(" · ")
+                }
+                color: Theme.panelSecondaryForeground
+                font.pixelSize: Theme.fontSizeTiny
+                font.family: Theme.fontFamily
+                elide: Text.ElideRight
+            }
+        }
+
+        Canvas {
+            id: waveformCanvas
+            visible: clipItem.trackType === "audio"
+                     || (clipItem.trackType === "video"
+                         && clipItem.showWaveform)
+            property var peaks: clipItem.clipData.path
+                          ? EditorState.waveformPeaks(clipItem.clipData.path)
+                          : []
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.topMargin: clipItem.headerBandHeight
+            anchors.bottom: parent.bottom
+            onPeaksChanged: requestPaint()
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+
+            Connections {
+                target: EditorState
+                function onWaveformReady(path) {
+                    if (path === clipItem.clipData.path)
+                        waveformCanvas.peaks = EditorState.waveformPeaks(path)
+                }
+            }
+
+            onPaint: {
+                var ctx = getContext("2d");
+                ctx.clearRect(0, 0, width, height);
+                if (!peaks || peaks.length === 0)
+                    return;
+                // One filled column per screen pixel: zoomed-out columns
+                // take the max of covered peaks; zoomed-in columns
+                // reuse peaks so there are never gaps between bars.
+                ctx.fillStyle = Theme.waveformColor;
+                var mid = height / 2;
+                var w = Math.max(1, Math.floor(width));
+                var n = peaks.length;
+                for (var x = 0; x < w; x++) {
+                    var i0 = Math.floor(x * n / w);
+                    var i1 = Math.floor((x + 1) * n / w);
+                    if (i1 <= i0)
+                        i1 = Math.min(n, i0 + 1);
+                    var peak = 0;
+                    for (var i = i0; i < i1; i++) {
+                        if (peaks[i] > peak)
+                            peak = peaks[i];
+                    }
+                    var amp = peak * mid * 0.9;
+                    if (amp > 0.5)
+                        ctx.fillRect(x, mid - amp, 1, amp * 2);
+                }
+            }
+        }
+    }
+
+    MouseArea {
+        id: clipMouse
+        z: 2
+        anchors.fill: parent
+        hoverEnabled: true
+        // Insets make room for the trim handles.
+        anchors.leftMargin: clipItem.showTrimHandles ? 14 : 0
+        anchors.rightMargin: clipItem.showTrimHandles ? 14 : 0
+        enabled: !leftTrimMouse.pressed && !rightTrimMouse.pressed
+                     && !fadeInMouse.pressed && !fadeOutMouse.pressed
+        // A clip is dragged, not clicked.
+        cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+        // Right-click opens the clip menu; the app
+        // previously had no context menus at all.
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        drag.target: clipItem
+        drag.axis: Drag.XAndYAxis
+        drag.threshold: 8
+        drag.minimumX: Theme.clipSelectionRingWidth
+        drag.minimumY: -clipItem.trackRow.height
+        drag.maximumY: clipItem.trackRow.height * 2
+        property int originTrack: clipItem.trackIndex
+
+        onPressed: (mouse) => {
+            originTrack = clipItem.trackIndex
+            if (mouse.button === Qt.RightButton) {
+                // Right-click selects, then opens the menu.
+                if (!clipItem.selected)
+                    EditorState.selectClip(clipItem.trackIndex, clipItem.clipIndex)
+                clipContextMenu.popup()
+                return
+            }
+            if ((mouse.modifiers & Qt.ShiftModifier) !== 0)
+                EditorState.addToSelection(clipItem.trackIndex, clipItem.clipIndex)
+            else
+                EditorState.selectClip(clipItem.trackIndex, clipItem.clipIndex)
+        }
+        onClicked: (mouse) => {
+            if (mouse.button === Qt.RightButton)
+                return
+            if ((mouse.modifiers & Qt.ShiftModifier) !== 0)
+                EditorState.addToSelection(clipItem.trackIndex, clipItem.clipIndex)
+            else
+                EditorState.selectClip(clipItem.trackIndex, clipItem.clipIndex)
+        }
+
+        // Surfaces actions that were previously
+        // reachable only by unlabelled shortcut,
+        // plus cutSelection which had no UI at all.
+        ThemedContextMenu {
+            id: clipContextMenu
+
+            ThemedMenuItem {
+                text: qsTr("Split at current time")
+                icon.name: Theme.icons.scissors
+                onTriggered: EditorState.splitAtPlayhead()
+            }
+            MenuSeparator { }
+            ThemedMenuItem {
+                text: qsTr("Cut")
+                icon.name: Theme.icons.scissors
+                onTriggered: EditorState.cutSelection()
+            }
+            ThemedMenuItem {
+                text: qsTr("Copy")
+                icon.name: Theme.icons.copy
+                onTriggered: EditorState.copySelection()
+            }
+            ThemedMenuItem {
+                text: qsTr("Duplicate")
+                icon.name: Theme.icons.copyPlus
+                onTriggered: EditorState.duplicateSelectedClip()
+            }
+            MenuSeparator { }
+            ThemedMenuItem {
+                text: qsTr("Delete")
+                icon.name: Theme.icons.trash
+                onTriggered: EditorState.deleteSelectedClip()
+            }
+        }
+        onReleased: {
+            panel.clearLandingPreview()
+            if (!drag.active)
+                return
+            const newStart = (clipItem.x - Theme.clipSelectionRingWidth) / panel.pxPerSecond
+            const pos = clipItem.mapToItem(timelineColumn, clipItem.width / 2, clipItem.height / 2)
+            const targetTrack = panel.trackIndexAtY(pos.y)
+            clipItem.y = Theme.clipSelectionRingWidth
+            if (targetTrack >= 0 && targetTrack !== originTrack)
+                EditorState.moveClipToTrack(originTrack, clipItem.clipIndex, targetTrack, newStart)
+            else
+                EditorState.moveClip(clipItem.trackIndex, clipItem.clipIndex, newStart)
+        }
+    }
+
+    // Fade dots sit above trim handles so they stay
+    // grabable at the corners (zero fade). Trim the
+    // edge below the dots; grab the dots to fade.
+    Rectangle {
+        id: fadeInHandle
+        width: 13
+        height: 13
+        radius: 6.5
+        y: 2
+        z: 40
+        visible: clipItem.timelineFadeHandles && clipItem.selected && clipItem.width > 26
+        color: Theme.primary
+        border.color: Theme.onMedia
+        border.width: 2
+
+        Binding {
+            target: fadeInHandle
+            property: "x"
+            when: !fadeInMouse.pressed
+            value: Math.max(0, Math.min(clipItem.width - fadeInHandle.width,
+                                        (clipItem.clipData.fadeIn || 0) * panel.pxPerSecond - fadeInHandle.width / 2))
+        }
+
+        MouseArea {
+            id: fadeInMouse
+            anchors.fill: parent
+            anchors.margins: -6
+            z: 1
+            preventStealing: true
+            hoverEnabled: true
+            cursorShape: Qt.SizeHorCursor
+            onPressed: (mouse) => {
+                mouse.accepted = true
+                EditorState.beginPreviewDrag(qsTr("Adjust fade"))
+            }
+            onPositionChanged: (mouse) => {
+                if (!pressed)
+                    return
+                const px = Math.max(0, Math.min(clipItem.width,
+                                                mapToItem(clipItem, mouse.x, mouse.y).x))
+                fadeInHandle.x = Math.min(clipItem.width - fadeInHandle.width, px - fadeInHandle.width / 2)
+                EditorState.previewSetClipFade(clipItem.trackIndex, clipItem.clipIndex,
+                                               px / panel.pxPerSecond,
+                                               clipItem.clipData.fadeOut || 0)
+            }
+            onReleased: EditorState.commitPreviewDrag()
+            onCanceled: EditorState.cancelPreviewDrag()
+
+            ThemedToolTip {
+                visible: fadeInMouse.pressed || fadeInMouse.containsMouse
+                text: qsTr("Fade in %1s").arg((clipItem.clipData.fadeIn || 0).toFixed(2))
+            }
+        }
+    }
+
+    Rectangle {
+        id: fadeOutHandle
+        width: 13
+        height: 13
+        radius: 6.5
+        y: 2
+        z: 40
+        visible: clipItem.timelineFadeHandles && clipItem.selected && clipItem.width > 26
+        color: Theme.primary
+        border.color: Theme.onMedia
+        border.width: 2
+
+        Binding {
+            target: fadeOutHandle
+            property: "x"
+            when: !fadeOutMouse.pressed
+            value: Math.max(0, Math.min(clipItem.width - fadeOutHandle.width,
+                                        clipItem.width - (clipItem.clipData.fadeOut || 0) * panel.pxPerSecond - fadeOutHandle.width / 2))
+        }
+
+        MouseArea {
+            id: fadeOutMouse
+            anchors.fill: parent
+            anchors.margins: -6
+            z: 1
+            preventStealing: true
+            hoverEnabled: true
+            cursorShape: Qt.SizeHorCursor
+            onPressed: (mouse) => {
+                mouse.accepted = true
+                EditorState.beginPreviewDrag(qsTr("Adjust fade"))
+            }
+            onPositionChanged: (mouse) => {
+                if (!pressed)
+                    return
+                const px = Math.max(0, Math.min(clipItem.width,
+                                                mapToItem(clipItem, mouse.x, mouse.y).x))
+                fadeOutHandle.x = Math.max(0, px - fadeOutHandle.width / 2)
+                EditorState.previewSetClipFade(clipItem.trackIndex, clipItem.clipIndex,
+                                               clipItem.clipData.fadeIn || 0,
+                                               Math.max(0, (clipItem.width - px) / panel.pxPerSecond))
+            }
+            onReleased: EditorState.commitPreviewDrag()
+            onCanceled: EditorState.cancelPreviewDrag()
+
+            ThemedToolTip {
+                visible: fadeOutMouse.pressed || fadeOutMouse.containsMouse
+                text: qsTr("Fade out %1s").arg((clipItem.clipData.fadeOut || 0).toFixed(2))
+            }
+        }
+    }
+
+    Rectangle {
+        id: leftTrimHandle
+        width: Theme.clipTrimHandleWidth
+        anchors.left: clipBackground.left
+        anchors.top: clipBackground.top
+        anchors.bottom: clipBackground.bottom
+        visible: clipItem.showTrimHandles
+        color: Theme.primary
+        opacity: leftTrimMouse.pressed ? 1.0
+                 : (leftTrimMouse.containsMouse ? 0.95 : 0.75)
+
+        Behavior on opacity {
+            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+
+        ThemedToolTip {
+            text: qsTr("Drag to trim the start")
+            visible: leftTrimMouse.containsMouse && !leftTrimMouse.pressed
+        }
+        z: 30
+
+        MouseArea {
+            id: leftTrimMouse
+            anchors.fill: parent
+            anchors.leftMargin: -10
+            anchors.rightMargin: -4
+            // Leave the top corner for the fade-in dot.
+            anchors.topMargin: clipItem.timelineFadeHandles ? 16 : -6
+            anchors.bottomMargin: -6
+            preventStealing: true
+            hoverEnabled: true
+            cursorShape: Qt.SizeHorCursor
+            onPositionChanged: (mouse) => {
+                if (!pressed)
+                    return
+                const end = (clipItem.clipData.start || 0)
+                            + (clipItem.clipData.duration || 0)
+                const raw = mapToItem(trackRow, mouse.x, mouse.y).x / panel.pxPerSecond
+                // Floor duration so the clip stays at least
+                // clipMinWidth; handles remain draggable to extend.
+                const newStart = Math.min(raw, end - clipItem.minDurationSeconds)
+                EditorState.trimClipLeft(clipItem.trackIndex, clipItem.clipIndex,
+                                       Math.max(0, newStart))
+            }
+        }
+    }
+
+    Rectangle {
+        id: rightTrimHandle
+        width: Theme.clipTrimHandleWidth
+        anchors.right: clipBackground.right
+        anchors.top: clipBackground.top
+        anchors.bottom: clipBackground.bottom
+        visible: clipItem.showTrimHandles
+        color: Theme.primary
+        opacity: rightTrimMouse.pressed ? 1.0
+                 : (rightTrimMouse.containsMouse ? 0.95 : 0.75)
+
+        Behavior on opacity {
+            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        }
+
+        ThemedToolTip {
+            text: qsTr("Drag to trim the end")
+            visible: rightTrimMouse.containsMouse && !rightTrimMouse.pressed
+        }
+        z: 30
+
+        MouseArea {
+            id: rightTrimMouse
+            anchors.fill: parent
+            anchors.leftMargin: -4
+            anchors.rightMargin: -10
+            // Leave the top corner for the fade-out dot.
+            anchors.topMargin: clipItem.timelineFadeHandles ? 16 : -6
+            anchors.bottomMargin: -6
+            preventStealing: true
+            hoverEnabled: true
+            cursorShape: Qt.SizeHorCursor
+            onPositionChanged: (mouse) => {
+                if (!pressed)
+                    return
+                const start = clipItem.clipData.start || 0
+                const raw = mapToItem(trackRow, mouse.x, mouse.y).x / panel.pxPerSecond
+                const newEnd = Math.max(raw, start + clipItem.minDurationSeconds)
+                EditorState.trimClipRight(clipItem.trackIndex, clipItem.clipIndex,
+                                        newEnd)
+            }
+        }
+    }
+}
