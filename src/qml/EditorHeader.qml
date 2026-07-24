@@ -92,35 +92,82 @@ Rectangle {
         anchors.verticalCenterOffset: 1
         spacing: Theme.spacingLg
 
-        // --- Left: project identity -------------------------------------------
+        // --- Left: project switcher + save ------------------------------------
         Row {
             Layout.alignment: Qt.AlignVCenter
             spacing: Theme.spacingLg
 
+            // Gmail-style status pill: saved/unsaved dot, project name, chevron.
             Rectangle {
-                width: 32
+                id: projectsButton
+
+                readonly property bool open: recentPopup.visible
+                readonly property bool saved: !EditorState.hasUnsavedChanges
+
+                // Cap width so a long name does not shove the right-side actions.
+                width: Math.min(projectsRow.implicitWidth + Theme.spacingXl * 2, 260)
                 height: 32
-                radius: Theme.radiusSm
-                color: logoArea.containsMouse ? Theme.accent : "transparent"
+                radius: Theme.radiusPill
+                color: projectsArea.containsMouse || open ? Theme.popoverHover : Theme.accent
+                anchors.verticalCenter: parent.verticalCenter
+                clip: true
 
                 Behavior on color {
                     ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
                 }
 
-                IconGlyph {
-                    anchors.centerIn: parent
-                    glyph: Theme.icons.film
-                    iconSize: Theme.iconSizeLg
-                    iconColor: Theme.primary
+                Accessible.role: Accessible.Button
+                Accessible.name: qsTr("Projects")
+                Accessible.description: saved ? qsTr("All changes saved")
+                                              : qsTr("Unsaved changes")
+
+                Row {
+                    id: projectsRow
+                    anchors.left: parent.left
+                    anchors.leftMargin: Theme.spacingXl
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Theme.spacingMd
+
+                    Rectangle {
+                        width: 8
+                        height: 8
+                        radius: 4
+                        color: projectsButton.saved ? Theme.constructive : Theme.destructive
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        // Cap against the pill's max width (dot + gaps + chevron + padding).
+                        readonly property real maxTextWidth: 260 - Theme.spacingXl * 2
+                                                             - 8 - Theme.iconSizeSm
+                                                             - Theme.spacingMd * 2
+                        width: Math.min(implicitWidth, maxTextWidth)
+                        text: root.projectName
+                        color: Theme.foreground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSm
+                        font.weight: Font.Medium
+                        elide: Text.ElideRight
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    IconGlyph {
+                        glyph: Theme.icons.chevronDown
+                        iconSize: Theme.iconSizeSm
+                        iconColor: Theme.mutedForeground
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
 
                 ThemedToolTip {
-                    visible: logoArea.containsMouse
-                    text: qsTr("Open project / recent")
+                    visible: projectsArea.containsMouse && !projectsButton.open
+                    text: projectsButton.saved
+                          ? qsTr("Projects — click to switch or start new")
+                          : qsTr("Unsaved changes — click to switch or start new")
                 }
 
                 MouseArea {
-                    id: logoArea
+                    id: projectsArea
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
@@ -131,88 +178,9 @@ Rectangle {
                     id: recentPopup
                     y: parent.height + Theme.spacingMd
                     onOpenFileRequested: root.openProject()
+                    onNewProjectRequested: EditorState.newProject()
                     onPackageRequested: root.packageProject()
                     onPropertiesRequested: projectPropertiesDialog.openDialog()
-                }
-            }
-
-            Rectangle {
-                // Bounded: an unbounded implicitWidth let a long project name
-                // grow until it collided with the status area and the right group.
-                width: Math.min(nameInput.implicitWidth + Theme.spacing2xl, 280)
-                height: 32
-                radius: Theme.radiusSm
-                color: nameArea.containsMouse || nameInput.activeFocus ? Theme.accent : "transparent"
-                anchors.verticalCenter: parent.verticalCenter
-
-                Behavior on color {
-                    ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                }
-
-                TextInput {
-                    id: nameInput
-                    anchors.fill: parent
-                    anchors.leftMargin: Theme.spacingLg
-                    anchors.rightMargin: Theme.spacingLg
-                    verticalAlignment: TextInput.AlignVCenter
-                    text: root.projectName
-                    color: Theme.foreground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeBase
-                    selectByMouse: true
-                    clip: true
-                    onEditingFinished: EditorState.projectName = text
-
-                    // Escape reverts. Committing used to be the only outcome, so
-                    // a mistyped name became permanent the moment focus moved.
-                    Keys.onEscapePressed: function(event) {
-                        text = root.projectName
-                        focus = false
-                        event.accepted = true
-                    }
-
-                    Accessible.role: Accessible.EditableText
-                    Accessible.name: qsTr("Project name")
-                }
-
-                ThemedToolTip {
-                    visible: nameArea.containsMouse && !nameInput.activeFocus
-                    text: qsTr("Project name — click to rename, Esc to cancel")
-                }
-
-                MouseArea {
-                    id: nameArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    acceptedButtons: Qt.NoButton
-                    cursorShape: Qt.IBeamCursor
-                }
-            }
-
-            Rectangle {
-                width: 7
-                height: 7
-                radius: 3.5
-                color: Theme.primary
-                anchors.verticalCenter: parent.verticalCenter
-                visible: opacity > 0
-                opacity: EditorState.hasUnsavedChanges ? 1 : 0
-
-                Behavior on opacity {
-                    NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
-                }
-
-                ThemedToolTip {
-                    visible: unsavedArea.containsMouse
-                    text: qsTr("Unsaved changes")
-                }
-
-                MouseArea {
-                    id: unsavedArea
-                    anchors.fill: parent
-                    anchors.margins: -Theme.spacingSm
-                    hoverEnabled: true
-                    acceptedButtons: Qt.NoButton
                 }
             }
 
