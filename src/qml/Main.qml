@@ -17,6 +17,22 @@ ApplicationWindow {
     title: "CutWire Drift"
     color: Theme.appBackground
 
+    // Set true after the unsaved prompt resolves so onClosing can finish quit.
+    property bool forceClose: false
+
+    onClosing: function (close) {
+        if (window.forceClose || !EditorState.hasUnsavedChanges)
+            return
+        close.accepted = false
+        editorHeader.confirmIfDirty(function () {
+            // Don't Save leaves dirty true; clear it so aboutToQuit does not
+            // write a recovery the user just declined. Harmless after Save.
+            EditorState.discardUnsavedChanges()
+            window.forceClose = true
+            window.close()
+        })
+    }
+
     // Fullscreen preview: the window goes fullscreen *and* every panel around the
     // preview collapses, so the video actually fills the display. Toggling the
     // window alone just scaled the same three-pane layout up.
@@ -260,6 +276,7 @@ ApplicationWindow {
         spacing: 0
 
         EditorHeader {
+            id: editorHeader
             width: parent.width
             visible: !window.previewFullscreen
         }

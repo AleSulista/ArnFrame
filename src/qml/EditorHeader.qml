@@ -15,20 +15,52 @@ Rectangle {
 
     readonly property var projectFilter: [qsTr("Drift project (*.drift)")]
 
-    function openProject() {
-        var url = FileDialogs.openFile(qsTr("Open Project"), root.projectFilter)
-        if (url != "")
-            EditorState.loadProject(url)
+    // Action to run after Save or Don't Save resolves. Null when idle.
+    property var _pendingAfterUnsaved: null
+
+    // Runs `action` immediately when clean; otherwise opens the unsaved prompt.
+    // Used by New / Open / Recent / Quit and the matching shortcuts.
+    function confirmIfDirty(action) {
+        if (!EditorState.hasUnsavedChanges) {
+            action()
+            return
+        }
+        root._pendingAfterUnsaved = action
+        unsavedDialog.openDialog()
     }
 
+    function openProject() {
+        root.confirmIfDirty(function () {
+            var url = FileDialogs.openFile(qsTr("Open Project"), root.projectFilter)
+            if (url != "")
+                EditorState.loadProject(url)
+        })
+    }
+
+    function requestNewProject() {
+        root.confirmIfDirty(function () {
+            EditorState.newProject()
+        })
+    }
+
+    function openRecent(path) {
+        root.confirmIfDirty(function () {
+            EditorState.openRecentProject(path)
+        })
+    }
+
+    // Returns true when the project is clean after the attempt. False if the
+    // user cancelled Save As or the write failed — callers must not continue.
     function saveProject() {
         if (EditorState.currentProjectPath && EditorState.currentProjectPath.length > 0) {
             EditorState.saveProject(EditorState.fileUrl(EditorState.currentProjectPath))
-            return
+            return !EditorState.hasUnsavedChanges
         }
         var url = FileDialogs.saveFile(qsTr("Save Project"), root.projectFilter, "drift")
-        if (url != "")
-            EditorState.saveProject(url)
+        if (url == "")
+            return false
+        EditorState.saveProject(url)
+        return !EditorState.hasUnsavedChanges
     }
 
     // Save As with every source file copied in, so the result opens on a machine that has none of
@@ -56,6 +88,9 @@ Rectangle {
                 exportProgressDialog.openDialog()
             }
         }
+        function onSaveRequested() { root.saveProject() }
+        function onOpenRequested() { root.openProject() }
+        function onNewProjectRequested() { root.requestNewProject() }
     }
 
     ExportDialog {
@@ -73,6 +108,30 @@ Rectangle {
 
     PackageProgressDialog {
         id: packageProgressDialog
+    }
+
+    UnsavedChangesDialog {
+        id: unsavedDialog
+
+        // Null pending *before* close(): Dialog.close() rejects, and onRejected
+        // must not wipe an action we are about to run.
+        onSaveChosen: {
+            if (!root.saveProject())
+                return
+            const action = root._pendingAfterUnsaved
+            root._pendingAfterUnsaved = null
+            close()
+            if (action)
+                action()
+        }
+        onDiscardChosen: {
+            const action = root._pendingAfterUnsaved
+            root._pendingAfterUnsaved = null
+            close()
+            if (action)
+                action()
+        }
+        onRejected: root._pendingAfterUnsaved = null
     }
 
     Rectangle {
@@ -178,7 +237,8 @@ Rectangle {
                     id: recentPopup
                     y: parent.height + Theme.spacingMd
                     onOpenFileRequested: root.openProject()
-                    onNewProjectRequested: EditorState.newProject()
+                    onNewProjectRequested: root.requestNewProject()
+                    onOpenRecentRequested: (path) => root.openRecent(path)
                     onPackageRequested: root.packageProject()
                     onPropertiesRequested: projectPropertiesDialog.openDialog()
                 }
@@ -187,7 +247,11 @@ Rectangle {
             IconButton {
                 glyph: Theme.icons.save
                 variant: "ghost"
-                tooltip: qsTr("Save project")
+                tooltip: {
+                    const keys = EditorState.shortcutFor("save")
+                    return keys.length > 0 ? qsTr("Save project (%1)").arg(keys)
+                                           : qsTr("Save project")
+                }
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: root.saveProject()
             }

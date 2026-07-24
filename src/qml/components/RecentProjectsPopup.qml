@@ -11,6 +11,7 @@ Popup {
 
     signal openFileRequested()
     signal newProjectRequested()
+    signal openRecentRequested(string path)
     signal packageRequested()
     signal propertiesRequested()
 
@@ -270,8 +271,8 @@ Popup {
                 const entry = root.previousItems[currentIndex]
                 if (!entry.exists)
                     return
-                EditorState.openRecentProject(entry.path)
                 root.close()
+                root.openRecentRequested(entry.path)
             }
 
             delegate: ProjectRow {
@@ -291,7 +292,7 @@ Popup {
                 interactive: previousRow.modelData.exists
                 highlighted: previousList.currentIndex === index
 
-                onTriggered: EditorState.openRecentProject(previousRow.modelData.path)
+                onTriggered: root.openRecentRequested(previousRow.modelData.path)
             }
         }
 
