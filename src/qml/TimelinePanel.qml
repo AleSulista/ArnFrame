@@ -1088,10 +1088,10 @@ PanelFrame {
                                     EditorState.snapTime(Math.max(0, x) / root.pxPerSecond)
                             }
 
-                            onPressed: (mouse) => {
-                                EditorState.clearSelection()
-                                scrubTo(mouse.x)
-                            }
+                            // Seeking is not a selection change: scrubbing to look at a different
+                            // point used to drop the clip you were editing, and with it the
+                            // properties panel you were working in.
+                            onPressed: (mouse) => scrubTo(mouse.x)
                             onPositionChanged: (mouse) => {
                                 if (pressed)
                                     scrubTo(mouse.x)

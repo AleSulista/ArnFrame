@@ -23,6 +23,7 @@ private slots:
     void keyframeLinearInterpolation();
     void keyframeEaseInterpolation();
     void keyframeBezierTangents();
+    void disabledKeyframesFreezeAtFirstKey();
     void legacyTrackInterpolationMigratesLosslessly();
     void keyframeNearestQuery();
     void projectSerializationRoundTrip();
@@ -98,6 +99,44 @@ void CoreTest::keyframeLinearInterpolation()
     track.setKeyframe(0, 0.0);
     track.setKeyframe(drift::secondsToUs(2.0), 1.0);
     QCOMPARE(track.evaluateAt(drift::secondsToUs(1.0)), 0.5);
+}
+
+void CoreTest::disabledKeyframesFreezeAtFirstKey()
+{
+    drift::KeyframeTrack<double> track;
+    track.setKeyframe(0, 0.0);
+    track.setKeyframe(drift::secondsToUs(2.0), 1.0);
+    QVERIFY(track.enabled());
+
+    track.setEnabled(false);
+    // Every sample reads as the first key while the animation is parked...
+    QCOMPARE(track.evaluateAt(drift::secondsToUs(1.0)), 0.0);
+    QCOMPARE(track.evaluateAt(drift::secondsToUs(2.0)), 0.0);
+    // ...and the keys themselves are untouched, so switching back on restores the curve exactly.
+    QCOMPARE(track.keyframes().size(), 2);
+    track.setEnabled(true);
+    QCOMPARE(track.evaluateAt(drift::secondsToUs(1.0)), 0.5);
+
+    // The switch survives a save/load round trip.
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-kf");
+    clip.type = drift::ClipType::Text;
+    clip.timelineDuration = drift::secondsToUs(3.0);
+    clip.opacity = track;
+    clip.opacity.setEnabled(false);
+    project.tracks()[0].clips.append(clip);
+
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(project.toJson(), &error);
+    QVERIFY(error.isEmpty());
+    const drift::KeyframeTrack<double> &loadedTrack = loaded.tracks().at(0).clips.at(0).opacity;
+    QVERIFY(!loadedTrack.enabled());
+    QCOMPARE(loadedTrack.keyframes().size(), 2);
+    // A project written before the switch existed loads with its animations on.
+    QVERIFY(loaded.tracks().at(0).clips.at(0).transformX.enabled());
 }
 
 void CoreTest::keyframeBezierTangents()

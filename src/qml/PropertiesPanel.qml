@@ -32,11 +32,11 @@ PanelFrame {
     property int transitionDataRevision: 0
     property bool suppressTransitionKindUpdate: false
     property int previousTab: 0
-    readonly property var clip: {
+    readonly property var clipData: {
         void clipDataRevision
         return EditorState.selectedClipData
     }
-    readonly property bool hasSelection: !!clip && Object.keys(clip).length > 0
+    readonly property bool hasSelection: !!root.clipData && Object.keys(root.clipData).length > 0
     readonly property int canvasW: {
         void EditorState.tracks
         return Math.max(1, EditorState.projectWidth())
@@ -91,11 +91,11 @@ PanelFrame {
     readonly property int transitionTabIndex: tabIndexOf("transition")
     readonly property var selectedEffects: EditorState.selectedClipEffects
     readonly property var selectedAudioEffects: EditorState.selectedClipAudioEffects
-    readonly property string clipKind: hasSelection ? (clip.kind || "") : ""
+    readonly property string clipKind: hasSelection ? (root.clipData.kind || "") : ""
     readonly property bool hasTextStyle: hasSelection
                                          && (clipKind === "text" || clipKind === "subtitle")
-                                         && !!clip.textStyle
-    readonly property var textStyle: hasTextStyle ? clip.textStyle : ({
+                                         && !!root.clipData.textStyle
+    readonly property var textStyle: hasTextStyle ? root.clipData.textStyle : ({
                                                                        "fontFamily": "Inter",
                                                                        "pixelSize": 64,
                                                                        "fontWeight": 700,
@@ -171,8 +171,8 @@ PanelFrame {
                                              "Every Nth word", "Longest word", "Random words",
                                              "Spoken word (karaoke)"]
 
-    readonly property bool hasShapeStyle: hasSelection && clipKind === "shape" && !!clip.shapeStyle
-    readonly property var shapeStyle: hasShapeStyle ? clip.shapeStyle : ({
+    readonly property bool hasShapeStyle: hasSelection && clipKind === "shape" && !!root.clipData.shapeStyle
+    readonly property var shapeStyle: hasShapeStyle ? root.clipData.shapeStyle : ({
                                                                        "kind": "rectangle",
                                                                        "fillKind": "solid",
                                                                        "fill": "#ff00b4ff",
@@ -266,17 +266,17 @@ PanelFrame {
         if (!root.hasSelection)
             return
         if (startField && !startField.activeFocus)
-            startField.value = root.clip.start
+            startField.value = root.clipData.start
         if (durationField && !durationField.activeFocus)
-            durationField.value = root.clip.duration
+            durationField.value = root.clipData.duration
         if (inPointField && !inPointField.activeFocus)
-            inPointField.value = root.clip.inPoint
+            inPointField.value = root.clipData.inPoint
         if (outPointField && !outPointField.activeFocus)
-            outPointField.value = root.clip.outPoint
+            outPointField.value = root.clipData.outPoint
         if (textContentField && !textContentField.activeFocus)
-            textContentField.text = root.clip.textContent || ""
+            textContentField.text = root.clipData.textContent || ""
         if (blendModeBox)
-            blendModeBox.currentIndex = Math.max(0, blendModeBox.model.indexOf(root.clip.blendMode || "normal"))
+            blendModeBox.currentIndex = Math.max(0, blendModeBox.model.indexOf(root.clipData.blendMode || "normal"))
         if (root.hasShapeStyle) {
             const sh = root.shapeStyle
             if (gradientAngleField && !gradientAngleField.activeFocus)
@@ -627,7 +627,7 @@ PanelFrame {
                         visible: root.currentTabId === "general"
 
                         Text {
-                            text: clip.name || "Untitled clip"
+                            text: root.clipData.name || "Untitled clip"
                             color: Theme.panelForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeBase
@@ -742,7 +742,7 @@ PanelFrame {
                                         decimals: 2
                                         step: 0.1
                                         from: 0
-                                        onEdited: v => applyTrim(v, root.clip.outPoint)
+                                        onEdited: v => applyTrim(v, root.clipData.outPoint)
                                     }
                                 }
 
@@ -765,7 +765,7 @@ PanelFrame {
                                         decimals: 2
                                         step: 0.1
                                         from: 0
-                                        onEdited: v => applyTrim(root.clip.inPoint, v)
+                                        onEdited: v => applyTrim(root.clipData.inPoint, v)
                                     }
                                 }
                             }
@@ -774,7 +774,7 @@ PanelFrame {
                         Column {
                             width: tabColumn.width
                             spacing: 4
-                            visible: clip.path !== undefined && clip.path.length > 0
+                            visible: root.clipData.path !== undefined && root.clipData.path.length > 0
 
                             Text {
                                 text: qsTr("File")
@@ -785,7 +785,7 @@ PanelFrame {
 
                             Text {
                                 id: clipPathLabel
-                                text: clip.path || "—"
+                                text: root.clipData.path || "—"
                                 color: Theme.panelForeground
                                 font.family: Theme.monoFontFamily
                                 font.pixelSize: Theme.fontSizeSm
@@ -799,8 +799,8 @@ PanelFrame {
                                 HoverHandler { id: pathHover }
 
                                 ThemedToolTip {
-                                    text: clip.path || ""
-                                    visible: pathHover.hovered && (clip.path || "").length > 0
+                                    text: root.clipData.path || ""
+                                    visible: pathHover.hovered && (root.clipData.path || "").length > 0
                                 }
                             }
                         }
@@ -2072,7 +2072,7 @@ PanelFrame {
                             PropertyKeyframeRow {
                                 width: parent.width
                                 propDef: root.propX
-                                keyframeList: (clip.keyframes && clip.keyframes.x && clip.keyframes.x.points) || []
+                                keyframeList: (root.clipData.keyframes && root.clipData.keyframes.x && root.clipData.keyframes.x.points) || []
                                 useSlider: true
                                 sliderFrom: -root.canvasW
                                 sliderTo: root.canvasW * 2
@@ -2081,7 +2081,7 @@ PanelFrame {
                             PropertyKeyframeRow {
                                 width: parent.width
                                 propDef: root.propY
-                                keyframeList: (clip.keyframes && clip.keyframes.y && clip.keyframes.y.points) || []
+                                keyframeList: (root.clipData.keyframes && root.clipData.keyframes.y && root.clipData.keyframes.y.points) || []
                                 useSlider: true
                                 sliderFrom: -root.canvasH
                                 sliderTo: root.canvasH * 2
@@ -2099,7 +2099,7 @@ PanelFrame {
                             PropertyKeyframeRow {
                                 width: parent.width
                                 propDef: root.propWidth
-                                keyframeList: (clip.keyframes && clip.keyframes.width && clip.keyframes.width.points) || []
+                                keyframeList: (root.clipData.keyframes && root.clipData.keyframes.width && root.clipData.keyframes.width.points) || []
                                 useSlider: true
                                 sliderFrom: 1
                                 sliderTo: Math.max(root.canvasW * 2, 2)
@@ -2108,7 +2108,7 @@ PanelFrame {
                             PropertyKeyframeRow {
                                 width: parent.width
                                 propDef: root.propHeight
-                                keyframeList: (clip.keyframes && clip.keyframes.height && clip.keyframes.height.points) || []
+                                keyframeList: (root.clipData.keyframes && root.clipData.keyframes.height && root.clipData.keyframes.height.points) || []
                                 useSlider: true
                                 sliderFrom: 1
                                 sliderTo: Math.max(root.canvasH * 2, 2)
@@ -2126,7 +2126,7 @@ PanelFrame {
                             PropertyKeyframeRow {
                                 width: parent.width
                                 propDef: root.propOpacity
-                                keyframeList: (clip.keyframes && clip.keyframes.opacity && clip.keyframes.opacity.points) || []
+                                keyframeList: (root.clipData.keyframes && root.clipData.keyframes.opacity && root.clipData.keyframes.opacity.points) || []
                                 useSlider: true
                                 sliderFrom: 0
                                 sliderTo: 1
@@ -2136,7 +2136,7 @@ PanelFrame {
                             PropertyKeyframeRow {
                                 width: parent.width
                                 propDef: root.propRotation
-                                keyframeList: (clip.keyframes && clip.keyframes.rotation && clip.keyframes.rotation.points) || []
+                                keyframeList: (root.clipData.keyframes && root.clipData.keyframes.rotation && root.clipData.keyframes.rotation.points) || []
                                 useSlider: true
                                 sliderFrom: -180
                                 sliderTo: 180
@@ -2163,7 +2163,7 @@ PanelFrame {
                                         selected: {
                                             void root.clipDataRevision
                                             void EditorState.playheadSeconds
-                                            const cur = Number(clip.rotationAtPlayhead || 0)
+                                            const cur = Number(root.clipData.rotationAtPlayhead || 0)
                                             return Math.abs(cur - modelData) < 0.5
                                         }
                                         onClicked: EditorState.setClipRotationSnap(
@@ -2188,21 +2188,21 @@ PanelFrame {
                                     text: qsTr("Flip H")
                                     selected: {
                                         void root.clipDataRevision
-                                        return !!clip.flipH
+                                        return !!root.clipData.flipH
                                     }
                                     onClicked: EditorState.setClipFlip(
                                                    EditorState.selectedTrack, EditorState.selectedClip,
-                                                   !clip.flipH, !!clip.flipV)
+                                                   !root.clipData.flipH, !!root.clipData.flipV)
                                 }
                                 ThemedChip {
                                     text: qsTr("Flip V")
                                     selected: {
                                         void root.clipDataRevision
-                                        return !!clip.flipV
+                                        return !!root.clipData.flipV
                                     }
                                     onClicked: EditorState.setClipFlip(
                                                    EditorState.selectedTrack, EditorState.selectedClip,
-                                                   !!clip.flipH, !clip.flipV)
+                                                   !!root.clipData.flipH, !root.clipData.flipV)
                                 }
                             }
 
@@ -2234,7 +2234,7 @@ PanelFrame {
                             width: tabColumn.width
                             visible: root.clipKind === "audio" || root.clipKind === "video"
                             propDef: root.propVolume
-                            keyframeList: (clip.keyframes && clip.keyframes.volume && clip.keyframes.volume.points) || []
+                            keyframeList: (root.clipData.keyframes && root.clipData.keyframes.volume && root.clipData.keyframes.volume.points) || []
                             useSlider: true
                             sliderFrom: 0
                             sliderTo: 2
@@ -2574,7 +2574,7 @@ PanelFrame {
                         // are meaningless while one is attached.
                         property bool hasSpeedCurve: {
                             void root.clipDataRevision
-                            return !!clip.hasSpeedCurve
+                            return !!root.clipData.hasSpeedCurve
                         }
 
                         Row {
@@ -2616,7 +2616,7 @@ PanelFrame {
                                         text: modelData.label
                                         enabled: !speedColumn.hasSpeedCurve
                                         selected: !speedColumn.hasSpeedCurve
-                                                  && Math.abs((clip.speed || 1) - modelData.value) < 0.01
+                                                  && Math.abs((root.clipData.speed || 1) - modelData.value) < 0.01
                                         onClicked: EditorState.setClipSpeed(
                                                        EditorState.selectedTrack, EditorState.selectedClip,
                                                        modelData.value)
@@ -2632,7 +2632,7 @@ PanelFrame {
                             from: 0.25
                             to: 4.0
                             stepSize: 0.05
-                            value: clip.speed || 1.0
+                            value: root.clipData.speed || 1.0
                             onMoved: EditorState.previewSetClipSpeed(
                                          EditorState.selectedTrack, EditorState.selectedClip, value)
                             onPressedChanged: {
@@ -2640,7 +2640,7 @@ PanelFrame {
                                     EditorState.beginPreviewDrag(qsTr("Speed changed"))
                                 } else {
                                     EditorState.commitPreviewDrag()
-                                    value = Qt.binding(() => clip.speed || 1.0)
+                                    value = Qt.binding(() => root.clipData.speed || 1.0)
                                 }
                             }
                         }
@@ -2649,8 +2649,8 @@ PanelFrame {
                             visible: root.clipKind === "video" || root.clipKind === "audio"
                             text: (speedColumn.hasSpeedCurve
                                    ? qsTr("Custom speed")
-                                   : (clip.speed || 1).toFixed(2) + "×")
-                                    + (clip.reverse ? qsTr(" (reversed)") : "")
+                                   : (root.clipData.speed || 1).toFixed(2) + "×")
+                                    + (root.clipData.reverse ? qsTr(" (reversed)") : "")
                             color: Theme.mutedForeground
                             font.family: Theme.monoFontFamily
                             font.pixelSize: Theme.fontSizeSm
@@ -2661,11 +2661,11 @@ PanelFrame {
                             text: qsTr("Reverse")
                             selected: {
                                 void root.clipDataRevision
-                                return !!clip.reverse
+                                return !!root.clipData.reverse
                             }
                             onClicked: EditorState.setClipReverse(
                                            EditorState.selectedTrack, EditorState.selectedClip,
-                                           !clip.reverse)
+                                           !root.clipData.reverse)
                         }
 
                         Rectangle {
@@ -2682,7 +2682,7 @@ PanelFrame {
                             font.pixelSize: Theme.fontSizeXs
                         }
 
-                        property real fadeMax: Math.max(0.1, clip.duration || 1)
+                        property real fadeMax: Math.max(0.1, root.clipData.duration || 1)
 
                         Row {
                             width: parent.width
@@ -2693,26 +2693,26 @@ PanelFrame {
                                 variant: "secondary"
                                 onClicked: EditorState.setClipFade(
                                                EditorState.selectedTrack, EditorState.selectedClip,
-                                               0.5, clip.fadeOut || 0)
+                                               0.5, root.clipData.fadeOut || 0)
                             }
                             ThemedButton {
                                 text: qsTr("Fade out")
                                 variant: "secondary"
                                 onClicked: EditorState.setClipFade(
                                                EditorState.selectedTrack, EditorState.selectedClip,
-                                               clip.fadeIn || 0, 0.5)
+                                               root.clipData.fadeIn || 0, 0.5)
                             }
                             ThemedButton {
                                 text: qsTr("Clear")
                                 variant: "ghost"
-                                enabled: (clip.fadeIn || 0) > 0 || (clip.fadeOut || 0) > 0
+                                enabled: (root.clipData.fadeIn || 0) > 0 || (root.clipData.fadeOut || 0) > 0
                                 onClicked: EditorState.setClipFade(
                                                EditorState.selectedTrack, EditorState.selectedClip, 0, 0)
                             }
                         }
 
                         Text {
-                            text: "Fade in: " + (clip.fadeIn || 0).toFixed(2) + "s"
+                            text: "Fade in: " + (root.clipData.fadeIn || 0).toFixed(2) + "s"
                             color: Theme.mutedForeground
                             font.family: Theme.monoFontFamily
                             font.pixelSize: Theme.fontSizeXs
@@ -2724,22 +2724,22 @@ PanelFrame {
                             from: 0
                             to: parent.fadeMax
                             stepSize: 0.05
-                            value: clip.fadeIn || 0
+                            value: root.clipData.fadeIn || 0
                             onMoved: EditorState.previewSetClipFade(
                                          EditorState.selectedTrack, EditorState.selectedClip,
-                                         value, clip.fadeOut || 0)
+                                         value, root.clipData.fadeOut || 0)
                             onPressedChanged: {
                                 if (pressed) {
                                     EditorState.beginPreviewDrag(qsTr("Adjust fade"))
                                 } else {
                                     EditorState.commitPreviewDrag()
-                                    value = Qt.binding(() => clip.fadeIn || 0)
+                                    value = Qt.binding(() => root.clipData.fadeIn || 0)
                                 }
                             }
                         }
 
                         Text {
-                            text: "Fade out: " + (clip.fadeOut || 0).toFixed(2) + "s"
+                            text: "Fade out: " + (root.clipData.fadeOut || 0).toFixed(2) + "s"
                             color: Theme.mutedForeground
                             font.family: Theme.monoFontFamily
                             font.pixelSize: Theme.fontSizeXs
@@ -2751,16 +2751,16 @@ PanelFrame {
                             from: 0
                             to: parent.fadeMax
                             stepSize: 0.05
-                            value: clip.fadeOut || 0
+                            value: root.clipData.fadeOut || 0
                             onMoved: EditorState.previewSetClipFade(
                                          EditorState.selectedTrack, EditorState.selectedClip,
-                                         clip.fadeIn || 0, value)
+                                         root.clipData.fadeIn || 0, value)
                             onPressedChanged: {
                                 if (pressed) {
                                     EditorState.beginPreviewDrag(qsTr("Adjust fade"))
                                 } else {
                                     EditorState.commitPreviewDrag()
-                                    value = Qt.binding(() => clip.fadeOut || 0)
+                                    value = Qt.binding(() => root.clipData.fadeOut || 0)
                                 }
                             }
                         }
@@ -2777,7 +2777,7 @@ PanelFrame {
                             width: parent.width
                             model: [qsTr("Linear"), qsTr("Smooth"), qsTr("Natural")]
                             readonly property var curveIds: ["linear", "smooth", "equalPower"]
-                            currentIndex: Math.max(0, curveIds.indexOf(clip.fadeCurve || "smooth"))
+                            currentIndex: Math.max(0, curveIds.indexOf(root.clipData.fadeCurve || "smooth"))
                             onActivated: (index) => EditorState.setClipFadeCurve(
                                              EditorState.selectedTrack, EditorState.selectedClip,
                                              curveIds[index])
@@ -3026,13 +3026,13 @@ PanelFrame {
                             })
                             displayText: labels[model[currentIndex]] || model[currentIndex]
                             tooltip: qsTr("How this clip blends with the layers below")
-                            currentIndex: Math.max(0, model.indexOf(clip.blendMode || "normal"))
+                            currentIndex: Math.max(0, model.indexOf(root.clipData.blendMode || "normal"))
                             onActivated: EditorState.setClipBlendMode(
                                              EditorState.selectedTrack, EditorState.selectedClip, model[currentIndex])
                         }
 
                         ThemedButton {
-                            visible: root.clipKind !== "audio" && (clip.blendMode || "normal") !== "normal"
+                            visible: root.clipKind !== "audio" && (root.clipData.blendMode || "normal") !== "normal"
                             text: qsTr("Reset to Normal")
                             variant: "ghost"
                             glyph: Theme.icons.reset
@@ -3479,9 +3479,9 @@ PanelFrame {
                             })
                             displayText: labels[model[currentIndex]] || model[currentIndex]
                             tooltip: qsTr("Shape used to cut out this clip")
-                            currentIndex: Math.max(0, model.indexOf((clip.mask && clip.mask.shape) || "none"))
+                            currentIndex: Math.max(0, model.indexOf((root.clipData.mask && root.clipData.mask.shape) || "none"))
                             onActivated: {
-                                const mask = Object.assign({}, clip.mask || {})
+                                const mask = Object.assign({}, root.clipData.mask || {})
                                 mask.shape = model[currentIndex]
                                 EditorState.setClipMask(EditorState.selectedTrack, EditorState.selectedClip, mask)
                             }
@@ -3491,12 +3491,12 @@ PanelFrame {
                         // "none" in the combo above.
                         ThemedButton {
                             visible: maskShapeBox.visible
-                                     && ((clip.mask && clip.mask.shape) || "none") !== "none"
+                                     && ((root.clipData.mask && root.clipData.mask.shape) || "none") !== "none"
                             text: qsTr("Remove cutout")
                             variant: "destructive"
                             glyph: Theme.icons.trash
                             onClicked: {
-                                const mask = Object.assign({}, clip.mask || {})
+                                const mask = Object.assign({}, root.clipData.mask || {})
                                 mask.shape = "none"
                                 EditorState.setClipMask(EditorState.selectedTrack, EditorState.selectedClip, mask)
                             }
@@ -3517,8 +3517,8 @@ PanelFrame {
                                 spacing: 4
                                 visible: root.clipKind !== "audio" && root.clipKind !== "text"
                                      && root.clipKind !== "subtitle"
-                                         && !!clip.mask && clip.mask.shape !== "none"
-                                         && (modelData.key !== "rotation" || clip.mask.shape !== "bars")
+                                         && !!root.clipData.mask && root.clipData.mask.shape !== "none"
+                                         && (modelData.key !== "rotation" || root.clipData.mask.shape !== "bars")
 
                                 Text {
                                     text: modelData.label
@@ -3531,9 +3531,9 @@ PanelFrame {
                                     from: modelData.min
                                     to: modelData.max
                                     stepSize: modelData.key === "feather" ? 1 : 0.01
-                                    value: (clip.mask && clip.mask[modelData.key]) || 0
+                                    value: (root.clipData.mask && root.clipData.mask[modelData.key]) || 0
                                     onMoved: {
-                                        const mask = Object.assign({}, clip.mask || {})
+                                        const mask = Object.assign({}, root.clipData.mask || {})
                                         mask[modelData.key] = value
                                         EditorState.previewSetClipMask(
                                             EditorState.selectedTrack, EditorState.selectedClip, mask)
@@ -3543,7 +3543,7 @@ PanelFrame {
                                             EditorState.beginPreviewDrag(qsTr("Mask changed"))
                                         } else {
                                             EditorState.commitPreviewDrag()
-                                            value = Qt.binding(() => (clip.mask && clip.mask[modelData.key]) || 0)
+                                            value = Qt.binding(() => (root.clipData.mask && root.clipData.mask[modelData.key]) || 0)
                                         }
                                     }
                                 }
@@ -3555,7 +3555,7 @@ PanelFrame {
                             spacing: 8
                             visible: root.clipKind !== "audio" && root.clipKind !== "text"
                                      && root.clipKind !== "subtitle"
-                                     && !!clip.mask && clip.mask.shape !== "none"
+                                     && !!root.clipData.mask && root.clipData.mask.shape !== "none"
                             Text {
                                 text: qsTr("Invert")
                                 color: Theme.mutedForeground
@@ -3564,9 +3564,9 @@ PanelFrame {
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                             ThemedSwitch {
-                                checked: !!(clip.mask && clip.mask.invert)
+                                checked: !!(root.clipData.mask && root.clipData.mask.invert)
                                 onToggled: {
-                                    const mask = Object.assign({}, clip.mask || {})
+                                    const mask = Object.assign({}, root.clipData.mask || {})
                                     mask.invert = checked
                                     EditorState.setClipMask(EditorState.selectedTrack, EditorState.selectedClip, mask)
                                 }
@@ -3830,7 +3830,7 @@ PanelFrame {
                 width: parent.width - Theme.tabRailWidth - Theme.borderWidth
                 height: Math.max(0, parent.height)
                 visible: root.currentTabId === "subtitles"
-                clip: root.hasSelection ? root.clip : null
+                clip: root.hasSelection ? root.clipData : null
                 formatSeconds: root.formatSeconds
             }
         }

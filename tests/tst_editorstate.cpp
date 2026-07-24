@@ -45,6 +45,7 @@ private slots:
     void overlapAutoAppliesCrossfade();
     void linkedAudioUnlinkAndMove();
     void keyframeGraphPropertySelection();
+    void keyframesCanBeDisabledPerProperty();
     void effectParamKeyframes();
     void effectRemovalRemapsGraphSelection();
     void denoiseAddsCleanedClipOnTrackAbove();
@@ -472,16 +473,17 @@ void EditorStateTest::effectRemovalRemapsGraphSelection()
     state.addEffect(track, clip, QStringLiteral("adjust.contrast"));
     state.addEffect(track, clip, QStringLiteral("adjust.brightness"));
 
-    state.setKeyframeGraphProperties({ QStringLiteral("x"), QStringLiteral("fx.0.contrast"),
-                                       QStringLiteral("fx.1.brightness") });
-    QCOMPARE(state.keyframeGraphProperties(),
+    state.toggleKeyframeGraphPropertyVisible(QStringLiteral("x"));
+    state.toggleKeyframeGraphPropertyVisible(QStringLiteral("fx.0.contrast"));
+    state.toggleKeyframeGraphPropertyVisible(QStringLiteral("fx.1.brightness"));
+    QCOMPARE(state.keyframeGraphHiddenProperties(),
              (QStringList { QStringLiteral("x"), QStringLiteral("fx.0.contrast"),
                             QStringLiteral("fx.1.brightness") }));
 
-    // Dropping effect 0 must retire its series and renumber the one above it, or the strip would
-    // start drawing brightness under the contrast label.
+    // Dropping effect 0 must retire its entry and renumber the one above it, or brightness would
+    // inherit contrast's folded-away state.
     state.removeEffect(track, clip, 0);
-    QCOMPARE(state.keyframeGraphProperties(),
+    QCOMPARE(state.keyframeGraphHiddenProperties(),
              (QStringList { QStringLiteral("x"), QStringLiteral("fx.0.brightness") }));
 }
 
@@ -854,69 +856,89 @@ void EditorStateTest::keyframeGraphPropertySelection()
 {
     AssetLibrary library;
     AppController state(&library);
-    QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("x") });
+    // Nothing is folded away to begin with: the strip shows every animated property of the clip.
+    QVERIFY(state.keyframeGraphHiddenProperties().isEmpty());
 
-    // The selection accumulates: editing x then picking y leaves both on the
-    // strip rather than swapping one for the other.
-    state.ensureKeyframeGraphProperty(QStringLiteral("x"));
-    state.toggleKeyframeGraphProperty(QStringLiteral("y"));
-    QCOMPARE(state.keyframeGraphProperties(),
-             (QStringList { QStringLiteral("x"), QStringLiteral("y") }));
-    QCOMPARE(state.keyframeGraphProperty(), QStringLiteral("x"));
+    // A chip click hides that one curve and leaves the rest alone.
+    state.toggleKeyframeGraphPropertyVisible(QStringLiteral("y"));
+    QCOMPARE(state.keyframeGraphHiddenProperties(), QStringList { QStringLiteral("y") });
+    state.toggleKeyframeGraphPropertyVisible(QStringLiteral("opacity"));
+    QCOMPARE(state.keyframeGraphHiddenProperties(),
+             (QStringList { QStringLiteral("y"), QStringLiteral("opacity") }));
 
-    // Clicking the same row again takes it back off.
-    state.toggleKeyframeGraphProperty(QStringLiteral("y"));
-    QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("x") });
+    // Clicking the same chip again brings the curve back.
+    state.toggleKeyframeGraphPropertyVisible(QStringLiteral("y"));
+    QCOMPARE(state.keyframeGraphHiddenProperties(), QStringList { QStringLiteral("opacity") });
 
-    // The last remaining property can be toggled off too, leaving the strip
-    // empty; editing or selecting anything brings it back.
-    state.toggleKeyframeGraphProperty(QStringLiteral("x"));
-    QVERIFY(state.keyframeGraphProperties().isEmpty());
-    QVERIFY(state.keyframeGraphProperty().isEmpty());
-    state.toggleKeyframeGraphProperty(QStringLiteral("x"));
-    QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("x") });
-
-    // Editing adds without disturbing what is already shown, and is a no-op for
-    // a property that is already on the strip.
-    state.toggleKeyframeGraphProperty(QStringLiteral("opacity"));
-    state.ensureKeyframeGraphProperty(QStringLiteral("width"));
-    QCOMPARE(state.keyframeGraphProperties(),
-             (QStringList { QStringLiteral("x"), QStringLiteral("opacity"),
-                            QStringLiteral("width") }));
-    state.ensureKeyframeGraphProperty(QStringLiteral("opacity"));
-    QCOMPARE(state.keyframeGraphProperties(),
-             (QStringList { QStringLiteral("x"), QStringLiteral("opacity"),
-                            QStringLiteral("width") }));
-
-    // A chip click narrows back down to one series.
-    state.soloKeyframeGraphProperty(QStringLiteral("rotation"));
-    QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("rotation") });
-
-    // Unknown keys and duplicates are dropped rather than reaching the strip.
-    state.setKeyframeGraphProperties({ QStringLiteral("x"), QStringLiteral("bogus"),
-                                       QStringLiteral("X"), QStringLiteral("volume") });
-    QCOMPARE(state.keyframeGraphProperties(),
-             (QStringList { QStringLiteral("x"), QStringLiteral("volume") }));
-
-    // An all-invalid write is ignored instead of emptying the selection.
-    state.setKeyframeGraphProperties({ QStringLiteral("nope") });
-    QCOMPARE(state.keyframeGraphProperties(),
-             (QStringList { QStringLiteral("x"), QStringLiteral("volume") }));
+    // Editing a property un-hides it, and is a no-op for one that was never hidden.
+    state.showKeyframeGraphProperty(QStringLiteral("opacity"));
+    QVERIFY(state.keyframeGraphHiddenProperties().isEmpty());
+    state.showKeyframeGraphProperty(QStringLiteral("width"));
+    QVERIFY(state.keyframeGraphHiddenProperties().isEmpty());
 
     // Effect param keys are verbatim manifest identifiers and are often camelCase, so they must
     // survive normalization intact while bare transform names stay case-insensitive.
-    state.soloKeyframeGraphProperty(QStringLiteral("fx.0.u_blurRadius"));
-    QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("fx.0.u_blurRadius") });
-    state.ensureKeyframeGraphProperty(QStringLiteral("fx.0.u_blurRadius"));
-    QCOMPARE(state.keyframeGraphProperties().size(), 1);
-    state.toggleKeyframeGraphProperty(QStringLiteral("fx.0.u_blurRadius"));
-    QVERIFY(state.keyframeGraphProperties().isEmpty());
+    state.toggleKeyframeGraphPropertyVisible(QStringLiteral("fx.0.u_blurRadius"));
+    QCOMPARE(state.keyframeGraphHiddenProperties(),
+             QStringList { QStringLiteral("fx.0.u_blurRadius") });
+    state.toggleKeyframeGraphPropertyVisible(QStringLiteral("X"));
+    QCOMPARE(state.keyframeGraphHiddenProperties(),
+             (QStringList { QStringLiteral("fx.0.u_blurRadius"), QStringLiteral("x") }));
 
-    // Malformed compound keys are rejected like any other unknown prop.
-    state.setKeyframeGraphProperties({ QStringLiteral("x") });
-    state.setKeyframeGraphProperties({ QStringLiteral("fx."), QStringLiteral("fx.a.b"),
-                                       QStringLiteral("fx.0.") });
-    QCOMPARE(state.keyframeGraphProperties(), QStringList { QStringLiteral("x") });
+    // Unknown and malformed keys never reach the strip.
+    state.toggleKeyframeGraphPropertyVisible(QStringLiteral("bogus"));
+    state.toggleKeyframeGraphPropertyVisible(QStringLiteral("fx."));
+    state.toggleKeyframeGraphPropertyVisible(QStringLiteral("fx.a.b"));
+    QCOMPARE(state.keyframeGraphHiddenProperties(),
+             (QStringList { QStringLiteral("fx.0.u_blurRadius"), QStringLiteral("x") }));
+}
+
+// The inspector row's label switches a property's animation off without discarding its keys: the
+// property freezes at its first key, and switching it back on restores the animation exactly.
+void EditorStateTest::keyframesCanBeDisabledPerProperty()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("Animate me"), 0.0);
+
+    const int track = state.selectedTrack();
+    const int clip = state.selectedClip();
+
+    state.setClipKeyframe(track, clip, QStringLiteral("opacity"), 0.0, 0.0);
+    state.setClipKeyframe(track, clip, QStringLiteral("opacity"), 2.0, 1.0);
+    QCOMPARE(state.clipAnimatedProperties(track, clip), QStringList { QStringLiteral("opacity") });
+    QVERIFY(state.clipPropertyKeyframesEnabled(track, clip, QStringLiteral("opacity")));
+    QCOMPARE(state.propertyValueAt(track, clip, QStringLiteral("opacity"), 2.0, 1.0), 1.0);
+
+    state.toggleClipPropertyKeyframesEnabled(track, clip, QStringLiteral("opacity"));
+    QVERIFY(!state.clipPropertyKeyframesEnabled(track, clip, QStringLiteral("opacity")));
+    // Frozen at the first key, everywhere.
+    QCOMPARE(state.propertyValueAt(track, clip, QStringLiteral("opacity"), 2.0, 1.0), 0.0);
+    QCOMPARE(state.propertyValueAt(track, clip, QStringLiteral("opacity"), 1.0, 1.0), 0.0);
+    // The keys themselves survive, so the strip still has a curve to draw.
+    QCOMPARE(state.clipKeyframes(track, clip, QStringLiteral("opacity")).size(), 2);
+    QCOMPARE(state.clipAnimatedProperties(track, clip), QStringList { QStringLiteral("opacity") });
+
+    state.toggleClipPropertyKeyframesEnabled(track, clip, QStringLiteral("opacity"));
+    QCOMPARE(state.propertyValueAt(track, clip, QStringLiteral("opacity"), 2.0, 1.0), 1.0);
+
+    // Undo takes the switch back with it.
+    state.toggleClipPropertyKeyframesEnabled(track, clip, QStringLiteral("opacity"));
+    state.undo();
+    QVERIFY(state.clipPropertyKeyframesEnabled(track, clip, QStringLiteral("opacity")));
+
+    // A property with no keys has no animation to switch off.
+    state.toggleClipPropertyKeyframesEnabled(track, clip, QStringLiteral("rotation"));
+    QVERIFY(state.clipPropertyKeyframesEnabled(track, clip, QStringLiteral("rotation")));
+    QVERIFY(!state.clipAnimatedProperties(track, clip).contains(QStringLiteral("rotation")));
+
+    // A single key is the case where switching off changes nothing on screen, so it is also the
+    // one most likely to look like a dead click: it still has to toggle both ways.
+    state.setClipKeyframe(track, clip, QStringLiteral("rotation"), 1.0, 45.0);
+    state.toggleClipPropertyKeyframesEnabled(track, clip, QStringLiteral("rotation"));
+    QVERIFY(!state.clipPropertyKeyframesEnabled(track, clip, QStringLiteral("rotation")));
+    state.toggleClipPropertyKeyframesEnabled(track, clip, QStringLiteral("rotation"));
+    QVERIFY(state.clipPropertyKeyframesEnabled(track, clip, QStringLiteral("rotation")));
 }
 
 // End-to-end noise removal through the controller: the whole clip is rendered on a worker thread

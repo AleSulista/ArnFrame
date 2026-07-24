@@ -44,13 +44,10 @@ class AppController : public QObject
     Q_PROPERTY(bool snapEnabled READ snapEnabled WRITE setSnapEnabled NOTIFY snapEnabledChanged)
     Q_PROPERTY(bool rippleEnabled READ rippleEnabled WRITE setRippleEnabled NOTIFY rippleEnabledChanged)
     Q_PROPERTY(bool autoKeyEnabled READ autoKeyEnabled WRITE setAutoKeyEnabled NOTIFY autoKeyEnabledChanged)
-    // The keyframe strip mirrors the inspector's selection: `properties` is the
-    // full set (multi-select), `property` is its focused head kept for the
-    // single-property call sites.
-    Q_PROPERTY(QString keyframeGraphProperty READ keyframeGraphProperty WRITE setKeyframeGraphProperty
-                   NOTIFY keyframeGraphPropertyChanged)
-    Q_PROPERTY(QStringList keyframeGraphProperties READ keyframeGraphProperties
-                   WRITE setKeyframeGraphProperties NOTIFY keyframeGraphPropertyChanged)
+    // The keyframe strip draws every animated property of the selected clip. This is the subset
+    // the user has folded away: a view filter only — hiding a curve never changes what renders.
+    Q_PROPERTY(QStringList keyframeGraphHiddenProperties READ keyframeGraphHiddenProperties
+                   NOTIFY keyframeGraphVisibilityChanged)
     // Detected beats / onsets for the keyframe strip. Transient analysis state — never
     // saved with the project, cleared whenever the underlying audio could have moved.
     Q_PROPERTY(QVariantMap beatAnalysis READ beatAnalysis NOTIFY beatAnalysisChanged)
@@ -148,11 +145,7 @@ public:
     bool snapEnabled() const { return m_snapEnabled; }
     bool rippleEnabled() const { return m_rippleEnabled; }
     bool autoKeyEnabled() const { return m_autoKeyEnabled; }
-    QString keyframeGraphProperty() const
-    {
-        return m_keyframeGraphProperties.isEmpty() ? QString() : m_keyframeGraphProperties.first();
-    }
-    QStringList keyframeGraphProperties() const { return m_keyframeGraphProperties; }
+    QStringList keyframeGraphHiddenProperties() const { return m_keyframeGraphHiddenProperties; }
     bool subtitleEditing() const { return m_subtitleEditing; }
     int selectedSubtitleCue() const { return m_selectedSubtitleCue; }
     bool undoAvailable() const { return m_undoStack.canUndo(); }
@@ -206,21 +199,12 @@ public:
     void setSnapEnabled(bool enabled);
     void setRippleEnabled(bool enabled);
     void setAutoKeyEnabled(bool enabled);
-    void setKeyframeGraphProperty(const QString &prop);
-    void setKeyframeGraphProperties(const QStringList &props);
-
-    // The strip accumulates: selecting or editing a property adds it alongside
-    // whatever is already there, so keying X and then moving to Y leaves both
-    // curves on screen.
-    //
-    // Inspector row click — adds `prop`, or drops it again if it is already
-    // shown. Dropping the last one is allowed and collapses the strip.
-    Q_INVOKABLE void toggleKeyframeGraphProperty(const QString &prop);
-    // Strip chip click — narrows the strip back down to just `prop`.
-    Q_INVOKABLE void soloKeyframeGraphProperty(const QString &prop);
-    // Editing a property's value/diamond/interpolation surfaces it on the strip
-    // without disturbing anything else already shown.
-    Q_INVOKABLE void ensureKeyframeGraphProperty(const QString &prop);
+    // Strip chip click — folds `prop`'s curve away, or brings it back. Purely a view filter: the
+    // chip stays put either way, and the animation keeps playing while it is hidden.
+    Q_INVOKABLE void toggleKeyframeGraphPropertyVisible(const QString &prop);
+    // Editing a property's value/diamond/interpolation un-hides its curve, so the thing just
+    // edited is the thing on screen.
+    Q_INVOKABLE void showKeyframeGraphProperty(const QString &prop);
     void setSubtitleEditing(bool editing);
     void setSelectedSubtitleCue(int index);
     void setProjectName(const QString &name);
@@ -423,6 +407,16 @@ public:
     Q_INVOKABLE void previewMoveClipKeyframe(int trackIndex, int clipIndex, const QString &prop,
                                              double fromSeconds, double toSeconds, double value);
     Q_INVOKABLE QVariantList clipKeyframes(int trackIndex, int clipIndex, const QString &prop) const;
+    // Every property of the clip that carries an animation, in strip order.
+    Q_INVOKABLE QStringList clipAnimatedProperties(int trackIndex, int clipIndex) const;
+    // Whether a property's keyframes drive it. Switched off, the keys are kept but the property
+    // holds its first key's value — the inspector row's label is what toggles this.
+    Q_INVOKABLE bool clipPropertyKeyframesEnabled(int trackIndex, int clipIndex,
+                                                  const QString &prop) const;
+    Q_INVOKABLE void setClipPropertyKeyframesEnabled(int trackIndex, int clipIndex,
+                                                     const QString &prop, bool enabled);
+    Q_INVOKABLE void toggleClipPropertyKeyframesEnabled(int trackIndex, int clipIndex,
+                                                        const QString &prop);
     Q_INVOKABLE double propertyValueAt(int trackIndex, int clipIndex, const QString &prop,
                                        double atSeconds, double fallback) const;
     // What the property evaluates to with no keyframes at all — the same implicit defaults
@@ -536,7 +530,7 @@ signals:
     void snapEnabledChanged();
     void rippleEnabledChanged();
     void autoKeyEnabledChanged();
-    void keyframeGraphPropertyChanged();
+    void keyframeGraphVisibilityChanged();
     void subtitleEditingChanged();
     void selectedSubtitleCueChanged();
     void undoStackChanged();
@@ -601,7 +595,7 @@ signals:
 protected:
     void pushProjectEdit(const drift::Project &before, const QString &text);
     void finishEdit(const QString &message);
-    // Keeps the keyframe strip's index-addressed effect series in sync after an effect is removed.
+    // Keeps the keyframe strip's index-addressed hidden series in sync after an effect is removed.
     void dropKeyframeGraphPropertiesForEffect(int removedIndex);
     // Publishes a finished beat analysis into m_beatAnalysis / m_beatSnapTargets.
     void applyBeatAnalysis(const AudioBeatAnalysis &analysis, double startSeconds, double durSeconds,
@@ -689,8 +683,8 @@ protected:
     bool m_playing = false;
     bool m_snapEnabled = true;
     bool m_rippleEnabled = false;
-    bool m_autoKeyEnabled = true;
-    QStringList m_keyframeGraphProperties { QStringLiteral("x") };
+    bool m_autoKeyEnabled = false;
+    QStringList m_keyframeGraphHiddenProperties;
     bool m_subtitleEditing = false;
     int m_selectedSubtitleCue = -1;
     bool m_exportInProgress = false;

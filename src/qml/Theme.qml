@@ -337,6 +337,8 @@ QtObject {
         blend: "blend",
         keyboard: "keyboard",
         crop: "crop",
+        diamondPlus: "diamond-plus",
+        diamondMinus: "diamond-minus",
         mask: "square-dashed",
         puzzle: "puzzle",
         info: "info",

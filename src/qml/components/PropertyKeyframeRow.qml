@@ -24,11 +24,15 @@ Column {
     property bool percent: false
     property string unit: "" // e.g. "°" — appended to the numeric readout
 
-    // Whether this property is currently drawn on the timeline keyframe strip.
-    // Clicking the row's label adds it to the strip alongside whatever is
-    // already there; clicking again takes it back off.
-    readonly property bool graphSelected:
-        EditorState.keyframeGraphProperties.indexOf(propDef.key) >= 0
+    // An animated property is tinted with its curve colour so the row, its chip and its curve on
+    // the keyframe strip read as one series. Clicking the label switches the animation off without
+    // discarding the keys — the property then holds its first key's value.
+    readonly property bool animated: !!keyframeList && keyframeList.length > 0
+    readonly property bool keyframesEnabled: {
+        void valueRevision
+        return EditorState.clipPropertyKeyframesEnabled(
+                   EditorState.selectedTrack, EditorState.selectedClip, propDef.key)
+    }
     readonly property color graphColor: Theme.keyframeCurveColor(propDef.key)
 
     spacing: 4
@@ -117,14 +121,14 @@ Column {
     function commitValue(v) {
         if (isNaN(v))
             return
-        EditorState.ensureKeyframeGraphProperty(root.propDef.key)
+        EditorState.showKeyframeGraphProperty(root.propDef.key)
         EditorState.setClipKeyframe(
             EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
             EditorState.playheadSeconds, v)
     }
 
     function setInterpolation(mode) {
-        EditorState.ensureKeyframeGraphProperty(root.propDef.key)
+        EditorState.showKeyframeGraphProperty(root.propDef.key)
         EditorState.setKeyframeInterpolation(
             EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key, mode)
     }
@@ -143,19 +147,6 @@ Column {
         width: root.width
         height: headerRow.height
 
-        // Selection highlight tinted to this property's curve color, so the row
-        // and its chip/curve on the keyframe strip read as the same series.
-        Rectangle {
-            anchors.fill: parent
-            anchors.leftMargin: -4
-            anchors.rightMargin: -4
-            radius: Theme.radiusSm
-            visible: root.graphSelected
-            color: Qt.rgba(root.graphColor.r, root.graphColor.g, root.graphColor.b, 0.12)
-            border.width: Theme.borderWidth
-            border.color: Qt.rgba(root.graphColor.r, root.graphColor.g, root.graphColor.b, 0.45)
-        }
-
         Row {
             id: headerRow
             width: parent.width
@@ -164,21 +155,19 @@ Column {
             KeyframeDiamond {
                 id: diamond
                 anchors.verticalCenter: parent.verticalCenter
-                hasKey: root.activeKey !== null
-                onToggled: {
-                    EditorState.ensureKeyframeGraphProperty(root.propDef.key)
-                    if (root.activeKey) {
-                        EditorState.removeClipKeyframe(
-                            EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
-                            root.activeKey.seconds)
-                    } else {
-                        commitValue(root.currentValue)
-                    }
-                }
+                accentColor: root.graphColor
+                animated: root.animated
+                keysEnabled: root.keyframesEnabled
+                tooltip: !root.animated
+                         ? qsTr("%1 has no keyframes yet").arg(root.propDef.label)
+                         : (root.keyframesEnabled
+                            ? qsTr("Turn off %1's keyframes — they are kept, but stop animating")
+                              .arg(root.propDef.label)
+                            : qsTr("Turn %1's keyframes back on").arg(root.propDef.label))
+                onToggled: EditorState.toggleClipPropertyKeyframesEnabled(
+                               EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key)
             }
 
-            // Label + the flexible gap after it, together forming the click target
-            // that drives the keyframe strip's selection.
             Item {
                 id: labelZone
                 anchors.verticalCenter: parent.verticalCenter
@@ -189,28 +178,15 @@ Column {
                 Text {
                     id: labelText
                     text: root.propDef.label
-                    color: root.graphSelected ? Theme.panelForeground : Theme.mutedForeground
+                    color: root.animated && root.keyframesEnabled ? Theme.panelForeground
+                                                                  : Theme.mutedForeground
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeXs
-                    font.weight: root.graphSelected ? Font.Medium : Font.Normal
+                    font.weight: root.animated && root.keyframesEnabled ? Font.Medium : Font.Normal
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     elide: Text.ElideRight
                     width: Math.min(implicitWidth + 2, parent.width)
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: EditorState.toggleKeyframeGraphProperty(root.propDef.key)
-
-                    ThemedToolTip {
-                        text: root.graphSelected
-                              ? qsTr("Hide %1 from the motion graph").arg(root.propDef.label)
-                              : qsTr("Add %1 to the motion graph").arg(root.propDef.label)
-                        visible: parent.containsMouse
-                    }
                 }
             }
 
@@ -255,96 +231,125 @@ Column {
         }
     }
 
-    // --- Numeric field (default) ---------------------------------------------
-    Item {
-        visible: !root.useSlider
+    // --- Value row: add/remove a key at the playhead, then the editor ---------
+    Row {
+        id: valueRow
         width: root.width
-        height: 30
+        spacing: 6
+        // Width left for the editor once the key button has taken its share.
+        readonly property real editorWidth: width - keyButton.width - spacing
 
-        ThemedTextField {
-            id: valueField
-            anchors.fill: parent
-            verticalAlignment: TextInput.AlignVCenter
-            text: root.formatValue(root.currentValue)
-            rightPadding: root.unit.length > 0 || root.percent ? 22 : 8
-            onEditingFinished: {
-                const v = root.parseInput(text)
-                root.editing = false
-                if (!isNaN(v))
-                    root.commitValue(v)
-                text = root.formatValue(root.currentValue)
-            }
-            onActiveFocusChanged: {
-                if (activeFocus) {
-                    root.editing = true
-                    root.liveValue = root.currentValue
+        IconButton {
+            id: keyButton
+            anchors.verticalCenter: parent.verticalCenter
+            buttonSize: 24
+            iconSize: 16
+            glyph: root.activeKey ? Theme.icons.diamondMinus : Theme.icons.diamondPlus
+            tooltip: root.activeKey
+                     ? qsTr("Remove %1's keyframe at the playhead").arg(root.propDef.label)
+                     : qsTr("Add a keyframe for %1 at the playhead").arg(root.propDef.label)
+            onClicked: {
+                EditorState.showKeyframeGraphProperty(root.propDef.key)
+                if (root.activeKey) {
+                    EditorState.removeClipKeyframe(
+                        EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
+                        root.activeKey.seconds)
                 } else {
+                    root.commitValue(root.currentValue)
+                }
+            }
+        }
+
+        Item {
+            visible: !root.useSlider
+            width: valueRow.editorWidth
+            height: 30
+
+            ThemedTextField {
+                id: valueField
+                anchors.fill: parent
+                verticalAlignment: TextInput.AlignVCenter
+                text: root.formatValue(root.currentValue)
+                rightPadding: root.unit.length > 0 || root.percent ? 22 : 8
+                onEditingFinished: {
+                    const v = root.parseInput(text)
                     root.editing = false
+                    if (!isNaN(v))
+                        root.commitValue(v)
                     text = root.formatValue(root.currentValue)
                 }
-            }
-            onTextEdited: {
-                const v = root.parseInput(text)
-                if (!isNaN(v))
-                    root.liveValue = v
-            }
-        }
-
-        Text {
-            anchors.right: parent.right
-            anchors.rightMargin: 8
-            anchors.verticalCenter: parent.verticalCenter
-            visible: root.unit.length > 0 || root.percent
-            text: root.percent ? "%" : root.unit
-            color: Theme.mutedForeground
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeXs
-            z: 1
-        }
-    }
-
-    // --- Slider (opt-in) -----------------------------------------------------
-    Row {
-        visible: root.useSlider
-        width: root.width
-        spacing: 8
-
-        ThemedSlider {
-            id: valueSlider
-            width: root.width - readout.width - parent.spacing
-            anchors.verticalCenter: parent.verticalCenter
-            from: root.sliderFrom
-            to: root.sliderTo
-            value: root.currentValue
-            onMoved: {
-                root.liveValue = value
-                EditorState.ensureKeyframeGraphProperty(root.propDef.key)
-                EditorState.previewSetClipKeyframe(
-                    EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
-                    EditorState.playheadSeconds, value)
-            }
-            onPressedChanged: {
-                if (pressed) {
-                    root.editing = true
-                    root.liveValue = value
-                    EditorState.beginPreviewDrag(qsTr("Edit %1").arg(root.propDef.label))
-                } else {
-                    EditorState.commitPreviewDrag()
-                    root.editing = false
-                    value = root.currentValue
+                onActiveFocusChanged: {
+                    if (activeFocus) {
+                        root.editing = true
+                        root.liveValue = root.currentValue
+                    } else {
+                        root.editing = false
+                        text = root.formatValue(root.currentValue)
+                    }
+                }
+                onTextEdited: {
+                    const v = root.parseInput(text)
+                    if (!isNaN(v))
+                        root.liveValue = v
                 }
             }
+
+            Text {
+                anchors.right: parent.right
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.unit.length > 0 || root.percent
+                text: root.percent ? "%" : root.unit
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+                z: 1
+            }
         }
 
-        Text {
-            id: readout
-            width: Math.max(44, implicitWidth)
-            anchors.verticalCenter: parent.verticalCenter
-            horizontalAlignment: Text.AlignRight
-            text: root.displayReadout(root.displayedValue)
-            color: Theme.panelForeground
-            font.family: Theme.monoFontFamily
-            font.pixelSize: Theme.fontSizeSm
+        // Slider (opt-in), in place of the numeric field.
+        Row {
+            visible: root.useSlider
+            width: valueRow.editorWidth
+            spacing: 8
+
+            ThemedSlider {
+                id: valueSlider
+                width: parent.width - readout.width - parent.spacing
+                anchors.verticalCenter: parent.verticalCenter
+                from: root.sliderFrom
+                to: root.sliderTo
+                value: root.currentValue
+                onMoved: {
+                    root.liveValue = value
+                    EditorState.showKeyframeGraphProperty(root.propDef.key)
+                    EditorState.previewSetClipKeyframe(
+                        EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
+                        EditorState.playheadSeconds, value)
+                }
+                onPressedChanged: {
+                    if (pressed) {
+                        root.editing = true
+                        root.liveValue = value
+                        EditorState.beginPreviewDrag(qsTr("Edit %1").arg(root.propDef.label))
+                    } else {
+                        EditorState.commitPreviewDrag()
+                        root.editing = false
+                        value = root.currentValue
+                    }
+                }
+            }
+
+            Text {
+                id: readout
+                width: Math.max(44, implicitWidth)
+                anchors.verticalCenter: parent.verticalCenter
+                horizontalAlignment: Text.AlignRight
+                text: root.displayReadout(root.displayedValue)
+                color: Theme.panelForeground
+                font.family: Theme.monoFontFamily
+                font.pixelSize: Theme.fontSizeSm
+            }
         }
     }
 }

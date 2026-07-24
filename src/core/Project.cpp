@@ -36,12 +36,17 @@ QJsonObject keyframesToJson(const KeyframeTrack<double> &track)
             object.insert(QStringLiteral("hold"), true);
         keyframes.append(object);
     }
-    return QJsonObject{{QStringLiteral("keyframes"), keyframes}};
+    QJsonObject out{{QStringLiteral("keyframes"), keyframes}};
+    // Written only when switched off, so files from the common case are byte-identical to before.
+    if (!track.enabled())
+        out.insert(QStringLiteral("enabled"), false);
+    return out;
 }
 
 KeyframeTrack<double> keyframesFromJson(const QJsonObject &object)
 {
     KeyframeTrack<double> track;
+    track.setEnabled(object.value(QStringLiteral("enabled")).toBool(true));
 
     // Projects written before keyframes had tangents carry one interpolation mode for the
     // whole track. Both legacy shapes are reproduced exactly by handles — Linear by

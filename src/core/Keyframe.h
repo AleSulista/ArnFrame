@@ -69,6 +69,12 @@ class KeyframeTrack
 public:
     bool isEmpty() const { return m_values.isEmpty(); }
 
+    // Animation can be switched off for a property without discarding its keys: the track then
+    // holds its first key's value for the whole clip, and switching it back on restores the
+    // animation exactly as it was.
+    bool enabled() const { return m_enabled; }
+    void setEnabled(bool enabled) { m_enabled = enabled; }
+
     void setKeyframe(TimeUs time, const T &value)
     {
         auto it = m_values.find(time);
@@ -180,6 +186,8 @@ public:
     {
         if (m_values.isEmpty())
             return T{};
+        if (!m_enabled)
+            return m_values.constBegin()->value; // frozen at the first key
 
         auto it = m_values.lowerBound(time);
         if (it == m_values.end())
@@ -225,6 +233,7 @@ private:
     }
 
     QMap<TimeUs, Keyframe<T>> m_values;
+    bool m_enabled = true;
 };
 
 } // namespace drift

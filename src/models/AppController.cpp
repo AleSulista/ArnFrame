@@ -157,7 +157,9 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     settings.endGroup();
     m_guidesEnabled = settings.value(QStringLiteral("preview/guidesEnabled"), false).toBool();
     m_guideType = settings.value(QStringLiteral("preview/guideType"), QStringLiteral("thirds")).toString();
-    m_autoKeyEnabled = settings.value(QStringLiteral("editor/autoKeyEnabled"), true).toBool();
+    // Off by default: with it on, nudging a clip while the playhead sits anywhere writes a
+    // keyframe, and an animation appears where the user only meant to reposition something.
+    m_autoKeyEnabled = settings.value(QStringLiteral("editor/autoKeyEnabled"), false).toBool();
 
     // Periodically snapshot unsaved work to a recovery file so a crash doesn't
     // lose progress. The file is removed only when the user saves, loads another
@@ -809,6 +811,12 @@ constexpr drift::TimeUs kKeyframeToleranceUs = drift::kUsPerSecond / 30;
 bool writeKeyframeValue(drift::KeyframeTrack<double> &track, drift::TimeUs relative, double value,
                         bool autoKey, bool force)
 {
+    // With the animation switched off the property reads as its first key, so that is the key an
+    // ordinary value edit has to land on — anything else would type into a value nothing shows.
+    if (!track.enabled() && !track.isEmpty() && !force) {
+        track.setKeyframe(track.keyframes().firstKey(), value);
+        return true;
+    }
     if (force || autoKey) {
         track.setKeyframe(relative, value);
         return true;
@@ -1490,55 +1498,32 @@ void AppController::setAutoKeyEnabled(bool enabled)
     emit autoKeyEnabledChanged();
 }
 
-void AppController::setKeyframeGraphProperty(const QString &prop)
-{
-    setKeyframeGraphProperties({ prop });
-}
-
-void AppController::setKeyframeGraphProperties(const QStringList &props)
-{
-    QStringList normalized;
-    for (const QString &prop : props) {
-        const QString key = normalizeKeyframeProp(prop);
-        if (key.isEmpty() || normalized.contains(key))
-            continue;
-        if (!isKnownKeyframeProp(key)) // only allow known prop keys
-            continue;
-        normalized.append(key);
-    }
-    // Clearing the selection is legitimate — it just collapses the strip. But a
-    // write made entirely of unknown keys is a mistake, not a request to clear,
-    // so keep what is already there.
-    if (normalized.isEmpty() && !props.isEmpty())
-        return;
-    if (normalized == m_keyframeGraphProperties)
-        return;
-    m_keyframeGraphProperties = normalized;
-    emit keyframeGraphPropertyChanged();
-}
-
-void AppController::toggleKeyframeGraphProperty(const QString &prop)
+void AppController::toggleKeyframeGraphPropertyVisible(const QString &prop)
 {
     const QString key = normalizeKeyframeProp(prop);
-    QStringList next = m_keyframeGraphProperties;
-    if (next.contains(key))
-        next.removeAll(key); // may empty the selection, which collapses the strip
+    if (!isKnownKeyframeProp(key))
+        return;
+    if (m_keyframeGraphHiddenProperties.contains(key))
+        m_keyframeGraphHiddenProperties.removeAll(key);
     else
-        next.append(key);
-    setKeyframeGraphProperties(next);
+        m_keyframeGraphHiddenProperties.append(key);
+    emit keyframeGraphVisibilityChanged();
 }
 
-void AppController::soloKeyframeGraphProperty(const QString &prop)
+void AppController::showKeyframeGraphProperty(const QString &prop)
 {
-    setKeyframeGraphProperties({ prop });
+    const QString key = normalizeKeyframeProp(prop);
+    if (!m_keyframeGraphHiddenProperties.removeAll(key))
+        return;
+    emit keyframeGraphVisibilityChanged();
 }
 
-// Effect props are addressed by index, so removing an effect would leave the strip drawing some
-// other effect's parameter. Drop the removed effect's series and renumber everything above it.
+// Effect props are addressed by index, so removing an effect would leave a hidden flag attached to
+// some other effect's parameter. Drop the removed effect's entries and renumber everything above it.
 void AppController::dropKeyframeGraphPropertiesForEffect(int removedIndex)
 {
     QStringList next;
-    for (const QString &prop : std::as_const(m_keyframeGraphProperties)) {
+    for (const QString &prop : std::as_const(m_keyframeGraphHiddenProperties)) {
         int effectIndex = -1;
         QString paramKey;
         if (!parseEffectProp(prop, &effectIndex, &paramKey)) {
@@ -1551,18 +1536,10 @@ void AppController::dropKeyframeGraphPropertiesForEffect(int removedIndex)
                         ? QStringLiteral("fx.%1.%2").arg(effectIndex - 1).arg(paramKey)
                         : prop);
     }
-    if (next == m_keyframeGraphProperties)
+    if (next == m_keyframeGraphHiddenProperties)
         return;
-    m_keyframeGraphProperties = next;
-    emit keyframeGraphPropertyChanged();
-}
-
-void AppController::ensureKeyframeGraphProperty(const QString &prop)
-{
-    const QString key = normalizeKeyframeProp(prop);
-    if (m_keyframeGraphProperties.contains(key))
-        return;
-    setKeyframeGraphProperties(m_keyframeGraphProperties + QStringList { key });
+    m_keyframeGraphHiddenProperties = next;
+    emit keyframeGraphVisibilityChanged();
 }
 
 void AppController::setSubtitleEditing(bool editing)
@@ -6113,6 +6090,98 @@ QVariantList AppController::clipKeyframes(int trackIndex, int clipIndex, const Q
         return out;
 
     return keyframeListToVariant(*kt, clip.timelineStart);
+}
+
+bool AppController::clipPropertyKeyframesEnabled(int trackIndex, int clipIndex,
+                                                 const QString &prop) const
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return true;
+
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return true;
+
+    const drift::KeyframeTrack<double> *kt =
+        keyframeTrackForProp(track.clips.at(clipIndex), prop);
+    return kt ? kt->enabled() : true;
+}
+
+void AppController::setClipPropertyKeyframesEnabled(int trackIndex, int clipIndex,
+                                                    const QString &prop, bool enabled)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    if (clipIndex < 0 || clipIndex >= m_project.tracks().at(trackIndex).clips.size())
+        return;
+
+    {
+        // With no keys there is no animation to switch off, and minting an empty track just to
+        // hold the flag would make an untouched property look animated.
+        const drift::KeyframeTrack<double> *kt =
+            keyframeTrackForProp(m_project.tracks().at(trackIndex).clips.at(clipIndex), prop);
+        if (!kt || kt->isEmpty() || kt->enabled() == enabled)
+            return;
+    }
+
+    // The snapshot is taken before any mutable reference into the project: QList is implicitly
+    // shared, so writing through a reference obtained earlier would land in the copy as well and
+    // leave undo with nothing to restore.
+    const drift::Project before = m_project;
+    drift::Clip &clip = m_project.tracks()[trackIndex].clips[clipIndex];
+    keyframeTrackForProp(clip, prop, /*createIfMissing=*/false)->setEnabled(enabled);
+    pushProjectEdit(before, enabled ? QStringLiteral("Enable keyframes")
+                                    : QStringLiteral("Disable keyframes"));
+    finishEdit(enabled ? QStringLiteral("Keyframes enabled") : QStringLiteral("Keyframes disabled"));
+}
+
+void AppController::toggleClipPropertyKeyframesEnabled(int trackIndex, int clipIndex,
+                                                       const QString &prop)
+{
+    setClipPropertyKeyframesEnabled(trackIndex, clipIndex, prop,
+                                    !clipPropertyKeyframesEnabled(trackIndex, clipIndex, prop));
+}
+
+// Every property of the clip that carries an animation — the keyframe strip's series list.
+//
+// A lone key at the clip's start is how a *static* transform value is stored (every clip gets one
+// for x/y/w/h when it is added), so that alone is not an animation. Effect params keep their static
+// value in Effect::parameters, so for those any key at all means animated.
+QStringList AppController::clipAnimatedProperties(int trackIndex, int clipIndex) const
+{
+    QStringList out;
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return out;
+
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return out;
+
+    const drift::Clip &clip = track.clips.at(clipIndex);
+
+    static const QStringList transformProps = {
+        QStringLiteral("x"),       QStringLiteral("y"),       QStringLiteral("width"),
+        QStringLiteral("height"),  QStringLiteral("rotation"), QStringLiteral("opacity"),
+        QStringLiteral("volume"),
+    };
+    for (const QString &prop : transformProps) {
+        const drift::KeyframeTrack<double> *kt = keyframeTrackForProp(clip, prop);
+        if (!kt || kt->isEmpty())
+            continue;
+        if (kt->keyframes().size() == 1 && kt->keyframes().firstKey() == 0)
+            continue;
+        out.append(prop);
+    }
+
+    for (int i = 0; i < clip.effects.size(); ++i) {
+        const QMap<QString, drift::KeyframeTrack<double>> &params = clip.effects.at(i).paramKeyframes;
+        for (auto it = params.constBegin(); it != params.constEnd(); ++it) {
+            if (!it.value().isEmpty())
+                out.append(QStringLiteral("fx.%1.%2").arg(i).arg(it.key()));
+        }
+    }
+    return out;
 }
 
 void AppController::setKeyframeInterpolation(int trackIndex, int clipIndex, const QString &prop,

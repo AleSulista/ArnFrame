@@ -5,12 +5,10 @@ import Drift
 // Keyframe strip aligned with the timeline: left gutter matches track labels,
 // graph scroll + playhead share the timeline's contentX / pxPerSecond.
 //
-// The strip is a *mirror* of the inspector's property selection, not its own
-// picker: it shows one color-coded series per property selected over in the
-// Transform or Effects panel. The selection accumulates — clicking or editing a
-// second property adds its curve rather than replacing the first — so clicking a
-// chip here is the way back to a single series. Deselecting everything collapses
-// the strip to nothing.
+// Every animated property of the selected clip earns a chip here — the strip is a view of the
+// clip, not of the inspector's selection. A chip toggles whether that curve is drawn: it is a
+// display filter and nothing more, so a hidden curve keeps animating and keeps its chip. Switching
+// an animation *off* is the inspector row's job, not this strip's.
 Item {
     id: root
 
@@ -139,28 +137,24 @@ Item {
     property real dragTangentOutDx: 0
     property real dragTangentOutDy: 0
 
-    // [{ prop, label, color, points, valueMin, valueMax }, ...] — selection order.
-    readonly property var series: {
+    // One entry per animated property of the clip — the chip row's model, hidden curves included.
+    // [{ prop, label, color, points, enabled, shown, valueMin, valueMax }, ...]
+    readonly property var allSeries: {
         void EditorState.selectedClipData
         void EditorState.tracks
-        if (draggingKey)
-            return frozenSeries
+        void EditorState.keyframeGraphHiddenProperties
         if (!hasClip)
             return []
         const out = []
-        const selected = EditorState.keyframeGraphProperties
-        for (let i = 0; i < selected.length; ++i) {
-            const id = selected[i]
+        const animated = EditorState.clipAnimatedProperties(
+                           EditorState.selectedTrack, EditorState.selectedClip)
+        const hidden = EditorState.keyframeGraphHiddenProperties
+        for (let i = 0; i < animated.length; ++i) {
+            const id = animated[i]
             if (!supportsProperty(id))
                 continue
             const pts = EditorState.clipKeyframes(
                           EditorState.selectedTrack, EditorState.selectedClip, id) || []
-            // Transform props are always animatable, so they earn a chip even before their first
-            // key. An effect param is a static value until it is keyed, and merely dragging its
-            // slider selects it — showing an empty series for that would pop the strip open on
-            // every effect edit.
-            if (pts.length === 0 && id.substring(0, 3) === "fx.")
-                continue
             // What the curve reads as when the property has no keys at all — the level of the
             // flat line drawn across the clip in that case.
             const base = EditorState.propertyBaseValue(
@@ -172,9 +166,24 @@ Item {
                 color: Theme.keyframeCurveColor(id),
                 points: pts,
                 baseValue: base,
+                enabled: EditorState.clipPropertyKeyframesEnabled(
+                             EditorState.selectedTrack, EditorState.selectedClip, id),
+                shown: hidden.indexOf(id) < 0,
                 valueMin: range.min,
                 valueMax: range.max
             })
+        }
+        return out
+    }
+
+    // The curves actually drawn: everything the chips have left visible.
+    readonly property var series: {
+        if (draggingKey)
+            return frozenSeries
+        const out = []
+        for (let i = 0; i < allSeries.length; ++i) {
+            if (allSeries[i].shown)
+                out.push(allSeries[i])
         }
         return out
     }
@@ -274,8 +283,10 @@ Item {
     readonly property real maxLaneHeight: 460
 
     height: visible ? laneHeight : 0
+    // Open whenever the clip has an animation to show, even if every curve is currently folded
+    // away — otherwise hiding the last one would take the chips with it.
     visible: (propertiesTab === "transform" || propertiesTab === "effects")
-             && hasClip && clip && series.length > 0
+             && hasClip && clip && allSeries.length > 0
 
     // Curve editing focuses one series: it gets tangent handles and owns the value axis,
     // while the others stay drawn as dimmed context. Handles from two series normalized to
@@ -305,7 +316,7 @@ Item {
         const value = EditorState.propertyValueAt(
                         EditorState.selectedTrack, EditorState.selectedClip, entry.prop,
                         seconds, entry.baseValue)
-        EditorState.ensureKeyframeGraphProperty(entry.prop)
+        EditorState.showKeyframeGraphProperty(entry.prop)
         EditorState.setClipKeyframe(EditorState.selectedTrack, EditorState.selectedClip,
                                     entry.prop, seconds, value)
         focusedProp = entry.prop
@@ -404,37 +415,39 @@ Item {
                     }
                 }
 
-                // Legend for what the inspector currently has selected — one chip
-                // per drawn curve, tinted to match it.
+                // One chip per animated property of the clip, tinted to its curve. Clicking folds
+                // that curve away or brings it back; the chip itself always stays put.
                 Flow {
                     width: parent.width
                     spacing: 3
                     Repeater {
-                        model: root.series
+                        model: root.allSeries
                         delegate: ThemedChip {
                             required property var modelData
-                            required property int index
                             text: modelData.label
                             chipHeight: 18
                             horizontalPadding: 3
                             accentColor: modelData.color
-                            tooltip: root.curveEditing
-                                     ? qsTr("%1 — click to edit this curve, double-click to show only it")
-                                       .arg(root.propertyLabel(modelData.prop))
-                                     : (root.series.length > 1
-                                        ? qsTr("%1 — click to show only this")
-                                          .arg(root.propertyLabel(modelData.prop))
-                                        : root.propertyLabel(modelData.prop))
-                            // While curve editing, the chip doubles as the focus picker, so
-                            // dimming the unfocused ones says which curve the handles belong to.
-                            selected: !root.curveEditing || root.isFocused(index)
-                            onClicked: {
-                                if (root.curveEditing)
-                                    root.focusedProp = modelData.prop
-                                else
-                                    EditorState.soloKeyframeGraphProperty(modelData.prop)
+                            // A property whose keyframes are switched off in the inspector still
+                            // has a curve to look at; it just is not driving anything.
+                            opacity: modelData.enabled ? 1.0 : 0.5
+                            tooltip: {
+                                const name = root.propertyLabel(modelData.prop)
+                                const state = modelData.enabled ? name
+                                                                : qsTr("%1 (keyframes off)").arg(name)
+                                return modelData.shown ? qsTr("%1 — click to hide this curve").arg(state)
+                                                       : qsTr("%1 — click to show this curve").arg(state)
                             }
-                            onDoubleClicked: EditorState.soloKeyframeGraphProperty(modelData.prop)
+                            selected: modelData.shown
+                            onClicked: {
+                                EditorState.toggleKeyframeGraphPropertyVisible(modelData.prop)
+                                // Showing a curve also makes it the one the tangent handles belong
+                                // to, so the chip you just clicked is the curve you can shape.
+                                if (!modelData.shown)
+                                    root.focusedProp = modelData.prop
+                                else if (root.focusedProp === modelData.prop)
+                                    root.focusedProp = ""
+                            }
                         }
                     }
                 }
@@ -616,10 +629,14 @@ Item {
                                 const sorted = live.sort((a, b) => a.seconds - b.seconds)
 
                                 // The focused series is the one being edited; the rest are
-                                // context and are drawn thinner and faded.
+                                // context and are drawn thinner and faded. A series whose
+                                // keyframes are switched off is faded further still — its curve
+                                // is a record of an animation that is not currently playing.
                                 const focused = root.isFocused(s)
                                 ctx.lineWidth = focused ? 1.8 : 1.2
                                 ctx.globalAlpha = (root.curveEditing && !focused) ? 0.35 : 1.0
+                                if (entry.enabled === false)
+                                    ctx.globalAlpha *= 0.45
                                 ctx.strokeStyle = String(entry.color)
                                 ctx.beginPath()
 

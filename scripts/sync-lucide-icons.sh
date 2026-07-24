@@ -39,6 +39,8 @@ icons=(
   captions list-video move-horizontal audio-lines video
   # Shortcuts tab and canvas crop tool
   keyboard crop minimize
+  # Keyframe row: add/remove a key at the playhead
+  diamond-plus diamond-minus
 )
 
 for name in "${icons[@]}"; do
