@@ -182,6 +182,48 @@ TextAnimOrder textAnimOrderFromString(const QString &order)
     return TextAnimOrder::Forward;
 }
 
+QString wordAccentRuleToString(WordAccentRule rule)
+{
+    switch (rule) {
+    case WordAccentRule::FirstWord:
+        return QStringLiteral("firstWord");
+    case WordAccentRule::LastWord:
+        return QStringLiteral("lastWord");
+    case WordAccentRule::EveryOther:
+        return QStringLiteral("everyOther");
+    case WordAccentRule::EveryNth:
+        return QStringLiteral("everyNth");
+    case WordAccentRule::LongestWord:
+        return QStringLiteral("longestWord");
+    case WordAccentRule::RandomStable:
+        return QStringLiteral("randomStable");
+    case WordAccentRule::Karaoke:
+        return QStringLiteral("karaoke");
+    case WordAccentRule::None:
+        return QStringLiteral("none");
+    }
+    return QStringLiteral("none");
+}
+
+WordAccentRule wordAccentRuleFromString(const QString &rule)
+{
+    if (rule == QStringLiteral("firstWord"))
+        return WordAccentRule::FirstWord;
+    if (rule == QStringLiteral("lastWord"))
+        return WordAccentRule::LastWord;
+    if (rule == QStringLiteral("everyOther"))
+        return WordAccentRule::EveryOther;
+    if (rule == QStringLiteral("everyNth"))
+        return WordAccentRule::EveryNth;
+    if (rule == QStringLiteral("longestWord"))
+        return WordAccentRule::LongestWord;
+    if (rule == QStringLiteral("randomStable"))
+        return WordAccentRule::RandomStable;
+    if (rule == QStringLiteral("karaoke"))
+        return WordAccentRule::Karaoke;
+    return WordAccentRule::None;
+}
+
 namespace {
 
 QList<TextPreset> buildPresets()
@@ -294,6 +336,138 @@ QList<TextPreset> buildPresets()
         s.shadowBlur = 6.0;
         s.animIn = {TextAnimKind::SlideUp, 550000, TextEase::EaseOut};
         presets.append({QStringLiteral("handwritten"), QStringLiteral("Handwritten"), s});
+    }
+
+    // Short-form caption packs. Unlike the presets above these carry a per-word accent rule, so the
+    // pack itself decides which words are recoloured, highlighted or scaled up.
+    {
+        TextStyle s;
+        s.fontFamily = QStringLiteral("Anton");
+        s.pixelSize = 96;
+        s.fontWeight = 400;
+        s.outlineWidth = 5.0;
+        s.shadowEnabled = true;
+        s.shadowBlur = 10.0;
+        s.shadowOffsetY = 6.0;
+        s.accent.rule = WordAccentRule::FirstWord;
+        s.accent.colorEnabled = true;
+        s.accent.color = QColor(255, 45, 45);
+        presets.append({QStringLiteral("hormozi"), QStringLiteral("Hormozi"), s});
+    }
+    {
+        TextStyle s;
+        s.fontFamily = QStringLiteral("Montserrat");
+        s.pixelSize = 84;
+        s.fontWeight = 800;
+        s.outlineWidth = 3.0;
+        s.shadowEnabled = true;
+        s.accent.rule = WordAccentRule::EveryNth;
+        s.accent.n = 3;
+        s.accent.colorEnabled = true;
+        s.accent.color = QColor(255, 59, 48);
+        presets.append({QStringLiteral("one-word-color"), QStringLiteral("One word colour"), s});
+    }
+    {
+        TextStyle s;
+        s.fontFamily = QStringLiteral("Inter");
+        s.pixelSize = 80;
+        s.fontWeight = 800;
+        s.outlineWidth = 2.0;
+        s.accent.rule = WordAccentRule::EveryOther;
+        s.accent.highlight.enabled = true;
+        s.accent.highlight.color = QColor(230, 40, 40);
+        s.accent.highlight.padding = 8.0;
+        s.accent.highlight.radius = 6.0;
+        presets.append({QStringLiteral("word-background"), QStringLiteral("Word background"), s});
+    }
+    {
+        TextStyle s;
+        s.fontFamily = QStringLiteral("Montserrat");
+        s.pixelSize = 76;
+        s.fontWeight = 800;
+        s.color = QColor(20, 20, 20);
+        s.boxEnabled = true;
+        s.boxColor = QColor(255, 196, 0);
+        s.boxPadding = 14.0;
+        s.boxRadius = 10.0;
+        presets.append({QStringLiteral("sentence-background"), QStringLiteral("Sentence background"), s});
+    }
+    {
+        TextStyle s;
+        s.fontFamily = QStringLiteral("League Spartan");
+        s.pixelSize = 88;
+        s.fontWeight = 900;
+        s.outlineWidth = 4.0;
+        s.shadowEnabled = true;
+        s.accent.rule = WordAccentRule::Karaoke;
+        s.accent.colorEnabled = true;
+        s.accent.color = QColor(255, 212, 0);
+        s.accent.sizeScale = 1.12;
+        presets.append({QStringLiteral("karaoke-pop"), QStringLiteral("Karaoke pop"), s});
+    }
+    {
+        TextStyle s;
+        s.fontFamily = QStringLiteral("Inter");
+        s.pixelSize = 78;
+        s.fontWeight = 800;
+        s.outlineWidth = 2.0;
+        s.accent.rule = WordAccentRule::Karaoke;
+        s.accent.highlight.enabled = true;
+        s.accent.highlight.color = QColor(34, 197, 94);
+        s.accent.highlight.padding = 8.0;
+        s.accent.highlight.radius = 8.0;
+        presets.append({QStringLiteral("karaoke-highlight"), QStringLiteral("Karaoke highlight"), s});
+    }
+    {
+        TextStyle s;
+        s.fontFamily = QStringLiteral("Montserrat");
+        s.pixelSize = 76;
+        s.fontWeight = 800;
+        s.italic = true;
+        s.glowEnabled = true;
+        s.glowColor = QColor(255, 255, 255);
+        s.glowRadius = 20.0;
+        s.glowOpacity = 0.9;
+        presets.append({QStringLiteral("mirage"), QStringLiteral("Mirage"), s});
+    }
+    {
+        TextStyle s;
+        s.fontFamily = QStringLiteral("Archivo Black");
+        s.pixelSize = 80;
+        s.fontWeight = 400;
+        s.outlineWidth = 2.0;
+        s.underlineEnabled = true;
+        s.underlineColor = QColor(230, 40, 40);
+        s.underlineWidth = 8.0;
+        s.underlineOffset = 8.0;
+        presets.append({QStringLiteral("underline"), QStringLiteral("Underline"), s});
+    }
+    {
+        TextStyle s;
+        s.fontFamily = QStringLiteral("Archivo Black");
+        s.pixelSize = 78;
+        s.fontWeight = 400;
+        s.align = TextAlign::Left;
+        s.wordHighlight.enabled = true;
+        s.wordHighlight.color = QColor(0, 0, 0, 235);
+        s.wordHighlight.padding = 8.0;
+        s.wordHighlight.radius = 2.0;
+        s.accent.rule = WordAccentRule::FirstWord;
+        s.accent.sizeScale = 1.35;
+        presets.append({QStringLiteral("bulky"), QStringLiteral("Bulky"), s});
+    }
+    {
+        TextStyle s;
+        s.fontFamily = QStringLiteral("Montserrat");
+        s.pixelSize = 82;
+        s.fontWeight = 900;
+        s.color = QColor(255, 255, 255, 0); // hollow by default; the accent words are the solid ones
+        s.outlineWidth = 3.0;
+        s.outlineColor = QColor(255, 255, 255);
+        s.accent.rule = WordAccentRule::EveryOther;
+        s.accent.colorEnabled = true;
+        s.accent.color = QColor(255, 255, 255);
+        presets.append({QStringLiteral("word-outline"), QStringLiteral("Word outline"), s});
     }
 
     return presets;

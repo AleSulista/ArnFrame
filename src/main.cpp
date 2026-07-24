@@ -9,6 +9,7 @@
 #include "ClipPreviewImageProvider.h"
 #include "DriftImageProvider.h"
 #include "SegmentImageProvider.h"
+#include "TextStylePreviewImageProvider.h"
 #include "preview/PreviewItem.h"
 
 // QApplication (not QGuiApplication) is required so QFileDialog can use the
@@ -59,6 +60,7 @@ int main(int argc, char *argv[])
     engine.addImageProvider(QStringLiteral("drift"), new DriftImageProvider());
     engine.addImageProvider(QStringLiteral("segment"), new SegmentImageProvider());
     engine.addImageProvider(QStringLiteral("clippreview"), new ClipPreviewImageProvider());
+    engine.addImageProvider(QStringLiteral("textstyle"), new TextStylePreviewImageProvider());
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QGuiApplication::exit(-1); }, Qt::QueuedConnection);
     engine.loadFromModule("Drift", "Main");

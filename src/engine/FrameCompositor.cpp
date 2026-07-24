@@ -499,6 +499,24 @@ QImage gpuSourceForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int m
     return CompositorFrameHistory::applyTimeEcho(samples, decay, blendMode);
 }
 
+// The word the playhead sits on, for styles whose accent rule follows the speech. -1 for every
+// other rule, which keeps their raster time-independent and therefore cached across the clip.
+int karaokeWordIndex(const drift::Clip &clip, drift::TimeUs timelineUs)
+{
+    if (clip.textStyle.accent.rule != drift::WordAccentRule::Karaoke)
+        return -1;
+    const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
+    return drift::activeWordIndexAt(text, clip.timelineStart,
+                                    clip.timelineStart + clip.timelineDuration, timelineUs);
+}
+
+int karaokeWordIndex(const drift::Clip &clip, const drift::SubtitleCue &cue, drift::TimeUs localUs)
+{
+    if (clip.textStyle.accent.rule != drift::WordAccentRule::Karaoke)
+        return -1;
+    return drift::activeWordIndexAt(cue.text, cue.startUs, cue.endUs, localUs);
+}
+
 GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth,
                        int projectHeight, double renderScale, int canvasWidth, int canvasHeight,
                        int projectFps, int maxTimeEchoHistoryFrames)
@@ -527,7 +545,8 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
     if (clip.type == drift::ClipType::Text) {
         // The raster carries a bleed margin for the stroke, shadow and box, so its destination rect
         // is wider than the layout rect. Entrance/exit motion rides on the layer, not the pixels.
-        const TextRasterResult raster = rasterizeText(clip, layoutRect, renderScale);
+        const TextRasterResult raster =
+            rasterizeText(clip, layoutRect, renderScale, karaokeWordIndex(clip, timelineUs));
         const TextAnimSample anim = sampleTextAnimation(clip, timelineUs, layoutRect, renderScale);
 
         layer.source = raster.image;
@@ -553,7 +572,9 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
         if (!cue || cue->text.trimmed().isEmpty())
             return layer;
 
-        const TextRasterResult raster = rasterizeText(clip, cue->text, layoutRect, renderScale);
+        const TextRasterResult raster =
+            rasterizeText(clip, cue->text, layoutRect, renderScale,
+                          karaokeWordIndex(clip, *cue, localUs));
         if (raster.image.isNull())
             return layer;
 
@@ -642,7 +663,8 @@ QList<GpuItem> buildTextSpanItems(const drift::Clip &clip, drift::TimeUs timelin
     const QRectF layoutRect(x, y, w, h);
 
     const QString text = clip.textContent.isEmpty() ? clip.name : clip.textContent;
-    const QList<TextSpanRaster> spans = rasterizeTextSpans(clip, text, layoutRect, renderScale, unit);
+    const QList<TextSpanRaster> spans = rasterizeTextSpans(clip, text, layoutRect, renderScale, unit,
+                                                           karaokeWordIndex(clip, timelineUs));
     if (spans.isEmpty())
         return items;
 

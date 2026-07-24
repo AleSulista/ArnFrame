@@ -15,6 +15,12 @@ struct SubtitleCue
 };
 
 const SubtitleCue *activeSubtitleCueAt(const QList<SubtitleCue> &cues, TimeUs localUs);
+
+// Index of the word being spoken at localUs inside a [startUs, endUs) window, or -1 when the
+// window is empty or has not started. Drives the Karaoke accent rule. The timings are the same
+// proportional ones packSubtitleCues uses — true word timestamps aren't available from our ONNX
+// Whisper export — so this is exact at cue boundaries and interpolated in between.
+int activeWordIndexAt(const QString &text, TimeUs startUs, TimeUs endUs, TimeUs localUs);
 int subtitleCueIndexAt(const QList<SubtitleCue> &cues, TimeUs localUs);
 void sortSubtitleCues(QList<SubtitleCue> &cues);
 

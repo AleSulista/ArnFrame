@@ -82,6 +82,24 @@ QList<TimedWord> flattenWords(const QList<SubtitleCue> &cues)
 
 } // namespace
 
+int activeWordIndexAt(const QString &text, TimeUs startUs, TimeUs endUs, TimeUs localUs)
+{
+    if (endUs <= startUs || localUs < startUs)
+        return -1;
+
+    SubtitleCue cue;
+    cue.startUs = startUs;
+    cue.endUs = endUs;
+    cue.text = text;
+    const QList<TimedWord> words = wordsFromCue(cue);
+    for (int i = 0; i < words.size(); ++i) {
+        if (localUs < words.at(i).endUs)
+            return i;
+    }
+    // Past the last word's end (rounding, or the window overrunning the text): keep it lit.
+    return words.isEmpty() ? -1 : words.size() - 1;
+}
+
 const SubtitleCue *activeSubtitleCueAt(const QList<SubtitleCue> &cues, TimeUs localUs)
 {
     for (const SubtitleCue &cue : cues) {

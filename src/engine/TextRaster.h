@@ -16,10 +16,12 @@ struct TextRasterResult
 };
 
 // Rasterize (or return a cached copy of) the styled text. layoutRect is the clip's layout rect in
-// canvas pixels; renderScale maps project pixels to canvas pixels.
+// canvas pixels; renderScale maps project pixels to canvas pixels. activeWordIndex is the word the
+// playhead is currently on, and only matters for the Karaoke accent rule (-1 = none).
 TextRasterResult rasterizeText(const drift::Clip &clip, const QString &text, const QRectF &layoutRect,
-                               double renderScale);
-TextRasterResult rasterizeText(const drift::Clip &clip, const QRectF &layoutRect, double renderScale);
+                               double renderScale, int activeWordIndex = -1);
+TextRasterResult rasterizeText(const drift::Clip &clip, const QRectF &layoutRect, double renderScale,
+                               int activeWordIndex = -1);
 
 // One reveal span (a character, word or line) of a text clip, rasterized on its own so the
 // compositor can stagger the entrance/exit across the block. Each span is a self-contained texture
@@ -37,7 +39,7 @@ struct TextSpanRaster
 // box background is returned first with index == -1.
 QList<TextSpanRaster> rasterizeTextSpans(const drift::Clip &clip, const QString &text,
                                          const QRectF &layoutRect, double renderScale,
-                                         drift::TextAnimUnit unit);
+                                         drift::TextAnimUnit unit, int activeWordIndex = -1);
 
 // Entrance/exit motion, sampled at a timeline instant. Applied to the *layer* — never to the
 // raster — so the cached texture stays valid for every frame of the animation.

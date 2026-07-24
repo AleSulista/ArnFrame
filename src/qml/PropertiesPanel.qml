@@ -114,10 +114,25 @@ PanelFrame {
                                                                        "shadowBlur": 8,
                                                                        "shadowOpacity": 0.6,
                                                                        "shadowColor": "#ff000000",
+                                                                       "glowEnabled": false,
+                                                                       "glowColor": "#ffffffff",
+                                                                       "glowRadius": 18,
+                                                                       "glowOpacity": 0.8,
                                                                        "boxEnabled": false,
                                                                        "boxColor": "#80000000",
                                                                        "boxPadding": 8,
                                                                        "boxRadius": 0,
+                                                                       "packId": "",
+                                                                       "wordHighlight": { "enabled": false, "color": "#ffe62828", "padding": 6, "radius": 4 },
+                                                                       "underlineEnabled": false,
+                                                                       "underlineColor": "#ffe62828",
+                                                                       "underlineWidth": 6,
+                                                                       "underlineOffset": 4,
+                                                                       "accent": { "rule": "none", "n": 2, "phase": 0,
+                                                                                   "colorEnabled": false, "color": "#ffffd640",
+                                                                                   "sizeScale": 1, "outlineEnabled": false,
+                                                                                   "outlineWidth": 0, "outlineColor": "#ff000000",
+                                                                                   "highlight": { "enabled": false, "color": "#ffe62828", "padding": 6, "radius": 4 } },
                                                                        "animIn": { "kind": "none", "duration": 0.4, "ease": "easeOut" },
                                                                        "animOut": { "kind": "none", "duration": 0.4, "ease": "easeOut" }
                                                                    })
@@ -150,6 +165,11 @@ PanelFrame {
     readonly property var animUnitLabels: ["Whole block", "Character", "Word", "Line"]
     readonly property var animOrders: ["forward", "backward", "centerOut", "random"]
     readonly property var animOrderLabels: ["Forward", "Backward", "Center out", "Random"]
+    readonly property var accentRules: ["none", "firstWord", "lastWord", "everyOther", "everyNth",
+                                        "longestWord", "randomStable", "karaoke"]
+    readonly property var accentRuleLabels: ["No accent", "First word", "Last word", "Every other word",
+                                             "Every Nth word", "Longest word", "Random words",
+                                             "Spoken word (karaoke)"]
 
     readonly property bool hasShapeStyle: hasSelection && clipKind === "shape" && !!clip.shapeStyle
     readonly property var shapeStyle: hasShapeStyle ? clip.shapeStyle : ({
@@ -194,6 +214,22 @@ PanelFrame {
         const patch = {}
         patch[key] = value
         EditorState.setShapeStyle(EditorState.selectedTrack, EditorState.selectedClip, patch)
+    }
+
+    // Nested style groups: the C++ side takes the same partial-patch shape one level down.
+    function setTextGroupKey(group, key, value) {
+        const inner = {}
+        inner[key] = value
+        const patch = {}
+        patch[group] = inner
+        EditorState.setTextStyle(EditorState.selectedTrack, EditorState.selectedClip, patch)
+    }
+
+    function setTextAccentHighlightKey(key, value) {
+        const highlight = {}
+        highlight[key] = value
+        EditorState.setTextStyle(EditorState.selectedTrack, EditorState.selectedClip,
+                                 { "accent": { "highlight": highlight } })
     }
 
     function setTextAnim(which, key, value) {
@@ -282,6 +318,24 @@ PanelFrame {
                 boxPaddingField.value = s.boxPadding
             if (boxRadiusField && !boxRadiusField.activeFocus)
                 boxRadiusField.value = s.boxRadius
+            if (glowRadiusField && !glowRadiusField.activeFocus)
+                glowRadiusField.value = s.glowRadius
+            if (glowOpacityField && !glowOpacityField.activeFocus)
+                glowOpacityField.value = s.glowOpacity
+            if (wordHighlightPaddingField && !wordHighlightPaddingField.activeFocus)
+                wordHighlightPaddingField.value = s.wordHighlight.padding
+            if (wordHighlightRadiusField && !wordHighlightRadiusField.activeFocus)
+                wordHighlightRadiusField.value = s.wordHighlight.radius
+            if (underlineWidthField && !underlineWidthField.activeFocus)
+                underlineWidthField.value = s.underlineWidth
+            if (underlineOffsetField && !underlineOffsetField.activeFocus)
+                underlineOffsetField.value = s.underlineOffset
+            if (accentEveryNField && !accentEveryNField.activeFocus)
+                accentEveryNField.value = s.accent.n
+            if (accentSizeScaleField && !accentSizeScaleField.activeFocus)
+                accentSizeScaleField.value = s.accent.sizeScale
+            if (accentOutlineWidthField && !accentOutlineWidthField.activeFocus)
+                accentOutlineWidthField.value = s.accent.outlineWidth
             if (animInDurationField && !animInDurationField.activeFocus)
                 animInDurationField.value = s.animIn.duration
             if (animOutDurationField && !animOutDurationField.activeFocus)
@@ -789,24 +843,67 @@ PanelFrame {
                             visible: root.hasTextStyle
 
                             Text {
-                                text: qsTr("Presets")
+                                text: qsTr("Style packs")
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
                             }
 
-                            Flow {
+                            // Cards render through the real rasterizer (image://textstyle), so what a
+                            // pack looks like here is what the compositor draws — accents included.
+                            Grid {
+                                id: packGrid
                                 width: parent.width
-                                spacing: 6
+                                columns: 2
+                                spacing: 8
+                                readonly property real cellWidth: (width - spacing * (columns - 1)) / columns
+
                                 Repeater {
                                     model: EditorState.textPresets()
-                                    delegate: ThemedChip {
+                                    delegate: Column {
+                                        id: packCard
                                         required property var modelData
-                                        text: modelData.label
-                                        variant: "outline"
-                                        onClicked: EditorState.applyTextPreset(
-                                                       EditorState.selectedTrack, EditorState.selectedClip,
-                                                       modelData.id)
+                                        readonly property bool selected: root.textStyle.packId === modelData.id
+                                        width: packGrid.cellWidth
+                                        spacing: 3
+
+                                        Text {
+                                            width: parent.width
+                                            text: packCard.modelData.label
+                                            elide: Text.ElideRight
+                                            color: packCard.selected ? Theme.primary : Theme.mutedForeground
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeXs
+                                        }
+
+                                        Rectangle {
+                                            width: parent.width
+                                            height: Math.round(width * 0.45)
+                                            radius: Theme.radiusSm
+                                            color: Theme.panelSecondaryBg
+                                            border.width: packCard.selected ? Theme.borderWidthFocus : Theme.borderWidth
+                                            border.color: packCard.selected ? Theme.primary : Theme.panelSecondaryBorder
+                                            clip: true
+
+                                            Image {
+                                                anchors.fill: parent
+                                                anchors.margins: 2
+                                                asynchronous: true
+                                                fillMode: Image.Pad
+                                                source: "image://textstyle/" + packCard.modelData.id
+                                                sourceSize.width: Math.max(1, Math.round(width))
+                                                sourceSize.height: Math.max(1, Math.round(height))
+                                            }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: EditorState.applyTextPreset(
+                                                               EditorState.selectedTrack,
+                                                               EditorState.selectedClip,
+                                                               packCard.modelData.id)
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1417,6 +1514,387 @@ PanelFrame {
                                         step: 1
                                         from: 0
                                         onEdited: v => root.setTextStyleKey("boxRadius", v)
+                                    }
+                                }
+                            }
+
+                            ThemedToggleButton {
+                                width: 96
+                                text: qsTr("Glow")
+                                checked: root.textStyle.glowEnabled
+                                tooltip: qsTr("Coloured bloom around the letters, with no offset")
+                                onClicked: root.setTextStyleKey("glowEnabled", !root.textStyle.glowEnabled)
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 8
+                                visible: root.textStyle.glowEnabled
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: qsTr("Radius")
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedNumberField {
+                                        id: glowRadiusField
+                                        to: 200
+                                        unit: "px"
+                                        width: parent.width
+                                        decimals: 1
+                                        step: 1
+                                        from: 0
+                                        onEdited: v => root.setTextStyleKey("glowRadius", v)
+                                    }
+                                }
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: qsTr("Opacity")
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedNumberField {
+                                        id: glowOpacityField
+                                        to: 1
+                                        width: parent.width
+                                        decimals: 2
+                                        step: 0.05
+                                        from: 0
+                                        onEdited: v => root.setTextStyleKey("glowOpacity", v)
+                                    }
+                                }
+                            }
+
+                            Column {
+                                width: parent.width
+                                spacing: 4
+                                visible: root.textStyle.glowEnabled
+                                Text {
+                                    text: qsTr("Glow colour")
+                                    color: Theme.mutedForeground
+                                    font.pixelSize: Theme.fontSizeXs
+                                    font.family: Theme.fontFamily
+                                }
+                                ColorSwatchField {
+                                    hex: root.textStyle.glowColor
+                                    tooltip: qsTr("Choose glow colour")
+                                    onEdited: value => root.setTextStyleKey("glowColor", value)
+                                }
+                            }
+
+                            ThemedToggleButton {
+                                width: 128
+                                text: qsTr("Word highlight")
+                                checked: root.textStyle.wordHighlight.enabled
+                                tooltip: qsTr("Filled pill behind every word, sized to the word itself")
+                                onClicked: root.setTextGroupKey("wordHighlight", "enabled",
+                                                                !root.textStyle.wordHighlight.enabled)
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 8
+                                visible: root.textStyle.wordHighlight.enabled
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: qsTr("Thickness")
+                                        HoverHandler { id: tipHoverHlPad }
+                                        ThemedToolTip { text: qsTr("How far the pill extends past the word"); visible: tipHoverHlPad.hovered }
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedNumberField {
+                                        id: wordHighlightPaddingField
+                                        to: 200
+                                        unit: "px"
+                                        width: parent.width
+                                        decimals: 1
+                                        step: 1
+                                        from: 0
+                                        onEdited: v => root.setTextGroupKey("wordHighlight", "padding", v)
+                                    }
+                                }
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: qsTr("Corner radius")
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedNumberField {
+                                        id: wordHighlightRadiusField
+                                        to: 200
+                                        unit: "px"
+                                        width: parent.width
+                                        decimals: 1
+                                        step: 1
+                                        from: 0
+                                        onEdited: v => root.setTextGroupKey("wordHighlight", "radius", v)
+                                    }
+                                }
+                            }
+
+                            Column {
+                                width: parent.width
+                                spacing: 4
+                                visible: root.textStyle.wordHighlight.enabled
+                                Text {
+                                    text: qsTr("Highlight colour")
+                                    color: Theme.mutedForeground
+                                    font.pixelSize: Theme.fontSizeXs
+                                    font.family: Theme.fontFamily
+                                }
+                                ColorSwatchField {
+                                    hex: root.textStyle.wordHighlight.color
+                                    tooltip: qsTr("Choose highlight colour")
+                                    onEdited: value => root.setTextGroupKey("wordHighlight", "color", value)
+                                }
+                            }
+
+                            ThemedToggleButton {
+                                width: 96
+                                text: qsTr("Underline")
+                                checked: root.textStyle.underlineEnabled
+                                tooltip: qsTr("Draw a rule under each line of text")
+                                onClicked: root.setTextStyleKey("underlineEnabled", !root.textStyle.underlineEnabled)
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 8
+                                visible: root.textStyle.underlineEnabled
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: qsTr("Thickness")
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedNumberField {
+                                        id: underlineWidthField
+                                        to: 100
+                                        unit: "px"
+                                        width: parent.width
+                                        decimals: 1
+                                        step: 0.5
+                                        from: 0
+                                        onEdited: v => root.setTextStyleKey("underlineWidth", v)
+                                    }
+                                }
+
+                                Column {
+                                    width: (parent.width - parent.spacing) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: qsTr("Offset")
+                                        HoverHandler { id: tipHoverUnderlineOffset }
+                                        ThemedToolTip { text: qsTr("Gap between the baseline and the rule"); visible: tipHoverUnderlineOffset.hovered }
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedNumberField {
+                                        id: underlineOffsetField
+                                        to: 200
+                                        unit: "px"
+                                        width: parent.width
+                                        decimals: 1
+                                        step: 1
+                                        from: -200
+                                        onEdited: v => root.setTextStyleKey("underlineOffset", v)
+                                    }
+                                }
+                            }
+
+                            Column {
+                                width: parent.width
+                                spacing: 4
+                                visible: root.textStyle.underlineEnabled
+                                Text {
+                                    text: qsTr("Underline colour")
+                                    color: Theme.mutedForeground
+                                    font.pixelSize: Theme.fontSizeXs
+                                    font.family: Theme.fontFamily
+                                }
+                                ColorSwatchField {
+                                    hex: root.textStyle.underlineColor
+                                    tooltip: qsTr("Choose underline colour")
+                                    onEdited: value => root.setTextStyleKey("underlineColor", value)
+                                }
+                            }
+
+                            Text {
+                                text: qsTr("Word accent")
+                                HoverHandler { id: tipHoverAccent }
+                                ThemedToolTip {
+                                    text: qsTr("Style some words differently from the rest, chosen by rule")
+                                    visible: tipHoverAccent.hovered
+                                }
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 8
+
+                                ThemedComboBox {
+                                    id: accentRuleBox
+                                    width: root.textStyle.accent.rule === "everyNth"
+                                           ? (parent.width - parent.spacing) * 0.66 : parent.width
+                                    model: root.accentRuleLabels
+                                    currentIndex: Math.max(0, root.accentRules.indexOf(root.textStyle.accent.rule))
+                                    onActivated: root.setTextGroupKey("accent", "rule",
+                                                                      root.accentRules[currentIndex])
+                                }
+
+                                ThemedNumberField {
+                                    id: accentEveryNField
+                                    visible: root.textStyle.accent.rule === "everyNth"
+                                    width: (parent.width - parent.spacing) * 0.34
+                                    to: 16
+                                    from: 1
+                                    decimals: 0
+                                    step: 1
+                                    onEdited: v => root.setTextGroupKey("accent", "n", v)
+                                }
+                            }
+
+                            Column {
+                                width: parent.width
+                                spacing: 8
+                                visible: root.textStyle.accent.rule !== "none"
+
+                                Row {
+                                    width: parent.width
+                                    spacing: 8
+
+                                    ThemedToggleButton {
+                                        width: 112
+                                        text: qsTr("Accent colour")
+                                        checked: root.textStyle.accent.colorEnabled
+                                        tooltip: qsTr("Recolour the words the rule picks out")
+                                        onClicked: root.setTextGroupKey("accent", "colorEnabled",
+                                                                        !root.textStyle.accent.colorEnabled)
+                                    }
+
+                                    ColorSwatchField {
+                                        visible: root.textStyle.accent.colorEnabled
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        hex: root.textStyle.accent.color
+                                        tooltip: qsTr("Choose accent colour")
+                                        onEdited: value => root.setTextGroupKey("accent", "color", value)
+                                    }
+                                }
+
+                                Column {
+                                    width: (parent.width - 8) / 2
+                                    spacing: 4
+                                    Text {
+                                        text: qsTr("Accent size")
+                                        HoverHandler { id: tipHoverAccentSize }
+                                        ThemedToolTip {
+                                            text: qsTr("Size of the accented words relative to the rest of the line")
+                                            visible: tipHoverAccentSize.hovered
+                                        }
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedNumberField {
+                                        id: accentSizeScaleField
+                                        to: 4
+                                        unit: "x"
+                                        width: parent.width
+                                        decimals: 2
+                                        step: 0.05
+                                        from: 0.25
+                                        onEdited: v => root.setTextGroupKey("accent", "sizeScale", v)
+                                    }
+                                }
+
+                                Row {
+                                    width: parent.width
+                                    spacing: 8
+
+                                    ThemedToggleButton {
+                                        width: 112
+                                        text: qsTr("Accent outline")
+                                        checked: root.textStyle.accent.outlineEnabled
+                                        tooltip: qsTr("Give the accented words their own outline")
+                                        onClicked: root.setTextGroupKey("accent", "outlineEnabled",
+                                                                        !root.textStyle.accent.outlineEnabled)
+                                    }
+
+                                    ColorSwatchField {
+                                        visible: root.textStyle.accent.outlineEnabled
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        hex: root.textStyle.accent.outlineColor
+                                        tooltip: qsTr("Choose accent outline colour")
+                                        onEdited: value => root.setTextGroupKey("accent", "outlineColor", value)
+                                    }
+                                }
+
+                                Column {
+                                    width: (parent.width - 8) / 2
+                                    spacing: 4
+                                    visible: root.textStyle.accent.outlineEnabled
+                                    Text {
+                                        text: qsTr("Accent outline width")
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeXs
+                                        font.family: Theme.fontFamily
+                                    }
+                                    ThemedNumberField {
+                                        id: accentOutlineWidthField
+                                        to: 100
+                                        unit: "px"
+                                        width: parent.width
+                                        decimals: 1
+                                        step: 0.5
+                                        from: 0
+                                        onEdited: v => root.setTextGroupKey("accent", "outlineWidth", v)
+                                    }
+                                }
+
+                                Row {
+                                    width: parent.width
+                                    spacing: 8
+
+                                    ThemedToggleButton {
+                                        width: 112
+                                        text: qsTr("Accent pill")
+                                        checked: root.textStyle.accent.highlight.enabled
+                                        tooltip: qsTr("Highlight only the accented words, instead of every word")
+                                        onClicked: root.setTextAccentHighlightKey(
+                                                       "enabled", !root.textStyle.accent.highlight.enabled)
+                                    }
+
+                                    ColorSwatchField {
+                                        visible: root.textStyle.accent.highlight.enabled
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        hex: root.textStyle.accent.highlight.color
+                                        tooltip: qsTr("Choose accent highlight colour")
+                                        onEdited: value => root.setTextAccentHighlightKey("color", value)
                                     }
                                 }
                             }

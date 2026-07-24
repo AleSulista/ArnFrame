@@ -119,9 +119,66 @@ QList<Effect> effectsFromJson(const QJsonArray &array)
     return effects;
 }
 
+QJsonObject textHighlightToJson(const TextHighlight &h)
+{
+    return QJsonObject{
+        {QStringLiteral("enabled"), h.enabled},
+        {QStringLiteral("color"), h.color.name(QColor::HexArgb)},
+        {QStringLiteral("padding"), h.padding},
+        {QStringLiteral("radius"), h.radius},
+    };
+}
+
+TextHighlight textHighlightFromJson(const QJsonObject &o, const TextHighlight &fallback)
+{
+    TextHighlight h = fallback;
+    if (o.isEmpty())
+        return h;
+    h.enabled = o.value(QStringLiteral("enabled")).toBool(h.enabled);
+    h.color = QColor(o.value(QStringLiteral("color")).toString(h.color.name(QColor::HexArgb)));
+    h.padding = o.value(QStringLiteral("padding")).toDouble(h.padding);
+    h.radius = o.value(QStringLiteral("radius")).toDouble(h.radius);
+    return h;
+}
+
+QJsonObject wordAccentToJson(const WordAccent &a)
+{
+    return QJsonObject{
+        {QStringLiteral("rule"), wordAccentRuleToString(a.rule)},
+        {QStringLiteral("n"), a.n},
+        {QStringLiteral("phase"), a.phase},
+        {QStringLiteral("colorEnabled"), a.colorEnabled},
+        {QStringLiteral("color"), a.color.name(QColor::HexArgb)},
+        {QStringLiteral("sizeScale"), a.sizeScale},
+        {QStringLiteral("outlineEnabled"), a.outlineEnabled},
+        {QStringLiteral("outlineWidth"), a.outlineWidth},
+        {QStringLiteral("outlineColor"), a.outlineColor.name(QColor::HexArgb)},
+        {QStringLiteral("highlight"), textHighlightToJson(a.highlight)},
+    };
+}
+
+WordAccent wordAccentFromJson(const QJsonObject &o)
+{
+    WordAccent a;
+    if (o.isEmpty())
+        return a; // projects predating style packs: no accent at all
+    a.rule = wordAccentRuleFromString(o.value(QStringLiteral("rule")).toString());
+    a.n = o.value(QStringLiteral("n")).toInt(a.n);
+    a.phase = o.value(QStringLiteral("phase")).toInt(a.phase);
+    a.colorEnabled = o.value(QStringLiteral("colorEnabled")).toBool(a.colorEnabled);
+    a.color = QColor(o.value(QStringLiteral("color")).toString(a.color.name(QColor::HexArgb)));
+    a.sizeScale = o.value(QStringLiteral("sizeScale")).toDouble(a.sizeScale);
+    a.outlineEnabled = o.value(QStringLiteral("outlineEnabled")).toBool(a.outlineEnabled);
+    a.outlineWidth = o.value(QStringLiteral("outlineWidth")).toDouble(a.outlineWidth);
+    a.outlineColor = QColor(o.value(QStringLiteral("outlineColor")).toString(a.outlineColor.name(QColor::HexArgb)));
+    a.highlight = textHighlightFromJson(o.value(QStringLiteral("highlight")).toObject(), a.highlight);
+    return a;
+}
+
 QJsonObject textStyleToJson(const TextStyle &s)
 {
     return QJsonObject{
+        {QStringLiteral("packId"), s.packId},
         {QStringLiteral("fontFamily"), s.fontFamily},
         {QStringLiteral("pixelSize"), s.pixelSize},
         {QStringLiteral("fontWeight"), s.fontWeight},
@@ -140,10 +197,20 @@ QJsonObject textStyleToJson(const TextStyle &s)
         {QStringLiteral("shadowBlur"), s.shadowBlur},
         {QStringLiteral("shadowOpacity"), s.shadowOpacity},
         {QStringLiteral("shadowColor"), s.shadowColor.name(QColor::HexArgb)},
+        {QStringLiteral("glowEnabled"), s.glowEnabled},
+        {QStringLiteral("glowColor"), s.glowColor.name(QColor::HexArgb)},
+        {QStringLiteral("glowRadius"), s.glowRadius},
+        {QStringLiteral("glowOpacity"), s.glowOpacity},
         {QStringLiteral("boxEnabled"), s.boxEnabled},
         {QStringLiteral("boxColor"), s.boxColor.name(QColor::HexArgb)},
         {QStringLiteral("boxPadding"), s.boxPadding},
         {QStringLiteral("boxRadius"), s.boxRadius},
+        {QStringLiteral("wordHighlight"), textHighlightToJson(s.wordHighlight)},
+        {QStringLiteral("underlineEnabled"), s.underlineEnabled},
+        {QStringLiteral("underlineColor"), s.underlineColor.name(QColor::HexArgb)},
+        {QStringLiteral("underlineWidth"), s.underlineWidth},
+        {QStringLiteral("underlineOffset"), s.underlineOffset},
+        {QStringLiteral("accent"), wordAccentToJson(s.accent)},
         {QStringLiteral("animInKind"), textAnimKindToString(s.animIn.kind)},
         {QStringLiteral("animInDurationUs"), static_cast<qint64>(s.animIn.durationUs)},
         {QStringLiteral("animInEase"), textEaseToString(s.animIn.ease)},
@@ -164,6 +231,7 @@ TextStyle textStyleFromJson(const QJsonObject &o)
     TextStyle s;
     if (o.isEmpty())
         return s; // old projects: keep defaults
+    s.packId = o.value(QStringLiteral("packId")).toString(s.packId);
     s.fontFamily = o.value(QStringLiteral("fontFamily")).toString(s.fontFamily);
     s.pixelSize = o.value(QStringLiteral("pixelSize")).toInt(s.pixelSize);
     // Projects written before the weight ladder only had a bold flag.
@@ -186,10 +254,21 @@ TextStyle textStyleFromJson(const QJsonObject &o)
     s.shadowBlur = o.value(QStringLiteral("shadowBlur")).toDouble(s.shadowBlur);
     s.shadowOpacity = o.value(QStringLiteral("shadowOpacity")).toDouble(s.shadowOpacity);
     s.shadowColor = QColor(o.value(QStringLiteral("shadowColor")).toString(s.shadowColor.name(QColor::HexArgb)));
+    s.glowEnabled = o.value(QStringLiteral("glowEnabled")).toBool(s.glowEnabled);
+    s.glowColor = QColor(o.value(QStringLiteral("glowColor")).toString(s.glowColor.name(QColor::HexArgb)));
+    s.glowRadius = o.value(QStringLiteral("glowRadius")).toDouble(s.glowRadius);
+    s.glowOpacity = o.value(QStringLiteral("glowOpacity")).toDouble(s.glowOpacity);
     s.boxEnabled = o.value(QStringLiteral("boxEnabled")).toBool(s.boxEnabled);
     s.boxColor = QColor(o.value(QStringLiteral("boxColor")).toString(s.boxColor.name(QColor::HexArgb)));
     s.boxPadding = o.value(QStringLiteral("boxPadding")).toDouble(s.boxPadding);
     s.boxRadius = o.value(QStringLiteral("boxRadius")).toDouble(s.boxRadius);
+    s.wordHighlight =
+        textHighlightFromJson(o.value(QStringLiteral("wordHighlight")).toObject(), s.wordHighlight);
+    s.underlineEnabled = o.value(QStringLiteral("underlineEnabled")).toBool(s.underlineEnabled);
+    s.underlineColor = QColor(o.value(QStringLiteral("underlineColor")).toString(s.underlineColor.name(QColor::HexArgb)));
+    s.underlineWidth = o.value(QStringLiteral("underlineWidth")).toDouble(s.underlineWidth);
+    s.underlineOffset = o.value(QStringLiteral("underlineOffset")).toDouble(s.underlineOffset);
+    s.accent = wordAccentFromJson(o.value(QStringLiteral("accent")).toObject());
     s.animIn.kind = textAnimKindFromString(o.value(QStringLiteral("animInKind")).toString());
     s.animIn.durationUs = o.value(QStringLiteral("animInDurationUs")).toInteger(s.animIn.durationUs);
     s.animIn.ease = textEaseFromString(o.value(QStringLiteral("animInEase")).toString());

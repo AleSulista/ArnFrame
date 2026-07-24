@@ -27,6 +27,12 @@ enum class TextAnimUnit { Block, Word, Character, Line };
 // Order the staggered spans fire in.
 enum class TextAnimOrder { Forward, Backward, CenterOut, Random };
 
+// Which words a style pack accents. The positional rules are time-independent, so the raster
+// stays cacheable for the whole cue; Karaoke follows the word being spoken and re-rasterizes as
+// the playhead crosses each word.
+enum class WordAccentRule { None, FirstWord, LastWord, EveryOther, EveryNth, LongestWord,
+                            RandomStable, Karaoke };
+
 QString textAlignToString(TextAlign align);
 TextAlign textAlignFromString(const QString &align);
 
@@ -45,6 +51,9 @@ TextAnimUnit textAnimUnitFromString(const QString &unit);
 QString textAnimOrderToString(TextAnimOrder order);
 TextAnimOrder textAnimOrderFromString(const QString &order);
 
+QString wordAccentRuleToString(WordAccentRule rule);
+WordAccentRule wordAccentRuleFromString(const QString &rule);
+
 struct TextAnimation
 {
     TextAnimKind kind = TextAnimKind::None;
@@ -58,8 +67,38 @@ struct TextAnimation
     TextAnimOrder order = TextAnimOrder::Forward;
 };
 
+// Rounded pill drawn behind a word. Used both for "every word" backgrounds and for the
+// accent-only highlight a pack paints under its chosen words.
+struct TextHighlight
+{
+    bool enabled = false;
+    QColor color = QColor(230, 40, 40);
+    double padding = 6.0; // px at pixelSize
+    double radius = 4.0;
+};
+
+// The per-word override a style pack applies to the words its rule picks out. Everything left
+// disabled falls through to the block style, so a pack only states what it changes.
+struct WordAccent
+{
+    WordAccentRule rule = WordAccentRule::None;
+    int n = 2;    // EveryNth stride
+    int phase = 0; // index of the first accented word
+
+    bool colorEnabled = false;
+    QColor color = QColor(255, 214, 64);
+    double sizeScale = 1.0; // relative to the block's pixelSize; changes the layout
+
+    bool outlineEnabled = false;
+    double outlineWidth = 0.0;
+    QColor outlineColor = Qt::black;
+
+    TextHighlight highlight;
+};
+
 struct TextStyle
 {
+    QString packId; // last applied style pack; cleared once the style is hand-edited
     QString fontFamily = QStringLiteral("Inter");
     int pixelSize = 64; // at project height
     int fontWeight = 700; // 100..900
@@ -82,10 +121,26 @@ struct TextStyle
     double shadowOpacity = 0.6;
     QColor shadowColor = QColor(0, 0, 0);
 
-    bool boxEnabled = false; // filled background behind the glyphs
+    // Offsetless coloured bloom. Separate from the shadow because the packs that use it want both
+    // at once — a glow for the look and a shadow for legibility.
+    bool glowEnabled = false;
+    QColor glowColor = QColor(255, 255, 255);
+    double glowRadius = 18.0;
+    double glowOpacity = 0.8;
+
+    bool boxEnabled = false; // filled background behind the whole block
     QColor boxColor = QColor(0, 0, 0, 128);
     double boxPadding = 8.0;
     double boxRadius = 0.0;
+
+    TextHighlight wordHighlight; // pill behind every word
+
+    bool underlineEnabled = false;
+    QColor underlineColor = QColor(230, 40, 40);
+    double underlineWidth = 6.0;
+    double underlineOffset = 4.0; // below the baseline
+
+    WordAccent accent;
 
     TextAnimation animIn;
     TextAnimation animOut;

@@ -40,6 +40,7 @@ private slots:
     void textStyleAndBlendModeSerialization();
     void legacyBoldMigratesToFontWeight();
     void textPresetsAreWellFormed();
+    void karaokeWordIndexTracksTheCue();
     void shapeStyleSerialization();
     void legacyShapeStyleLoadsWithDefaults();
     void shapeCatalogPathsFitBounds();
@@ -658,10 +659,30 @@ void CoreTest::textStyleAndBlendModeSerialization()
     clip.textStyle.shadowBlur = 11.0;
     clip.textStyle.shadowOpacity = 0.42;
     clip.textStyle.shadowColor = QColor(0, 128, 255);
+    clip.textStyle.glowEnabled = true;
+    clip.textStyle.glowColor = QColor(0, 255, 128);
+    clip.textStyle.glowRadius = 21.0;
+    clip.textStyle.glowOpacity = 0.55;
     clip.textStyle.boxEnabled = true;
     clip.textStyle.boxColor = QColor(0, 0, 0, 100);
     clip.textStyle.boxPadding = 12.0;
     clip.textStyle.boxRadius = 5.0;
+    clip.textStyle.packId = QStringLiteral("hormozi");
+    clip.textStyle.wordHighlight = {true, QColor(12, 34, 56), 9.0, 3.0};
+    clip.textStyle.underlineEnabled = true;
+    clip.textStyle.underlineColor = QColor(200, 100, 50);
+    clip.textStyle.underlineWidth = 7.5;
+    clip.textStyle.underlineOffset = 2.5;
+    clip.textStyle.accent.rule = drift::WordAccentRule::EveryNth;
+    clip.textStyle.accent.n = 3;
+    clip.textStyle.accent.phase = 1;
+    clip.textStyle.accent.colorEnabled = true;
+    clip.textStyle.accent.color = QColor(9, 8, 7);
+    clip.textStyle.accent.sizeScale = 1.4;
+    clip.textStyle.accent.outlineEnabled = true;
+    clip.textStyle.accent.outlineWidth = 4.5;
+    clip.textStyle.accent.outlineColor = QColor(1, 2, 3);
+    clip.textStyle.accent.highlight = {true, QColor(60, 70, 80), 11.0, 6.0};
     clip.textStyle.animIn = {drift::TextAnimKind::Pop, drift::secondsToUs(0.3), drift::TextEase::Back};
     clip.textStyle.animOut = {drift::TextAnimKind::SlideDown, drift::secondsToUs(0.25),
                               drift::TextEase::EaseInOut};
@@ -693,10 +714,36 @@ void CoreTest::textStyleAndBlendModeSerialization()
     QCOMPARE(s.shadowBlur, 11.0);
     QCOMPARE(s.shadowOpacity, 0.42);
     QCOMPARE(s.shadowColor, QColor(0, 128, 255));
+    QCOMPARE(s.glowEnabled, true);
+    QCOMPARE(s.glowColor, QColor(0, 255, 128));
+    QCOMPARE(s.glowRadius, 21.0);
+    QCOMPARE(s.glowOpacity, 0.55);
     QCOMPARE(s.boxEnabled, true);
     QCOMPARE(s.boxColor, QColor(0, 0, 0, 100));
     QCOMPARE(s.boxPadding, 12.0);
     QCOMPARE(s.boxRadius, 5.0);
+    QCOMPARE(s.packId, QStringLiteral("hormozi"));
+    QCOMPARE(s.wordHighlight.enabled, true);
+    QCOMPARE(s.wordHighlight.color, QColor(12, 34, 56));
+    QCOMPARE(s.wordHighlight.padding, 9.0);
+    QCOMPARE(s.wordHighlight.radius, 3.0);
+    QCOMPARE(s.underlineEnabled, true);
+    QCOMPARE(s.underlineColor, QColor(200, 100, 50));
+    QCOMPARE(s.underlineWidth, 7.5);
+    QCOMPARE(s.underlineOffset, 2.5);
+    QCOMPARE(s.accent.rule, drift::WordAccentRule::EveryNth);
+    QCOMPARE(s.accent.n, 3);
+    QCOMPARE(s.accent.phase, 1);
+    QCOMPARE(s.accent.colorEnabled, true);
+    QCOMPARE(s.accent.color, QColor(9, 8, 7));
+    QCOMPARE(s.accent.sizeScale, 1.4);
+    QCOMPARE(s.accent.outlineEnabled, true);
+    QCOMPARE(s.accent.outlineWidth, 4.5);
+    QCOMPARE(s.accent.outlineColor, QColor(1, 2, 3));
+    QCOMPARE(s.accent.highlight.enabled, true);
+    QCOMPARE(s.accent.highlight.color, QColor(60, 70, 80));
+    QCOMPARE(s.accent.highlight.padding, 11.0);
+    QCOMPARE(s.accent.highlight.radius, 6.0);
     QCOMPARE(s.animIn.kind, drift::TextAnimKind::Pop);
     QCOMPARE(s.animIn.durationUs, drift::secondsToUs(0.3));
     QCOMPARE(s.animIn.ease, drift::TextEase::Back);
@@ -756,8 +803,48 @@ void CoreTest::textPresetsAreWellFormed()
         QVERIFY(!preset.style.fontFamily.isEmpty());
         QVERIFY(preset.style.fontWeight >= 100 && preset.style.fontWeight <= 900);
         QCOMPARE(drift::textStyleForPresetId(preset.id)->fontFamily, preset.style.fontFamily);
+
+        // A pack's accent has to be usable: a stride that advances, a size that renders, and an
+        // override that actually changes something when a rule picks words out.
+        const drift::WordAccent &accent = preset.style.accent;
+        QVERIFY(accent.n >= 1);
+        QVERIFY(accent.phase >= 0);
+        QVERIFY(accent.sizeScale > 0.0);
+        if (accent.rule != drift::WordAccentRule::None) {
+            QVERIFY(accent.colorEnabled || accent.outlineEnabled || accent.highlight.enabled
+                    || !qFuzzyCompare(accent.sizeScale, 1.0));
+        }
+        if (accent.colorEnabled)
+            QVERIFY(accent.color.isValid());
+        if (accent.highlight.enabled)
+            QVERIFY(accent.highlight.color.isValid());
     }
     QVERIFY(drift::textStyleForPresetId(QStringLiteral("nope")) == nullptr);
+}
+
+void CoreTest::karaokeWordIndexTracksTheCue()
+{
+    const QString text = QStringLiteral("Number of thumbnails that");
+    const drift::TimeUs start = drift::secondsToUs(2.0);
+    const drift::TimeUs end = drift::secondsToUs(4.0);
+
+    // Before the window there is no spoken word at all.
+    QCOMPARE(drift::activeWordIndexAt(text, start, end, drift::secondsToUs(1.0)), -1);
+    QCOMPARE(drift::activeWordIndexAt(text, start, start, drift::secondsToUs(2.5)), -1);
+
+    // Inside it the index only ever advances, starts at the first word and ends on the last.
+    QCOMPARE(drift::activeWordIndexAt(text, start, end, start), 0);
+    int previous = 0;
+    for (int step = 1; step <= 20; ++step) {
+        const drift::TimeUs at = start + (end - start) * step / 21;
+        const int index = drift::activeWordIndexAt(text, start, end, at);
+        QVERIFY(index >= previous);
+        QVERIFY(index < 4);
+        previous = index;
+    }
+    QCOMPARE(drift::activeWordIndexAt(text, start, end, end - 1), 3);
+    // Past the end (rounding at a cue boundary) keeps the last word lit rather than blanking it.
+    QCOMPARE(drift::activeWordIndexAt(text, start, end, end), 3);
 }
 
 void CoreTest::shapeStyleSerialization()

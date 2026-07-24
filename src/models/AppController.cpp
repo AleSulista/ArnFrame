@@ -432,9 +432,71 @@ QVariantMap textAnimationToMap(const drift::TextAnimation &a)
     };
 }
 
+QVariantMap textHighlightToMap(const drift::TextHighlight &h)
+{
+    return {
+        {QStringLiteral("enabled"), h.enabled},
+        {QStringLiteral("color"), h.color.name(QColor::HexArgb)},
+        {QStringLiteral("padding"), h.padding},
+        {QStringLiteral("radius"), h.radius},
+    };
+}
+
+void applyTextHighlightPatch(drift::TextHighlight *highlight, const QVariantMap &m)
+{
+    if (m.contains(QStringLiteral("enabled")))
+        highlight->enabled = m.value(QStringLiteral("enabled")).toBool();
+    if (m.contains(QStringLiteral("color")))
+        highlight->color = QColor(m.value(QStringLiteral("color")).toString());
+    if (m.contains(QStringLiteral("padding")))
+        highlight->padding = qMax(0.0, m.value(QStringLiteral("padding")).toDouble());
+    if (m.contains(QStringLiteral("radius")))
+        highlight->radius = qMax(0.0, m.value(QStringLiteral("radius")).toDouble());
+}
+
+QVariantMap wordAccentToMap(const drift::WordAccent &a)
+{
+    return {
+        {QStringLiteral("rule"), drift::wordAccentRuleToString(a.rule)},
+        {QStringLiteral("n"), a.n},
+        {QStringLiteral("phase"), a.phase},
+        {QStringLiteral("colorEnabled"), a.colorEnabled},
+        {QStringLiteral("color"), a.color.name(QColor::HexArgb)},
+        {QStringLiteral("sizeScale"), a.sizeScale},
+        {QStringLiteral("outlineEnabled"), a.outlineEnabled},
+        {QStringLiteral("outlineWidth"), a.outlineWidth},
+        {QStringLiteral("outlineColor"), a.outlineColor.name(QColor::HexArgb)},
+        {QStringLiteral("highlight"), textHighlightToMap(a.highlight)},
+    };
+}
+
+void applyWordAccentPatch(drift::WordAccent *accent, const QVariantMap &m)
+{
+    if (m.contains(QStringLiteral("rule")))
+        accent->rule = drift::wordAccentRuleFromString(m.value(QStringLiteral("rule")).toString());
+    if (m.contains(QStringLiteral("n")))
+        accent->n = qBound(1, m.value(QStringLiteral("n")).toInt(), 16);
+    if (m.contains(QStringLiteral("phase")))
+        accent->phase = qBound(0, m.value(QStringLiteral("phase")).toInt(), 16);
+    if (m.contains(QStringLiteral("colorEnabled")))
+        accent->colorEnabled = m.value(QStringLiteral("colorEnabled")).toBool();
+    if (m.contains(QStringLiteral("color")))
+        accent->color = QColor(m.value(QStringLiteral("color")).toString());
+    if (m.contains(QStringLiteral("sizeScale")))
+        accent->sizeScale = qBound(0.25, m.value(QStringLiteral("sizeScale")).toDouble(), 4.0);
+    if (m.contains(QStringLiteral("outlineEnabled")))
+        accent->outlineEnabled = m.value(QStringLiteral("outlineEnabled")).toBool();
+    if (m.contains(QStringLiteral("outlineWidth")))
+        accent->outlineWidth = qMax(0.0, m.value(QStringLiteral("outlineWidth")).toDouble());
+    if (m.contains(QStringLiteral("outlineColor")))
+        accent->outlineColor = QColor(m.value(QStringLiteral("outlineColor")).toString());
+    applyTextHighlightPatch(&accent->highlight, m.value(QStringLiteral("highlight")).toMap());
+}
+
 QVariantMap textStyleToMap(const drift::TextStyle &s)
 {
     return {
+        {QStringLiteral("packId"), s.packId},
         {QStringLiteral("fontFamily"), s.fontFamily},
         {QStringLiteral("pixelSize"), s.pixelSize},
         {QStringLiteral("fontWeight"), s.fontWeight},
@@ -453,10 +515,20 @@ QVariantMap textStyleToMap(const drift::TextStyle &s)
         {QStringLiteral("shadowBlur"), s.shadowBlur},
         {QStringLiteral("shadowOpacity"), s.shadowOpacity},
         {QStringLiteral("shadowColor"), s.shadowColor.name(QColor::HexArgb)},
+        {QStringLiteral("glowEnabled"), s.glowEnabled},
+        {QStringLiteral("glowColor"), s.glowColor.name(QColor::HexArgb)},
+        {QStringLiteral("glowRadius"), s.glowRadius},
+        {QStringLiteral("glowOpacity"), s.glowOpacity},
         {QStringLiteral("boxEnabled"), s.boxEnabled},
         {QStringLiteral("boxColor"), s.boxColor.name(QColor::HexArgb)},
         {QStringLiteral("boxPadding"), s.boxPadding},
         {QStringLiteral("boxRadius"), s.boxRadius},
+        {QStringLiteral("wordHighlight"), textHighlightToMap(s.wordHighlight)},
+        {QStringLiteral("underlineEnabled"), s.underlineEnabled},
+        {QStringLiteral("underlineColor"), s.underlineColor.name(QColor::HexArgb)},
+        {QStringLiteral("underlineWidth"), s.underlineWidth},
+        {QStringLiteral("underlineOffset"), s.underlineOffset},
+        {QStringLiteral("accent"), wordAccentToMap(s.accent)},
         {QStringLiteral("animIn"), textAnimationToMap(s.animIn)},
         {QStringLiteral("animOut"), textAnimationToMap(s.animOut)},
     };
@@ -4989,6 +5061,14 @@ void AppController::setTextStyle(int trackIndex, int clipIndex, const QVariantMa
         s.shadowOpacity = qBound(0.0, m.value(QStringLiteral("shadowOpacity")).toDouble(), 1.0);
     if (m.contains(QStringLiteral("shadowColor")))
         s.shadowColor = QColor(m.value(QStringLiteral("shadowColor")).toString());
+    if (m.contains(QStringLiteral("glowEnabled")))
+        s.glowEnabled = m.value(QStringLiteral("glowEnabled")).toBool();
+    if (m.contains(QStringLiteral("glowColor")))
+        s.glowColor = QColor(m.value(QStringLiteral("glowColor")).toString());
+    if (m.contains(QStringLiteral("glowRadius")))
+        s.glowRadius = qMax(0.0, m.value(QStringLiteral("glowRadius")).toDouble());
+    if (m.contains(QStringLiteral("glowOpacity")))
+        s.glowOpacity = qBound(0.0, m.value(QStringLiteral("glowOpacity")).toDouble(), 1.0);
     if (m.contains(QStringLiteral("boxEnabled")))
         s.boxEnabled = m.value(QStringLiteral("boxEnabled")).toBool();
     if (m.contains(QStringLiteral("boxColor")))
@@ -4997,8 +5077,28 @@ void AppController::setTextStyle(int trackIndex, int clipIndex, const QVariantMa
         s.boxPadding = qMax(0.0, m.value(QStringLiteral("boxPadding")).toDouble());
     if (m.contains(QStringLiteral("boxRadius")))
         s.boxRadius = qMax(0.0, m.value(QStringLiteral("boxRadius")).toDouble());
+    if (m.contains(QStringLiteral("underlineEnabled")))
+        s.underlineEnabled = m.value(QStringLiteral("underlineEnabled")).toBool();
+    if (m.contains(QStringLiteral("underlineColor")))
+        s.underlineColor = QColor(m.value(QStringLiteral("underlineColor")).toString());
+    if (m.contains(QStringLiteral("underlineWidth")))
+        s.underlineWidth = qMax(0.0, m.value(QStringLiteral("underlineWidth")).toDouble());
+    if (m.contains(QStringLiteral("underlineOffset")))
+        s.underlineOffset = m.value(QStringLiteral("underlineOffset")).toDouble();
+    applyTextHighlightPatch(&s.wordHighlight, m.value(QStringLiteral("wordHighlight")).toMap());
+    applyWordAccentPatch(&s.accent, m.value(QStringLiteral("accent")).toMap());
     applyTextAnimationPatch(&s.animIn, m.value(QStringLiteral("animIn")).toMap());
     applyTextAnimationPatch(&s.animOut, m.value(QStringLiteral("animOut")).toMap());
+    // A hand-edited style is no longer the pack it came from, so the picker stops showing one as
+    // selected. Alignment and wrapping are layout, not look, and leave the pack intact.
+    static const QSet<QString> kLayoutOnlyKeys = {QStringLiteral("align"), QStringLiteral("valign"),
+                                                  QStringLiteral("wordWrap")};
+    for (auto it = m.constBegin(); it != m.constEnd(); ++it) {
+        if (!kLayoutOnlyKeys.contains(it.key())) {
+            s.packId.clear();
+            break;
+        }
+    }
     pushProjectEdit(before, QStringLiteral("Edit text style"));
     finishEdit(QStringLiteral("Text style updated"));
 }
@@ -5022,6 +5122,7 @@ void AppController::applyTextPreset(int trackIndex, int clipIndex, const QString
 
     const drift::Project before = m_project;
     clip.textStyle = *preset;
+    clip.textStyle.packId = presetId;
     pushProjectEdit(before, QStringLiteral("Apply text preset"));
     finishEdit(QStringLiteral("Text preset applied"));
 }

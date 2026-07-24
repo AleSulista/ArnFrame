@@ -110,6 +110,10 @@ private slots:
     void fontForStyleResolvesRequestedFace();
     void textRasterIsCached();
     void textDecorationsAreNotCropped();
+    void wordAccentRecoloursChosenWords();
+    void karaokeAccentFollowsThePlayhead();
+    void accentSizeScaleWidensTheBlock();
+    void everyStylePackRenders();
     void heavyWeightsRenderSolidGlyphs();
     void textClipCarriesGpuEffects();
     void textAnimationFadesAndSlides();
@@ -2345,6 +2349,153 @@ void EngineTest::textDecorationsAreNotCropped()
 
     // The stroke and shadow really do add ink.
     QVERIFY(litPixels(decorated.image) > litPixels(plain.image));
+
+    // The same has to hold for the decorations a style pack adds, which sit outside the glyphs:
+    // a glow bleeds outward, a highlight pill sits behind the word and the rule sits under it.
+    clip.textStyle.outlineWidth = 0.0;
+    clip.textStyle.shadowEnabled = false;
+    clip.textStyle.glowEnabled = true;
+    clip.textStyle.glowRadius = 14.0;
+    clip.textStyle.wordHighlight.enabled = true;
+    clip.textStyle.wordHighlight.padding = 10.0;
+    clip.textStyle.underlineEnabled = true;
+    clip.textStyle.underlineOffset = 10.0;
+    clip.textStyle.underlineWidth = 8.0;
+    const TextRasterResult packed = rasterizeText(clip, rect, 1.0);
+    QCOMPARE(packed.rect.center(), rect.center());
+    QCOMPARE(packed.image.width(), qRound(packed.rect.width()));
+    QCOMPARE(packed.image.height(), qRound(packed.rect.height()));
+    QVERIFY(litPixels(packed.image) > litPixels(plain.image));
+}
+
+namespace {
+
+// Pixels close enough to pure red to have come from the accent colour rather than antialiasing.
+int redPixels(const QImage &image)
+{
+    int count = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QRgb px = image.pixel(x, y);
+            if (qAlpha(px) > 200 && qRed(px) > 200 && qGreen(px) < 80 && qBlue(px) < 80)
+                ++count;
+        }
+    }
+    return count;
+}
+
+QRect inkBounds(const QImage &image)
+{
+    int left = image.width(), right = -1, top = image.height(), bottom = -1;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            if (qAlpha(image.pixel(x, y)) <= 8)
+                continue;
+            left = qMin(left, x);
+            right = qMax(right, x);
+            top = qMin(top, y);
+            bottom = qMax(bottom, y);
+        }
+    }
+    return right < 0 ? QRect() : QRect(QPoint(left, top), QPoint(right, bottom));
+}
+
+} // namespace
+
+void EngineTest::wordAccentRecoloursChosenWords()
+{
+    SKIP_WITHOUT_FONTS();
+
+    const QRectF rect(0, 0, 700, 200);
+    drift::Clip clip = makeTextClip(QStringLiteral("Number of thumbnails that"), rect);
+    clip.textStyle.fontFamily = QStringLiteral("Inter");
+    clip.textStyle.fontWeight = 800;
+    clip.textStyle.pixelSize = 48;
+
+    const QImage plain = rasterizeText(clip, rect, 1.0).image;
+    QVERIFY(!plain.isNull());
+    QCOMPARE(redPixels(plain), 0);
+
+    clip.textStyle.accent.rule = drift::WordAccentRule::FirstWord;
+    clip.textStyle.accent.colorEnabled = true;
+    clip.textStyle.accent.color = QColor(255, 0, 0);
+    const QImage accented = rasterizeText(clip, rect, 1.0).image;
+
+    // Only the picked word changes colour: some ink is red, most of it is not.
+    const int red = redPixels(accented);
+    QVERIFY(red > 0);
+    QVERIFY(red < litPixels(accented) / 2);
+
+    // A rule that picks nothing leaves the block exactly as it was.
+    clip.textStyle.accent.rule = drift::WordAccentRule::None;
+    QCOMPARE(redPixels(rasterizeText(clip, rect, 1.0).image), 0);
+}
+
+void EngineTest::karaokeAccentFollowsThePlayhead()
+{
+    SKIP_WITHOUT_FONTS();
+
+    const QRectF rect(0, 0, 700, 200);
+    const QString text = QStringLiteral("Number of thumbnails that");
+    drift::Clip clip = makeTextClip(text, rect);
+    clip.textStyle.fontFamily = QStringLiteral("Inter");
+    clip.textStyle.fontWeight = 800;
+    clip.textStyle.pixelSize = 48;
+    clip.textStyle.accent.rule = drift::WordAccentRule::Karaoke;
+    clip.textStyle.accent.colorEnabled = true;
+    clip.textStyle.accent.color = QColor(255, 0, 0);
+
+    const QImage first = rasterizeText(clip, text, rect, 1.0, 0).image;
+    const QImage third = rasterizeText(clip, text, rect, 1.0, 2).image;
+    QVERIFY(!first.isNull());
+    QVERIFY(redPixels(first) > 0);
+    QVERIFY(redPixels(third) > 0);
+    // Different word lit, so genuinely different pixels — not just a different cache slot.
+    QVERIFY(first != third);
+
+    // The spoken word still only costs one raster: the same index hits the cache.
+    QCOMPARE(rasterizeText(clip, text, rect, 1.0, 0).image.cacheKey(), first.cacheKey());
+}
+
+void EngineTest::accentSizeScaleWidensTheBlock()
+{
+    SKIP_WITHOUT_FONTS();
+
+    const QRectF rect(0, 0, 900, 240);
+    drift::Clip clip = makeTextClip(QStringLiteral("Number of thumbnails"), rect);
+    clip.textStyle.fontFamily = QStringLiteral("Inter");
+    clip.textStyle.fontWeight = 800;
+    clip.textStyle.pixelSize = 40;
+
+    const QRect plain = inkBounds(rasterizeText(clip, rect, 1.0).image);
+    QVERIFY(plain.isValid());
+
+    clip.textStyle.accent.rule = drift::WordAccentRule::FirstWord;
+    clip.textStyle.accent.sizeScale = 2.0;
+    const QRect scaled = inkBounds(rasterizeText(clip, rect, 1.0).image);
+
+    // The scaled word takes more room on the line and stands taller than the rest.
+    QVERIFY(scaled.width() > plain.width());
+    QVERIFY(scaled.height() > plain.height());
+}
+
+void EngineTest::everyStylePackRenders()
+{
+    SKIP_WITHOUT_FONTS();
+
+    // A pack naming a font that is not bundled, or an all-transparent colour combination, would
+    // ship a card and a caption that render as nothing at all.
+    const QRectF rect(0, 0, 900, 300);
+    const QString text = QStringLiteral("Number of thumbnails that");
+    for (const drift::TextPreset &preset : drift::textPresets()) {
+        drift::Clip clip = makeTextClip(text, rect);
+        clip.textStyle = preset.style;
+        const int activeWord =
+            preset.style.accent.rule == drift::WordAccentRule::Karaoke ? 1 : -1;
+        const QImage image = rasterizeText(clip, text, rect, 1.0, activeWord).image;
+        QVERIFY2(!image.isNull(), qPrintable(preset.id));
+        QVERIFY2(litPixels(image) > 0, qPrintable(preset.id));
+    }
 }
 
 void EngineTest::heavyWeightsRenderSolidGlyphs()

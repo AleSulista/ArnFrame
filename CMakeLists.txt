@@ -250,6 +250,8 @@ qt_add_executable(drift
     src/ClipPreviewImageProvider.cpp
     src/ClipPreviewImageStore.h
     src/ClipPreviewImageStore.cpp
+    src/TextStylePreviewImageProvider.h
+    src/TextStylePreviewImageProvider.cpp
     src/models/AddonEndpoint.h
     src/models/AddonManager.h
     src/models/AddonManager.cpp

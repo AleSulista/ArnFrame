@@ -451,11 +451,21 @@ PanelFrame {
                                 radius: handle.liveStyle ? handle.liveStyle.boxRadius * handle.sy : 0
                             }
 
+                            // A plain Text item cannot show per-word accents, highlight pills or
+                            // underlines, so styles that use them fall back to the composited raster
+                            // rather than preview something the export will not match.
+                            readonly property bool plainStyle: !handle.liveStyle
+                                    || ((!handle.liveStyle.accent || handle.liveStyle.accent.rule === "none")
+                                        && !(handle.liveStyle.wordHighlight
+                                             && handle.liveStyle.wordHighlight.enabled)
+                                        && !handle.liveStyle.underlineEnabled)
+
                             // Crisp vector text while the clip is selected. The composited
                             // raster is downscaled for preview and looks soft when upscaled.
                             Text {
                                 anchors.fill: parent
                                 visible: handle.isText && handle.selected && !handle.editing
+                                         && handle.plainStyle
                                 text: handle.liveText
                                 renderType: Text.NativeRendering
                                 color: handle.liveStyle ? handle.liveStyle.color : "white"
