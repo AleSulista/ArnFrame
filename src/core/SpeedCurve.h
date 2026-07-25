@@ -77,6 +77,14 @@ public:
     // A constant-rate curve — the seed for a fresh editing session.
     static SpeedCurve flat(double speed);
 
+    // Break Qt implicit sharing so a cross-thread reader cannot race a detach on the live copy.
+    void detachSharedData()
+    {
+        m_points.detach();
+        m_speeds.detach();
+        m_cum.detach();
+    }
+
 private:
     void rebuild();
     // Index of the sample bucket holding `unitTime`, with the leftover time inside it.

@@ -47,6 +47,7 @@ private slots:
     void shapeCatalogPathsFitBounds();
     void effectCatalogIdSerialization();
     void effectParamKeyframeSerialization();
+    void detachedCopyIsolatesKeyframesFromLiveMutations();
     void effectTemplateStackSerialization();
     void audioEffectSerialization();
     void rgbSplitEffectParametersSerialization();
@@ -1082,6 +1083,57 @@ void CoreTest::effectParamKeyframeSerialization()
     const drift::Effect resolved = loadedEffect.resolvedAt(drift::secondsToUs(2.0));
     QCOMPARE(resolved.parameters.value(QStringLiteral("contrast")).toDouble(), 2.5);
     QCOMPARE(resolved.catalogId, QStringLiteral("adjust.contrast"));
+}
+
+// Plain Project copy shares QMap payloads with the source. Mutating keyframes on the live
+// project must not touch a compositor snapshot (and must not race a concurrent reader).
+void CoreTest::detachedCopyIsolatesKeyframesFromLiveMutations()
+{
+    drift::Project live;
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-detach");
+    clip.type = drift::ClipType::Video;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(2.0);
+    clip.opacity.setKeyframe(0, 1.0);
+
+    drift::Effect effect;
+    effect.catalogId = QStringLiteral("adjust.contrast");
+    effect.parameters.insert(QStringLiteral("contrast"), 1.0);
+    drift::KeyframeTrack<double> track;
+    track.setKeyframe(0, 0.5);
+    effect.paramKeyframes.insert(QStringLiteral("contrast"), track);
+    clip.effects.append(effect);
+    live.tracks()[0].clips.append(clip);
+
+    const drift::Project snapshot = live.detachedCopy();
+    QCOMPARE(snapshot.tracks().at(0).clips.at(0).opacity.evaluateAt(0), 1.0);
+    QCOMPARE(snapshot.tracks().at(0).clips.at(0).effects.at(0).valueAt(QStringLiteral("contrast"), 0).toDouble(),
+             0.5);
+
+    // Mutate every COW container the compositor reads — list structure and nested maps.
+    live.tracks()[0].clips[0].opacity.setKeyframe(0, 0.25);
+    live.tracks()[0].clips[0].opacity.setKeyframe(drift::secondsToUs(1.0), 0.0);
+    live.tracks()[0].clips[0].effects[0].paramKeyframes[QStringLiteral("contrast")].setKeyframe(
+        0, 2.0);
+    live.tracks()[0].clips[0].effects[0].parameters.insert(QStringLiteral("contrast"), 2.0);
+    drift::Clip extra;
+    extra.id = QStringLiteral("clip-extra");
+    extra.type = drift::ClipType::Video;
+    live.tracks()[0].clips.append(extra);
+
+    QCOMPARE(snapshot.tracks().size(), 1);
+    QCOMPARE(snapshot.tracks().at(0).clips.size(), 1);
+    QCOMPARE(snapshot.tracks().at(0).clips.at(0).opacity.evaluateAt(0), 1.0);
+    QCOMPARE(snapshot.tracks().at(0).clips.at(0).opacity.keyframes().size(), 1);
+    QCOMPARE(snapshot.tracks().at(0).clips.at(0).effects.at(0).valueAt(QStringLiteral("contrast"), 0).toDouble(),
+             0.5);
+    QCOMPARE(snapshot.tracks().at(0).clips.at(0).effects.at(0).parameters.value(QStringLiteral("contrast")).toDouble(),
+             1.0);
+
+    const drift::Effect resolved =
+        snapshot.tracks().at(0).clips.at(0).effects.at(0).resolvedAt(0);
+    QCOMPARE(resolved.parameters.value(QStringLiteral("contrast")).toDouble(), 0.5);
 }
 
 // A beat-synced template applies several effects and per-param keyframes in one edit; all of

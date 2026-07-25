@@ -149,8 +149,10 @@ QList<AudioEffectEntry> scanDirectories(const QStringList &rootDirs)
                 continue;
             }
             if (seenIds.contains(entry->id)) {
-                qWarning("AudioEffectCatalog: duplicate id '%s' in %s (ignored)",
-                         qPrintable(entry->id), qPrintable(packageDir));
+                // Higher-priority roots (installed addons, DRIFT_*_DIR) intentionally
+                // supersede the bundled <appDir>/audio-effects copy — not an error.
+                qDebug("AudioEffectCatalog: duplicate id '%s' in %s (ignored)",
+                       qPrintable(entry->id), qPrintable(packageDir));
                 continue;
             }
             seenIds.insert(entry->id);

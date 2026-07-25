@@ -149,8 +149,9 @@ QList<EffectPresetEntry> EffectPackageLoader::scanDirectories(const QStringList 
                 continue;
             }
             if (seenIds.contains(entry.meta.id)) {
-                qWarning("EffectPackageLoader: duplicate id '%s' in %s (ignored)",
-                         qPrintable(entry.meta.id), qPrintable(packageDir));
+                // Installed addons supersede the bundled <appDir> copy — not an error.
+                qDebug("EffectPackageLoader: duplicate id '%s' in %s (ignored)",
+                       qPrintable(entry.meta.id), qPrintable(packageDir));
                 continue;
             }
             seenIds.insert(entry.meta.id);

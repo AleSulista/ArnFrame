@@ -104,8 +104,10 @@ void CompositorService::dispatch(drift::TimeUs timeUs, const FrameCompositor::Re
         return;
 
     if (!m_sharedSnapshot || m_snapshotGeneration != m_liveGeneration) {
-        // One COW snapshot per generation; subsequent ticks only bump the shared_ptr.
-        m_sharedSnapshot = std::make_shared<drift::Project>(*m_project);
+        // One uniquely-owned snapshot per generation; subsequent ticks only bump
+        // the shared_ptr. Plain Project copy would keep sharing QMap/QList with
+        // the live tree — unsafe once the GUI mutates while the worker reads.
+        m_sharedSnapshot = std::make_shared<drift::Project>(m_project->detachedCopy());
         m_snapshotGeneration = m_liveGeneration;
     }
 

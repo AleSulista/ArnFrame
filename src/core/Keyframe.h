@@ -224,6 +224,9 @@ public:
         return static_cast<T>(y);
     }
 
+    // Break Qt implicit sharing so a cross-thread reader cannot race a detach on the live copy.
+    void detachSharedData() { m_values.detach(); }
+
 private:
     static double lerp(double a, double b, double t) { return a + (b - a) * t; }
 

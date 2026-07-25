@@ -1,6 +1,7 @@
 #include "engine/EffectCatalog.h"
 #include "engine/EffectPackageLoader.h"
 #include "engine/EffectProcessor.h"
+#include "engine/FaceLandmarker.h"
 #include "engine/GpuEffectExecutor.h"
 
 #include <QGuiApplication>
@@ -159,6 +160,36 @@ QMap<QString, QVariant> dramaticDefaults(const EffectPresetEntry &def)
     } else if (def.meta.id == QLatin1String("time_echo")) {
         params.insert(QStringLiteral("frames"), 4);
         params.insert(QStringLiteral("decay"), 0.65);
+    } else if (def.meta.id == QLatin1String("key.chroma")) {
+        params.insert(QStringLiteral("u_keyHue"), 120.0);
+        params.insert(QStringLiteral("u_tolerance"), 0.55);
+        params.insert(QStringLiteral("u_softness"), 0.35);
+        params.insert(QStringLiteral("u_spill"), 1.0);
+    } else if (def.meta.id == QLatin1String("face_big_eyes")) {
+        params.insert(QStringLiteral("amount"), 0.7);
+        params.insert(QStringLiteral("radius"), 5.0);
+    } else if (def.meta.id == QLatin1String("face_fisheye")) {
+        params.insert(QStringLiteral("amount"), 0.7);
+        params.insert(QStringLiteral("coverage"), 1.4);
+    } else if (def.meta.id == QLatin1String("face_wide_mouth")) {
+        params.insert(QStringLiteral("widen"), 1.2);
+        params.insert(QStringLiteral("heighten"), 0.7);
+    } else if (def.meta.id == QLatin1String("face_fat_slim")) {
+        params.insert(QStringLiteral("width"), 1.0);
+        params.insert(QStringLiteral("height"), 0.35);
+    } else if (def.meta.id == QLatin1String("face_alien_head")) {
+        params.insert(QStringLiteral("stretch"), 1.5);
+        params.insert(QStringLiteral("narrow"), 0.45);
+    } else if (def.meta.id == QLatin1String("face_swirl")) {
+        params.insert(QStringLiteral("twist"), 2.2);
+        params.insert(QStringLiteral("coverage"), 1.3);
+    } else if (def.meta.id == QLatin1String("duotone")) {
+        // String colour params don't survive EffectParamSpec (double-only defaults), so set them
+        // explicitly here or the shader mixes black→black.
+        params.insert(QStringLiteral("strength"), 1.0);
+        params.insert(QStringLiteral("contrast"), 0.7);
+        params.insert(QStringLiteral("shadowColor"), QStringLiteral("#0a1628"));
+        params.insert(QStringLiteral("highlightColor"), QStringLiteral("#ff6b35"));
     }
     return params;
 }
@@ -180,6 +211,27 @@ QImage applyTimeEchoPreview(const QImage &base, const QMap<QString, QVariant> &p
     const int blendMode = 0;
     QImage gpu = GpuEffectExecutor::instance().blendTimeEcho(frames, decay, blendMode);
     return gpu.isNull() ? base : gpu;
+}
+
+// Studio portraits often sit on black/near-black; chroma key needs a keyed colour. Swap dark
+// backdrop pixels for green so the key pass produces a transparent cutout of the subject.
+QImage withGreenScreenBackdrop(const QImage &src)
+{
+    QImage out = src.convertToFormat(QImage::Format_RGBA8888);
+    for (int y = 0; y < out.height(); ++y) {
+        auto *line = reinterpret_cast<QRgb *>(out.scanLine(y));
+        for (int x = 0; x < out.width(); ++x) {
+            const QRgb px = line[x];
+            const int r = qRed(px);
+            const int g = qGreen(px);
+            const int b = qBlue(px);
+            const int luma = (r * 54 + g * 183 + b * 19) >> 8;
+            if (luma < 28) {
+                line[x] = qRgba(0, 180, 0, 255);
+            }
+        }
+    }
+    return out;
 }
 
 } // namespace
@@ -239,8 +291,28 @@ int main(int argc, char *argv[])
     base = base.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation)
                .copy(0, 0, size, size);
 
+    // Prefer landmarks from the real base photo when the face model is available; fall back to
+    // the drawn stand-in so thumbnails still generate without the addon installed.
     drift::FaceAnchors faceAnchors;
-    const QImage faceBase = makeFaceBase(size, &faceAnchors);
+    QImage faceBase;
+    bool usedDetectedFace = false;
+    if (drift::FaceLandmarker::instance().available()) {
+        const QList<drift::FaceAnchors> faces = drift::FaceLandmarker::instance().detect(base);
+        if (!faces.isEmpty() && faces.first().valid) {
+            faceAnchors = faces.first();
+            faceBase = base;
+            usedDetectedFace = true;
+            out << "face: detected on base (score=" << faceAnchors.score << ")\n";
+        }
+    }
+    if (!usedDetectedFace) {
+        if (!basePath.isEmpty())
+            err << "face: detection unavailable (" << drift::FaceLandmarker::instance().lastError()
+                << "); using drawn stand-in for face effects\n";
+        faceBase = makeFaceBase(size, &faceAnchors);
+    }
+
+    const QImage chromaBase = withGreenScreenBackdrop(base);
 
     int ok = 0;
     int failed = 0;
@@ -267,6 +339,11 @@ int main(int argc, char *argv[])
         const QMap<QString, QVariant> params = dramaticDefaults(def);
         if (def.meta.id == QLatin1String("time_echo")) {
             result = applyTimeEchoPreview(base, params);
+        } else if (def.meta.id == QLatin1String("key.chroma")) {
+            drift::Effect effect;
+            effect.catalogId = def.meta.id;
+            effect.parameters = params;
+            result = EffectProcessor::applyEffects(chromaBase, {effect}, 500000);
         } else if (def.needsFace) {
             drift::Effect effect;
             effect.catalogId = def.meta.id;

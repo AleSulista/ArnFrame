@@ -83,6 +83,11 @@ public:
     void resetToDefaultTimeline();
     TimeUs durationUs() const;
 
+    // Copy that uniquely owns its Qt containers. A plain `Project copy = *this` shares
+    // QMap/QList payloads via implicit sharing; mutating either side while another thread
+    // reads the other is a use-after-free. Call this before handing a snapshot to a worker.
+    Project detachedCopy() const;
+
     QString addAsset(MediaAsset asset);
     MediaAsset *asset(const QString &id);
     const MediaAsset *asset(const QString &id) const;

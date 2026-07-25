@@ -243,8 +243,9 @@ QList<EffectTemplateEntry> scanDirectories(const QStringList &rootDirs)
                 continue;
             }
             if (seenIds.contains(entry->id)) {
-                qWarning("EffectTemplateCatalog: duplicate id '%s' in %s (ignored)",
-                         qPrintable(entry->id), qPrintable(packageDir));
+                // Installed addons supersede the bundled <appDir> copy — not an error.
+                qDebug("EffectTemplateCatalog: duplicate id '%s' in %s (ignored)",
+                       qPrintable(entry->id), qPrintable(packageDir));
                 continue;
             }
             seenIds.insert(entry->id);

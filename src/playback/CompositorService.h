@@ -20,8 +20,8 @@ public slots:
     // Shared immutable snapshot taken on the GUI thread. The worker must never
     // hold a pointer into the live project: compositing runs concurrently with
     // editing, and reading a QMap/QList while the GUI thread rebalances it is a
-    // use-after-free. shared_ptr avoids re-copying the COW tree through the
-    // queued invoke.
+    // use-after-free. Use Project::detachedCopy() so Qt COW payloads are unique,
+    // then share that snapshot via shared_ptr across queued invokes.
     void composite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options,
                    std::shared_ptr<const drift::Project> snapshot);
 

@@ -58,6 +58,11 @@ QImage DriftImageProvider::requestImage(const QString &id, QSize *size, const QS
         image = image.scaled(requestedSize, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
     }
 
+    // Soft-alpha package thumbs (e.g. audio-effect AuraBlur PNGs) need premultiplied ARGB or
+    // Qt Quick can blend them as nearly invisible mud against the card background.
+    if (image.hasAlphaChannel())
+        image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+
     if (size)
         *size = image.size();
     return image;

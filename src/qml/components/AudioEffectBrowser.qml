@@ -119,7 +119,7 @@ Column {
                         width: Theme.assetCardWidth
                         height: Theme.assetCardWidth
                         radius: Theme.radiusSm
-                        color: cardHover.hovered ? Theme.panelSecondaryBg : Theme.panelAccent
+                        color: cardHover.hovered ? Theme.panelAccent : Theme.panelBackground
                         border.width: presetDrag.active ? 1 : 0
                         border.color: Theme.primary
                         clip: true
@@ -127,8 +127,12 @@ Column {
                         HoverHandler { id: cardHover }
 
                         Image {
-                            anchors.fill: parent
-                            visible: presetCard.thumb.length > 0
+                            id: presetThumb
+                            // Soft-alpha AuraBlur PNGs fade out at the rim; zoom past that
+                            // falloff so the card reads as a full-bleed colour field, not a
+                            // vignette floating on the panel accent.
+                            anchors.fill:parent
+                            visible: presetCard.thumb.length > 0 && status === Image.Ready
                             source: presetCard.thumb.length > 0
                                     ? EditorState.imageUrl(presetCard.thumb) : ""
                             fillMode: Image.PreserveAspectCrop
@@ -140,6 +144,7 @@ Column {
                         IconGlyph {
                             anchors.centerIn: parent
                             visible: presetCard.thumb.length === 0
+                                     || presetThumb.status === Image.Error
                             glyph: presetCard.iconGlyph
                             iconSize: 28
                             iconColor: Theme.mutedForeground

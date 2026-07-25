@@ -723,6 +723,65 @@ TimeUs Project::durationUs() const
     return maxEnd;
 }
 
+namespace {
+
+void detachEffect(Effect &effect)
+{
+    effect.parameters.detach();
+    for (auto it = effect.parameters.begin(); it != effect.parameters.end(); ++it)
+        it.value().detach();
+    effect.paramKeyframes.detach();
+    for (auto it = effect.paramKeyframes.begin(); it != effect.paramKeyframes.end(); ++it)
+        it.value().detachSharedData();
+}
+
+void detachClip(Clip &clip)
+{
+    clip.opacity.detachSharedData();
+    clip.transformX.detachSharedData();
+    clip.transformY.detachSharedData();
+    clip.transformW.detachSharedData();
+    clip.transformH.detachSharedData();
+    clip.rotation.detachSharedData();
+    clip.volume.detachSharedData();
+    clip.speedCurve.detachSharedData();
+    clip.mask.points.detach();
+    clip.subtitleCues.detach();
+    clip.effects.detach();
+    for (Effect &effect : clip.effects)
+        detachEffect(effect);
+    clip.audioEffects.detach();
+    for (Effect &effect : clip.audioEffects)
+        detachEffect(effect);
+}
+
+void detachTrack(Track &track)
+{
+    track.clips.detach();
+    for (Clip &clip : track.clips)
+        detachClip(clip);
+    track.transitions.detach();
+    for (Transition &transition : track.transitions) {
+        transition.parameters.detach();
+        for (auto it = transition.parameters.begin(); it != transition.parameters.end(); ++it)
+            it.value().detach();
+    }
+}
+
+} // namespace
+
+Project Project::detachedCopy() const
+{
+    Project out = *this;
+    out.m_tracks.detach();
+    for (Track &track : out.m_tracks)
+        detachTrack(track);
+    out.m_bookmarks.detach();
+    out.m_assetOrder.detach();
+    out.m_assetsById.detach();
+    return out;
+}
+
 QString Project::addAsset(MediaAsset asset)
 {
     if (asset.id.isEmpty())
