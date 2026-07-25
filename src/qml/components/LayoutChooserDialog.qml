@@ -210,13 +210,6 @@ ThemedDialog {
         EditorState.markProjectLayoutChosen()
     }
 
-    onRejected: {
-        // Keep the default canvas and stop prompting for this project. Settings
-        // Cancel must not mark chosen — the user may still want the first-run flow.
-        if (!fromSettings)
-            EditorState.markProjectLayoutChosen()
-    }
-
     contentItem: Column {
         spacing: Theme.spacingXl
         width: parent ? parent.width : 600
