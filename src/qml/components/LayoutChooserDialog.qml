@@ -3,7 +3,9 @@ import QtQuick.Controls.Basic
 import Drift
 
 // Shown on a fresh empty project so the user picks a platform canvas before editing.
-// Category chips → template list (icon + label). "Decide later" keeps the default size.
+// Category chips → template list (icon + label). "Decide later" keeps the default size
+// and marks the layout chosen so neither this dialog nor ProjectSetupDialog reappear
+// for the current project (New Project clears that and asks again).
 ThemedDialog {
     id: root
 
@@ -206,6 +208,13 @@ ThemedDialog {
     onAccepted: {
         EditorState.setProjectSetup(outWidth, outHeight, EditorState.projectFps())
         EditorState.markProjectLayoutChosen()
+    }
+
+    onRejected: {
+        // Keep the default canvas and stop prompting for this project. Settings
+        // Cancel must not mark chosen — the user may still want the first-run flow.
+        if (!fromSettings)
+            EditorState.markProjectLayoutChosen()
     }
 
     contentItem: Column {

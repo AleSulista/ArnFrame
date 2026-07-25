@@ -208,8 +208,14 @@ ApplicationWindow {
         // These signals previously had no handler anywhere in QML, so a failed
         // export or transcription was reported only to the console.
         function onExportFinished(success) {
-            if (success)
+            if (success) {
                 Toasts.success(qsTr("Export finished."))
+                return
+            }
+            // Exporter reports cancellation as a failed run with this message —
+            // surface it as a neutral note, not a disk/location error.
+            if (EditorState.lastMessage === "Export cancelled")
+                Toasts.info(qsTr("Export cancelled."))
             else
                 Toasts.error(qsTr("Export failed. Check the save location and free space on your disk."))
         }

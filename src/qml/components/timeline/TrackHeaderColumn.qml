@@ -18,7 +18,44 @@ Item {
     property int draggingTrackFrom: -1
     property int draggingTrackTo: -1
 
+    // Pending delete confirmation — index kept until Accept/Reject so the menu
+    // can close without wiping the track immediately.
+    property int pendingDeleteTrack: -1
+
     clip: true
+
+    ThemedDialog {
+        id: confirmDeleteTrack
+        title: qsTr("Delete this track?")
+        acceptText: qsTr("Delete track")
+        acceptVariant: "destructive"
+        preferredWidth: Theme.dialogWidthSm
+        acceptOnReturn: false
+
+        readonly property int clipCount: {
+            if (root.pendingDeleteTrack < 0 || root.pendingDeleteTrack >= root.tracks.length)
+                return 0
+            const clips = root.tracks[root.pendingDeleteTrack].clips
+            return clips ? clips.length : 0
+        }
+
+        contentItem: ThemedLabel {
+            width: parent ? parent.width : Theme.dialogWidthSm
+            wrapMode: Text.WordWrap
+            size: "sm"
+            text: confirmDeleteTrack.clipCount > 0
+                  ? qsTr("This removes the track and its %n clip(s). You can undo afterwards.",
+                         "", confirmDeleteTrack.clipCount)
+                  : qsTr("This removes the empty track. You can undo afterwards.")
+        }
+
+        onAccepted: {
+            if (root.pendingDeleteTrack >= 0)
+                EditorState.removeTrack(root.pendingDeleteTrack)
+            root.pendingDeleteTrack = -1
+        }
+        onRejected: root.pendingDeleteTrack = -1
+    }
 
     function trackHeight(type) {
         if (type === "video") return Theme.trackHeightVideo;
@@ -292,7 +329,10 @@ Item {
                     ThemedMenuItem {
                         text: qsTr("Delete track")
                         icon.name: Theme.icons.trash
-                        onTriggered: EditorState.removeTrack(index)
+                        onTriggered: {
+                            root.pendingDeleteTrack = index
+                            confirmDeleteTrack.open()
+                        }
                     }
                 }
             }
