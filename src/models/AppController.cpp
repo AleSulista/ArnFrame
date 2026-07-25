@@ -2103,6 +2103,92 @@ void AppController::splitAtPlayhead()
     }
 }
 
+void AppController::splitClipAt(int trackIndex, int clipIndex, double seconds)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    const drift::TimeUs atUs = drift::secondsToUs(seconds);
+    if (!clip.containsTime(atUs) || atUs == clip.timelineStart)
+        return;
+
+    const drift::Project before = m_project;
+    const drift::TimeUs offset = atUs - clip.timelineStart;
+    drift::Clip tail;
+    if (!drift::splitClipAtOffset(clip, tail, offset))
+        return;
+
+    tail.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString tailLinkId = drift::assignSplitLinkIds(clip, tail);
+    splitLinkedPartnerAt(m_project, clip, atUs, tailLinkId);
+    track.clips.insert(clipIndex + 1, tail);
+
+    pushProjectEdit(before, QStringLiteral("Split clip"));
+    finishEdit(QStringLiteral("Split clip"));
+}
+
+void AppController::splitClipLeftAt(int trackIndex, int clipIndex, double seconds)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    const drift::TimeUs atUs = drift::secondsToUs(seconds);
+    if (!clip.containsTime(atUs) || atUs == clip.timelineStart)
+        return;
+
+    const drift::TimeUs offset = atUs - clip.timelineStart;
+    const drift::Project before = m_project;
+
+    drift::Clip right;
+    if (!drift::splitClipAtOffset(clip, right, offset))
+        return;
+
+    right.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    // Keep only the right half — everything left of the cut is dropped.
+    track.clips[clipIndex] = right;
+
+    pushProjectEdit(before, QStringLiteral("Split left"));
+    finishEdit(QStringLiteral("Split left"));
+    selectClip(trackIndex, clipIndex);
+}
+
+void AppController::splitClipRightAt(int trackIndex, int clipIndex, double seconds)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    const drift::TimeUs atUs = drift::secondsToUs(seconds);
+    if (!clip.containsTime(atUs))
+        return;
+
+    const drift::TimeUs offset = atUs - clip.timelineStart;
+    const drift::Project before = m_project;
+
+    drift::Clip discardedTail;
+    if (!drift::splitClipAtOffset(clip, discardedTail, offset))
+        return;
+
+    // Keep only the left half — everything right of the cut is dropped.
+    pushProjectEdit(before, QStringLiteral("Split right"));
+    finishEdit(QStringLiteral("Split right"));
+    selectClip(trackIndex, clipIndex);
+}
+
 void AppController::trimClipLeft(int trackIndex, int clipIndex, double newStart)
 {
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())

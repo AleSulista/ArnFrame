@@ -54,9 +54,27 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
         }
 
-        IconButton { glyph: Theme.icons.scissors; variant: "text"; tooltip: qsTr("Split at current time"); onClicked: EditorState.splitAtPlayhead() }
-        IconButton { glyph: Theme.icons.chevronsLeft; variant: "text"; tooltip: qsTr("Split left"); onClicked: EditorState.splitSelectedClipLeft() }
-        IconButton { glyph: Theme.icons.chevronsRight; variant: "text"; tooltip: qsTr("Split right"); onClicked: EditorState.splitSelectedClipRight() }
+        IconButton {
+            glyph: Theme.icons.scissors
+            variant: "text"
+            tooltip: qsTr("Cut mode — click a clip to split it")
+            active: toolbar.panel.timelineTool === "split"
+            onClicked: toolbar.panel.timelineTool = toolbar.panel.timelineTool === "split" ? "" : "split"
+        }
+        IconButton {
+            glyph: Theme.icons.chevronsLeft
+            variant: "text"
+            tooltip: qsTr("Trim start — click a clip to drop everything left of the cut")
+            active: toolbar.panel.timelineTool === "trimStart"
+            onClicked: toolbar.panel.timelineTool = toolbar.panel.timelineTool === "trimStart" ? "" : "trimStart"
+        }
+        IconButton {
+            glyph: Theme.icons.chevronsRight
+            variant: "text"
+            tooltip: qsTr("Trim end — click a clip to drop everything right of the cut")
+            active: toolbar.panel.timelineTool === "trimEnd"
+            onClicked: toolbar.panel.timelineTool = toolbar.panel.timelineTool === "trimEnd" ? "" : "trimEnd"
+        }
         IconButton {
             glyph: Theme.icons.unlink
             variant: "text"

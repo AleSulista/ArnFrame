@@ -353,6 +353,9 @@ public:
     Q_INVOKABLE void splitSelectedClipLeft();
     Q_INVOKABLE void splitSelectedClipRight();
     Q_INVOKABLE void splitAtPlayhead();
+    Q_INVOKABLE void splitClipAt(int trackIndex, int clipIndex, double seconds);
+    Q_INVOKABLE void splitClipLeftAt(int trackIndex, int clipIndex, double seconds);
+    Q_INVOKABLE void splitClipRightAt(int trackIndex, int clipIndex, double seconds);
     Q_INVOKABLE void trimClipLeft(int trackIndex, int clipIndex, double newStart);
     Q_INVOKABLE void trimClipRight(int trackIndex, int clipIndex, double newEnd);
     Q_INVOKABLE void setClipTrim(int trackIndex, int clipIndex, double inPoint, double outPoint);

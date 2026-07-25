@@ -10,6 +10,34 @@ PanelFrame {
 
     property real zoom: 1.0
     property string propertiesTab: ""
+
+    // Timeline cutting tool, driven by the scissors toolbar toggles. One of:
+    //   ""          normal editing
+    //   "split"     click a clip to split it in two at the cut line
+    //   "trimStart"  click a clip to drop everything left of the cut line
+    //   "trimEnd"    click a clip to drop everything right of the cut line
+    // While a tool is active, hovering the timeline shows a red dashed virtual
+    // playhead (snapped to clip edges and the real playhead); the trim tools
+    // also tint the doomed side of the hovered clip red.
+    property string timelineTool: ""
+    // Snapped position (seconds) of the virtual cut playhead; < 0 when not hovering.
+    property real cutHoverSeconds: -1
+    // Clip physically under the pointer while a tool is active (-1 when none).
+    property int cutHoverTrack: -1
+    property int cutHoverClip: -1
+    onTimelineToolChanged: if (timelineTool === "") {
+        cutHoverSeconds = -1
+        cutHoverTrack = -1
+        cutHoverClip = -1
+    }
+
+    // Y offset of a track row within the track column (excludes ruler/bookmark).
+    function trackOffsetY(index) {
+        var cursor = 0
+        for (var i = 0; i < index && i < tracks.length; i++)
+            cursor += trackHeight(tracks[i].type) + Theme.trackGap
+        return cursor
+    }
     readonly property real minZoom: 0.05
     readonly property real maxZoom: 40.0
     readonly property real pxPerSecond: Theme.pixelsPerSecondBase * zoom
@@ -1103,6 +1131,134 @@ PanelFrame {
                             drag.minimumX: 0
                             drag.maximumX: flick.contentWidth - Theme.playheadLineWidth
                             onReleased: EditorState.playheadSeconds = EditorState.snapTime(playhead.x / root.pxPerSecond)
+                        }
+                    }
+
+                    // cut tools ----------------------------------------------------------------
+                    // Sits above the tracks and playhead so it both draws the red
+                    // dashed virtual playhead (and, for the trim tools, the red
+                    // gradient over the doomed side) and intercepts the click.
+                    Item {
+                        id: cutOverlay
+                        visible: root.timelineTool !== ""
+                        enabled: root.timelineTool !== ""
+                        x: 0
+                        y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
+                        width: parent.width
+                        height: root.totalTracksHeight()
+                        z: 20
+
+                        readonly property bool trimMode: root.timelineTool === "trimStart"
+                                                         || root.timelineTool === "trimEnd"
+                        readonly property var hoverClip: (root.cutHoverTrack >= 0 && root.cutHoverClip >= 0
+                            && root.cutHoverTrack < root.tracks.length
+                            && root.cutHoverClip < root.tracks[root.cutHoverTrack].clips.length)
+                            ? root.tracks[root.cutHoverTrack].clips[root.cutHoverClip]
+                            : null
+
+                        function seconds(mx) {
+                            return EditorState.snapTime(Math.max(0, mx) / root.pxPerSecond)
+                        }
+
+                        function updateHover(mx, my) {
+                            root.cutHoverSeconds = seconds(mx)
+                            const trackIdx = root.trackIndexAtY(my)
+                            root.cutHoverTrack = trackIdx
+                            root.cutHoverClip = trackIdx >= 0
+                                ? root.clipIndexAtPosition(trackIdx, Math.max(0, mx))
+                                : -1
+                        }
+
+                        MouseArea {
+                            id: cutMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.CrossCursor
+                            acceptedButtons: Qt.LeftButton
+                            onEntered: cutOverlay.updateHover(mouseX, mouseY)
+                            onPositionChanged: (mouse) => cutOverlay.updateHover(mouse.x, mouse.y)
+                            onExited: {
+                                root.cutHoverSeconds = -1
+                                root.cutHoverTrack = -1
+                                root.cutHoverClip = -1
+                            }
+                            onClicked: (mouse) => {
+                                const atSeconds = cutOverlay.seconds(mouse.x)
+                                const trackIdx = root.trackIndexAtY(mouse.y)
+                                if (trackIdx < 0)
+                                    return
+                                const clipIdx = root.clipIndexAtPosition(trackIdx, Math.max(0, mouse.x))
+                                if (clipIdx < 0)
+                                    return
+                                if (root.timelineTool === "trimStart")
+                                    EditorState.splitClipLeftAt(trackIdx, clipIdx, atSeconds)
+                                else if (root.timelineTool === "trimEnd")
+                                    EditorState.splitClipRightAt(trackIdx, clipIdx, atSeconds)
+                                else
+                                    EditorState.splitClipAt(trackIdx, clipIdx, atSeconds)
+                            }
+                        }
+
+                        // Red gradient on the doomed side of the hovered clip: a
+                        // fixed band attached to the cut line, reddest at the
+                        // pointer and fading away from it, clamped to the clip.
+                        Rectangle {
+                            id: doomGradient
+                            readonly property real bandLength: 80
+                            visible: cutOverlay.trimMode && cutOverlay.hoverClip !== null
+                                     && root.cutHoverSeconds >= 0
+                            readonly property real clipStartX: cutOverlay.hoverClip
+                                ? cutOverlay.hoverClip.start * root.pxPerSecond : 0
+                            readonly property real clipEndX: cutOverlay.hoverClip
+                                ? (cutOverlay.hoverClip.start + cutOverlay.hoverClip.duration) * root.pxPerSecond : 0
+                            readonly property real cutX: Math.max(clipStartX,
+                                Math.min(clipEndX, root.cutHoverSeconds * root.pxPerSecond))
+                            readonly property color solid: Qt.rgba(Theme.destructive.r, Theme.destructive.g,
+                                                                   Theme.destructive.b, 0.55)
+                            readonly property color clear: Qt.rgba(Theme.destructive.r, Theme.destructive.g,
+                                                                   Theme.destructive.b, 0.0)
+
+                            x: root.timelineTool === "trimStart"
+                               ? Math.max(clipStartX, cutX - bandLength)
+                               : cutX
+                            width: root.timelineTool === "trimStart"
+                                   ? cutX - x
+                                   : Math.min(clipEndX, cutX + bandLength) - cutX
+                            y: root.trackOffsetY(root.cutHoverTrack)
+                            height: cutOverlay.hoverClip
+                                ? root.trackHeight(root.tracks[root.cutHoverTrack].type) : 0
+                            radius: Theme.radiusSm
+
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                // Red toward the cut line (the pointer), fading away.
+                                GradientStop {
+                                    position: 0.0
+                                    color: root.timelineTool === "trimStart"
+                                           ? doomGradient.clear : doomGradient.solid
+                                }
+                                GradientStop {
+                                    position: 1.0
+                                    color: root.timelineTool === "trimStart"
+                                           ? doomGradient.solid : doomGradient.clear
+                                }
+                            }
+                        }
+
+                        // Red dashed virtual playhead. A column of dashes reflows
+                        // with the track height without any repaint plumbing.
+                        Column {
+                            visible: root.cutHoverSeconds >= 0
+                            x: root.cutHoverSeconds * root.pxPerSecond
+                            spacing: 3
+                            Repeater {
+                                model: Math.ceil(cutOverlay.height / 7)
+                                delegate: Rectangle {
+                                    width: 2
+                                    height: 4
+                                    color: Theme.destructive
+                                }
+                            }
                         }
                     }
                 }
