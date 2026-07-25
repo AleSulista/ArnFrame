@@ -1251,6 +1251,7 @@ QHash<QString, QString> defaultShortcuts()
         {QStringLiteral("undo"), QStringLiteral("Ctrl+Z")},
         {QStringLiteral("redo"), QStringLiteral("Ctrl+Shift+Z")},
         {QStringLiteral("clearSelection"), QStringLiteral("Escape")},
+        {QStringLiteral("selectAll"), QStringLiteral("Ctrl+A")},
         {QStringLiteral("duplicate"), QStringLiteral("Ctrl+D")},
         {QStringLiteral("split"), QStringLiteral("S")},
         {QStringLiteral("merge"), QStringLiteral("Ctrl+M")},
@@ -1418,6 +1419,7 @@ QVariantList AppController::actions() const
         action(QStringLiteral("merge"), QStringLiteral("Merge adjacent clips")),
         action(QStringLiteral("unlink"), QStringLiteral("Separate audio")),
         action(QStringLiteral("clearSelection"), QStringLiteral("Clear selection")),
+        action(QStringLiteral("selectAll"), QStringLiteral("Select all clips")),
         action(QStringLiteral("nudgeLeft"), QStringLiteral("Move selection left a little")),
         action(QStringLiteral("nudgeRight"), QStringLiteral("Move selection right a little")),
         action(QStringLiteral("toggleGuides"), QStringLiteral("Toggle guides")),
@@ -1963,13 +1965,15 @@ void AppController::setSelection(const QVariantList &pairs)
         const QVariantMap map = value.toMap();
         const int trackIndex = map.value(QStringLiteral("track")).toInt();
         const int clipIndex = map.value(QStringLiteral("clip")).toInt();
-        if (!isValidClipIndex(trackIndex, clipIndex))
-            continue;
-        const QPair<int, int> pair(trackIndex, clipIndex);
-        if (!next.contains(pair))
-            next.append(pair);
+        // Match click-select: bring linked A/V partners along.
+        for (const QPair<int, int> &pair : selectionWithLinkedPartners(m_project, trackIndex, clipIndex)) {
+            if (!next.contains(pair))
+                next.append(pair);
+        }
     }
     m_selection = next;
+    m_selectedTransitionTrack = -1;
+    m_selectedTransitionLeftClip = -1;
     if (m_selection.isEmpty()) {
         m_selectedTrack = -1;
         m_selectedClip = -1;
@@ -1978,6 +1982,23 @@ void AppController::setSelection(const QVariantList &pairs)
         m_selectedClip = m_selection.constLast().second;
     }
     emit selectionChanged();
+    emit selectedTransitionDataChanged();
+    syncTextOverlaySkip();
+}
+
+void AppController::selectAllClips()
+{
+    QVariantList pairs;
+    for (int t = 0; t < m_project.tracks().size(); ++t) {
+        const int clipCount = m_project.tracks().at(t).clips.size();
+        for (int c = 0; c < clipCount; ++c) {
+            pairs.append(QVariantMap{
+                {QStringLiteral("track"), t},
+                {QStringLiteral("clip"), c},
+            });
+        }
+    }
+    setSelection(pairs);
 }
 
 void AppController::clearSelection()
@@ -7578,6 +7599,8 @@ void AppController::triggerAction(const QString &actionId)
         redo();
     else if (actionId == QStringLiteral("clearSelection"))
         clearSelection();
+    else if (actionId == QStringLiteral("selectAll"))
+        selectAllClips();
     else if (actionId == QStringLiteral("duplicate"))
         duplicateSelectedClip();
     else if (actionId == QStringLiteral("split"))

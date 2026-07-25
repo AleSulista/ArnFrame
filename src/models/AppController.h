@@ -338,6 +338,7 @@ public:
     Q_INVOKABLE void selectClip(int trackIndex, int clipIndex);
     Q_INVOKABLE void addToSelection(int trackIndex, int clipIndex);
     Q_INVOKABLE void setSelection(const QVariantList &pairs);
+    Q_INVOKABLE void selectAllClips();
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE QVariantMap clipAt(int trackIndex, int clipIndex) const;
     Q_INVOKABLE QVariantMap activeVideoClipAtPlayhead() const;

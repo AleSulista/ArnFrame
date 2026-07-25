@@ -99,6 +99,73 @@ PanelFrame {
     // Clip under an in-progress effect drag (for drop highlight).
     property int effectDropTrackIndex: -1
     property int effectDropClipIndex: -1
+    // CapCut-style marquee (drag on empty track space to box-select clips).
+    property bool marqueeActive: false
+    property bool marqueeAdditive: false
+    property real marqueeOriginX: 0
+    property real marqueeOriginY: 0
+    property real marqueeCurrentX: 0
+    property real marqueeCurrentY: 0
+    readonly property real marqueeLeft: Math.min(marqueeOriginX, marqueeCurrentX)
+    readonly property real marqueeTop: Math.min(marqueeOriginY, marqueeCurrentY)
+    readonly property real marqueeWidth: Math.abs(marqueeCurrentX - marqueeOriginX)
+    readonly property real marqueeHeight: Math.abs(marqueeCurrentY - marqueeOriginY)
+
+    // Clips whose timeline rect intersects the marquee (track-column coords).
+    function clipsInMarquee(left, top, right, bottom) {
+        const pairs = []
+        for (let t = 0; t < tracks.length; t++) {
+            const trackTop = trackOffsetY(t)
+            const trackBottom = trackTop + trackHeight(tracks[t].type)
+            if (trackBottom < top || trackTop > bottom)
+                continue
+            const clips = tracks[t].clips
+            for (let c = 0; c < clips.length; c++) {
+                const clipLeft = clips[c].start * pxPerSecond
+                const clipRight = (clips[c].start + clips[c].duration) * pxPerSecond
+                if (clipRight < left || clipLeft > right)
+                    continue
+                pairs.push({ "track": t, "clip": c })
+            }
+        }
+        return pairs
+    }
+
+    function applyMarqueeSelection() {
+        const hits = clipsInMarquee(marqueeLeft, marqueeTop,
+                                    marqueeLeft + marqueeWidth,
+                                    marqueeTop + marqueeHeight)
+        if (marqueeAdditive) {
+            const merged = []
+            const seen = {}
+            const existing = EditorState.selection
+            for (let i = 0; i < existing.length; i++) {
+                const key = existing[i].track + ":" + existing[i].clip
+                seen[key] = true
+                merged.push({ "track": existing[i].track, "clip": existing[i].clip })
+            }
+            for (let i = 0; i < hits.length; i++) {
+                const key = hits[i].track + ":" + hits[i].clip
+                if (seen[key])
+                    continue
+                seen[key] = true
+                merged.push(hits[i])
+            }
+            EditorState.setSelection(merged)
+        } else {
+            EditorState.setSelection(hits)
+        }
+    }
+
+    function endMarquee(apply) {
+        if (!marqueeActive)
+            return
+        if (apply && (marqueeWidth > 2 || marqueeHeight > 2))
+            applyMarqueeSelection()
+        else if (apply && !marqueeAdditive)
+            EditorState.clearSelection()
+        marqueeActive = false
+    }
 
     // Shared by library drops and in-timeline clip moves so both snap and show
     // the same outline the same way.
@@ -697,11 +764,51 @@ PanelFrame {
                     }
 
                     // track rows ---------------------------------------------------------
+                    // CapCut marquee: drag empty track space to box-select.
+                    // Sits under the track column so clips still receive presses;
+                    // empty gaps fall through to this grabber.
+                    MouseArea {
+                        id: marqueeArea
+                        x: 0
+                        y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
+                        width: parent.width
+                        height: Math.max(root.totalTracksHeight() + Theme.trackGap,
+                                         flick.height - flick.headerHeight)
+                        z: 0
+                        enabled: root.timelineTool === ""
+                        acceptedButtons: Qt.LeftButton
+                        // CapCut: empty-space drag is marquee, not flick-scroll.
+                        preventStealing: true
+                        cursorShape: pressed ? Qt.CrossCursor : Qt.ArrowCursor
+
+                        onPressed: (mouse) => {
+                            root.marqueeAdditive = (mouse.modifiers & Qt.ShiftModifier) !== 0
+                            root.marqueeOriginX = mouse.x
+                            root.marqueeOriginY = mouse.y
+                            root.marqueeCurrentX = mouse.x
+                            root.marqueeCurrentY = mouse.y
+                            root.marqueeActive = true
+                            if (!root.marqueeAdditive)
+                                EditorState.clearSelection()
+                        }
+                        onPositionChanged: (mouse) => {
+                            if (!root.marqueeActive)
+                                return
+                            root.marqueeCurrentX = Math.max(0, mouse.x)
+                            root.marqueeCurrentY = Math.max(0, mouse.y)
+                            if (root.marqueeWidth > 2 || root.marqueeHeight > 2)
+                                root.applyMarqueeSelection()
+                        }
+                        onReleased: root.endMarquee(true)
+                        onCanceled: root.endMarquee(false)
+                    }
+
                     Column {
                         id: trackColumn
                         y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
                         width: parent.width
                         spacing: Theme.trackGap
+                        z: 1
 
                         // Landing preview when creating a new track above existing rows.
                         Rectangle {
@@ -1041,6 +1148,21 @@ PanelFrame {
                                 }
                             }
                         }
+                    }
+
+                    // CapCut-style selection box drawn while marquee-dragging.
+                    Rectangle {
+                        visible: root.marqueeActive
+                                 && (root.marqueeWidth > 2 || root.marqueeHeight > 2)
+                        x: root.marqueeLeft
+                        y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
+                           + root.marqueeTop
+                        width: root.marqueeWidth
+                        height: root.marqueeHeight
+                        z: 8
+                        color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.12)
+                        border.width: Theme.borderWidth
+                        border.color: Theme.primary
                     }
 
                     // snap guide -------------------------------------------------------------
