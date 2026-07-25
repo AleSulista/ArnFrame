@@ -52,6 +52,20 @@ modules:
         only-arches:
           - aarch64
 
+  # Pitch shifting for the voice effects. Not in org.kde.Platform, so it is built here; the app
+  # links it, which is fine for GPL-3.0 since LGPL-2.1 section 3 permits use under GPL v2 or later.
+  - name: soundtouch
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_SHARED_LIBS=ON
+      - -DSOUNDSTRETCH=OFF
+    sources:
+      - type: git
+        url: https://codeberg.org/soundtouch/soundtouch.git
+        tag: "2.4.1"
+        commit: b5d0e9ba61871ef135e67bebe3228136da4e8833
+
   - name: drift
     buildsystem: cmake-ninja
     builddir: true

@@ -129,6 +129,7 @@ private slots:
     void audioEffectStreamIsContinuousAcrossBlocks();
     void audioEffectFlangerProcessesSignal();
     void audioEffectRackPrimingAlignsLatentStages();
+    void pitchShiftMovesPitchInTheRightDirection();
     void audioEffectRackParameterChangeIsContinuous();
     void onsetsDetectClickTrackTempo();
     void onsetsIgnoreSilence();
@@ -2776,6 +2777,18 @@ double rms(const float *samples, int count)
         sum += static_cast<double>(samples[i]) * samples[i];
     return std::sqrt(sum / std::max(1, count));
 }
+// Naive DFT at one frequency. Enough to ask "is the energy where it should be".
+double toneEnergy(const float *interleaved, int frames, double hz, int rate)
+{
+    const double w = 2.0 * M_PI * hz / rate;
+    double re = 0.0;
+    double im = 0.0;
+    for (int i = 0; i < frames; ++i) {
+        re += interleaved[i * 2] * std::cos(w * i);
+        im += interleaved[i * 2] * std::sin(w * i);
+    }
+    return std::sqrt(re * re + im * im) / frames;
+}
 
 } // namespace
 
@@ -3080,6 +3093,68 @@ void EngineTest::audioEffectRackPrimingAlignsLatentStages()
     QVERIFY2(primedHead > coldHead * 4.0,
              qPrintable(QStringLiteral("priming changed nothing: primed=%1 cold=%2")
                             .arg(primedHead).arg(coldHead)));
+}
+
+// A pitch shifter has exactly one job and "the output is finite" does not check it. Chipmunk must
+// raise the pitch and Deep Voice must lower it, by the ratio the manifest asks for.
+//
+// The granular shifter reads two taps out of one delay line. juce's popSample only advances the
+// read pointer when told to, and leaving it frozen for both taps pinned the read position while
+// the write position kept moving: the traversal rate collapsed from `ratio` to `ratio - 1`, so
+// 1.5 came out an octave down and 0.7 came out reversed.
+void EngineTest::pitchShiftMovesPitchInTheRightDirection()
+{
+    constexpr int kRate = 48000;
+    constexpr double kToneHz = 440.0;
+    constexpr int kMeasure = 24000; // half a second is plenty of resolution
+
+    struct Case
+    {
+        const char *id;
+        double ratio;
+    };
+
+    for (const Case &testCase : {Case{"voice.chipmunk", 1.5}, Case{"voice.deep", 0.7}}) {
+        drift::Effect effect;
+        effect.catalogId = QString::fromLatin1(testCase.id);
+        effect.parameters.insert(QStringLiteral("pitch"), testCase.ratio);
+
+        const QVector<drift::AudioEffectSpec> specs = audioEffectSpecsFor({effect});
+        QCOMPARE(specs.size(), 1);
+
+        drift::AudioEffectRack rack;
+        QVERIFY(rack.configure(specs, kRate));
+
+        const int prime = rack.primeFrames();
+        const QVector<float> tone = stereoTone(prime + kMeasure, kToneHz, kRate);
+        rack.warmUp(tone.constData(), prime);
+
+        QVector<float> out(kMeasure * 2);
+        std::memcpy(out.data(), tone.constData() + prime * 2,
+                    static_cast<size_t>(kMeasure) * 2 * sizeof(float));
+        rack.process(out.data(), kMeasure);
+
+        const double shifted = kToneHz * testCase.ratio;
+        const double atShifted = toneEnergy(out.constData(), kMeasure, shifted, kRate);
+        const double atOriginal = toneEnergy(out.constData(), kMeasure, kToneHz, kRate);
+        // Where the frozen read pointer used to put it.
+        const double atBroken = toneEnergy(out.constData(), kMeasure,
+                                           std::abs(kToneHz * (testCase.ratio - 1.0)), kRate);
+
+        QVERIFY2(atShifted > atOriginal * 4.0,
+                 qPrintable(QStringLiteral("%1: energy at the shifted %2 Hz (%3) does not dominate "
+                                           "the unshifted %4 Hz (%5)")
+                                .arg(testCase.id).arg(shifted).arg(atShifted).arg(kToneHz).arg(atOriginal)));
+        QVERIFY2(atShifted > atBroken * 4.0,
+                 qPrintable(QStringLiteral("%1: energy at %2 Hz (%3) does not dominate the "
+                                           "ratio-minus-one artefact at %4 Hz (%5)")
+                                .arg(testCase.id).arg(shifted).arg(atShifted)
+                                .arg(std::abs(kToneHz * (testCase.ratio - 1.0))).arg(atBroken)));
+
+        // And it must still be a tone, not a smear: the shifted partial should carry real level.
+        QVERIFY2(atShifted > 0.02,
+                 qPrintable(QStringLiteral("%1: shifted tone is weak (%2)").arg(testCase.id).arg(atShifted)));
+    }
 }
 
 void EngineTest::audioEffectRackParameterChangeIsContinuous()

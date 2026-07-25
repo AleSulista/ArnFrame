@@ -107,6 +107,22 @@ else()
 endif()
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 
+# SoundTouch does the pitch shifting behind the voice effects. juce_dsp has no pitch shifter, and a
+# hand-rolled granular one cancels the signal outright wherever the tap spacing lands on an odd
+# number of half-periods of the output. LGPL-2.1, whose section 3 allows use under GPL v2 or later,
+# so it is compatible with this project's GPL-3.0.
+# pkg-config first: SoundTouch's installed CMake config names an include directory that several
+# distributions do not actually ship, and an imported target with a non-existent path is a hard
+# configure error rather than something we can fall back from.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SOUNDTOUCH QUIET IMPORTED_TARGET soundtouch)
+if(TARGET PkgConfig::SOUNDTOUCH)
+    set(DRIFT_SOUNDTOUCH_TARGET PkgConfig::SOUNDTOUCH)
+else()
+    find_package(SoundTouch CONFIG REQUIRED)
+    set(DRIFT_SOUNDTOUCH_TARGET SoundTouch::SoundTouch)
+endif()
+
 # --- JUCE -------------------------------------------------------------------
 # Audio effects are JUCE DSP processors (src/engine/audio). Only juce_dsp and the modules it pulls
 # in are used — deliberately NOT juce_audio_processors, which depends on juce_gui_extra ->
@@ -191,8 +207,8 @@ add_library(driftaudiodsp STATIC
     src/engine/audio/DynamicsProcessors.cpp
     src/engine/audio/ModulationProcessors.h
     src/engine/audio/ModulationProcessors.cpp
-    src/engine/audio/PitchShiftProcessor.h
-    src/engine/audio/PitchShiftProcessor.cpp
+    src/engine/audio/SoundTouchPitchProcessor.h
+    src/engine/audio/SoundTouchPitchProcessor.cpp
     src/engine/audio/AudioEffectFactory.h
     src/engine/audio/AudioEffectFactory.cpp
     src/engine/audio/AudioEffectRack.h
@@ -202,7 +218,8 @@ add_library(driftaudiodsp STATIC
 set_target_properties(driftaudiodsp PROPERTIES AUTOMOC OFF)
 target_include_directories(driftaudiodsp PUBLIC src)
 target_link_libraries(driftaudiodsp PUBLIC driftcore)
-target_link_libraries(driftaudiodsp PRIVATE juce::juce_dsp juce::juce_recommended_config_flags)
+target_link_libraries(driftaudiodsp PRIVATE juce::juce_dsp juce::juce_recommended_config_flags
+    ${DRIFT_SOUNDTOUCH_TARGET})
 # JUCE_USE_CURL and JUCE_WEB_BROWSER matter: without them juce_core links libcurl on Linux, which
 # is exactly the dependency creep this split exists to prevent.
 target_compile_definitions(driftaudiodsp PRIVATE

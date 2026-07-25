@@ -3,7 +3,7 @@
 #include "engine/audio/DynamicsProcessors.h"
 #include "engine/audio/FilterProcessors.h"
 #include "engine/audio/ModulationProcessors.h"
-#include "engine/audio/PitchShiftProcessor.h"
+#include "engine/audio/SoundTouchPitchProcessor.h"
 
 #include <QHash>
 
@@ -91,21 +91,21 @@ void buildLeveler(ChainProcessor &chain)
 
 void buildPitch(ChainProcessor &chain)
 {
-    auto *pitch = chain.addStage<PitchShiftProcessor>();
-    chain.bind(QStringLiteral("pitch"), pitch, &PitchShiftProcessor::setRatio);
+    auto *pitch = chain.addStage<SoundTouchPitchProcessor>();
+    chain.bind(QStringLiteral("pitch"), pitch, &SoundTouchPitchProcessor::setRatio);
 }
 
 // voice.vader: asetrate/aresample/atempo + aecho=0.8:0.9 + acrusher=bits=10.
 void buildDarkLord(ChainProcessor &chain)
 {
-    auto *pitch = chain.addStage<PitchShiftProcessor>();
+    auto *pitch = chain.addStage<SoundTouchPitchProcessor>();
     auto *echo = chain.addStage<EchoProcessor>();
     auto *crusher = chain.addStage<BitCrusherProcessor>(BitCrusherProcessor::Mode::Linear, 10.0f);
 
     echo->setInGain(0.8f);
     echo->setOutGain(0.9f);
 
-    chain.bind(QStringLiteral("pitch"), pitch, &PitchShiftProcessor::setRatio);
+    chain.bind(QStringLiteral("pitch"), pitch, &SoundTouchPitchProcessor::setRatio);
     chain.bind(QStringLiteral("echo_delay"), echo, &EchoProcessor::setDelayMs);
     chain.bind(QStringLiteral("echo_decay"), echo, &EchoProcessor::setDecay);
     chain.bind(QStringLiteral("grit"), crusher, &BitCrusherProcessor::setMix);
