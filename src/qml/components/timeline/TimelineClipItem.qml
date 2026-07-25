@@ -63,8 +63,12 @@ Item {
 
     // While dragging, show the same snapped landing outline the
     // library drop uses, on whichever track the clip is over.
+    //
+    // Gated on `moving` rather than drag.active: Qt only clears drag.active
+    // after onReleased returns, so resetting y on drop re-armed the preview and
+    // left an orphaned outline on the old track.
     function updateMovePreview() {
-        if (!clipMouse.drag.active)
+        if (!clipMouse.moving)
             return
         const desired = Math.max(0, (x - Theme.clipSelectionRingWidth) / panel.pxPerSecond)
         const pos = mapToItem(timelineColumn, width / 2, height / 2)
@@ -351,12 +355,22 @@ Item {
         drag.axis: Drag.XAndYAxis
         drag.threshold: 8
         drag.minimumX: Theme.clipSelectionRingWidth
-        drag.minimumY: -clipItem.trackRow.height
-        drag.maximumY: clipItem.trackRow.height * 2
+        // Allow dropping onto any track, not just the immediate neighbours.
+        drag.minimumY: -Math.max(clipItem.trackRow.height, panel.totalTracksHeight())
+        drag.maximumY: Math.max(clipItem.trackRow.height * 2, panel.totalTracksHeight())
         property int originTrack: clipItem.trackIndex
+        property int originClip: clipItem.clipIndex
+        // drag.active is cleared after onReleased in some paths; remember we dragged.
+        property bool didDrag: false
+        // True only for the span we treat as a move, so the landing preview stops
+        // updating the moment the clip is dropped.
+        property bool moving: false
 
         onPressed: (mouse) => {
             originTrack = clipItem.trackIndex
+            originClip = clipItem.clipIndex
+            didDrag = false
+            moving = false
             if (mouse.button === Qt.RightButton) {
                 // Right-click selects, then opens the menu.
                 if (!clipItem.selected)
@@ -370,7 +384,7 @@ Item {
                 EditorState.selectClip(clipItem.trackIndex, clipItem.clipIndex)
         }
         onClicked: (mouse) => {
-            if (mouse.button === Qt.RightButton)
+            if (mouse.button === Qt.RightButton || didDrag)
                 return
             if ((mouse.modifiers & Qt.ShiftModifier) !== 0)
                 EditorState.addToSelection(clipItem.trackIndex, clipItem.clipIndex)
@@ -426,17 +440,33 @@ Item {
             }
         }
         onReleased: {
+            const moved = drag.active || didDrag
+            didDrag = false
+            moving = false
             panel.clearLandingPreview()
-            if (!drag.active)
+            if (!moved)
                 return
             const newStart = (clipItem.x - Theme.clipSelectionRingWidth) / panel.pxPerSecond
             const pos = clipItem.mapToItem(timelineColumn, clipItem.width / 2, clipItem.height / 2)
             const targetTrack = panel.trackIndexAtY(pos.y)
             clipItem.y = Theme.clipSelectionRingWidth
+            // Use indices captured on press — after the model updates, clipIndex
+            // on this delegate can already refer to a different clip.
             if (targetTrack >= 0 && targetTrack !== originTrack)
-                EditorState.moveClipToTrack(originTrack, clipItem.clipIndex, targetTrack, newStart)
+                EditorState.moveClipToTrack(originTrack, originClip, targetTrack, newStart)
             else
-                EditorState.moveClip(clipItem.trackIndex, clipItem.clipIndex, newStart)
+                EditorState.moveClip(originTrack, originClip, newStart)
+        }
+        onPositionChanged: {
+            if (pressed && drag.active) {
+                didDrag = true
+                moving = true
+            }
+        }
+        onCanceled: {
+            didDrag = false
+            moving = false
+            panel.clearLandingPreview()
         }
     }
 

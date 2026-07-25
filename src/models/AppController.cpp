@@ -2474,17 +2474,38 @@ void AppController::moveClipToTrack(int trackIndex, int clipIndex, int newTrackI
 
     const drift::Project before = m_project;
     fromTrack.clips.removeAt(clipIndex);
+
+    // Source-track indices after the hole shift down. Drop the moved slot and
+    // remap anything that pointed past it, otherwise finishEdit's normalize
+    // would keep the old (track, index) and light up the wrong clip.
+    for (int i = m_selection.size() - 1; i >= 0; --i) {
+        QPair<int, int> &pair = m_selection[i];
+        if (pair.first != trackIndex)
+            continue;
+        if (pair.second == clipIndex)
+            m_selection.removeAt(i);
+        else if (pair.second > clipIndex)
+            --pair.second;
+    }
+
     drift::Clip moved = clip;
     moved.timelineStart = drift::resolveClipStart(m_project, toTrack, -1, drift::secondsToUs(newStart),
                                                   moved.timelineDuration, m_snapEnabled, m_playheadUs,
                                                   m_beatSnapTargets);
     toTrack.clips.append(moved);
+    const int newClipIndex = toTrack.clips.size() - 1;
 
     syncLinkedPartnersFrom(m_project, moved);
 
+    // Selection follows the clip to its new track before tracksChanged fires.
+    m_selectedTrack = newTrackIndex;
+    m_selectedClip = newClipIndex;
+    m_selection = selectionWithLinkedPartners(m_project, newTrackIndex, newClipIndex);
+    m_selectedTransitionTrack = -1;
+    m_selectedTransitionLeftClip = -1;
+
     pushProjectEdit(before, QStringLiteral("Clip moved"));
     finishEdit(QStringLiteral("Clip moved"));
-    selectClip(newTrackIndex, toTrack.clips.size() - 1);
 }
 
 void AppController::addTextClip(const QString &text, double atSeconds)
