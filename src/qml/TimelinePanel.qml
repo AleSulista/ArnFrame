@@ -11,14 +11,13 @@ PanelFrame {
     property real zoom: 1.0
     property string propertiesTab: ""
 
-    // Timeline cutting tool, driven by the scissors toolbar toggles. One of:
-    //   ""          normal editing
-    //   "split"     click a clip to split it in two at the cut line
+    // Timeline tool mode (CapCut-style exclusive modes). One of:
+    //   ""          Select — normal editing (toolbar pointer / V)
+    //   "split"     Blade — click a clip to split it (toolbar scissors / B)
     //   "trimStart"  click a clip to drop everything left of the cut line
     //   "trimEnd"    click a clip to drop everything right of the cut line
-    // While a tool is active, hovering the timeline shows a red dashed virtual
-    // playhead (snapped to clip edges and the real playhead); the trim tools
-    // also tint the doomed side of the hovered clip red.
+    // While a cut tool is active, hovering the timeline shows a red dashed
+    // virtual playhead; trim tools also tint the doomed side of the clip.
     property string timelineTool: ""
     // Snapped position (seconds) of the virtual cut playhead; < 0 when not hovering.
     property real cutHoverSeconds: -1
@@ -29,6 +28,19 @@ PanelFrame {
         cutHoverSeconds = -1
         cutHoverTrack = -1
         cutHoverClip = -1
+    }
+
+    // CapCut: V = Select, B = Blade. Escape while a cut tool is active is
+    // handled in Main.qml so it exits the tool without clearing the selection.
+    Shortcut {
+        sequence: "V"
+        context: Qt.ApplicationShortcut
+        onActivated: root.timelineTool = ""
+    }
+    Shortcut {
+        sequence: "B"
+        context: Qt.ApplicationShortcut
+        onActivated: root.timelineTool = "split"
     }
 
     // Y offset of a track row within the track column (excludes ruler/bookmark).

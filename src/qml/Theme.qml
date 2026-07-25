@@ -368,6 +368,8 @@ QtObject {
         lock: "lock",
         lockOpen: "lock-open",
         moveHorizontal: "move-horizontal",
+        // CapCut-style select/pointer tool (exit cut modes)
+        mousePointer: "mouse-pointer",
 
         // Text alignment
         alignLeft: "text-align-start",

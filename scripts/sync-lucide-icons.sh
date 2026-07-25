@@ -36,7 +36,7 @@ icons=(
   text-align-start text-align-center text-align-end
   align-start-vertical align-center-vertical align-end-vertical
   # Timeline / media
-  captions list-video move-horizontal audio-lines video
+  captions list-video move-horizontal mouse-pointer audio-lines video
   smartphone monitor square ratio
   # Shortcuts tab and canvas crop tool
   keyboard crop minimize

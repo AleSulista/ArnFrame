@@ -54,10 +54,20 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
         }
 
+        // CapCut-style exclusive tool modes: Select is the default; cut tools
+        // stay sticky until you switch back via Select (or V). Clicking the
+        // active cut tool again also returns to Select.
+        IconButton {
+            glyph: Theme.icons.mousePointer
+            variant: "text"
+            tooltip: qsTr("Select — normal editing (V)")
+            active: toolbar.panel.timelineTool === ""
+            onClicked: toolbar.panel.timelineTool = ""
+        }
         IconButton {
             glyph: Theme.icons.scissors
             variant: "text"
-            tooltip: qsTr("Cut mode — click a clip to split it")
+            tooltip: qsTr("Cut mode — click a clip to split it (B)")
             active: toolbar.panel.timelineTool === "split"
             onClicked: toolbar.panel.timelineTool = toolbar.panel.timelineTool === "split" ? "" : "split"
         }

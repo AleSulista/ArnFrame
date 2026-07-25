@@ -263,6 +263,8 @@ ApplicationWindow {
     }
 
     // Shortcut is not an Item, so wrap each binding in a zero-size host.
+    // Escape (clearSelection): CapCut-style — if a timeline cut tool is active,
+    // first press returns to Select; only then does Escape clear the selection.
     Repeater {
         model: EditorState.actions
         Item {
@@ -272,7 +274,15 @@ ApplicationWindow {
             Shortcut {
                 sequence: modelData.shortcut
                 context: Qt.ApplicationShortcut
-                onActivated: EditorState.triggerAction(modelData.id)
+                onActivated: {
+                    if (modelData.id === "clearSelection"
+                            && timelinePanel.visible
+                            && timelinePanel.timelineTool !== "") {
+                        timelinePanel.timelineTool = ""
+                        return
+                    }
+                    EditorState.triggerAction(modelData.id)
+                }
             }
         }
     }
@@ -432,6 +442,7 @@ ApplicationWindow {
                 }
 
                 TimelinePanel {
+                    id: timelinePanel
                     visible: !window.previewFullscreen
                     propertiesTab: propertiesPanel.currentTabId
                     SplitView.preferredHeight: Math.max(0, outerSplit.height * 0.5)
