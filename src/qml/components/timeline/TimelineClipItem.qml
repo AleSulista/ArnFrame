@@ -333,13 +333,17 @@ Item {
         z: 2
         anchors.fill: parent
         hoverEnabled: true
-        // Insets make room for the trim handles.
-        anchors.leftMargin: clipItem.showTrimHandles ? 14 : 0
-        anchors.rightMargin: clipItem.showTrimHandles ? 14 : 0
+        // Always leave edge strips for CapCut-style trim cursor on approach.
+        anchors.leftMargin: 14
+        anchors.rightMargin: 14
         enabled: !leftTrimMouse.pressed && !rightTrimMouse.pressed
                      && !fadeInMouse.pressed && !fadeOutMouse.pressed
-        // A clip is dragged, not clicked.
-        cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+        // CapCut: open hand to move; trim edges own SplitHCursor via HoverHandler.
+        cursorShape: drag.active ? Qt.ClosedHandCursor
+                     : (leftTrimMouse.containsMouse || rightTrimMouse.containsMouse
+                        || fadeInMouse.containsMouse || fadeOutMouse.containsMouse)
+                       ? Qt.SplitHCursor
+                       : Qt.OpenHandCursor
         // Right-click opens the clip menu; the app
         // previously had no context menus at all.
         acceptedButtons: Qt.LeftButton | Qt.RightButton
@@ -384,6 +388,19 @@ Item {
                 text: qsTr("Split at current time")
                 icon.name: Theme.icons.scissors
                 onTriggered: EditorState.splitAtPlayhead()
+            }
+            ThemedMenuItem {
+                text: qsTr("Separate audio")
+                icon.name: Theme.icons.audioLines
+                // CapCut: only offer extract when the clip still has embedded audio.
+                visible: clipItem.trackType === "video" && EditorState.separateAudioAvailable
+                onTriggered: EditorState.separateAudioFromSelection()
+            }
+            ThemedMenuItem {
+                text: qsTr("Unlink")
+                icon.name: Theme.icons.unlink
+                visible: !!clipItem.clipData.linked && EditorState.unlinkAvailable
+                onTriggered: EditorState.unlinkSelectedClips()
             }
             MenuSeparator { }
             ThemedMenuItem {
@@ -453,7 +470,7 @@ Item {
             z: 1
             preventStealing: true
             hoverEnabled: true
-            cursorShape: Qt.SizeHorCursor
+            cursorShape: Qt.SplitHCursor
             onPressed: (mouse) => {
                 mouse.accepted = true
                 EditorState.beginPreviewDrag(qsTr("Adjust fade"))
@@ -470,6 +487,8 @@ Item {
             }
             onReleased: EditorState.commitPreviewDrag()
             onCanceled: EditorState.cancelPreviewDrag()
+
+            HoverHandler { cursorShape: Qt.SplitHCursor }
 
             ThemedToolTip {
                 visible: fadeInMouse.pressed || fadeInMouse.containsMouse
@@ -505,7 +524,7 @@ Item {
             z: 1
             preventStealing: true
             hoverEnabled: true
-            cursorShape: Qt.SizeHorCursor
+            cursorShape: Qt.SplitHCursor
             onPressed: (mouse) => {
                 mouse.accepted = true
                 EditorState.beginPreviewDrag(qsTr("Adjust fade"))
@@ -523,6 +542,8 @@ Item {
             onReleased: EditorState.commitPreviewDrag()
             onCanceled: EditorState.cancelPreviewDrag()
 
+            HoverHandler { cursorShape: Qt.SplitHCursor }
+
             ThemedToolTip {
                 visible: fadeOutMouse.pressed || fadeOutMouse.containsMouse
                 text: qsTr("Fade out %1s").arg((clipItem.clipData.fadeOut || 0).toFixed(2))
@@ -536,18 +557,21 @@ Item {
         anchors.left: clipBackground.left
         anchors.top: clipBackground.top
         anchors.bottom: clipBackground.bottom
-        visible: clipItem.showTrimHandles
-        color: Theme.primary
-        opacity: leftTrimMouse.pressed ? 1.0
+        // Hit target always present so CapCut-style edge cursor appears on approach;
+        // the yellow bar only paints when the clip is selected.
+        color: clipItem.showTrimHandles ? Theme.primary : "transparent"
+        opacity: !clipItem.showTrimHandles ? 0
+                 : leftTrimMouse.pressed ? 1.0
                  : (leftTrimMouse.containsMouse ? 0.95 : 0.75)
 
         Behavior on opacity {
+            enabled: clipItem.showTrimHandles
             NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
         }
 
         ThemedToolTip {
             text: qsTr("Drag to trim the start")
-            visible: leftTrimMouse.containsMouse && !leftTrimMouse.pressed
+            visible: clipItem.showTrimHandles && leftTrimMouse.containsMouse && !leftTrimMouse.pressed
         }
         z: 30
 
@@ -557,11 +581,16 @@ Item {
             anchors.leftMargin: -10
             anchors.rightMargin: -4
             // Leave the top corner for the fade-in dot.
-            anchors.topMargin: clipItem.timelineFadeHandles ? 16 : -6
+            anchors.topMargin: clipItem.timelineFadeHandles && clipItem.showTrimHandles ? 16 : -6
             anchors.bottomMargin: -6
             preventStealing: true
             hoverEnabled: true
-            cursorShape: Qt.SizeHorCursor
+            // CapCut-style bracket / edge-resize cursor on trim grips.
+            cursorShape: Qt.SplitHCursor
+            onPressed: {
+                if (!clipItem.selected)
+                    EditorState.selectClip(clipItem.trackIndex, clipItem.clipIndex)
+            }
             onPositionChanged: (mouse) => {
                 if (!pressed)
                     return
@@ -574,6 +603,9 @@ Item {
                 EditorState.trimClipLeft(clipItem.trackIndex, clipItem.clipIndex,
                                        Math.max(0, newStart))
             }
+
+            // HoverHandler wins the cursor reliably (same pattern as subtitle grips).
+            HoverHandler { cursorShape: Qt.SplitHCursor }
         }
     }
 
@@ -583,18 +615,19 @@ Item {
         anchors.right: clipBackground.right
         anchors.top: clipBackground.top
         anchors.bottom: clipBackground.bottom
-        visible: clipItem.showTrimHandles
-        color: Theme.primary
-        opacity: rightTrimMouse.pressed ? 1.0
+        color: clipItem.showTrimHandles ? Theme.primary : "transparent"
+        opacity: !clipItem.showTrimHandles ? 0
+                 : rightTrimMouse.pressed ? 1.0
                  : (rightTrimMouse.containsMouse ? 0.95 : 0.75)
 
         Behavior on opacity {
+            enabled: clipItem.showTrimHandles
             NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
         }
 
         ThemedToolTip {
             text: qsTr("Drag to trim the end")
-            visible: rightTrimMouse.containsMouse && !rightTrimMouse.pressed
+            visible: clipItem.showTrimHandles && rightTrimMouse.containsMouse && !rightTrimMouse.pressed
         }
         z: 30
 
@@ -604,11 +637,15 @@ Item {
             anchors.leftMargin: -4
             anchors.rightMargin: -10
             // Leave the top corner for the fade-out dot.
-            anchors.topMargin: clipItem.timelineFadeHandles ? 16 : -6
+            anchors.topMargin: clipItem.timelineFadeHandles && clipItem.showTrimHandles ? 16 : -6
             anchors.bottomMargin: -6
             preventStealing: true
             hoverEnabled: true
-            cursorShape: Qt.SizeHorCursor
+            cursorShape: Qt.SplitHCursor
+            onPressed: {
+                if (!clipItem.selected)
+                    EditorState.selectClip(clipItem.trackIndex, clipItem.clipIndex)
+            }
             onPositionChanged: (mouse) => {
                 if (!pressed)
                     return
@@ -618,6 +655,8 @@ Item {
                 EditorState.trimClipRight(clipItem.trackIndex, clipItem.clipIndex,
                                         newEnd)
             }
+
+            HoverHandler { cursorShape: Qt.SplitHCursor }
         }
     }
 }

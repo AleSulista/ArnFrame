@@ -86,9 +86,16 @@ Item {
             onClicked: toolbar.panel.timelineTool = toolbar.panel.timelineTool === "trimEnd" ? "" : "trimEnd"
         }
         IconButton {
+            glyph: Theme.icons.audioLines
+            variant: "text"
+            tooltip: qsTr("Separate audio from video")
+            enabled: EditorState.separateAudioAvailable
+            onClicked: EditorState.separateAudioFromSelection()
+        }
+        IconButton {
             glyph: Theme.icons.unlink
             variant: "text"
-            tooltip: qsTr("Separate audio")
+            tooltip: qsTr("Unlink video and audio")
             enabled: EditorState.unlinkAvailable
             onClicked: EditorState.unlinkSelectedClips()
         }

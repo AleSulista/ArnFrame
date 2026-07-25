@@ -1152,14 +1152,21 @@ drift::Clip makeAudioCompanionFromVideo(const drift::Clip &videoClip, const QStr
 }
 
 // Split embedded audio onto the audio track (video keeps picture only).
+// CapCut-style: the new audio clip stays linked to the video so they move together
+// until the user explicitly unlinks.
 bool detachEmbeddedAudioFromVideo(drift::Project &project, AssetLibrary *library, drift::Clip &videoClip)
 {
     if (!clipHasEmbeddedAudio(project, library, videoClip))
         return false;
 
-    const int audioTrack = drift::ensureTrackForClipType(project, drift::ClipType::Audio, false);
-    project.tracks()[audioTrack].clips.append(makeAudioCompanionFromVideo(videoClip));
+    const QString linkId = videoClip.linkId.isEmpty()
+        ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+        : videoClip.linkId;
+    videoClip.linkId = linkId;
     videoClip.suppressEmbeddedAudio = true;
+
+    const int audioTrack = drift::ensureTrackForClipType(project, drift::ClipType::Audio, false);
+    project.tracks()[audioTrack].clips.append(makeAudioCompanionFromVideo(videoClip, linkId));
     return true;
 }
 
@@ -1255,7 +1262,8 @@ QHash<QString, QString> defaultShortcuts()
         {QStringLiteral("duplicate"), QStringLiteral("Ctrl+D")},
         {QStringLiteral("split"), QStringLiteral("S")},
         {QStringLiteral("merge"), QStringLiteral("Ctrl+M")},
-        {QStringLiteral("unlink"), QStringLiteral("Ctrl+Shift+L")},
+        {QStringLiteral("unlink"), QStringLiteral("Ctrl+Shift+U")},
+        {QStringLiteral("separateAudio"), QStringLiteral("Ctrl+Shift+S")},
         {QStringLiteral("copy"), QStringLiteral("Ctrl+C")},
         {QStringLiteral("cut"), QStringLiteral("Ctrl+X")},
         {QStringLiteral("paste"), QStringLiteral("Ctrl+V")},
@@ -1307,8 +1315,7 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("sourceDuration"), sourceAsset ? drift::usToSeconds(sourceAsset->durationUs) : 0.0},
         {QStringLiteral("assetId"), clip.assetId},
         {QStringLiteral("assetIndex"), assetIndexForClip(clip)},
-        {QStringLiteral("linked"), !clip.linkId.isEmpty()
-            || (clip.type == drift::ClipType::Video && !clip.suppressEmbeddedAudio)},
+        {QStringLiteral("linked"), !clip.linkId.isEmpty()},
         {QStringLiteral("volume"), clip.volume.isEmpty() ? 1.0 : clip.volume.evaluateAt(0)},
         {QStringLiteral("fadeIn"), drift::usToSeconds(clip.fadeInUs)},
         {QStringLiteral("fadeOut"), drift::usToSeconds(clip.fadeOutUs)},
@@ -1417,7 +1424,8 @@ QVariantList AppController::actions() const
         action(QStringLiteral("duplicate"), QStringLiteral("Duplicate selected clip")),
         action(QStringLiteral("split"), QStringLiteral("Split at current time")),
         action(QStringLiteral("merge"), QStringLiteral("Merge adjacent clips")),
-        action(QStringLiteral("unlink"), QStringLiteral("Separate audio")),
+        action(QStringLiteral("separateAudio"), QStringLiteral("Separate audio")),
+        action(QStringLiteral("unlink"), QStringLiteral("Unlink audio")),
         action(QStringLiteral("clearSelection"), QStringLiteral("Clear selection")),
         action(QStringLiteral("selectAll"), QStringLiteral("Select all clips")),
         action(QStringLiteral("nudgeLeft"), QStringLiteral("Move selection left a little")),
@@ -5566,6 +5574,22 @@ void AppController::mergeSelectedClips()
     selectClip(trackIndex, leftIndex);
 }
 
+bool AppController::canSeparateAudioSelection() const
+{
+    QList<QPair<int, int>> pairs = m_selection;
+    if (pairs.isEmpty() && m_selectedTrack >= 0 && m_selectedClip >= 0)
+        pairs.append(qMakePair(m_selectedTrack, m_selectedClip));
+
+    for (const QPair<int, int> &pair : pairs) {
+        if (!isValidClipIndex(pair.first, pair.second))
+            continue;
+        if (clipHasEmbeddedAudio(m_project, m_assetLibrary,
+                                 m_project.tracks().at(pair.first).clips.at(pair.second)))
+            return true;
+    }
+    return false;
+}
+
 bool AppController::canUnlinkSelection() const
 {
     QList<QPair<int, int>> pairs = m_selection;
@@ -5575,13 +5599,44 @@ bool AppController::canUnlinkSelection() const
     for (const QPair<int, int> &pair : pairs) {
         if (!isValidClipIndex(pair.first, pair.second))
             continue;
-        const drift::Clip &clip = m_project.tracks().at(pair.first).clips.at(pair.second);
-        if (!clip.linkId.isEmpty())
-            return true;
-        if (clipHasEmbeddedAudio(m_project, m_assetLibrary, clip))
+        if (!m_project.tracks().at(pair.first).clips.at(pair.second).linkId.isEmpty())
             return true;
     }
     return false;
+}
+
+void AppController::separateAudioFromSelection()
+{
+    QList<QPair<int, int>> pairs = m_selection;
+    if (pairs.isEmpty() && m_selectedTrack >= 0 && m_selectedClip >= 0)
+        pairs.append(qMakePair(m_selectedTrack, m_selectedClip));
+    if (pairs.isEmpty())
+        return;
+
+    const drift::Project before = m_project;
+    bool changed = false;
+    QSet<QString> detachedVideoIds;
+    for (const QPair<int, int> &pair : pairs) {
+        if (!isValidClipIndex(pair.first, pair.second))
+            continue;
+
+        drift::Clip &clip = m_project.tracks()[pair.first].clips[pair.second];
+        if (clip.type != drift::ClipType::Video || detachedVideoIds.contains(clip.id))
+            continue;
+        if (detachEmbeddedAudioFromVideo(m_project, m_assetLibrary, clip)) {
+            detachedVideoIds.insert(clip.id);
+            changed = true;
+        }
+    }
+
+    if (!changed)
+        return;
+
+    if (m_selectedTrack >= 0 && m_selectedClip >= 0)
+        m_selection = selectionWithLinkedPartners(m_project, m_selectedTrack, m_selectedClip);
+
+    pushProjectEdit(before, QStringLiteral("Audio separated"));
+    finishEdit(QStringLiteral("Audio separated"));
 }
 
 void AppController::unlinkSelectedClips()
@@ -5595,30 +5650,22 @@ void AppController::unlinkSelectedClips()
     const drift::Project before = m_project;
     bool changed = false;
     QSet<QString> clearedLinkIds;
-    QSet<QString> detachedVideoIds;
     for (const QPair<int, int> &pair : pairs) {
         if (!isValidClipIndex(pair.first, pair.second))
             continue;
 
         drift::Clip &clip = m_project.tracks()[pair.first].clips[pair.second];
-        if (!clip.linkId.isEmpty() && !clearedLinkIds.contains(clip.linkId)) {
-            clearedLinkIds.insert(clip.linkId);
-            for (drift::Track &track : m_project.tracks()) {
-                for (drift::Clip &candidate : track.clips) {
-                    if (candidate.linkId == clip.linkId)
-                        candidate.linkId.clear();
-                }
-            }
-            changed = true;
+        if (clip.linkId.isEmpty() || clearedLinkIds.contains(clip.linkId))
             continue;
-        }
 
-        if (clip.type != drift::ClipType::Video || detachedVideoIds.contains(clip.id))
-            continue;
-        if (detachEmbeddedAudioFromVideo(m_project, m_assetLibrary, clip)) {
-            detachedVideoIds.insert(clip.id);
-            changed = true;
+        clearedLinkIds.insert(clip.linkId);
+        for (drift::Track &track : m_project.tracks()) {
+            for (drift::Clip &candidate : track.clips) {
+                if (candidate.linkId == clip.linkId)
+                    candidate.linkId.clear();
+            }
         }
+        changed = true;
     }
 
     if (!changed)
@@ -7607,6 +7654,8 @@ void AppController::triggerAction(const QString &actionId)
         splitAtPlayhead();
     else if (actionId == QStringLiteral("merge"))
         mergeSelectedClips();
+    else if (actionId == QStringLiteral("separateAudio"))
+        separateAudioFromSelection();
     else if (actionId == QStringLiteral("unlink"))
         unlinkSelectedClips();
     else if (actionId == QStringLiteral("copy"))

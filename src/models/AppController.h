@@ -124,6 +124,7 @@ class AppController : public QObject
     Q_PROPERTY(bool recoveryAvailable READ recoveryAvailable NOTIFY recoveryChanged)
     Q_PROPERTY(QVariantMap recoveryInfo READ recoveryInfo NOTIFY recoveryChanged)
     Q_PROPERTY(QVariantList recentProjects READ recentProjects NOTIFY recentProjectsChanged)
+    Q_PROPERTY(bool separateAudioAvailable READ canSeparateAudioSelection NOTIFY editCapabilitiesChanged)
     Q_PROPERTY(bool unlinkAvailable READ canUnlinkSelection NOTIFY editCapabilitiesChanged)
     Q_PROPERTY(bool mergeAvailable READ canMergeSelection NOTIFY editCapabilitiesChanged)
     // False until the user picks a launch layout (or decides later via first-clip setup / load).
@@ -389,6 +390,8 @@ public:
     Q_INVOKABLE void setClipRotationSnap(int trackIndex, int clipIndex, double degrees);
     Q_INVOKABLE bool canMergeSelection() const;
     Q_INVOKABLE void mergeSelectedClips();
+    Q_INVOKABLE bool canSeparateAudioSelection() const;
+    Q_INVOKABLE void separateAudioFromSelection();
     Q_INVOKABLE bool canUnlinkSelection() const;
     Q_INVOKABLE void unlinkSelectedClips();
     Q_INVOKABLE void setClipMask(int trackIndex, int clipIndex, const QVariantMap &mask);
