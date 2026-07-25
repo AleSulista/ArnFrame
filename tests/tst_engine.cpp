@@ -8,6 +8,8 @@
 #include <QSet>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QThread>
+#include <atomic>
 
 #include <cmath>
 #include <random>
@@ -122,6 +124,7 @@ private slots:
     void maskApplierEllipseMasksCorners();
     void exporterProducesPlayableFileWithBackground();
     void mixerHasNoBlockBoundaryDropout();
+    void mixerSurvivesConcurrentEffectRackReset();
     void audioEffectCatalogLoadsPackages();
     void audioEffectFactoryBuildsEveryCatalogEntry();
     void audioEffectChainAltersSignal();
@@ -2865,6 +2868,63 @@ void EngineTest::mixerHasNoBlockBoundaryDropout()
                                 .arg(block).arg(worst).arg(worstIndex)
                                 .arg(worstIndex % block).arg(bound).arg(kToneHz)));
     }
+}
+
+// PlaybackEngine clears the effect racks from the GUI thread on every seek, play and pause, while
+// mix() is running on the audio thread. Taking a reference into the hash instead of a strong
+// reference — and touching the hash at all without a lock — segfaults inside the rack's buffers
+// once the timing lines up, which is what "crashed after a while" looks like from the outside.
+void EngineTest::mixerSurvivesConcurrentEffectRackReset()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeToneAudio(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    constexpr int kRate = 48000;
+    constexpr drift::TimeUs kDurationUs = 2'000'000;
+
+    drift::Project project;
+    project.setSampleRate(kRate);
+    drift::Track track{.type = drift::TrackType::Audio};
+    drift::Clip clip;
+    clip.id = QStringLiteral("tone");
+    clip.type = drift::ClipType::Audio;
+    clip.path = path;
+    clip.timelineStart = 0;
+    clip.timelineDuration = kDurationUs;
+    clip.srcIn = 0;
+    clip.srcOut = kDurationUs;
+    drift::Effect echo;
+    echo.catalogId = QStringLiteral("space.echo");
+    clip.audioEffects.append(echo);
+    track.clips.append(clip);
+    project.tracks().append(track);
+
+    AudioMixer mixer;
+    mixer.setProject(&project);
+
+    std::atomic<bool> stop{false};
+    QScopedPointer<QThread> mixThread(QThread::create([&mixer, &stop] {
+        QVector<float> buffer(1024 * 2);
+        drift::TimeUs t = 0;
+        while (!stop.load(std::memory_order_relaxed)) {
+            mixer.mix(t, 1024, kRate, buffer.data());
+            t = (t + 21333) % 1'500'000;
+        }
+    }));
+    QScopedPointer<QThread> resetThread(QThread::create([&mixer, &stop] {
+        while (!stop.load(std::memory_order_relaxed))
+            mixer.resetEffectRacks();
+    }));
+
+    mixThread->start();
+    resetThread->start();
+    QThread::msleep(2000);
+    stop.store(true);
+    QVERIFY(mixThread->wait(10000));
+    QVERIFY(resetThread->wait(10000));
 }
 
 void EngineTest::audioEffectCatalogLoadsPackages()

@@ -5,6 +5,7 @@
 #include "engine/audio/AudioEffectRack.h"
 
 #include <QHash>
+#include <QMutex>
 #include <QVector>
 #include <memory>
 
@@ -27,5 +28,9 @@ public:
 
 private:
     const drift::Project *m_project = nullptr;
+    // mix() runs on the audio thread; resetEffectRacks() is called from the GUI thread on seek,
+    // play and pause. The mutex covers the hash itself — callers take a shared_ptr copy out of it
+    // and work on the rack with the lock released.
+    mutable QMutex m_effectRackMutex;
     mutable QHash<QString, std::shared_ptr<drift::AudioEffectRack>> m_effectRacks;
 };

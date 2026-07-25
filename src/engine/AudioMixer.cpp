@@ -144,6 +144,7 @@ namespace {
 
 void accumulateClipAudio(const drift::Clip &clip, const drift::Track &track, drift::TimeUs timelineStartUs,
                          int sampleCount, int sampleRate, float *mixBuffer,
+                         QMutex &rackMutex,
                          QHash<QString, std::shared_ptr<drift::AudioEffectRack>> &effectRacks)
 {
     if (clip.path.isEmpty())
@@ -163,9 +164,22 @@ void accumulateClipAudio(const drift::Clip &clip, const drift::Track &track, dri
 
     QVector<float> chunk;
     if (!clip.audioEffects.isEmpty()) {
-        std::shared_ptr<drift::AudioEffectRack> &rackPtr = effectRacks[clip.id];
-        if (!rackPtr)
-            rackPtr = std::make_shared<drift::AudioEffectRack>();
+        // Hold a strong reference rather than pointing into the hash. mix() runs on the audio
+        // thread while resetEffectRacks() clears this hash from the GUI thread on every seek, play
+        // and pause: an unguarded operator[] can rehash underneath that clear(), and a reference
+        // into the hash dangles the moment clear() drops the last owner — the rack's buffers are
+        // then freed while this thread is still processing into them.
+        std::shared_ptr<drift::AudioEffectRack> rackPtr;
+        {
+            QMutexLocker locker(&rackMutex);
+            rackPtr = effectRacks.value(clip.id);
+            if (!rackPtr) {
+                rackPtr = std::make_shared<drift::AudioEffectRack>();
+                effectRacks.insert(clip.id, rackPtr);
+            }
+        }
+        // Safe even if the hash is cleared right now: this copy keeps the rack alive until the
+        // block finishes, and the next block simply builds a fresh one.
         drift::AudioEffectRack &rack = *rackPtr;
 
         const drift::TimeUs lastEndUs = rack.lastTimelineEndUs();
@@ -214,13 +228,16 @@ void accumulateClipAudio(const drift::Clip &clip, const drift::Track &track, dri
 
 void AudioMixer::setProject(const drift::Project *project)
 {
-    if (m_project != project)
+    if (m_project != project) {
+        QMutexLocker locker(&m_effectRackMutex);
         m_effectRacks.clear();
+    }
     m_project = project;
 }
 
 void AudioMixer::resetEffectRacks()
 {
+    QMutexLocker locker(&m_effectRackMutex);
     m_effectRacks.clear();
 }
 
@@ -239,12 +256,12 @@ void AudioMixer::mix(drift::TimeUs timelineStartUs, int sampleCount, int sampleR
         if (track.type == drift::TrackType::Audio) {
             for (const drift::Clip &clip : track.clips)
                 accumulateClipAudio(clip, track, timelineStartUs, sampleCount, sampleRate,
-                                      interleavedStereoOut, m_effectRacks);
+                                      interleavedStereoOut, m_effectRackMutex, m_effectRacks);
         } else if (track.type == drift::TrackType::Video) {
             for (const drift::Clip &clip : track.clips) {
                 if (clip.type == drift::ClipType::Video && !clip.suppressEmbeddedAudio)
                     accumulateClipAudio(clip, track, timelineStartUs, sampleCount, sampleRate,
-                                          interleavedStereoOut, m_effectRacks);
+                                          interleavedStereoOut, m_effectRackMutex, m_effectRacks);
             }
         }
     }
