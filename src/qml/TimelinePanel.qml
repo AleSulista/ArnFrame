@@ -528,7 +528,42 @@ PanelFrame {
                 width: Theme.trackLabelsWidth
                 height: parent.height
 
-                Item { width: parent.width; height: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight }
+                // CapCut-style: add-track sits at the timeline origin, above the
+                // track headers, not buried in the top toolbar.
+                Item {
+                    width: parent.width
+                    height: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
+
+                    IconButton {
+                        id: addTrackButton
+                        anchors.centerIn: parent
+                        glyph: Theme.icons.plus
+                        variant: "text"
+                        tooltip: qsTr("Add new track")
+                        onClicked: addTrackMenu.open()
+
+                        NewTrackMenu {
+                            id: addTrackMenu
+                            x: Math.max(0, (addTrackButton.width - width) / 2)
+                            y: addTrackButton.height + 4
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        width: 1
+                        height: parent.height
+                        color: Theme.panelBorder
+                    }
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        height: 1
+                        color: Theme.panelBorder
+                    }
+                }
 
                 TrackHeaderColumn {
                     id: trackLabelsArea

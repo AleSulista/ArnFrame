@@ -3,9 +3,10 @@ import QtQuick.Controls.Basic
 import Drift
 import ".."
 
-// Timeline toolbar: transport/edit actions, new-track menu, scene badge,
-// snap/ripple toggles and zoom controls. Zoom and the time readout are read
-// from and written back to the owning TimelinePanel via `panel`.
+// Timeline toolbar: transport/edit actions, scene badge, snap/ripple toggles
+// and zoom controls. Zoom and the time readout are read from and written back
+// to the owning TimelinePanel via `panel`. New tracks are added from the
+// plus button above the track headers.
 Item {
     id: toolbar
 
@@ -138,28 +139,6 @@ Item {
             tooltip: qsTr("Redo")
             onClicked: EditorState.redo()
             enabled: EditorState.redoAvailable
-        }
-
-        Rectangle {
-            width: Theme.borderWidth
-            height: Theme.spacing3xl
-            color: Theme.panelBorder
-            anchors.verticalCenter: parent.verticalCenter
-        }
-
-        ThemedButton {
-            id: newTrackButton
-            text: qsTr("New Track")
-            variant: "ghost"
-            glyph: Theme.icons.plus
-            anchors.verticalCenter: parent.verticalCenter
-            onClicked: newTrackMenu.open()
-
-            NewTrackMenu {
-                id: newTrackMenu
-                x: 0
-                y: newTrackButton.height + 4
-            }
         }
     }
 
