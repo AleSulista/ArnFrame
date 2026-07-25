@@ -402,7 +402,7 @@ Item {
                 visible: !!clipItem.clipData.linked && EditorState.unlinkAvailable
                 onTriggered: EditorState.unlinkSelectedClips()
             }
-            MenuSeparator { }
+            ThemedMenuSeparator { }
             ThemedMenuItem {
                 text: qsTr("Cut")
                 icon.name: Theme.icons.scissors
@@ -418,7 +418,7 @@ Item {
                 icon.name: Theme.icons.copyPlus
                 onTriggered: EditorState.duplicateSelectedClip()
             }
-            MenuSeparator { }
+            ThemedMenuSeparator { }
             ThemedMenuItem {
                 text: qsTr("Delete")
                 icon.name: Theme.icons.trash

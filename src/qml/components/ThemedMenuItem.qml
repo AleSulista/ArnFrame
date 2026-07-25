@@ -11,7 +11,10 @@ import Drift
 MenuItem {
     id: root
 
-    implicitHeight: Theme.controlHeightSm + Theme.spacingSm
+    // A Menu lays entries out in a ListView, which still reserves a row for a
+    // hidden item, so conditional entries left blank gaps behind.
+    implicitHeight: visible ? Theme.controlHeightSm + Theme.spacingSm : 0
+    height: implicitHeight
     hoverEnabled: true
 
     contentItem: Row {

@@ -317,7 +317,6 @@ Item {
                     }
                     ThemedMenuItem {
                         visible: root.tracks[index].type === "video"
-                        height: visible ? implicitHeight : 0
                         text: trackLabelRow.trackWaveform
                               ? qsTr("Show thumbnails") : qsTr("Show waveform")
                         icon.name: trackLabelRow.trackWaveform
@@ -325,7 +324,7 @@ Item {
                         onTriggered: EditorState.setTrackShowWaveform(
                                          index, !trackLabelRow.trackWaveform)
                     }
-                    MenuSeparator {}
+                    ThemedMenuSeparator {}
                     ThemedMenuItem {
                         text: qsTr("Delete track")
                         icon.name: Theme.icons.trash
