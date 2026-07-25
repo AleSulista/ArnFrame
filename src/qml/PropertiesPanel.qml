@@ -7,9 +7,10 @@ import "components/properties"
 PanelFrame {
     id: root
 
-    // Raised by the Effects tab's empty state; Main wires it to the assets
-    // panel so "Browse effects" actually takes the user somewhere.
+    // Raised by the Effects / Audio empty states; Main wires them to the
+    // assets panel so the browse CTAs actually take the user somewhere.
     signal browseEffectsRequested()
+    signal browseAudioEffectsRequested()
 
     // selectedClipData is a QVariantMap; key the binding on an explicit revision
     // so nested fields such as effects refresh after project edits.
@@ -282,6 +283,7 @@ PanelFrame {
                     AudioInspector {
                         width: tabColumn.width
                         visible: root.currentTabId === "audio"
+                        onBrowseAudioEffectsRequested: root.browseAudioEffectsRequested()
                     }
 
                     SpeedFadeInspector {

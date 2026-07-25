@@ -54,7 +54,7 @@ PanelFrame {
     }
 
     // Selects a tab by id. Used by cross-panel jumps such as the properties
-    // panel's "Browse effects" empty-state action.
+    // panel's "Browse effects" / "Browse sounds" empty-state actions.
     function showTab(tabId) {
         for (var i = 0; i < tabsModel.count; ++i) {
             if (tabsModel.get(i).tabId === tabId) {

@@ -42,6 +42,11 @@ icons=(
   keyboard crop minimize
   # Keyframe row: add/remove a key at the playhead
   diamond-plus diamond-minus
+  # Audio-effect Sounds browser (per-preset Lucide glyphs)
+  phone bot radio-receiver megaphone droplets volume-x binary cpu gem disc-3
+  cassette-tape orbit rabbit arrow-down-wide-narrow shield activity audio-waveform
+  repeat reply layers circle-dot-dashed circle-dashed unfold-horizontal door-closed
+  ear equal maximize
 )
 
 for name in "${icons[@]}"; do

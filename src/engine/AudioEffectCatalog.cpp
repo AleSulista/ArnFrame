@@ -112,6 +112,13 @@ std::optional<AudioEffectEntry> loadManifest(const QString &packageDir, QString 
         return std::nullopt;
     }
 
+    entry.icon = root.value(QStringLiteral("icon")).toString();
+    // Optional thumbnail: explicit relative/absolute path, else thumbnail.png in the package.
+    QString thumbRel = root.value(QStringLiteral("thumbnail")).toString();
+    if (thumbRel.isEmpty())
+        thumbRel = QStringLiteral("thumbnail.png");
+    entry.thumbnailPath = GpuPackageParse::resolvePackageAsset(packageDir, thumbRel);
+
     entry.packageDir = packageDir;
     return entry;
 }

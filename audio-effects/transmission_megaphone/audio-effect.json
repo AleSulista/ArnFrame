@@ -2,6 +2,7 @@
   "id": "transmission.megaphone",
   "displayName": "Megaphone",
   "category": "transmission",
+  "icon": "megaphone",
   "order": 220,
   "backend": "juce",
   "processor": "megaphone",

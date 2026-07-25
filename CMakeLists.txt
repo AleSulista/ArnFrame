@@ -434,6 +434,7 @@ qt_add_qml_module(drift
         src/qml/components/ShapePreview.qml
         src/qml/components/ColorSwatchField.qml
         src/qml/components/EffectBrowser.qml
+        src/qml/components/AudioEffectBrowser.qml
         src/qml/components/EffectTemplateBrowser.qml
         src/qml/components/ThemedSlider.qml
         src/qml/components/ThemedTextField.qml

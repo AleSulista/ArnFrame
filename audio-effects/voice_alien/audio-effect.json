@@ -2,6 +2,7 @@
   "id": "voice.alien",
   "displayName": "Alien",
   "category": "voice",
+  "icon": "orbit",
   "order": 140,
   "backend": "juce",
   "processor": "flanger",

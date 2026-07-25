@@ -2,6 +2,7 @@
   "id": "utility.limiter",
   "displayName": "Limiter",
   "category": "utility",
+  "icon": "maximize",
   "order": 120,
   "backend": "juce",
   "processor": "limiter",

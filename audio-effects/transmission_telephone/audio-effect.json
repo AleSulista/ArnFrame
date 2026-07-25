@@ -2,6 +2,7 @@
   "id": "transmission.telephone",
   "displayName": "Telephone",
   "category": "transmission",
+  "icon": "phone",
   "order": 200,
   "backend": "juce",
   "processor": "bandlimit",

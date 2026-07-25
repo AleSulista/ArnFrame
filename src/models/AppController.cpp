@@ -966,6 +966,8 @@ QVariantMap audioEffectToMap(const drift::Effect &effect)
     return {
         {QStringLiteral("catalogId"), effect.catalogId},
         {QStringLiteral("label"), def ? def->displayName : effect.name},
+        {QStringLiteral("icon"), def ? def->icon : QString()},
+        {QStringLiteral("thumbnailPath"), def ? def->thumbnailPath : QString()},
         {QStringLiteral("params"), params},
         {QStringLiteral("missing"), def == nullptr},
     };
@@ -7186,6 +7188,8 @@ QVariantList AppController::audioEffectCatalog() const
             {QStringLiteral("displayName"), def.displayName},
             {QStringLiteral("category"), def.category},
             {QStringLiteral("categoryLabel"), audioEffectCategoryLabel(def.category)},
+            {QStringLiteral("icon"), def.icon},
+            {QStringLiteral("thumbnailPath"), def.thumbnailPath},
             {QStringLiteral("params"), params},
         });
     }

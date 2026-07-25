@@ -7,6 +7,9 @@ import ".."
 Item {
     id: root
 
+    // Raised by the empty effects state; Main wires it to the Sounds library.
+    signal browseAudioEffectsRequested()
+
     property int clipDataRevision: 0
     readonly property var clipData: {
         void clipDataRevision
@@ -14,7 +17,9 @@ Item {
     }
     readonly property bool hasSelection: !!clipData && Object.keys(clipData).length > 0
     readonly property string clipKind: hasSelection ? (clipData.kind || "") : ""
+    readonly property bool hasAudio: clipKind === "audio" || clipKind === "video"
     readonly property var selectedAudioEffects: EditorState.selectedClipAudioEffects
+    readonly property var audioFxCatalog: hasAudio ? EditorState.audioEffectCatalog() : []
     readonly property var propVolume: { "key": "volume", "label": "Volume", "def": 1.0, "decimals": 2 }
 
     height: audioTabColumn.height
@@ -126,23 +131,17 @@ Item {
             opacity: 0.5
         }
 
-        // ----- Audio effects ---------------------------------------------
+        // ----- Audio effects (browse in Sounds; edit here) ---------------
         Text {
-            visible: root.clipKind === "audio" || root.clipKind === "video"
+            visible: root.hasAudio
             text: qsTr("Audio effects")
             color: Theme.mutedForeground
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeXs
         }
 
-        // Empty state doubles as the discovery hint: the effects come from an addon,
-        // so when the catalog is empty point the user at the Addon Manager.
-        property var audioFxCatalog: (root.clipKind === "audio" || root.clipKind === "video")
-                                     ? EditorState.audioEffectCatalog() : []
-
         Text {
-            visible: (root.clipKind === "audio" || root.clipKind === "video")
-                     && parent.audioFxCatalog.length === 0
+            visible: root.hasAudio && root.audioFxCatalog.length === 0
             width: parent.width
             wrapMode: Text.WordWrap
             text: qsTr("No audio effects installed. Get the Audio Effects pack from Extras.")
@@ -152,36 +151,22 @@ Item {
         }
 
         ThemedButton {
-            visible: (root.clipKind === "audio" || root.clipKind === "video")
-                     && parent.audioFxCatalog.length === 0
+            visible: root.hasAudio && root.audioFxCatalog.length === 0
             width: parent.width
             text: qsTr("Install audio effects")
             variant: "primary"
             onClicked: root.Window.window.openAddonManager("audio-effects")
         }
 
-        Row {
-            visible: (root.clipKind === "audio" || root.clipKind === "video")
-                     && parent.audioFxCatalog.length > 0
+        EmptyState {
             width: parent.width
-            spacing: 8
-
-            ThemedComboBox {
-                id: audioFxPicker
-                width: parent.width - 96
-                textRole: "label"
-                valueRole: "id"
-                model: audioTabColumn.audioFxCatalog
-            }
-
-            ThemedButton {
-                width: 88
-                text: qsTr("Add")
-                enabled: audioFxPicker.currentValue !== undefined
-                onClicked: EditorState.addAudioEffect(
-                               EditorState.selectedTrack, EditorState.selectedClip,
-                               audioFxPicker.currentValue)
-            }
+            visible: root.hasAudio && root.audioFxCatalog.length > 0
+                     && root.selectedAudioEffects.length === 0
+            glyph: Theme.icons.headphones
+            title: qsTr("No audio effects yet")
+            hint: qsTr("Drag a preset from the Sounds library onto this clip, or click a preset card.")
+            actionText: qsTr("Browse sounds")
+            onActionTriggered: root.browseAudioEffectsRequested()
         }
 
         Repeater {
@@ -206,6 +191,14 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.leftMargin: 8
                         anchors.rightMargin: 4
+                        spacing: 6
+
+                        IconGlyph {
+                            anchors.verticalCenter: parent.verticalCenter
+                            glyph: audioEffectCard.modelData.icon || "audio-lines"
+                            iconSize: 14
+                            iconColor: Theme.mutedForeground
+                        }
                         Text {
                             text: audioEffectCard.modelData.missing
                                   ? qsTr("%1 (not installed)").arg(audioEffectCard.modelData.label)
@@ -214,7 +207,7 @@ Item {
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSm
                             font.weight: Font.Medium
-                            width: parent.width - 28
+                            width: parent.width - 28 - 20
                             elide: Text.ElideRight
                             anchors.verticalCenter: parent.verticalCenter
                         }

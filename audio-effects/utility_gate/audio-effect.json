@@ -2,6 +2,7 @@
   "id": "utility.gate",
   "displayName": "Noise Gate",
   "category": "utility",
+  "icon": "door-closed",
   "order": 130,
   "backend": "juce",
   "processor": "gate",

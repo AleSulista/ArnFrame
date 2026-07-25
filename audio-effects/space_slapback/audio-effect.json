@@ -2,6 +2,7 @@
   "id": "space.slapback",
   "displayName": "Slapback",
   "category": "space",
+  "icon": "reply",
   "order": 410,
   "backend": "juce",
   "processor": "echo",

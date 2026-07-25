@@ -2,6 +2,7 @@
   "id": "texture.crystal",
   "displayName": "Crystalize",
   "category": "texture",
+  "icon": "gem",
   "order": 340,
   "backend": "juce",
   "processor": "crystalizer",

@@ -435,9 +435,10 @@ ApplicationWindow {
                         visible: !window.previewFullscreen
                         SplitView.preferredWidth: Math.max(0, innerSplit.width * 0.25)
                         SplitView.minimumWidth: Math.min(240, Math.max(0, innerSplit.width * 0.2))
-                        // "Browse effects" in the empty Effects tab jumps the
-                        // assets panel to its Effects library.
+                        // Empty-state browse CTAs jump the assets panel to the
+                        // matching library tab.
                         onBrowseEffectsRequested: assetsPanel.showTab("effects")
+                        onBrowseAudioEffectsRequested: assetsPanel.showTab("sounds")
                     }
                 }
 

@@ -881,10 +881,16 @@ PanelFrame {
 
                                 DropArea {
                                     anchors.fill: parent
-                                    keys: ["text/plain", "application/x-drift-effect", "application/x-drift-shape", "application/x-drift-transition"]
+                                    keys: ["text/plain", "application/x-drift-effect",
+                                           "application/x-drift-audio-effect",
+                                           "application/x-drift-shape", "application/x-drift-transition"]
 
                                     function isEffectDrag(drop) {
                                         return drop.keys.indexOf("application/x-drift-effect") !== -1
+                                    }
+
+                                    function isAudioEffectDrag(drop) {
+                                        return drop.keys.indexOf("application/x-drift-audio-effect") !== -1
                                     }
 
                                     function isShapeDrag(drop) {
@@ -909,7 +915,7 @@ PanelFrame {
                                             root.clearEffectDropHighlight()
                                             return
                                         }
-                                        if (isEffectDrag(drop)) {
+                                        if (isEffectDrag(drop) || isAudioEffectDrag(drop)) {
                                             root.updateEffectDropHighlight(trackRow.trackIndex, drop.x)
                                             return
                                         }
@@ -959,6 +965,16 @@ PanelFrame {
                                             root.clearEffectDropHighlight()
                                             if (clipIndex >= 0 && effectId.length > 0) {
                                                 EditorState.addEffect(trackRow.trackIndex, clipIndex, effectId)
+                                                EditorState.selectClip(trackRow.trackIndex, clipIndex)
+                                            }
+                                            return
+                                        }
+                                        if (isAudioEffectDrag(drop)) {
+                                            const effectId = drop.getDataAsString("application/x-drift-audio-effect")
+                                            const clipIndex = root.clipIndexAtPosition(trackRow.trackIndex, drop.x)
+                                            root.clearEffectDropHighlight()
+                                            if (clipIndex >= 0 && effectId.length > 0) {
+                                                EditorState.addAudioEffect(trackRow.trackIndex, clipIndex, effectId)
                                                 EditorState.selectClip(trackRow.trackIndex, clipIndex)
                                             }
                                             return

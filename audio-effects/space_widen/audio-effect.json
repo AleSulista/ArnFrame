@@ -2,6 +2,7 @@
   "id": "space.widen",
   "displayName": "Stereo Widen",
   "category": "space",
+  "icon": "unfold-horizontal",
   "order": 470,
   "backend": "juce",
   "processor": "stereowiden",

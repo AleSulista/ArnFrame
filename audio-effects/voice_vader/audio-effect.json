@@ -2,6 +2,7 @@
   "id": "voice.vader",
   "displayName": "Dark Lord",
   "category": "voice",
+  "icon": "shield",
   "order": 120,
   "backend": "juce",
   "processor": "darklord",

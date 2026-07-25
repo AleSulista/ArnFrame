@@ -2,6 +2,7 @@
   "id": "utility.eq",
   "displayName": "EQ",
   "category": "utility",
+  "icon": "sliders-horizontal",
   "order": 100,
   "backend": "juce",
   "processor": "eq3",

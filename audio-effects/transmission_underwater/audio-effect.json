@@ -2,6 +2,7 @@
   "id": "transmission.underwater",
   "displayName": "Underwater",
   "category": "transmission",
+  "icon": "droplets",
   "order": 230,
   "backend": "juce",
   "processor": "underwater",
