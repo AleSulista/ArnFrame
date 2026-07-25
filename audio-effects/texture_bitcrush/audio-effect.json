@@ -3,8 +3,8 @@
   "displayName": "Bitcrush",
   "category": "texture",
   "order": 310,
-  "backend": "avfilter",
-  "chain": "acrusher=bits={bits}:samples={samples}:mix={mix}",
+  "backend": "juce",
+  "processor": "bitcrush",
   "prerollMs": 0,
   "parameters": [
     {

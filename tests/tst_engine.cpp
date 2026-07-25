@@ -14,11 +14,13 @@
 
 #include "core/Clip.h"
 #include "core/Project.h"
+#include "engine/AudioMixer.h"
 #include "engine/ClipReader.h"
 #include "engine/Exporter.h"
 #include "engine/CompositorFrameHistory.h"
 #include "engine/AudioEffectCatalog.h"
-#include "engine/AudioEffectChain.h"
+#include "engine/audio/AudioEffectFactory.h"
+#include "engine/audio/AudioEffectRack.h"
 #include "engine/AudioFileWriter.h"
 #include "engine/AudioOnsets.h"
 #include "engine/DeepFilterDenoiser.h"
@@ -119,12 +121,15 @@ private slots:
     void textAnimationFadesAndSlides();
     void maskApplierEllipseMasksCorners();
     void exporterProducesPlayableFileWithBackground();
+    void mixerHasNoBlockBoundaryDropout();
     void audioEffectCatalogLoadsPackages();
-    void audioEffectChainResolvesPlaceholders();
+    void audioEffectFactoryBuildsEveryCatalogEntry();
     void audioEffectChainAltersSignal();
     void audioEffectChainBypassesUnknownEffect();
     void audioEffectStreamIsContinuousAcrossBlocks();
     void audioEffectFlangerProcessesSignal();
+    void audioEffectRackPrimingAlignsLatentStages();
+    void audioEffectRackParameterChangeIsContinuous();
     void onsetsDetectClickTrackTempo();
     void onsetsIgnoreSilence();
     void denoiseAuxiliaryConstantsRoundTrip();
@@ -2736,6 +2741,119 @@ void EngineTest::exporterProducesPlayableFileWithBackground()
 // The audio-effects addon content must parse into a usable catalog: known ids resolve, categories
 // are discovered, and every manifest carries a chain. A broken manifest would be skipped silently,
 // so assert the expected count rather than merely "non-empty".
+namespace {
+
+// Build a rack for `effects` and run the whole buffer through it in one pass. The mixer does this
+// block by block; a single pass is the reference those blocks must agree with.
+QVector<float> runRack(const QList<drift::Effect> &effects, const float *interleavedStereo,
+                       int frames, int sampleRate)
+{
+    QVector<float> out(frames * 2, 0.0f);
+    if (interleavedStereo)
+        std::memcpy(out.data(), interleavedStereo, static_cast<size_t>(frames) * 2 * sizeof(float));
+
+    drift::AudioEffectRack rack;
+    if (rack.configure(audioEffectSpecsFor(effects), sampleRate))
+        rack.process(out.data(), frames);
+    return out;
+}
+
+QVector<float> stereoTone(int frames, double hz, int sampleRate, float amplitude = 1.0f)
+{
+    QVector<float> tone(frames * 2);
+    for (int i = 0; i < frames; ++i) {
+        const auto s = static_cast<float>(amplitude * std::sin(2.0 * M_PI * hz * i / sampleRate));
+        tone[i * 2] = s;
+        tone[i * 2 + 1] = s;
+    }
+    return tone;
+}
+
+double rms(const float *samples, int count)
+{
+    double sum = 0.0;
+    for (int i = 0; i < count; ++i)
+        sum += static_cast<double>(samples[i]) * samples[i];
+    return std::sqrt(sum / std::max(1, count));
+}
+
+} // namespace
+
+// A single sample dropped once per mix block is a periodic impulse: a buzz at rate/block with
+// harmonics all the way to Nyquist, which is what it looks like on a spectrogram. It came from
+// deriving the source frame count through microseconds — 1024 frames at 48 kHz is 21333.33 us, and
+// truncating into µs and back out again asks for 1023 frames to fill 1024, leaving the last one at
+// the buffer's initial zero. Only block sizes lasting a whole number of µs escaped it, and audio
+// device periods are powers of two.
+void EngineTest::mixerHasNoBlockBoundaryDropout()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeToneAudio(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    constexpr int kRate = 48000;
+    constexpr double kToneHz = 440.0;
+    constexpr drift::TimeUs kDurationUs = 1'500'000;
+
+    drift::Project project;
+    project.setSampleRate(kRate);
+    drift::Track track{.type = drift::TrackType::Audio};
+    drift::Clip clip;
+    clip.id = QStringLiteral("tone");
+    clip.type = drift::ClipType::Audio;
+    clip.path = path;
+    clip.timelineStart = 0;
+    clip.timelineDuration = kDurationUs;
+    clip.srcIn = 0;
+    clip.srcOut = kDurationUs;
+    track.clips.append(clip);
+    project.tracks().append(track);
+
+    AudioMixer mixer;
+    mixer.setProject(&project);
+
+    const int total = static_cast<int>((kDurationUs * kRate) / drift::kUsPerSecond);
+
+    // 480 lasts exactly 10000 us and always worked; the rest do not divide evenly and did not.
+    for (const int block : {1024, 512, 1000, 480}) {
+        QVector<float> out(total * 2, 0.0f);
+        for (int offset = 0; offset < total; offset += block) {
+            const int count = std::min(block, total - offset);
+            const auto startUs =
+                static_cast<drift::TimeUs>((static_cast<int64_t>(offset) * drift::kUsPerSecond) / kRate);
+            mixer.mix(startUs, count, kRate, out.data() + static_cast<size_t>(offset) * 2);
+        }
+
+        const int skip = kRate / 10; // let the decoder settle
+        float amplitude = 0.0f;
+        for (int i = skip; i < total; ++i)
+            amplitude = std::max(amplitude, std::abs(out[i * 2]));
+        QVERIFY2(amplitude > 0.01f, "mixed tone is silent");
+
+        // A band-limited sine cannot step by more than this between adjacent samples. Anything
+        // beyond it is a splice, not signal.
+        const auto bound = static_cast<float>(amplitude * 2.0 * std::sin(M_PI * kToneHz / kRate));
+
+        float worst = 0.0f;
+        int worstIndex = 0;
+        for (int i = skip + 1; i < total; ++i) {
+            const float delta = std::abs(out[i * 2] - out[(i - 1) * 2]);
+            if (delta > worst) {
+                worst = delta;
+                worstIndex = i;
+            }
+        }
+
+        QVERIFY2(worst < bound * 1.5f,
+                 qPrintable(QStringLiteral("block=%1: step %2 at frame %3 (phase %4) exceeds the %5 "
+                                           "a %6 Hz tone can produce")
+                                .arg(block).arg(worst).arg(worstIndex)
+                                .arg(worstIndex % block).arg(bound).arg(kToneHz)));
+    }
+}
+
 void EngineTest::audioEffectCatalogLoadsPackages()
 {
     const QList<AudioEffectEntry> &catalog = audioEffectCatalog();
@@ -2746,12 +2864,11 @@ void EngineTest::audioEffectCatalogLoadsPackages()
     QVERIFY(telephone);
     QCOMPARE(telephone->displayName, QStringLiteral("Telephone"));
     QCOMPARE(telephone->category, QStringLiteral("transmission"));
-    QVERIFY(!telephone->chainTemplate.isEmpty());
+    QCOMPARE(telephone->processorId, QStringLiteral("bandlimit"));
 
     const AudioEffectEntry *chipmunk = audioEffectDefForId(QStringLiteral("voice.chipmunk"));
     QVERIFY(chipmunk);
-    QVERIFY(chipmunk->chainTemplate.contains(QStringLiteral("{sampleRate}")));
-    QVERIFY(chipmunk->chainTemplate.contains(QStringLiteral("{pitch}")));
+    QCOMPARE(chipmunk->processorId, QStringLiteral("pitch"));
     QCOMPARE(chipmunk->parameters.size(), 1);
     QCOMPARE(chipmunk->parameters[0].key, QStringLiteral("pitch"));
 
@@ -2762,67 +2879,71 @@ void EngineTest::audioEffectCatalogLoadsPackages()
     QVERIFY(slugs.contains(QStringLiteral("voice")));
     QVERIFY(slugs.contains(QStringLiteral("transmission")));
 
-    // Every catalog entry must carry a chain, or the mixer has nothing to run.
+    // Every catalog entry must name a processor, or the mixer has nothing to run.
     for (const AudioEffectEntry &entry : catalog)
-        QVERIFY2(!entry.chainTemplate.isEmpty(), qPrintable(entry.id));
+        QVERIFY2(!entry.processorId.isEmpty(), qPrintable(entry.id));
 }
 
-void EngineTest::audioEffectChainResolvesPlaceholders()
+void EngineTest::audioEffectFactoryBuildsEveryCatalogEntry()
 {
-    const AudioEffectEntry *chipmunk = audioEffectDefForId(QStringLiteral("voice.chipmunk"));
-    QVERIFY(chipmunk);
+    // A manifest naming a processor nobody implements used to be discoverable only by hearing
+    // nothing. The catalog rejects those at load, so every entry that survived must build.
+    const QList<AudioEffectEntry> &catalog = audioEffectCatalog();
+    QVERIFY(!catalog.isEmpty());
 
-    drift::Effect effect;
-    effect.catalogId = chipmunk->id;
-    // No instance parameters set: the default (1.5) must fill in.
-    QString chain = AudioEffectChain::resolveChain(*chipmunk, effect, 48000);
-    QVERIFY2(!chain.contains(QLatin1Char('{')), qPrintable(chain));
-    QVERIFY(chain.contains(QStringLiteral("48000")));
-    QVERIFY(chain.contains(QStringLiteral("1.5")));
+    for (const AudioEffectEntry &entry : catalog) {
+        QVERIFY2(drift::audiofx::hasProcessor(entry.processorId),
+                 qPrintable(QStringLiteral("%1 -> %2").arg(entry.id, entry.processorId)));
 
-    // An explicit instance value overrides the default.
-    effect.parameters.insert(QStringLiteral("pitch"), 1.25);
-    chain = AudioEffectChain::resolveChain(*chipmunk, effect, 44100);
-    QVERIFY(chain.contains(QStringLiteral("1.25")));
-    QVERIFY(chain.contains(QStringLiteral("44100")));
-    QVERIFY(!chain.contains(QStringLiteral("1.5")));
+        // configure() only reports true once the factory has actually built a chain, so this is
+        // what proves the processor exists rather than the effect quietly becoming a passthrough.
+        // Run it at every rate the mixer uses: 8 kHz for the subtitle waveform, 22050 for beat
+        // detection, 48 kHz for playback and export.
+        drift::Effect effect;
+        effect.catalogId = entry.id;
+        const QVector<drift::AudioEffectSpec> specs = audioEffectSpecsFor({effect});
+        QCOMPARE(specs.size(), 1);
+
+        for (const int rate : {8000, 22050, 48000}) {
+            constexpr int kFrames = 512;
+            QVector<float> buffer = stereoTone(kFrames, 440.0, rate, 0.5f);
+
+            drift::AudioEffectRack rack;
+            QVERIFY2(rack.configure(specs, rate), qPrintable(entry.id));
+            rack.process(buffer.data(), kFrames);
+
+            QCOMPARE(buffer.size(), kFrames * 2);
+            for (int i = 0; i < buffer.size(); ++i) {
+                QVERIFY2(std::isfinite(buffer[i]),
+                         qPrintable(QStringLiteral("%1 @%2Hz produced a non-finite sample")
+                                        .arg(entry.id).arg(rate)));
+            }
+        }
+    }
 }
 
 void EngineTest::audioEffectChainAltersSignal()
 {
-    // A 4 kHz tone pushed through the telephone band-limit (300–3400 Hz) must come back quieter,
-    // finite, and the right length — a real avfilter pass, not a passthrough.
+    // A 4 kHz tone pushed through the telephone band-limit (300-3400 Hz) must come back quieter,
+    // finite, and the right length — a real filter pass, not a passthrough.
     constexpr int kRate = 48000;
     constexpr int kFrames = 4096;
-    QVector<float> tone(kFrames * 2);
-    for (int i = 0; i < kFrames; ++i) {
-        const float s = std::sin(2.0 * M_PI * 4000.0 * i / kRate);
-        tone[i * 2] = s;
-        tone[i * 2 + 1] = s;
-    }
-
-    double inRms = 0.0;
-    for (float s : tone)
-        inRms += static_cast<double>(s) * s;
-    inRms = std::sqrt(inRms / tone.size());
+    const QVector<float> tone = stereoTone(kFrames, 4000.0, kRate);
+    const double inRms = rms(tone.constData(), tone.size());
 
     drift::Effect telephone;
     telephone.catalogId = QStringLiteral("transmission.telephone");
-    const QVector<float> out =
-        AudioEffectChain::apply({telephone}, tone.constData(), 0, kFrames, kRate);
+    const QVector<float> out = runRack({telephone}, tone.constData(), kFrames, kRate);
 
     QCOMPARE(out.size(), kFrames * 2);
-    double outRms = 0.0;
-    for (float s : out) {
+    for (float s : out)
         QVERIFY(std::isfinite(s));
-        outRms += static_cast<double>(s) * s;
-    }
-    outRms = std::sqrt(outRms / out.size());
+    const double outRms = rms(out.constData(), out.size());
 
     // 4 kHz sits above the 3400 Hz cutoff, so the band-limited output is markedly attenuated.
     QVERIFY2(outRms < inRms * 0.6,
              qPrintable(QStringLiteral("in=%1 out=%2").arg(inRms).arg(outRms)));
-    QVERIFY2(outRms > 1e-4, "output is silent — chain likely failed to build");
+    QVERIFY2(outRms > 1e-4, "output is silent — the rack likely failed to build");
 }
 
 void EngineTest::audioEffectChainBypassesUnknownEffect()
@@ -2831,14 +2952,11 @@ void EngineTest::audioEffectChainBypassesUnknownEffect()
     // clean passthrough, never a dropout.
     constexpr int kRate = 48000;
     constexpr int kFrames = 1024;
-    QVector<float> tone(kFrames * 2);
-    for (int i = 0; i < kFrames; ++i)
-        tone[i * 2] = tone[i * 2 + 1] = std::sin(2.0 * M_PI * 440.0 * i / kRate);
+    const QVector<float> tone = stereoTone(kFrames, 440.0, kRate);
 
     drift::Effect unknown;
     unknown.catalogId = QStringLiteral("does.not.exist");
-    const QVector<float> out =
-        AudioEffectChain::apply({unknown}, tone.constData(), 0, kFrames, kRate);
+    const QVector<float> out = runRack({unknown}, tone.constData(), kFrames, kRate);
 
     QCOMPARE(out.size(), kFrames * 2);
     for (int i = 0; i < out.size(); ++i)
@@ -2851,41 +2969,33 @@ void EngineTest::audioEffectStreamIsContinuousAcrossBlocks()
     constexpr int kRate = 48000;
     constexpr int kBlock = 1024;
     constexpr int kBlocks = 8;
+    constexpr int kTotal = kBlock * kBlocks;
 
-    QVector<float> tone((kBlock * kBlocks) * 2);
-    for (int i = 0; i < kBlock * kBlocks; ++i) {
-        const float s = std::sin(2.0 * M_PI * 440.0 * i / kRate);
-        tone[i * 2] = s;
-        tone[i * 2 + 1] = s;
-    }
+    const QVector<float> tone = stereoTone(kTotal, 440.0, kRate);
 
     drift::Effect tremolo;
     tremolo.catalogId = QStringLiteral("space.tremolo");
     tremolo.parameters.insert(QStringLiteral("rate"), 8.0);
     tremolo.parameters.insert(QStringLiteral("depth"), 0.9);
 
-    AudioEffectChain::Stream stream;
-    QVERIFY(stream.configure({tremolo}, kRate));
+    const QVector<drift::AudioEffectSpec> specs = audioEffectSpecsFor({tremolo});
+    drift::AudioEffectRack rack;
+    QVERIFY(rack.configure(specs, kRate));
 
-    QVector<float> streamed;
-    streamed.reserve(tone.size());
-    for (int block = 0; block < kBlocks; ++block) {
-        const float *blockIn = tone.constData() + block * kBlock * 2;
-        stream.feed(blockIn, kBlock);
-        const QVector<float> blockOut = stream.drain(kBlock);
-        QCOMPARE(blockOut.size(), kBlock * 2);
-        streamed.append(blockOut);
-    }
+    QVector<float> streamed(kTotal * 2);
+    std::memcpy(streamed.data(), tone.constData(), static_cast<size_t>(kTotal) * 2 * sizeof(float));
+    for (int block = 0; block < kBlocks; ++block)
+        rack.process(streamed.data() + block * kBlock * 2, kBlock);
 
-    const QVector<float> reference =
-        AudioEffectChain::apply({tremolo}, tone.constData(), 0, kBlock * kBlocks, kRate);
-    QVERIFY2(reference.size() == streamed.size(),
-             qPrintable(QStringLiteral("ref=%1 streamed=%2").arg(reference.size()).arg(streamed.size())));
+    const QVector<float> reference = runRack({tremolo}, tone.constData(), kTotal, kRate);
+    QCOMPARE(reference.size(), streamed.size());
 
+    // Block-by-block must be bit-comparable to one pass: the sub-block loop inside the rack means
+    // the caller's block size cannot change the result.
     double maxDiff = 0.0;
     for (int i = 0; i < streamed.size(); ++i)
         maxDiff = std::max(maxDiff, static_cast<double>(std::abs(streamed[i] - reference[i])));
-    QVERIFY2(maxDiff < 0.05,
+    QVERIFY2(maxDiff < 1e-6,
              qPrintable(QStringLiteral("block boundary discontinuity maxDiff=%1").arg(maxDiff)));
 }
 
@@ -2893,17 +3003,12 @@ void EngineTest::audioEffectFlangerProcessesSignal()
 {
     constexpr int kRate = 48000;
     constexpr int kFrames = 4096;
-
-    QVector<float> tone(kFrames * 2);
-    for (int i = 0; i < kFrames; ++i) {
-        const float s = std::sin(2.0 * M_PI * 440.0 * i / kRate);
-        tone[i * 2] = s;
-        tone[i * 2 + 1] = s;
-    }
+    const QVector<float> tone = stereoTone(kFrames, 440.0, kRate);
 
     const AudioEffectEntry *flanger = audioEffectDefForId(QStringLiteral("space.flanger"));
     QVERIFY(flanger);
     QCOMPARE(flanger->parameters.size(), 7);
+    QCOMPARE(flanger->processorId, QStringLiteral("flanger"));
 
     drift::Effect effect;
     effect.catalogId = flanger->id;
@@ -2912,47 +3017,104 @@ void EngineTest::audioEffectFlangerProcessesSignal()
     effect.parameters.insert(QStringLiteral("mix"), 80.0);
     effect.parameters.insert(QStringLiteral("invert"), 1.0);
 
-    QString chain = AudioEffectChain::resolveChain(*flanger, effect, kRate);
-    QVERIFY2(!chain.contains(QLatin1Char('{')), qPrintable(chain));
-    QVERIFY(chain.contains(QStringLiteral("speed=0.8")));
-    QVERIFY(chain.contains(QStringLiteral("stereotools=phase=180")));
-    QVERIFY(chain.contains(QStringLiteral("width=80")));
-    QVERIFY(chain.contains(QStringLiteral("phasel=1")));
-
-    const QVector<float> out =
-        AudioEffectChain::apply({effect}, tone.constData(), 0, kFrames, kRate);
+    const QVector<float> out = runRack({effect}, tone.constData(), kFrames, kRate);
     QCOMPARE(out.size(), kFrames * 2);
 
-    double inRms = 0.0;
-    double outRms = 0.0;
     int changed = 0;
     for (int i = 0; i < kFrames * 2; ++i) {
         QVERIFY(std::isfinite(out[i]));
-        inRms += tone[i] * tone[i];
-        outRms += out[i] * out[i];
         if (std::abs(out[i] - tone[i]) > 1e-4)
             ++changed;
     }
-    inRms = std::sqrt(inRms / (kFrames * 2));
-    outRms = std::sqrt(outRms / (kFrames * 2));
+    const double inRms = rms(tone.constData(), kFrames * 2);
+    const double outRms = rms(out.constData(), kFrames * 2);
 
-    QVERIFY2(changed > kFrames, "flanger output matches input — chain likely failed");
+    QVERIFY2(changed > kFrames, "flanger output matches input — the rack likely failed");
     QVERIFY2(outRms > 1e-4, "flanger output is silent");
     QVERIFY2(outRms < inRms * 2.0,
              qPrintable(QStringLiteral("flanger blew up: in=%1 out=%2").arg(inRms).arg(outRms)));
+}
 
-    AudioEffectChain::Stream stream;
-    QVERIFY(stream.configure({effect}, kRate));
-    stream.feed(tone.constData(), kFrames);
-    const QVector<float> streamed = stream.drain(kFrames);
-    QCOMPARE(streamed.size(), kFrames * 2);
-    int streamChanged = 0;
-    for (int i = 0; i < streamed.size(); ++i) {
-        QVERIFY(std::isfinite(streamed[i]));
-        if (std::abs(streamed[i] - tone[i]) > 1e-4)
-            ++streamChanged;
-    }
-    QVERIFY2(streamChanged > kFrames, "streamed flanger matches input — graph likely failed");
+void EngineTest::audioEffectRackPrimingAlignsLatentStages()
+{
+    // The pitch shifter reads out of a delay line, so it has real latency. The libavfilter path
+    // zero-filled what the graph had not produced yet, which is why a pitch-shifted clip opened
+    // with silence and then stayed offset. Priming on the audio that precedes the block is the fix.
+    constexpr int kRate = 48000;
+    constexpr int kBlock = 2048;
+
+    drift::Effect chipmunk;
+    chipmunk.catalogId = QStringLiteral("voice.chipmunk");
+    chipmunk.parameters.insert(QStringLiteral("pitch"), 1.0);
+
+    const QVector<drift::AudioEffectSpec> specs = audioEffectSpecsFor({chipmunk});
+    drift::AudioEffectRack primed;
+    QVERIFY(primed.configure(specs, kRate));
+
+    const int primeFrames = primed.primeFrames();
+    QVERIFY2(primeFrames > 0, "a latent stage must ask for priming");
+
+    const QVector<float> continuous = stereoTone(primeFrames + kBlock, 440.0, kRate);
+
+    primed.warmUp(continuous.constData(), primeFrames);
+    QVector<float> primedOut(kBlock * 2);
+    std::memcpy(primedOut.data(), continuous.constData() + primeFrames * 2,
+                static_cast<size_t>(kBlock) * 2 * sizeof(float));
+    primed.process(primedOut.data(), kBlock);
+
+    drift::AudioEffectRack cold;
+    QVERIFY(cold.configure(specs, kRate));
+    QVector<float> coldOut(kBlock * 2);
+    std::memcpy(coldOut.data(), continuous.constData() + primeFrames * 2,
+                static_cast<size_t>(kBlock) * 2 * sizeof(float));
+    cold.process(coldOut.data(), kBlock);
+
+    // The opening of the block is the part latency eats. Primed, it carries signal; cold, it is
+    // the silence users heard at the head of every pitch-shifted clip.
+    constexpr int kHead = 512;
+    const double primedHead = rms(primedOut.constData(), kHead * 2);
+    const double coldHead = rms(coldOut.constData(), kHead * 2);
+
+    QVERIFY2(primedHead > 0.1,
+             qPrintable(QStringLiteral("primed head is quiet: %1").arg(primedHead)));
+    QVERIFY2(primedHead > coldHead * 4.0,
+             qPrintable(QStringLiteral("priming changed nothing: primed=%1 cold=%2")
+                            .arg(primedHead).arg(coldHead)));
+}
+
+void EngineTest::audioEffectRackParameterChangeIsContinuous()
+{
+    // The libavfilter graph rebuilt itself whenever any value changed, so every slider tick
+    // restarted the DSP from zero — the click users heard while dragging. Values now ramp.
+    constexpr int kRate = 48000;
+    constexpr int kBlock = 4096;
+
+    // Constant input: any jump in the output is the parameter, not the signal.
+    QVector<float> first(kBlock * 2, 0.5f);
+    QVector<float> second(kBlock * 2, 0.5f);
+
+    drift::Effect muffled;
+    muffled.catalogId = QStringLiteral("transmission.muffled");
+    muffled.parameters.insert(QStringLiteral("cutoff"), 4000.0);
+    muffled.parameters.insert(QStringLiteral("gain"), 0.5);
+
+    drift::AudioEffectRack rack;
+    QVERIFY(rack.configure(audioEffectSpecsFor({muffled}), kRate));
+    rack.process(first.data(), kBlock);
+
+    muffled.parameters.insert(QStringLiteral("gain"), 2.0);
+    QVERIFY(rack.configure(audioEffectSpecsFor({muffled}), kRate));
+    rack.process(second.data(), kBlock);
+
+    const float boundaryStep = std::abs(second[0] - first[(kBlock - 1) * 2]);
+    // An unsmoothed 0.5 -> 2.0 gain change on a 0.5 input steps by 0.75 in one sample.
+    QVERIFY2(boundaryStep < 0.05f,
+             qPrintable(QStringLiteral("parameter change stepped by %1").arg(boundaryStep)));
+
+    // It must still actually arrive at the new value.
+    const float settled = second[(kBlock - 1) * 2];
+    QVERIFY2(std::abs(settled - 1.0f) < 0.05f,
+             qPrintable(QStringLiteral("gain never reached its target: %1").arg(settled)));
 }
 
 // ---- DeepFilterNet3 denoiser -------------------------------------------------------------

@@ -3,8 +3,8 @@
   "displayName": "Walkie-Talkie",
   "category": "transmission",
   "order": 210,
-  "backend": "avfilter",
-  "chain": "highpass=f={low_cut},lowpass=f={high_cut},acrusher=bits=6:mix={grit}",
+  "backend": "juce",
+  "processor": "walkie",
   "prerollMs": 50,
   "parameters": [
     {

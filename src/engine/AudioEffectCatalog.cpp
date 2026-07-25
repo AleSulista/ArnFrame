@@ -1,6 +1,7 @@
 #include "AudioEffectCatalog.h"
 
 #include "GpuPackageParse.h"
+#include "engine/audio/AudioEffectFactory.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -58,10 +59,16 @@ std::optional<AudioEffectEntry> loadManifest(const QString &packageDir, QString 
 
     const QJsonObject root = doc.object();
     const QString backend = root.value(QStringLiteral("backend")).toString();
-    if (backend != QLatin1String("avfilter")) {
-        if (errorOut)
-            *errorOut = backend.isEmpty() ? QStringLiteral("audio-effect.json missing backend")
-                                          : QStringLiteral("unsupported backend '%1'").arg(backend);
+    if (backend != QLatin1String("juce")) {
+        if (errorOut) {
+            if (backend.isEmpty())
+                *errorOut = QStringLiteral("audio-effect.json missing backend");
+            else if (backend == QLatin1String("avfilter"))
+                *errorOut = QStringLiteral(
+                    "backend 'avfilter' is no longer supported; audio effects are JUCE processors");
+            else
+                *errorOut = QStringLiteral("unsupported backend '%1'").arg(backend);
+        }
         return std::nullopt;
     }
 
@@ -81,10 +88,17 @@ std::optional<AudioEffectEntry> loadManifest(const QString &packageDir, QString 
     entry.order = root.value(QStringLiteral("order")).toInt(0);
     entry.prerollMs = root.value(QStringLiteral("prerollMs")).toInt(0);
 
-    entry.chainTemplate = root.value(QStringLiteral("chain")).toString();
-    if (entry.chainTemplate.isEmpty()) {
+    entry.processorId = root.value(QStringLiteral("processor")).toString();
+    if (entry.processorId.isEmpty()) {
         if (errorOut)
-            *errorOut = QStringLiteral("audio-effect.json missing chain");
+            *errorOut = QStringLiteral("audio-effect.json missing processor");
+        return std::nullopt;
+    }
+    // Reject at load rather than at playback: a manifest naming a processor nobody implements would
+    // otherwise show up in the browser and then do nothing.
+    if (!drift::audiofx::hasProcessor(entry.processorId)) {
+        if (errorOut)
+            *errorOut = QStringLiteral("unknown processor '%1'").arg(entry.processorId);
         return std::nullopt;
     }
 
@@ -193,6 +207,30 @@ QMap<QString, QVariant> resolvedAudioEffectParameters(const drift::Effect &effec
                                                                     : QVariant(spec.defaultValue));
     }
     return values;
+}
+
+QVector<drift::AudioEffectSpec> audioEffectSpecsFor(const QList<drift::Effect> &effects)
+{
+    QVector<drift::AudioEffectSpec> specs;
+    specs.reserve(effects.size());
+
+    for (const drift::Effect &effect : effects) {
+        const AudioEffectEntry *def = audioEffectDefForId(effect.catalogId);
+        if (!def)
+            continue; // addon not installed — pass the audio through untouched
+
+        drift::AudioEffectSpec spec;
+        spec.processorId = def->processorId;
+        spec.prerollMs = def->prerollMs;
+
+        const QMap<QString, QVariant> values = resolvedAudioEffectParameters(effect, *def);
+        for (auto it = values.constBegin(); it != values.constEnd(); ++it)
+            spec.parameters.insert(it.key(), static_cast<float>(it.value().toDouble()));
+
+        specs.append(spec);
+    }
+
+    return specs;
 }
 
 QStringList audioEffectPresetIds()

@@ -1,7 +1,7 @@
 #include "AudioMixer.h"
 
 #include "AudioAtempo.h"
-#include "AudioEffectChain.h"
+#include "AudioEffectCatalog.h"
 #include "ClipReaderPool.h"
 #include "TransitionCatalog.h"
 #include "core/Clip.h"
@@ -15,13 +15,25 @@
 
 namespace {
 
+// Summing several clips, each with up to 2.0 of gain, regularly overshoots. Clamping squared off
+// the peaks; this rounds them instead, asymptotically approaching full scale so the result can
+// never exceed 1.0 however hard the mix is driven. Stateless — no attack, no release, no pumping
+// across the timeline, nothing to reset on seek.
+//
+// The knee sits just under full scale on purpose. Anything lower colours audio that was never
+// going to clip: normal material crosses -3 dBFS on every peak, so a knee down there is an
+// always-on waveshaper rather than a safety net.
+constexpr float kSoftClipKnee = 0.95f; // -0.45 dBFS
+
 float softClip(float sample)
 {
-    if (sample > 1.0f)
-        return 1.0f;
-    if (sample < -1.0f)
-        return -1.0f;
-    return sample;
+    const float magnitude = std::fabs(sample);
+    if (magnitude <= kSoftClipKnee)
+        return sample;
+
+    const float over = (magnitude - kSoftClipKnee) / (1.0f - kSoftClipKnee);
+    const float shaped = kSoftClipKnee + (1.0f - kSoftClipKnee) * std::tanh(over);
+    return std::copysign(shaped, sample);
 }
 
 double volumeForClip(const drift::Clip &clip, drift::TimeUs timelineUs)
@@ -75,9 +87,6 @@ QVector<float> AudioMixer::readClipAudio(const drift::Clip &clip, drift::TimeUs 
     const int leadFrames = static_cast<int>(((playStartUs - winStartUs) * sampleRate) / drift::kUsPerSecond);
     const int wantFrames = qMax(1, outFrames - leadFrames);
 
-    const drift::TimeUs wantDurUs =
-        static_cast<drift::TimeUs>((static_cast<int64_t>(wantFrames) * drift::kUsPerSecond) / sampleRate);
-
     // A ramp only means the rate changes from block to block; within one block it is read as
     // constant, which is what atempo can express anyway. Taken from the curve rather than by
     // differencing two mapped positions so the final, partly-overhanging block of a clip still
@@ -87,10 +96,17 @@ QVector<float> AudioMixer::readClipAudio(const drift::Clip &clip, drift::TimeUs 
             ? clip.speedCurve.speedAtTimelineOffset(playStartUs - clip.timelineStart,
                                                     clip.srcOut - clip.srcIn)
             : clip.effectiveSpeed();
-    const drift::TimeUs sourceSpanUs =
-        qMax<drift::TimeUs>(1, static_cast<drift::TimeUs>(std::llround(wantDurUs * speed)));
-    const int sourceSampleCount =
-        qMax(1, static_cast<int>((sourceSpanUs * sampleRate) / drift::kUsPerSecond));
+
+    // Frame counts are derived in the sample domain, never by going through microseconds. A block
+    // whose duration is not a whole number of microseconds — 1024 frames at 48 kHz is 21333.33 —
+    // used to truncate twice, once into µs and once back out, and ask the decoder for 1023 frames
+    // to fill 1024. The frame left behind stayed at the buffer's initial zero, putting a
+    // single-sample dropout on every block boundary: a periodic impulse, which is a harmonic comb
+    // all the way to Nyquist.
+    const int sourceSampleCount = qMax(1, static_cast<int>(std::llround(wantFrames * speed)));
+    const drift::TimeUs sourceSpanUs = qMax<drift::TimeUs>(
+        1, static_cast<drift::TimeUs>((static_cast<int64_t>(sourceSampleCount) * drift::kUsPerSecond)
+                                      / sampleRate));
 
     // Reverse reads the block ahead of the mapped position and flips it below.
     const drift::TimeUs sourceStartUs =
@@ -128,7 +144,7 @@ namespace {
 
 void accumulateClipAudio(const drift::Clip &clip, const drift::Track &track, drift::TimeUs timelineStartUs,
                          int sampleCount, int sampleRate, float *mixBuffer,
-                         QHash<QString, std::shared_ptr<AudioEffectChain::Stream>> &effectStreams)
+                         QHash<QString, std::shared_ptr<drift::AudioEffectRack>> &effectRacks)
 {
     if (clip.path.isEmpty())
         return;
@@ -147,21 +163,37 @@ void accumulateClipAudio(const drift::Clip &clip, const drift::Track &track, dri
 
     QVector<float> chunk;
     if (!clip.audioEffects.isEmpty()) {
-        std::shared_ptr<AudioEffectChain::Stream> &streamPtr = effectStreams[clip.id];
-        if (!streamPtr)
-            streamPtr = std::make_shared<AudioEffectChain::Stream>();
-        AudioEffectChain::Stream &stream = *streamPtr;
-        const drift::TimeUs lastEndUs = stream.lastTimelineEndUs();
+        std::shared_ptr<drift::AudioEffectRack> &rackPtr = effectRacks[clip.id];
+        if (!rackPtr)
+            rackPtr = std::make_shared<drift::AudioEffectRack>();
+        drift::AudioEffectRack &rack = *rackPtr;
+
+        const drift::TimeUs lastEndUs = rack.lastTimelineEndUs();
         const bool continuous = lastEndUs >= 0
                                 && qAbs(timelineStartUs - lastEndUs) <= kTimelineGapToleranceUs;
-        if (!continuous)
-            stream.reset();
-        chunk = AudioMixer::readClipAudio(clip, timelineStartUs, sampleCount, sampleRate);
-        if (stream.configure(clip.audioEffects, sampleRate)) {
-            stream.feed(chunk.constData(), sampleCount);
-            chunk = stream.drain(sampleCount);
+
+        const bool active = rack.configure(audioEffectSpecsFor(clip.audioEffects), sampleRate);
+        if (active && !continuous) {
+            rack.reset();
+            // Warm the stages on the audio immediately before this block. That is what makes an
+            // echo tail already present after a seek instead of fading in from silence, and what
+            // lines up a latent stage instead of leaving it permanently late.
+            const int primeFrames = rack.primeFrames();
+            if (primeFrames > 0) {
+                const drift::TimeUs primeStartUs =
+                    timelineStartUs
+                    - static_cast<drift::TimeUs>((static_cast<int64_t>(primeFrames) * drift::kUsPerSecond)
+                                                 / sampleRate);
+                const QVector<float> preroll =
+                    AudioMixer::readClipAudio(clip, primeStartUs, primeFrames, sampleRate);
+                rack.warmUp(preroll.constData(), primeFrames);
+            }
         }
-        stream.setLastTimelineEndUs(timelineStartUs + blockDurUs);
+
+        chunk = AudioMixer::readClipAudio(clip, timelineStartUs, sampleCount, sampleRate);
+        if (active)
+            rack.process(chunk.data(), sampleCount);
+        rack.setLastTimelineEndUs(timelineStartUs + blockDurUs);
     } else {
         chunk = AudioMixer::readClipAudio(clip, timelineStartUs, sampleCount, sampleRate);
     }
@@ -183,13 +215,13 @@ void accumulateClipAudio(const drift::Clip &clip, const drift::Track &track, dri
 void AudioMixer::setProject(const drift::Project *project)
 {
     if (m_project != project)
-        m_effectStreams.clear();
+        m_effectRacks.clear();
     m_project = project;
 }
 
-void AudioMixer::resetEffectStreams()
+void AudioMixer::resetEffectRacks()
 {
-    m_effectStreams.clear();
+    m_effectRacks.clear();
 }
 
 void AudioMixer::mix(drift::TimeUs timelineStartUs, int sampleCount, int sampleRate,
@@ -207,12 +239,12 @@ void AudioMixer::mix(drift::TimeUs timelineStartUs, int sampleCount, int sampleR
         if (track.type == drift::TrackType::Audio) {
             for (const drift::Clip &clip : track.clips)
                 accumulateClipAudio(clip, track, timelineStartUs, sampleCount, sampleRate,
-                                      interleavedStereoOut, m_effectStreams);
+                                      interleavedStereoOut, m_effectRacks);
         } else if (track.type == drift::TrackType::Video) {
             for (const drift::Clip &clip : track.clips) {
                 if (clip.type == drift::ClipType::Video && !clip.suppressEmbeddedAudio)
                     accumulateClipAudio(clip, track, timelineStartUs, sampleCount, sampleRate,
-                                          interleavedStereoOut, m_effectStreams);
+                                          interleavedStereoOut, m_effectRacks);
             }
         }
     }

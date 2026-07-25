@@ -3,8 +3,8 @@
   "displayName": "Tremolo",
   "category": "space",
   "order": 450,
-  "backend": "avfilter",
-  "chain": "tremolo=f={rate}:d={depth}",
+  "backend": "juce",
+  "processor": "tremolo",
   "prerollMs": 0,
   "parameters": [
     {

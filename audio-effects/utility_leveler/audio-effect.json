@@ -3,8 +3,8 @@
   "displayName": "Voice Leveler",
   "category": "utility",
   "order": 150,
-  "backend": "avfilter",
-  "chain": "speechnorm=e={strength}:p={peak}:r=0.0005:f=0.001:l=1",
+  "backend": "juce",
+  "processor": "leveler",
   "prerollMs": 300,
   "parameters": [
     {

@@ -3,8 +3,8 @@
   "displayName": "Echo",
   "category": "space",
   "order": 400,
-  "backend": "avfilter",
-  "chain": "aecho={in_gain}:{out_gain}:{delay}:{decay}",
+  "backend": "juce",
+  "processor": "echo",
   "prerollMs": 800,
   "parameters": [
     {

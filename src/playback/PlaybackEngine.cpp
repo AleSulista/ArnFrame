@@ -124,7 +124,7 @@ void PlaybackEngine::setProject(drift::Project *project)
 void PlaybackEngine::setPlayheadUs(drift::TimeUs us)
 {
     m_playheadUs = qMax<drift::TimeUs>(0, us);
-    m_mixer.resetEffectStreams();
+    m_mixer.resetEffectRacks();
     m_clock.reset(m_playheadUs, m_sampleRate);
     // reset() clears the running flag; resume the clock if we are still in play
     // so edits/seeks during playback don't freeze audio at one timeline spot.
@@ -197,7 +197,7 @@ void PlaybackEngine::play()
         return;
 
     ensureAudioSink();
-    m_mixer.resetEffectStreams();
+    m_mixer.resetEffectRacks();
     m_clock.reset(m_playheadUs, m_sampleRate);
     m_clock.start();
     m_playing = true;
@@ -232,7 +232,7 @@ void PlaybackEngine::pause()
     m_compositeTimer.stop();
     m_clock.pause();
     m_playheadUs = m_clock.pausedAt();
-    m_mixer.resetEffectStreams();
+    m_mixer.resetEffectRacks();
     QMetaObject::invokeMethod(
         m_device,
         [this] {

@@ -3,8 +3,8 @@
   "displayName": "Dark Lord",
   "category": "voice",
   "order": 120,
-  "backend": "avfilter",
-  "chain": "asetrate={sampleRate}*{pitch},aresample={sampleRate},atempo=1/{pitch},aecho=0.8:0.9:{echo_delay}:{echo_decay},acrusher=bits=10:mix={grit}",
+  "backend": "juce",
+  "processor": "darklord",
   "prerollMs": 600,
   "parameters": [
     {

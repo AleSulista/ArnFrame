@@ -60,6 +60,10 @@ modules:
       - -DDRIFT_FETCH_ONNXRUNTIME=OFF
       - -DDRIFT_BUNDLE_ONNXRUNTIME=OFF
       - -DONNXRUNTIME_ROOT=/app
+      # JUCE is checked out as a source below rather than fetched by CMake: the build runs with no
+      # network, so FetchContent would fail here.
+      - -DDRIFT_FETCH_JUCE=OFF
+      - -DDRIFT_JUCE_DIR=juce
     sources:
       - type: dir
         path: ..
@@ -69,3 +73,10 @@ modules:
           - flatpak/repo
           - flatpak/dist
           - build
+          - juce
+      # Audio effect DSP. Only juce_dsp and its dependencies are compiled; nothing GUI-facing.
+      - type: git
+        url: https://github.com/juce-framework/JUCE.git
+        tag: 8.0.15
+        commit: 91ad83ae34a81e0833b1a2b0866f54846370ae53
+        dest: juce

@@ -3,8 +3,8 @@
   "displayName": "Phaser",
   "category": "space",
   "order": 440,
-  "backend": "avfilter",
-  "chain": "aphaser=in_gain={in_gain}:out_gain={out_gain}:delay={delay}:decay={decay}:speed={speed}",
+  "backend": "juce",
+  "processor": "phaser",
   "prerollMs": 150,
   "parameters": [
     {

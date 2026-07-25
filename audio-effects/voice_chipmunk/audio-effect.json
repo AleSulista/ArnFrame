@@ -3,8 +3,8 @@
   "displayName": "Chipmunk",
   "category": "voice",
   "order": 100,
-  "backend": "avfilter",
-  "chain": "asetrate={sampleRate}*{pitch},aresample={sampleRate},atempo=1/{pitch}",
+  "backend": "juce",
+  "processor": "pitch",
   "prerollMs": 300,
   "parameters": [
     {

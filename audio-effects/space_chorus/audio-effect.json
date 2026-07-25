@@ -3,8 +3,8 @@
   "displayName": "Chorus",
   "category": "space",
   "order": 420,
-  "backend": "avfilter",
-  "chain": "chorus={in_gain}:{out_gain}:{delay}:{decay}:{speed}:{depth}",
+  "backend": "juce",
+  "processor": "chorus",
   "prerollMs": 150,
   "parameters": [
     {

@@ -3,8 +3,8 @@
   "displayName": "Muffled",
   "category": "transmission",
   "order": 240,
-  "backend": "avfilter",
-  "chain": "lowpass=f={cutoff},volume={gain}",
+  "backend": "juce",
+  "processor": "muffled",
   "prerollMs": 50,
   "parameters": [
     {

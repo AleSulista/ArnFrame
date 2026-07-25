@@ -3,8 +3,8 @@
   "displayName": "Compressor",
   "category": "utility",
   "order": 110,
-  "backend": "avfilter",
-  "chain": "acompressor=threshold={threshold}dB:ratio={ratio}:attack={attack}:release={release}:makeup={makeup}",
+  "backend": "juce",
+  "processor": "compressor",
   "prerollMs": 150,
   "parameters": [
     {

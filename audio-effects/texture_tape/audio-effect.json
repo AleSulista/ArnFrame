@@ -3,8 +3,8 @@
   "displayName": "Tape Saturation",
   "category": "texture",
   "order": 330,
-  "backend": "avfilter",
-  "chain": "acompressor=threshold={threshold}:ratio={ratio}:attack={attack}:release={release}",
+  "backend": "juce",
+  "processor": "tape",
   "prerollMs": 200,
   "parameters": [
     {

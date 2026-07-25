@@ -3,8 +3,8 @@
   "displayName": "Flanger",
   "category": "space",
   "order": 430,
-  "backend": "avfilter",
-  "chain": "flanger=delay={delay}:depth={depth}:regen={regen}:speed={rate}:width={mix},stereotools=phase={phase}:phasel={invert}:phaser={invert}",
+  "backend": "juce",
+  "processor": "flanger",
   "prerollMs": 150,
   "parameters": [
     {

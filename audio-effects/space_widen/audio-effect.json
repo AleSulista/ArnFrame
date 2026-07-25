@@ -3,8 +3,8 @@
   "displayName": "Stereo Widen",
   "category": "space",
   "order": 470,
-  "backend": "avfilter",
-  "chain": "stereowiden=delay={delay}:feedback={feedback}:crossfeed={crossfeed}:drymix={drymix}",
+  "backend": "juce",
+  "processor": "stereowiden",
   "prerollMs": 50,
   "parameters": [
     {

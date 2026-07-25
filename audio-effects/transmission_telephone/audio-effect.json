@@ -3,8 +3,8 @@
   "displayName": "Telephone",
   "category": "transmission",
   "order": 200,
-  "backend": "avfilter",
-  "chain": "highpass=f={low_cut},lowpass=f={high_cut}",
+  "backend": "juce",
+  "processor": "bandlimit",
   "prerollMs": 50,
   "parameters": [
     {

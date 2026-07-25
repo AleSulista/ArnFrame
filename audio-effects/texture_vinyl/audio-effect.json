@@ -3,8 +3,8 @@
   "displayName": "Vinyl",
   "category": "texture",
   "order": 320,
-  "backend": "avfilter",
-  "chain": "highpass=f={highpass},lowpass=f={lowpass},vibrato=f={wobble}:d={flutter}",
+  "backend": "juce",
+  "processor": "vinyl",
   "prerollMs": 100,
   "parameters": [
     {

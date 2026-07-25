@@ -3,8 +3,8 @@
   "displayName": "Crystalize",
   "category": "texture",
   "order": 340,
-  "backend": "avfilter",
-  "chain": "crystalizer=i={intensity}:n={colors}",
+  "backend": "juce",
+  "processor": "crystalizer",
   "prerollMs": 0,
   "parameters": [
     {

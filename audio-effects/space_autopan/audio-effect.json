@@ -3,8 +3,8 @@
   "displayName": "Auto-Pan",
   "category": "space",
   "order": 460,
-  "backend": "avfilter",
-  "chain": "apulsator=hz={rate}:amount={amount}:level_in={level_in}:level_out={level_out}",
+  "backend": "juce",
+  "processor": "autopan",
   "prerollMs": 0,
   "parameters": [
     {

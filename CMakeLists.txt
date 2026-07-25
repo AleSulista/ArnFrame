@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
-project(Drift VERSION 0.1.0 LANGUAGES CXX)
+# C is enabled for JUCE only: its modules compile a handful of C sources (zlib, flac, oggvorbis)
+# and its CMake refuses to configure without it.
+project(Drift VERSION 0.1.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -105,6 +107,38 @@ else()
 endif()
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 
+# --- JUCE -------------------------------------------------------------------
+# Audio effects are JUCE DSP processors (src/engine/audio). Only juce_dsp and the modules it pulls
+# in are used — deliberately NOT juce_audio_processors, which depends on juce_gui_extra ->
+# juce_gui_basics and would drag X11, freetype and fontconfig into an engine that is headless on
+# purpose. JUCE never opens the sound card here either: Qt Multimedia owns the sink, and JUCE only
+# processes float blocks inside AudioMixer.
+#
+# Acquisition mirrors ONNX Runtime above: a local tree wins, otherwise fetch. flatpak-builder runs
+# offline, so packaged builds set DRIFT_JUCE_DIR at a source it vendored itself and turn the fetch
+# off (see flatpak/org.cutwire.Drift.yml).
+option(DRIFT_FETCH_JUCE "Download JUCE when DRIFT_JUCE_DIR is not set" ON)
+set(DRIFT_JUCE_DIR "" CACHE PATH "Path to an existing JUCE source tree; overrides DRIFT_FETCH_JUCE")
+set(DRIFT_JUCE_TAG "8.0.15" CACHE STRING "JUCE release tag to fetch when DRIFT_JUCE_DIR is unset")
+
+if(DRIFT_JUCE_DIR)
+    message(STATUS "JUCE: using ${DRIFT_JUCE_DIR}")
+    add_subdirectory("${DRIFT_JUCE_DIR}" "${CMAKE_BINARY_DIR}/juce-build")
+elseif(DRIFT_FETCH_JUCE)
+    message(STATUS "JUCE: fetching ${DRIFT_JUCE_TAG}")
+    include(FetchContent)
+    FetchContent_Declare(JUCE
+        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+        GIT_TAG ${DRIFT_JUCE_TAG}
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS TRUE)
+    FetchContent_MakeAvailable(JUCE)
+else()
+    message(FATAL_ERROR
+        "JUCE not available. Point DRIFT_JUCE_DIR at a JUCE source tree, "
+        "or enable DRIFT_FETCH_JUCE to download it automatically.")
+endif()
+
 qt_standard_project_setup(REQUIRES 6.5)
 qt_policy(SET QTP0004 NEW)
 
@@ -143,6 +177,43 @@ add_library(driftcore STATIC
 )
 target_include_directories(driftcore PUBLIC src)
 target_link_libraries(driftcore PUBLIC Qt6::Core Qt6::Gui)
+
+# Audio effect DSP. JUCE modules compile into whatever target links them, so keeping them in a
+# library of their own is what stops JUCE's headers, its compile definitions and its build time
+# from spreading across driftengine. AudioEffectRack.h is the only header that leaves here and it
+# mentions no JUCE type, so driftengine stays JUCE-free at the source level.
+add_library(driftaudiodsp STATIC
+    src/engine/audio/AudioEffectProcessor.h
+    src/engine/audio/AudioEffectProcessor.cpp
+    src/engine/audio/FilterProcessors.h
+    src/engine/audio/FilterProcessors.cpp
+    src/engine/audio/DynamicsProcessors.h
+    src/engine/audio/DynamicsProcessors.cpp
+    src/engine/audio/ModulationProcessors.h
+    src/engine/audio/ModulationProcessors.cpp
+    src/engine/audio/PitchShiftProcessor.h
+    src/engine/audio/PitchShiftProcessor.cpp
+    src/engine/audio/AudioEffectFactory.h
+    src/engine/audio/AudioEffectFactory.cpp
+    src/engine/audio/AudioEffectRack.h
+    src/engine/audio/AudioEffectRack.cpp
+)
+# Nothing here is a QObject, and AUTOMOC would otherwise scan JUCE's amalgamated sources.
+set_target_properties(driftaudiodsp PROPERTIES AUTOMOC OFF)
+target_include_directories(driftaudiodsp PUBLIC src)
+target_link_libraries(driftaudiodsp PUBLIC driftcore)
+target_link_libraries(driftaudiodsp PRIVATE juce::juce_dsp juce::juce_recommended_config_flags)
+# JUCE_USE_CURL and JUCE_WEB_BROWSER matter: without them juce_core links libcurl on Linux, which
+# is exactly the dependency creep this split exists to prevent.
+target_compile_definitions(driftaudiodsp PRIVATE
+    JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1
+    JUCE_STANDALONE_APPLICATION=1
+    JUCE_USE_CURL=0
+    JUCE_WEB_BROWSER=0
+    JUCE_MODAL_LOOPS_PERMITTED=0
+    # Otherwise every binary that links this, tools and tests included, opens with "JUCE v8.0.15".
+    JUCE_DISABLE_JUCE_VERSION_PRINTING=1
+)
 
 # --- engine: FFmpeg-facing code, no QML deps -------------------------------
 add_library(driftengine STATIC
@@ -208,8 +279,6 @@ add_library(driftengine STATIC
     src/engine/AudioEffectCatalog.cpp
     src/engine/EffectTemplateCatalog.h
     src/engine/EffectTemplateCatalog.cpp
-    src/engine/AudioEffectChain.h
-    src/engine/AudioEffectChain.cpp
     src/engine/AudioMixer.h
     src/engine/AudioMixer.cpp
     src/engine/WhisperTokenizer.h
@@ -238,7 +307,7 @@ add_library(driftengine STATIC
 )
 target_include_directories(driftengine PUBLIC src)
 target_link_libraries(driftengine PUBLIC Qt6::Core Qt6::Gui Qt6::OpenGL FFmpeg::FFmpeg driftcore
-    onnxruntime::headers)
+    driftaudiodsp onnxruntime::headers)
 target_link_libraries(driftengine PRIVATE ${DRIFT_ZSTD_TARGET} OpenSSL::Crypto ${CMAKE_DL_LIBS})
 target_compile_definitions(driftengine PRIVATE DRIFT_VERSION="${PROJECT_VERSION}")
 

@@ -3,8 +3,8 @@
   "displayName": "Underwater",
   "category": "transmission",
   "order": 230,
-  "backend": "avfilter",
-  "chain": "lowpass=f={cutoff},chorus={wet}:0.9:50:0.4:{motion}:2",
+  "backend": "juce",
+  "processor": "underwater",
   "prerollMs": 150,
   "parameters": [
     {

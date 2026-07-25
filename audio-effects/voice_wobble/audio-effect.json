@@ -3,8 +3,8 @@
   "displayName": "Wobble",
   "category": "voice",
   "order": 150,
-  "backend": "avfilter",
-  "chain": "vibrato=f={rate}:d={depth}",
+  "backend": "juce",
+  "processor": "vibrato",
   "prerollMs": 100,
   "parameters": [
     {

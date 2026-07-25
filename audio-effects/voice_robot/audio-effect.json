@@ -3,8 +3,8 @@
   "displayName": "Robot",
   "category": "voice",
   "order": 130,
-  "backend": "avfilter",
-  "chain": "tremolo=f={freq}:d={depth}",
+  "backend": "juce",
+  "processor": "tremolo",
   "prerollMs": 0,
   "parameters": [
     {

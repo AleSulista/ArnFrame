@@ -3,8 +3,8 @@
   "displayName": "8-Bit",
   "category": "texture",
   "order": 300,
-  "backend": "avfilter",
-  "chain": "acrusher=bits={bits}:samples={samples}:mix={mix}:mode=log",
+  "backend": "juce",
+  "processor": "bitcrush_log",
   "prerollMs": 0,
   "parameters": [
     {

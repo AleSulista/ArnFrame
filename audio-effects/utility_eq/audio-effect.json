@@ -3,8 +3,8 @@
   "displayName": "EQ",
   "category": "utility",
   "order": 100,
-  "backend": "avfilter",
-  "chain": "bass=g={low}:f=110,equalizer=f=1000:t=q:w=1.2:g={mid},treble=g={high}:f=8000",
+  "backend": "juce",
+  "processor": "eq3",
   "prerollMs": 50,
   "parameters": [
     {

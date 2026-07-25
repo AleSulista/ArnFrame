@@ -2,28 +2,34 @@
 
 #include "core/Effect.h"
 #include "core/EffectPreset.h"
+#include "engine/audio/AudioEffectRack.h"
 
 #include <QList>
 #include <QPair>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 // File-based audio effect packages: audio-effects/<name>/audio-effect.json.
 //
-// An audio effect is a libavfilter chain applied to a clip's audio in the mixer. Unlike the GPU
-// effect catalog there is no built-in baseline — the whole catalog comes from packages, shipped
+// An audio effect is a chain of JUCE DSP stages applied to a clip's audio in the mixer. Unlike the
+// GPU effect catalog there is no built-in baseline — the whole catalog comes from packages, shipped
 // as the "audio-effects" addon kind (src/models/AddonManager) or found under a local override dir.
+//
+// The DSP itself is compiled in (src/engine/audio), so a manifest names a processor rather than
+// describing one. That means an addon can add a preset or relabel an effect but cannot contribute
+// new DSP — the trade taken when these moved off libavfilter chain strings.
 
-// One parsed manifest. `chainTemplate` carries {sampleRate} and {<paramIdentifier>} placeholders
-// that AudioEffectChain resolves per instance; `prerollMs` is the lookback a correct block needs
-// from an arbitrary timeline position (0 for stateless filters, larger for echo/reverb tails).
+// One parsed manifest. `processorId` selects a builder from the audio effect factory; `prerollMs`
+// is the lookback a correct block needs from an arbitrary timeline position (0 for stateless
+// stages, larger for echo tails).
 struct AudioEffectEntry
 {
     QString id;
     QString displayName;
     QString category; // stable slug: "voice", "transmission", "texture", "space"
     int order = 0;
-    QString chainTemplate;
+    QString processorId;
     int prerollMs = 0;
     QList<drift::EffectParamSpec> parameters;
     QString packageDir; // where it was loaded from; traces the entry back to its addon
@@ -35,6 +41,11 @@ const AudioEffectEntry *audioEffectDefForId(const QString &id);
 // Merge each parameter's current instance value (or its default) into a name->value map.
 QMap<QString, QVariant> resolvedAudioEffectParameters(const drift::Effect &effect,
                                                       const AudioEffectEntry &def);
+
+// Reduce a clip's effect list to what AudioEffectRack needs. Effects whose catalogId is not in the
+// catalog are dropped, which is what makes an uninstalled addon a clean passthrough rather than a
+// dropout.
+QVector<drift::AudioEffectSpec> audioEffectSpecsFor(const QList<drift::Effect> &effects);
 
 QStringList audioEffectPresetIds();
 

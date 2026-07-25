@@ -3,8 +3,8 @@
   "displayName": "Limiter",
   "category": "utility",
   "order": 120,
-  "backend": "avfilter",
-  "chain": "alimiter=level_in={drive}:level_out=1:limit={ceiling}:attack=5:release=50:level=disabled",
+  "backend": "juce",
+  "processor": "limiter",
   "prerollMs": 150,
   "parameters": [
     {

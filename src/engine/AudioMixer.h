@@ -2,7 +2,7 @@
 
 #include "core/Project.h"
 #include "core/Time.h"
-#include "engine/AudioEffectChain.h"
+#include "engine/audio/AudioEffectRack.h"
 
 #include <QHash>
 #include <QVector>
@@ -13,7 +13,7 @@ class AudioMixer
 {
 public:
     void setProject(const drift::Project *project);
-    void resetEffectStreams();
+    void resetEffectRacks();
 
     void mix(drift::TimeUs timelineStartUs, int sampleCount, int sampleRate, float *interleavedStereoOut) const;
 
@@ -27,5 +27,5 @@ public:
 
 private:
     const drift::Project *m_project = nullptr;
-    mutable QHash<QString, std::shared_ptr<AudioEffectChain::Stream>> m_effectStreams;
+    mutable QHash<QString, std::shared_ptr<drift::AudioEffectRack>> m_effectRacks;
 };

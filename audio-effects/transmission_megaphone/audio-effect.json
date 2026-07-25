@@ -3,8 +3,8 @@
   "displayName": "Megaphone",
   "category": "transmission",
   "order": 220,
-  "backend": "avfilter",
-  "chain": "bandpass=f={center}:width_type=h:w={width},acrusher=bits=8:mix={grit}",
+  "backend": "juce",
+  "processor": "megaphone",
   "prerollMs": 50,
   "parameters": [
     {

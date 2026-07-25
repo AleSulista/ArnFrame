@@ -3,8 +3,8 @@
   "displayName": "Noise Gate",
   "category": "utility",
   "order": 130,
-  "backend": "avfilter",
-  "chain": "agate=threshold={threshold}:ratio={ratio}:attack={attack}:release={release}",
+  "backend": "juce",
+  "processor": "gate",
   "prerollMs": 150,
   "parameters": [
     {

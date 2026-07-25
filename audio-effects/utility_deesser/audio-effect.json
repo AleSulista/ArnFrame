@@ -3,8 +3,8 @@
   "displayName": "De-esser",
   "category": "utility",
   "order": 140,
-  "backend": "avfilter",
-  "chain": "deesser=i={intensity}:m={amount}:f={frequency}",
+  "backend": "juce",
+  "processor": "deesser",
   "prerollMs": 50,
   "parameters": [
     {
