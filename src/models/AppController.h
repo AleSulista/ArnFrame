@@ -482,6 +482,9 @@ public:
     Q_INVOKABLE void pasteAtPlayhead();
     Q_INVOKABLE void nudgeSelection(double deltaSeconds);
     Q_INVOKABLE bool selectionContains(int trackIndex, int clipIndex) const;
+    // Premiere-style trim pointer. side: -1=start, 0=off, 1=end.
+    // heightPx scales the cursor to the hovered clip/track height.
+    Q_INVOKABLE void setTimelineTrimCursor(int side, int heightPx = 0);
     Q_INVOKABLE QString shortcutFor(const QString &actionId) const;
     Q_INVOKABLE void setShortcut(const QString &actionId, const QString &keys);
     Q_INVOKABLE void triggerAction(const QString &actionId);
@@ -776,6 +779,8 @@ protected:
     int m_selectedTransitionTrack = -1;
     int m_selectedTransitionLeftClip = -1;
     QList<QPair<int, int>> m_selection;
+    int m_timelineTrimCursorSide = 0;
+    int m_timelineTrimCursorHeight = 0;
     bool m_guidesEnabled = false;
     bool m_canvasCropMode = false;
     QString m_guideType = QStringLiteral("thirds");

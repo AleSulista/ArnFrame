@@ -36,13 +36,18 @@
 #include <QColor>
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QCursor>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPixmap>
 #include <QSettings>
 #include <QSet>
 #include <QStandardPaths>
@@ -59,6 +64,51 @@
 
 namespace {
 QHash<QString, QString> defaultShortcuts();
+
+QCursor timelineTrimCursor(int side, int heightPx)
+{
+    // Premiere Selection-tool trim pointer: vertical bar sized to the
+    // clip/track, with a solid triangle pointing toward the clip interior.
+    const int h = qBound(18, heightPx, 160);
+    const int w = 22;
+    QPixmap pixmap(w, h);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    // Hotspot sits on the bar so it lines up with the clip edge.
+    const qreal barX = side < 0 ? 14.0 : 7.0;
+    const qreal top = 1.0;
+    const qreal bot = h - 2.0;
+    const qreal midY = h * 0.5;
+    // Arrow points into the clip (right on left edge, left on right edge).
+    const qreal tipX = side < 0 ? w - 2.0 : 2.0;
+    const qreal baseX = side < 0 ? barX + 1.0 : barX - 1.0;
+    const qreal arrowH = qBound(5.0, h * 0.18, 9.0);
+
+    QPainterPath arrow;
+    arrow.moveTo(tipX, midY);
+    arrow.lineTo(baseX, midY - arrowH);
+    arrow.lineTo(baseX, midY + arrowH);
+    arrow.closeSubpath();
+
+    // White outline (Premiere contrast on dark/light filmstrips).
+    painter.setPen(QPen(QColor(255, 255, 255), 3.2, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin));
+    painter.drawLine(QPointF(barX, top), QPointF(barX, bot));
+    painter.setPen(QPen(QColor(255, 255, 255), 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(QColor(255, 255, 255));
+    painter.drawPath(arrow);
+
+    // Black fill — Premiere’s classic trim pointer.
+    painter.setPen(QPen(QColor(20, 20, 20), 1.5, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin));
+    painter.drawLine(QPointF(barX, top), QPointF(barX, bot));
+    painter.setBrush(QColor(20, 20, 20));
+    painter.setPen(Qt::NoPen);
+    painter.drawPath(arrow);
+
+    return QCursor(pixmap, qRound(barX), qRound(midY));
+}
 }
 
 AppController::~AppController()
@@ -67,6 +117,11 @@ AppController::~AppController()
     // below — but by then the members it touches (m_selection, the models) are
     // already gone. Cut the signals before any member is destroyed.
     m_undoStack.disconnect(this);
+    if (m_timelineTrimCursorSide != 0) {
+        QGuiApplication::restoreOverrideCursor();
+        m_timelineTrimCursorSide = 0;
+        m_timelineTrimCursorHeight = 0;
+    }
 }
 
 AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
@@ -7632,6 +7687,22 @@ void AppController::nudgeSelection(double deltaSeconds)
 bool AppController::selectionContains(int trackIndex, int clipIndex) const
 {
     return m_selection.contains(qMakePair(trackIndex, clipIndex));
+}
+
+void AppController::setTimelineTrimCursor(int side, int heightPx)
+{
+    side = qBound(-1, side, 1);
+    heightPx = qMax(0, heightPx);
+    if (side == m_timelineTrimCursorSide && (side == 0 || heightPx == m_timelineTrimCursorHeight))
+        return;
+
+    if (m_timelineTrimCursorSide != 0)
+        QGuiApplication::restoreOverrideCursor();
+
+    m_timelineTrimCursorSide = side;
+    m_timelineTrimCursorHeight = heightPx;
+    if (side != 0)
+        QGuiApplication::setOverrideCursor(timelineTrimCursor(side, heightPx > 0 ? heightPx : 28));
 }
 
 QString AppController::shortcutFor(const QString &actionId) const
