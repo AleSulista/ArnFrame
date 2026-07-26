@@ -7,6 +7,7 @@
 #include "core/Keyframe.h"
 #include "core/Project.h"
 #include "core/ShapePath.h"
+#include "core/SrtIO.h"
 #include "core/SubtitleCue.h"
 #include "core/TimelineOps.h"
 #include "core/Transition.h"
@@ -36,6 +37,8 @@ private slots:
     void subtitleCueSerialization();
     void subtitleCueLookup();
     void subtitleCuePacking();
+    void srtRoundTrip();
+    void srtParseEdgeCases();
     void insertTrackAtTopAllowsDuplicateTypes();
     void multiTrackSerializationRoundTrip();
     void textStyleAndBlendModeSerialization();
@@ -614,6 +617,47 @@ void CoreTest::subtitleCuePacking()
     const QList<drift::SubtitleCue> shortPacked = drift::packSubtitleCues(shortInput, 42, 1);
     QCOMPARE(shortPacked.size(), 1);
     QCOMPARE(shortPacked.first().text, QStringLiteral("Hi there"));
+}
+
+void CoreTest::srtRoundTrip()
+{
+    QList<drift::SubtitleCue> cues;
+    cues.append({drift::secondsToUs(1.0), drift::secondsToUs(4.0), QStringLiteral("Hello")});
+    cues.append({drift::secondsToUs(65.5), drift::secondsToUs(70.25),
+                 QStringLiteral("Line one\nLine two")});
+
+    const QString srt = drift::writeSrt(cues);
+    QVERIFY(srt.contains(QStringLiteral("00:00:01,000 --> 00:00:04,000")));
+    QVERIFY(srt.contains(QStringLiteral("00:01:05,500 --> 00:01:10,250")));
+    QVERIFY(srt.contains(QStringLiteral("Line one\nLine two")));
+
+    QList<drift::SubtitleCue> loaded;
+    QString error;
+    QVERIFY(drift::parseSrt(srt, &loaded, &error));
+    QVERIFY(error.isEmpty());
+    QCOMPARE(loaded.size(), 2);
+    QCOMPARE(loaded[0].text, QStringLiteral("Hello"));
+    QCOMPARE(loaded[0].startUs, drift::secondsToUs(1.0));
+    QCOMPARE(loaded[0].endUs, drift::secondsToUs(4.0));
+    QCOMPARE(loaded[1].text, QStringLiteral("Line one\nLine two"));
+    QCOMPARE(loaded[1].startUs, drift::secondsToUs(65.5));
+    QCOMPARE(loaded[1].endUs, drift::secondsToUs(70.25));
+}
+
+void CoreTest::srtParseEdgeCases()
+{
+    // Dot milliseconds (common non-strict variant) and UTF-8 BOM.
+    const QString srt = QStringLiteral("\uFEFF1\n00:00:00.500 --> 00:00:02.000\nCafé\n");
+    QList<drift::SubtitleCue> cues;
+    QString error;
+    QVERIFY(drift::parseSrt(srt, &cues, &error));
+    QCOMPARE(cues.size(), 1);
+    QCOMPARE(cues[0].text, QStringLiteral("Café"));
+    QCOMPARE(cues[0].startUs, drift::secondsToUs(0.5));
+    QCOMPARE(cues[0].endUs, drift::secondsToUs(2.0));
+
+    QVERIFY(!drift::parseSrt(QString(), &cues, &error));
+    QVERIFY(!error.isEmpty());
 }
 
 void CoreTest::insertTrackAtTopAllowsDuplicateTypes()

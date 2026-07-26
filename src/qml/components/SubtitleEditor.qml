@@ -279,6 +279,45 @@ Item {
             font.pixelSize: Theme.fontSizeXs
             opacity: 0.8
         }
+
+        Row {
+            width: parent.width
+            spacing: 6
+
+            ThemedButton {
+                width: (parent.width - parent.spacing) / 2
+                text: qsTr("Import")
+                variant: "secondary"
+                glyph: Theme.icons.upload
+                tooltip: qsTr("Replace these captions from a .srt file")
+                onClicked: {
+                    const url = FileDialogs.openFile(
+                        qsTr("Import Subtitles"),
+                        [qsTr("SubRip subtitles (*.srt)"), qsTr("All files (*)")])
+                    if (url != "")
+                        EditorState.importSubtitleFileIntoClip(
+                            root.trackIndex, root.clipIndex, url)
+                }
+            }
+
+            ThemedButton {
+                width: (parent.width - parent.spacing) / 2
+                text: qsTr("Export")
+                variant: "secondary"
+                glyph: Theme.icons.save
+                tooltip: qsTr("Save captions as a .srt file")
+                enabled: root.cues.length > 0
+                onClicked: {
+                    const url = FileDialogs.saveFile(
+                        qsTr("Export Subtitles"),
+                        [qsTr("SubRip subtitles (*.srt)")],
+                        "srt")
+                    if (url != "")
+                        EditorState.exportSubtitleFile(
+                            root.trackIndex, root.clipIndex, url)
+                }
+            }
+        }
     }
 
     // ---- Lyrics list (compact, keeps neighbours in view) -----------------------

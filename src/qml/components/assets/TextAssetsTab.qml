@@ -62,6 +62,20 @@ Column {
         onClicked: EditorState.addSubtitleClip(-1)
     }
 
+    ThemedButton {
+        text: qsTr("Import subtitle file")
+        variant: "secondary"
+        glyph: Theme.icons.upload
+        tooltip: qsTr("Import a .srt file as a subtitle clip")
+        onClicked: {
+            const url = FileDialogs.openFile(
+                qsTr("Import Subtitles"),
+                [qsTr("SubRip subtitles (*.srt)"), qsTr("All files (*)")])
+            if (url != "")
+                EditorState.importSubtitleFile(url, -1)
+        }
+    }
+
     Rectangle {
         width: root.contentWidth
         height: Theme.borderWidth

@@ -172,6 +172,8 @@ add_library(driftcore STATIC
     src/core/SpeedCurve.cpp
     src/core/SubtitleCue.h
     src/core/SubtitleCue.cpp
+    src/core/SrtIO.h
+    src/core/SrtIO.cpp
     src/core/Mask.h
     src/core/Mask.cpp
     src/core/Transition.h

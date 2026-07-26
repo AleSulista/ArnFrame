@@ -221,6 +221,12 @@ public:
     Q_INVOKABLE QString trackTypeForAsset(int assetIndex) const;
     Q_INVOKABLE void addTextClip(const QString &text, double atSeconds);
     Q_INVOKABLE void addSubtitleClip(double atSeconds);
+    // Import a SubRip (.srt) file as a new subtitle clip at the playhead (or atSeconds).
+    Q_INVOKABLE bool importSubtitleFile(const QUrl &url, double atSeconds = -1.0);
+    // Replace cues on an existing subtitle clip from a .srt file.
+    Q_INVOKABLE bool importSubtitleFileIntoClip(int trackIndex, int clipIndex, const QUrl &url);
+    // Export a subtitle clip's cues to a .srt file (clip-local timestamps).
+    Q_INVOKABLE bool exportSubtitleFile(int trackIndex, int clipIndex, const QUrl &url);
     Q_INVOKABLE void generateSubtitlesForClip(int trackIndex, int clipIndex,
                                               const QString &language = QString());
     Q_INVOKABLE void cancelSubtitleGeneration();

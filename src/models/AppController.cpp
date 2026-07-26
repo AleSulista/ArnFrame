@@ -6,6 +6,7 @@
 #include "core/SpeedCurve.h"
 #include "core/ShapePath.h"
 #include "core/SubtitleCue.h"
+#include "core/SrtIO.h"
 #include "core/TimelineOps.h"
 #include "core/Transition.h"
 #include "core/commands/ProjectCommands.h"
@@ -2648,6 +2649,146 @@ void AppController::addSubtitleClip(double atSeconds)
     pushProjectEdit(before, QStringLiteral("Subtitle clip added"));
     finishEdit(QStringLiteral("Subtitle clip added"));
     selectClip(trackIndex, track.clips.size() - 1);
+}
+
+namespace {
+
+drift::TimeUs subtitleClipDurationForCues(const QList<drift::SubtitleCue> &cues)
+{
+    drift::TimeUs duration = drift::kSubtitleClipDurationUs;
+    for (const drift::SubtitleCue &cue : cues)
+        duration = qMax(duration, cue.endUs);
+    return duration;
+}
+
+} // namespace
+
+bool AppController::importSubtitleFile(const QUrl &url, double atSeconds)
+{
+    const QString path = url.toLocalFile();
+    if (path.isEmpty()) {
+        setLastMessage(QStringLiteral("No subtitle file selected"));
+        return false;
+    }
+
+    QList<drift::SubtitleCue> cues;
+    QString error;
+    if (!drift::parseSrtFile(path, &cues, &error)) {
+        setLastMessage(error.isEmpty() ? QStringLiteral("Could not read subtitle file") : error);
+        return false;
+    }
+
+    const drift::TimeUs duration = subtitleClipDurationForCues(cues);
+    const drift::Project before = m_project;
+    const int trackIndex =
+        drift::ensureTrackForClipType(m_project, drift::ClipType::Subtitle, true);
+    if (trackIndex < 0)
+        return false;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    const drift::TimeUs startSeconds = atSeconds < 0.0 ? m_playheadUs : drift::secondsToUs(atSeconds);
+    const drift::TimeUs start =
+        drift::resolveClipStart(m_project, track, -1, startSeconds, duration, m_snapEnabled,
+                                m_playheadUs);
+
+    drift::Clip clip;
+    clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    clip.type = drift::ClipType::Subtitle;
+    clip.timelineStart = start;
+    clip.timelineDuration = duration;
+    clip.srcIn = 0;
+    clip.srcOut = duration;
+    clip.subtitleCues = cues;
+    clip.name = subtitleClipName(cues);
+    if (const drift::TextStyle *preset = drift::textStyleForPresetId(QStringLiteral("subtitle")))
+        clip.textStyle = *preset;
+    applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
+
+    track.clips.append(clip);
+    pushProjectEdit(before, QStringLiteral("Subtitles imported"));
+    finishEdit(QStringLiteral("Subtitles imported"));
+    selectClip(trackIndex, track.clips.size() - 1);
+    setLastMessage(QStringLiteral("Imported %1 subtitle(s)").arg(cues.size()));
+    return true;
+}
+
+bool AppController::importSubtitleFileIntoClip(int trackIndex, int clipIndex, const QUrl &url)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return false;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return false;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Subtitle) {
+        setLastMessage(QStringLiteral("Select a subtitle clip to import into"));
+        return false;
+    }
+
+    const QString path = url.toLocalFile();
+    if (path.isEmpty()) {
+        setLastMessage(QStringLiteral("No subtitle file selected"));
+        return false;
+    }
+
+    QList<drift::SubtitleCue> cues;
+    QString error;
+    if (!drift::parseSrtFile(path, &cues, &error)) {
+        setLastMessage(error.isEmpty() ? QStringLiteral("Could not read subtitle file") : error);
+        return false;
+    }
+
+    const drift::TimeUs duration = subtitleClipDurationForCues(cues);
+    const drift::Project before = m_project;
+    clip.subtitleCues = cues;
+    clip.name = subtitleClipName(cues);
+    if (duration > clip.timelineDuration) {
+        clip.timelineDuration = duration;
+        clip.srcOut = duration;
+    }
+    pushProjectEdit(before, QStringLiteral("Subtitles imported"));
+    finishEdit(QStringLiteral("Subtitles imported"));
+    setLastMessage(QStringLiteral("Imported %1 subtitle(s)").arg(cues.size()));
+    return true;
+}
+
+bool AppController::exportSubtitleFile(int trackIndex, int clipIndex, const QUrl &url)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return false;
+
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return false;
+
+    const drift::Clip &clip = track.clips.at(clipIndex);
+    if (clip.type != drift::ClipType::Subtitle) {
+        setLastMessage(QStringLiteral("Select a subtitle clip to export"));
+        return false;
+    }
+    if (clip.subtitleCues.isEmpty()) {
+        setLastMessage(QStringLiteral("This subtitle clip has no captions"));
+        return false;
+    }
+
+    QString path = url.toLocalFile();
+    if (path.isEmpty()) {
+        setLastMessage(QStringLiteral("No save location selected"));
+        return false;
+    }
+    if (!path.endsWith(QStringLiteral(".srt"), Qt::CaseInsensitive))
+        path += QStringLiteral(".srt");
+
+    QString error;
+    if (!drift::writeSrtFile(path, clip.subtitleCues, &error)) {
+        setLastMessage(error.isEmpty() ? QStringLiteral("Could not write subtitle file") : error);
+        return false;
+    }
+
+    setLastMessage(QStringLiteral("Subtitles saved"));
+    return true;
 }
 
 void AppController::cancelSubtitleGeneration()
