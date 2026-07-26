@@ -31,16 +31,18 @@ void PreviewItem::setTextureSize(const QSize &size)
 QSGNode *PreviewItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
     auto *node = static_cast<QSGSimpleTextureNode *>(oldNode);
-    if (!node)
-        node = new QSGSimpleTextureNode();
 
+    // Qt 6's QSGSimpleTextureNode::setTexture(nullptr) segfaults. When there is
+    // nothing to show, drop the node entirely instead of clearing the texture.
     if (m_textureId == 0 || m_textureSize.isEmpty() || !window()) {
-        node->setTexture(nullptr);
-        node->setRect(boundingRect());
+        delete node;
         m_boundTextureId = 0;
         m_boundTextureSize = {};
-        return node;
+        return nullptr;
     }
+
+    if (!node)
+        node = new QSGSimpleTextureNode();
 
     const bool needNewWrapper =
         !node->texture() || m_boundTextureId != m_textureId || m_boundTextureSize != m_textureSize;
@@ -50,6 +52,12 @@ QSGNode *PreviewItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         // must not take ownership of it; setOwnsTexture only frees this wrapper.
         QSGTexture *texture = QNativeInterface::QSGOpenGLTexture::fromNative(
             static_cast<GLuint>(m_textureId), window(), m_textureSize);
+        if (!texture) {
+            delete node;
+            m_boundTextureId = 0;
+            m_boundTextureSize = {};
+            return nullptr;
+        }
         node->setTexture(texture);
         node->setOwnsTexture(true);
         node->setFiltering(QSGTexture::Linear);

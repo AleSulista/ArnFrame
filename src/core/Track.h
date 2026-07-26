@@ -22,6 +22,9 @@ struct Track
     bool hidden = false;
     bool locked = false;
     bool showWaveform = false; // view-only: show audio waveform instead of filmstrip for this track's clips
+    // view-only: multiplies this track's base row height so a single lane can be
+    // enlarged (waveform editing) without zooming the whole timeline.
+    qreal heightScale = 1.0;
 
     bool allowsClipType(ClipType clipType) const;
 };

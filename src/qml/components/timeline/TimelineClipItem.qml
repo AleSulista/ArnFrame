@@ -84,6 +84,8 @@ Item {
     function updateMovePreview() {
         if (!clipMouse.moving)
             return
+        // Keep linked/selected partners locked to this clip's live X.
+        panel.updateMoveFollow(x - clipMouse.moveOriginX)
         const desired = Math.max(0, (x - Theme.clipSelectionRingWidth) / panel.pxPerSecond)
         const pos = mapToItem(timelineColumn, width / 2, height / 2)
         const targetTrack = panel.trackIndexAtY(pos.y)
@@ -93,11 +95,20 @@ Item {
     onXChanged: updateMovePreview()
     onYChanged: updateMovePreview()
 
+    // CapCut-style: selected/linked partners slide with the dragged clip.
+    readonly property bool moveFollowFollower: panel.moveFollowActive
+                                              && selected
+                                              && !(panel.moveLeaderTrack === trackIndex
+                                                   && panel.moveLeaderClip === clipIndex)
+    readonly property real followOffsetX: moveFollowFollower ? panel.moveFollowDeltaX : 0
+
     Binding {
         target: clipItem
         property: "x"
         when: !clipMouse.drag.active
-        value: clipItem.clipData.start * panel.pxPerSecond + Theme.clipSelectionRingWidth
+        value: clipItem.clipData.start * panel.pxPerSecond
+               + Theme.clipSelectionRingWidth
+               + clipItem.followOffsetX
     }
 
     Binding {
@@ -379,6 +390,9 @@ Item {
         drag.maximumY: Math.max(clipItem.trackRow.height * 2, panel.totalTracksHeight())
         property int originTrack: clipItem.trackIndex
         property int originClip: clipItem.clipIndex
+        // Model-space X at press — follow delta is measured from this so partners
+        // stay locked to the leader even after the drag threshold has been crossed.
+        property real moveOriginX: 0
         // drag.active is cleared after onReleased in some paths; remember we dragged.
         property bool didDrag: false
         // True only for the span we treat as a move, so the landing preview stops
@@ -388,6 +402,8 @@ Item {
         onPressed: (mouse) => {
             originTrack = clipItem.trackIndex
             originClip = clipItem.clipIndex
+            moveOriginX = clipItem.clipData.start * panel.pxPerSecond
+                          + Theme.clipSelectionRingWidth
             didDrag = false
             moving = false
             if (mouse.button === Qt.RightButton) {
@@ -462,6 +478,9 @@ Item {
             const moved = drag.active || didDrag
             didDrag = false
             moving = false
+            // Clear follow before committing so partners don't keep the drag
+            // offset on top of the new model start for a frame.
+            panel.clearMoveFollow()
             panel.clearLandingPreview()
             if (!moved)
                 return
@@ -479,12 +498,17 @@ Item {
         onPositionChanged: {
             if (pressed && drag.active) {
                 didDrag = true
-                moving = true
+                if (!moving) {
+                    moving = true
+                    panel.beginMoveFollow(originTrack, originClip)
+                }
+                panel.updateMoveFollow(clipItem.x - moveOriginX)
             }
         }
         onCanceled: {
             didDrag = false
             moving = false
+            panel.clearMoveFollow()
             panel.clearLandingPreview()
         }
     }

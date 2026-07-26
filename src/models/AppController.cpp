@@ -60,6 +60,7 @@
 #include <QtMath>
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <optional>
 
 namespace {
@@ -454,6 +455,7 @@ QVariantList AppController::tracks() const
             {QStringLiteral("muted"), track.muted},
             {QStringLiteral("hidden"), track.hidden},
             {QStringLiteral("showWaveform"), track.showWaveform},
+            {QStringLiteral("heightScale"), track.heightScale},
         });
     }
 
@@ -1825,7 +1827,12 @@ void AppController::finishEdit(const QString &message)
     emit tracksChanged();
     emit selectionChanged();
     emit selectedClipDataChanged();
-    setLastMessage(message);
+    // Routine edits used to announce themselves here ("Clip moved", "Split
+    // clip", ...), which surfaced as a toast for every drag and cut. The
+    // timeline already shows the result and the label lives on in the undo
+    // stack, so an edit now only clears a stale warning from an earlier attempt.
+    Q_UNUSED(message)
+    setLastMessage(QString());
 }
 
 void AppController::applyRippleShift(drift::Track &track, int fromClipIndex, drift::TimeUs delta)
@@ -3082,7 +3089,6 @@ void AppController::applySpeedCurve()
     pushProjectEdit(before, QStringLiteral("Custom speed applied"));
     finishEdit(QStringLiteral("Custom speed applied"));
     selectClip(newTrack, m_project.tracks().at(newTrack).clips.size() - 1);
-    setLastMessage(QStringLiteral("Custom speed applied"));
     emit speedCurveApplied();
 }
 
@@ -7414,6 +7420,35 @@ bool AppController::trackShowWaveform(int trackIndex) const
     return m_project.tracks().at(trackIndex).showWaveform;
 }
 
+void AppController::setTrackHeightScale(int trackIndex, double scale)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    const qreal clamped = qBound(trackHeightScaleMin(), scale, trackHeightScaleMax());
+    if (qFuzzyCompare(m_project.tracks()[trackIndex].heightScale, clamped))
+        return;
+
+    // View-only preference, like showWaveform: no undo entry.
+    m_project.tracks()[trackIndex].heightScale = clamped;
+    emit tracksChanged();
+}
+
+double AppController::trackHeightScale(int trackIndex) const
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return 1.0;
+    return m_project.tracks().at(trackIndex).heightScale;
+}
+
+void AppController::nudgeTrackHeightScale(int trackIndex, int steps)
+{
+    if (steps == 0)
+        return;
+    setTrackHeightScale(trackIndex,
+                        trackHeightScale(trackIndex) * std::pow(1.18, steps));
+}
+
 void AppController::moveTrack(int fromIndex, int toIndex)
 {
     const int trackCount = m_project.tracks().size();
@@ -7613,7 +7648,6 @@ void AppController::copySelection()
         item.trackType = m_project.tracks().at(pair.first).type;
         m_clipboard.append(item);
     }
-    setLastMessage(QStringLiteral("Copied %1 clip(s)").arg(m_clipboard.size()));
 }
 
 void AppController::cutSelection()
@@ -7773,7 +7807,6 @@ void AppController::undo()
     if (!m_undoStack.canUndo())
         return;
     m_undoStack.undo();
-    setLastMessage(QStringLiteral("Undo"));
 }
 
 void AppController::redo()
@@ -7781,7 +7814,6 @@ void AppController::redo()
     if (!m_undoStack.canRedo())
         return;
     m_undoStack.redo();
-    setLastMessage(QStringLiteral("Redo"));
 }
 
 QVariantList AppController::waveformPeaks(const QString &path) const

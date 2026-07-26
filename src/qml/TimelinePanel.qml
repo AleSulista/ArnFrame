@@ -47,7 +47,7 @@ PanelFrame {
     function trackOffsetY(index) {
         var cursor = 0
         for (var i = 0; i < index && i < tracks.length; i++)
-            cursor += trackHeight(tracks[i].type) + Theme.trackGap
+            cursor += trackHeight(i) + Theme.trackGap
         return cursor
     }
     readonly property real minZoom: 0.05
@@ -116,7 +116,7 @@ PanelFrame {
         const pairs = []
         for (let t = 0; t < tracks.length; t++) {
             const trackTop = trackOffsetY(t)
-            const trackBottom = trackTop + trackHeight(tracks[t].type)
+            const trackBottom = trackTop + trackHeight(t)
             if (trackBottom < top || trackTop > bottom)
                 continue
             const clips = tracks[t].clips
@@ -165,6 +165,33 @@ PanelFrame {
         else if (apply && !marqueeAdditive)
             EditorState.clearSelection()
         marqueeActive = false
+    }
+
+    // While dragging a clip, other selected clips (linked A/V partners included)
+    // ride along on the X axis so they don't sit still until drop. CapCut-style.
+    property bool moveFollowActive: false
+    property int moveLeaderTrack: -1
+    property int moveLeaderClip: -1
+    property real moveFollowDeltaX: 0
+
+    function beginMoveFollow(trackIndex, clipIndex) {
+        moveLeaderTrack = trackIndex
+        moveLeaderClip = clipIndex
+        moveFollowDeltaX = 0
+        moveFollowActive = true
+    }
+
+    function updateMoveFollow(deltaX) {
+        if (!moveFollowActive)
+            return
+        moveFollowDeltaX = deltaX
+    }
+
+    function clearMoveFollow() {
+        moveFollowActive = false
+        moveLeaderTrack = -1
+        moveLeaderClip = -1
+        moveFollowDeltaX = 0
     }
 
     // Shared by library drops and in-timeline clip moves so both snap and show
@@ -269,12 +296,22 @@ PanelFrame {
         return { "start": desiredStart, "guide": -1 }
     }
 
-    function trackHeight(type) {
+    // Default row height for a track type, before the per-track scale.
+    function trackBaseHeight(type) {
         if (type === "video") return Theme.trackHeightVideo;
         if (type === "audio") return Theme.trackHeightAudio;
         if (type === "shape") return Theme.trackHeightShape;
         if (type === "subtitle") return Theme.trackHeightSubtitle;
         return Theme.trackHeightText;
+    }
+
+    // Actual row height, including the lane's DAW-style vertical zoom.
+    function trackHeight(index) {
+        if (index < 0 || index >= tracks.length)
+            return Theme.trackHeightVideo
+        const track = tracks[index]
+        const scale = track.heightScale > 0 ? track.heightScale : 1
+        return Math.round(Math.max(20, trackBaseHeight(track.type) * scale))
     }
 
     function clipColor(type) {
@@ -289,7 +326,7 @@ PanelFrame {
     function totalTracksHeight() {
         var h = 0;
         for (var i = 0; i < tracks.length; i++) {
-            h += trackHeight(tracks[i].type);
+            h += trackHeight(i);
             if (i > 0) h += Theme.trackGap;
         }
         return h;
@@ -328,7 +365,7 @@ PanelFrame {
     function trackIndexAtY(y) {
         var cursor = 0;
         for (var i = 0; i < tracks.length; i++) {
-            const th = trackHeight(tracks[i].type);
+            const th = trackHeight(i);
             if (y >= cursor && y < cursor + th)
                 return i;
             cursor += th + Theme.trackGap;
@@ -667,40 +704,46 @@ PanelFrame {
                         onWheel: (wheel) => root.handleTimelineWheel(wheel)
                     }
 
-                    // Opaque backdrop behind the pinned ruler/bookmark strip.
-                    Rectangle {
-                        y: flick.contentY
-                        width: parent.width
-                        height: flick.headerHeight
-                        color: Theme.panelBackground
-                        z: 1
-                    }
-
-                    // ruler ------------------------------------------------------------
+                    // seek strip (ruler + bookmark lane) ------------------------------------
+                    // CapCut/Premiere-style: the whole pinned header is one scrub area so
+                    // the playhead is easy to move without hunting for a tiny hit target.
                     Item {
-                        id: ruler
+                        id: seekStrip
                         width: parent.width
-                        // Pinned: stays at the top of the viewport as tracks scroll.
                         y: flick.contentY
                         z: 2
-                        height: Theme.timelineRulerHeight
+                        height: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
 
-                        // Press-and-drag scrubs; it used to handle clicks only.
+                        Rectangle {
+                            anchors.fill: parent
+                            color: Theme.panelBackground
+                        }
+
+                        // Subtle bottom edge so the seek strip reads as a distinct bar.
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: 1
+                            color: Theme.panelBorder
+                        }
+
                         MouseArea {
                             id: rulerScrub
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             preventStealing: true
+                            // Leave room for the playhead head so its drag can start first.
+                            z: 1
 
                             function scrubTo(x) {
                                 EditorState.playheadSeconds =
                                     EditorState.snapTime(Math.max(0, x) / root.pxPerSecond)
                             }
 
-                            // Seeking is not a selection change: scrubbing to look at a different
-                            // point used to drop the clip you were editing, and with it the
-                            // properties panel you were working in.
+                            // Seeking is not a selection change: scrubbing to look at a
+                            // different point used to drop the clip you were editing.
                             onPressed: (mouse) => scrubTo(mouse.x)
                             onPositionChanged: (mouse) => {
                                 if (pressed)
@@ -708,68 +751,84 @@ PanelFrame {
                             }
 
                             ThemedToolTip {
-                                text: qsTr("Click or drag to move the current time")
+                                text: qsTr("Click or drag to seek")
                                 visible: rulerScrub.containsMouse && !rulerScrub.pressed
+                                         && !playheadDragArea.drag.active
                             }
                         }
 
-                        Repeater {
-                            model: Math.ceil(flick.contentWidth / (root.tickStepSeconds * root.pxPerSecond)) + 1
-                            delegate: Item {
-                                readonly property real tickSeconds: index * root.tickStepSeconds
-                                x: tickSeconds * root.pxPerSecond
-                                width: root.tickStepSeconds * root.pxPerSecond
-                                height: ruler.height
+                        // Time ticks live in the upper half of the seek strip.
+                        Item {
+                            id: ruler
+                            width: parent.width
+                            height: Theme.timelineRulerHeight
+                            z: 0
 
-                                Rectangle {
-                                    x: 0
-                                    y: 6
-                                    width: 1
-                                    height: 6
-                                    color: Qt.rgba(Theme.mutedForeground.r, Theme.mutedForeground.g, Theme.mutedForeground.b, 0.25)
-                                }
+                            Repeater {
+                                model: Math.ceil(flick.contentWidth
+                                                 / (root.tickStepSeconds * root.pxPerSecond)) + 1
+                                delegate: Item {
+                                    readonly property real tickSeconds: index * root.tickStepSeconds
+                                    x: tickSeconds * root.pxPerSecond
+                                    width: root.tickStepSeconds * root.pxPerSecond
+                                    height: ruler.height
 
-                                Text {
-                                    x: 4
-                                    y: 4
-                                    text: root.formatTick(parent.tickSeconds)
-                                    color: Theme.mutedForeground
-                                    font.pixelSize: Theme.fontSizeTick
-                                    font.family: Theme.fontFamily
+                                    Rectangle {
+                                        x: 0
+                                        y: parent.height - 10
+                                        width: 1
+                                        height: 8
+                                        color: Qt.rgba(Theme.mutedForeground.r,
+                                                       Theme.mutedForeground.g,
+                                                       Theme.mutedForeground.b, 0.28)
+                                    }
+
+                                    Text {
+                                        x: 4
+                                        y: 4
+                                        text: root.formatTick(parent.tickSeconds)
+                                        color: Theme.mutedForeground
+                                        font.pixelSize: Theme.fontSizeTick
+                                        font.family: Theme.fontFamily
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    Item {
-                        id: bookmarkRow
-                        y: flick.contentY + Theme.timelineRulerHeight
-                        z: 2
-                        width: parent.width
-                        height: Theme.timelineBookmarkRowHeight
+                        Item {
+                            id: bookmarkRow
+                            y: Theme.timelineRulerHeight
+                            width: parent.width
+                            height: Theme.timelineBookmarkRowHeight
+                            z: 2
 
-                        Repeater {
-                            model: EditorState.bookmarks
-                            delegate: Rectangle {
-                                x: modelData.seconds * root.pxPerSecond - width / 2
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 8
-                                height: 8
-                                radius: 4
-                                color: Theme.primary
+                            Repeater {
+                                model: EditorState.bookmarks
+                                delegate: Rectangle {
+                                    x: modelData.seconds * root.pxPerSecond - width / 2
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 8
+                                    height: 8
+                                    radius: 4
+                                    color: Theme.primary
+                                    z: 3
 
-                                ThemedToolTip {
-                                    visible: bookmarkMouse.containsMouse
-                                    text: modelData.label + " @ " + root.formatTime(modelData.seconds)
-                                }
+                                    ThemedToolTip {
+                                        visible: bookmarkMouse.containsMouse
+                                        text: modelData.label + " @ "
+                                              + root.formatTime(modelData.seconds)
+                                    }
 
-                                MouseArea {
-                                    id: bookmarkMouse
-                                    anchors.fill: parent
-                                    anchors.margins: -6
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: EditorState.goToBookmark(index)
+                                    MouseArea {
+                                        id: bookmarkMouse
+                                        anchors.fill: parent
+                                        anchors.margins: -6
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        // Stop the seek strip from eating bookmark clicks.
+                                        preventStealing: true
+                                        onClicked: EditorState.goToBookmark(index)
+                                    }
                                 }
                             }
                         }
@@ -850,7 +909,7 @@ PanelFrame {
                             visible: root.dropCreatesNewTrack
                             x: root.dropStartSeconds * root.pxPerSecond
                             width: root.dropDurationSeconds * root.pxPerSecond
-                            height: root.trackHeight(EditorState.trackTypeForAsset(EditorState.draggingAssetIndex))
+                            height: root.trackBaseHeight(EditorState.trackTypeForAsset(EditorState.draggingAssetIndex))
                             radius: Theme.radiusSm
                             color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.12)
                             border.width: 2
@@ -864,7 +923,7 @@ PanelFrame {
                                 id: trackRow
                                 property int trackIndex: index
                                 width: flick.contentWidth
-                                height: root.trackHeight(root.tracks[trackIndex].type)
+                                height: root.trackHeight(trackIndex)
                                 // Faint row tint on hover, and an empty track now
                                 // reads as a track rather than as blank space.
                                 color: trackHover.hovered
@@ -1257,57 +1316,106 @@ PanelFrame {
                     Item {
                         id: playhead
                         y: 0
-                        // Above the pinned ruler (z: 2), otherwise the ruler's
-                        // scrub area covers the handle and swallows the press
-                        // before the drag can start.
+                        // Above the seek strip (z: 2), otherwise the scrub area
+                        // covers the handle and swallows the press before drag starts.
                         z: 3
                         width: Theme.playheadLineWidth
-                        height: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight + root.totalTracksHeight()
+                        height: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
+                                + root.totalTracksHeight()
 
                         Binding {
                             target: playhead
                             property: "x"
                             value: EditorState.playheadSeconds * root.pxPerSecond
-                            when: !playheadDragArea.drag.active
+                            when: !playheadDragArea.drag.active && !playheadLineDrag.drag.active
                         }
 
-                        // Follow the drag live so the preview scrubs with it,
-                        // matching what dragging along the ruler already does.
+                        // Follow either drag live so the preview scrubs with it.
                         onXChanged: {
-                            if (playheadDragArea.drag.active)
+                            if (playheadDragArea.drag.active || playheadLineDrag.drag.active)
                                 EditorState.playheadSeconds = playhead.x / root.pxPerSecond
+                        }
+
+                        function finishSeek() {
+                            EditorState.playheadSeconds =
+                                EditorState.snapTime(playhead.x / root.pxPerSecond)
                         }
 
                         Rectangle {
                             anchors.left: parent.left
+                            y: Theme.timelineRulerHeight * 0.55
                             width: Theme.playheadLineWidth
-                            height: parent.height
+                            height: parent.height - y
                             color: Theme.primary
                         }
 
-                        Rectangle {
+                        // CapCut/Premiere-style scrubber head in the seek strip.
+                        Item {
                             id: playheadHandle
                             width: Theme.playheadHandleSize
-                            height: Theme.playheadHandleSize
-                            radius: Theme.playheadHandleSize / 2
+                            height: Theme.playheadHandleSize + 2
                             x: -width / 2 + Theme.playheadLineWidth / 2
-                            y: 4
-                            color: Theme.primary
-                            border.width: 2
-                            border.color: Theme.primary
+                            y: 3
+
+                            Rectangle {
+                                anchors.top: parent.top
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                width: parent.width
+                                height: parent.height * 0.55
+                                radius: 2
+                                color: Theme.primary
+                            }
+
+                            // Pointed tip so the head reads as a scrubber, not a knob.
+                            Canvas {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.top: parent.top
+                                anchors.topMargin: parent.height * 0.4
+                                width: parent.width
+                                height: parent.height * 0.6
+                                onPaint: {
+                                    const ctx = getContext("2d")
+                                    ctx.reset()
+                                    ctx.beginPath()
+                                    ctx.moveTo(0, 0)
+                                    ctx.lineTo(width, 0)
+                                    ctx.lineTo(width * 0.5, height)
+                                    ctx.closePath()
+                                    ctx.fillStyle = Theme.primary
+                                    ctx.fill()
+                                }
+                                onWidthChanged: requestPaint()
+                                onHeightChanged: requestPaint()
+                                Component.onCompleted: requestPaint()
+                            }
                         }
 
-                        // Grab strip running the whole height of the line, so the
-                        // playhead can be dragged from anywhere down the timeline
-                        // rather than only by its handle. Clips take selection on
-                        // press, so this band is kept as narrow as it can be while
-                        // staying grabbable — it is dead to clip clicks.
+                        // Wide grab across the seek strip head.
                         MouseArea {
                             id: playheadDragArea
-                            width: 7
-                            height: parent.height
+                            width: Theme.playheadSeekGrabWidth
+                            height: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
                             x: -(width - Theme.playheadLineWidth) / 2
                             y: 0
+                            cursorShape: Qt.SizeHorCursor
+                            preventStealing: true
+                            hoverEnabled: true
+                            drag.target: playhead
+                            drag.axis: Drag.XAxis
+                            drag.threshold: 0
+                            drag.minimumX: 0
+                            drag.maximumX: flick.contentWidth - Theme.playheadLineWidth
+                            onReleased: playhead.finishSeek()
+                        }
+
+                        // Narrow grab down the timeline line — stays thin so clip
+                        // clicks aren't stolen.
+                        MouseArea {
+                            id: playheadLineDrag
+                            width: 7
+                            height: parent.height - playheadDragArea.height
+                            x: -(width - Theme.playheadLineWidth) / 2
+                            y: playheadDragArea.height
                             cursorShape: Qt.SizeHorCursor
                             preventStealing: true
                             drag.target: playhead
@@ -1315,7 +1423,7 @@ PanelFrame {
                             drag.threshold: 0
                             drag.minimumX: 0
                             drag.maximumX: flick.contentWidth - Theme.playheadLineWidth
-                            onReleased: EditorState.playheadSeconds = EditorState.snapTime(playhead.x / root.pxPerSecond)
+                            onReleased: playhead.finishSeek()
                         }
                     }
 
@@ -1411,7 +1519,7 @@ PanelFrame {
                                    : Math.min(clipEndX, cutX + bandLength) - cutX
                             y: root.trackOffsetY(root.cutHoverTrack)
                             height: cutOverlay.hoverClip
-                                ? root.trackHeight(root.tracks[root.cutHoverTrack].type) : 0
+                                ? root.trackHeight(root.cutHoverTrack) : 0
                             radius: Theme.radiusSm
 
                             gradient: Gradient {

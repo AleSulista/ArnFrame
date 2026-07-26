@@ -57,12 +57,22 @@ Item {
         onRejected: root.pendingDeleteTrack = -1
     }
 
-    function trackHeight(type) {
+    // Must stay in step with TimelinePanel's own height helpers, or the headers
+    // drift out of alignment with their rows.
+    function trackBaseHeight(type) {
         if (type === "video") return Theme.trackHeightVideo;
         if (type === "audio") return Theme.trackHeightAudio;
         if (type === "shape") return Theme.trackHeightShape;
         if (type === "subtitle") return Theme.trackHeightSubtitle;
         return Theme.trackHeightText;
+    }
+
+    function trackHeight(index) {
+        if (index < 0 || index >= tracks.length)
+            return Theme.trackHeightVideo
+        const track = tracks[index]
+        const scale = track.heightScale > 0 ? track.heightScale : 1
+        return Math.round(Math.max(20, trackBaseHeight(track.type) * scale))
     }
 
     function trackTypeIcon(type) {
@@ -85,7 +95,7 @@ Item {
     function trackRowTop(index) {
         var cursor = 0
         for (var i = 0; i < index && i < tracks.length; i++)
-            cursor += trackHeight(tracks[i].type) + Theme.trackGap
+            cursor += trackHeight(i) + Theme.trackGap
         return cursor
     }
 
@@ -95,7 +105,7 @@ Item {
             return -1
         var cursor = 0
         for (var i = 0; i < tracks.length; i++) {
-            const th = trackHeight(tracks[i].type)
+            const th = trackHeight(i)
             if (y < cursor + th / 2)
                 return i
             cursor += th + Theme.trackGap
@@ -118,7 +128,7 @@ Item {
             readonly property bool trackHidden: root.tracks[index].hidden === true
             readonly property bool trackWaveform: root.tracks[index].showWaveform === true
             width: Theme.trackLabelsWidth
-            height: root.trackHeight(root.tracks[index].type)
+            height: root.trackHeight(index)
                     + (index < root.tracks.length - 1 ? Theme.trackGap : 0)
             // Follows the timeline's vertical scroll so labels stay
             // aligned with their rows.
@@ -128,7 +138,7 @@ Item {
             Rectangle {
                 anchors.right: parent.right
                 width: 1
-                height: root.trackHeight(root.tracks[index].type)
+                height: root.trackHeight(index)
                 color: Theme.panelBorder
             }
 
@@ -289,7 +299,7 @@ Item {
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeTiny
                 elide: Text.ElideRight
-                visible: root.trackHeight(root.tracks[index].type) >= 40
+                visible: root.trackHeight(index) >= 40
             }
 
             // Track context menu.
@@ -326,6 +336,13 @@ Item {
                     }
                     ThemedMenuSeparator {}
                     ThemedMenuItem {
+                        text: qsTr("Reset row height")
+                        icon.name: Theme.icons.minimize
+                        enabled: root.tracks[index].heightScale !== 1
+                        onTriggered: EditorState.setTrackHeightScale(index, 1)
+                    }
+                    ThemedMenuSeparator {}
+                    ThemedMenuItem {
                         text: qsTr("Delete track")
                         icon.name: Theme.icons.trash
                         onTriggered: {
@@ -333,6 +350,28 @@ Item {
                             confirmDeleteTrack.open()
                         }
                     }
+                }
+            }
+
+            // DAW-style lane zoom: wheel over this header grows/shrinks only
+            // this track, so a music track can be made tall for waveform work
+            // without zooming the whole timeline. NoButton keeps clicks, the
+            // reorder drag and the context menu working underneath.
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.NoButton
+                z: 40
+                onWheel: (wheel) => {
+                    // Modified wheel belongs to the timeline's zoom/pan.
+                    if (wheel.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) {
+                        wheel.accepted = false
+                        return
+                    }
+                    const dy = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y
+                                                        : wheel.pixelDelta.y
+                    if (dy === 0)
+                        return
+                    EditorState.nudgeTrackHeightScale(index, dy > 0 ? 1 : -1)
                 }
             }
         }
@@ -354,7 +393,7 @@ Item {
             const from = root.draggingTrackFrom
             const to = root.draggingTrackTo
             if (from < to)
-                return root.trackRowTop(to) + root.trackHeight(root.tracks[to].type) - 1
+                return root.trackRowTop(to) + root.trackHeight(to) - 1
             return root.trackRowTop(to)
         }
     }

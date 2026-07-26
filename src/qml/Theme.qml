@@ -245,8 +245,9 @@ QtObject {
 
     // --- Layout: timeline ------------------------------------------------------
     readonly property real timelineToolbarHeight: 40
-    readonly property real timelineRulerHeight: 22
-    readonly property real timelineBookmarkRowHeight: 16
+    // Tall enough to be an easy seek/scrub hit target (CapCut/Premiere-style).
+    readonly property real timelineRulerHeight: 28
+    readonly property real timelineBookmarkRowHeight: 18
     readonly property real trackHeightVideo: 65
     readonly property real trackHeightAudio: 50
     readonly property real trackHeightText: 25
@@ -258,7 +259,9 @@ QtObject {
     readonly property real trackLabelsWidth: 130
     readonly property real pixelsPerSecondBase: 50
     readonly property real playheadLineWidth: 2
-    readonly property real playheadHandleSize: 12
+    // Top scrubber head — sized to sit in the seek strip and stay easy to grab.
+    readonly property real playheadHandleSize: 16
+    readonly property real playheadSeekGrabWidth: 18
     readonly property real clipSelectionRingWidth: 1.5
     // Name band across the top of a clip. Clamped against track height at the use
     // site so it never swallows a short (25px text/subtitle) row.

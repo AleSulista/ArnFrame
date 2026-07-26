@@ -16,23 +16,11 @@ Popup {
     // menu used to be mouse-only despite already handling Escape.
     property int highlightIndex: 0
 
-    onOpened: highlightIndex = 0
-
-    Keys.onUpPressed: function(event) {
-        highlightIndex = (highlightIndex - 1 + trackTypes.length) % trackTypes.length
-        event.accepted = true
-    }
-    Keys.onDownPressed: function(event) {
-        highlightIndex = (highlightIndex + 1) % trackTypes.length
-        event.accepted = true
-    }
-    Keys.onReturnPressed: function(event) {
-        root.addHighlighted()
-        event.accepted = true
-    }
-    Keys.onEnterPressed: function(event) {
-        root.addHighlighted()
-        event.accepted = true
+    onOpened: {
+        highlightIndex = 0
+        // Popup itself is not an Item — Keys.* on the root fails with
+        // "Could not attach Keys property". Focus the content column instead.
+        contentItem.forceActiveFocus()
     }
 
     function addHighlighted() {
@@ -79,6 +67,25 @@ Popup {
 
     contentItem: Column {
         spacing: 2
+        focus: true
+
+        Keys.onUpPressed: function(event) {
+            root.highlightIndex = (root.highlightIndex - 1 + root.trackTypes.length)
+                                  % root.trackTypes.length
+            event.accepted = true
+        }
+        Keys.onDownPressed: function(event) {
+            root.highlightIndex = (root.highlightIndex + 1) % root.trackTypes.length
+            event.accepted = true
+        }
+        Keys.onReturnPressed: function(event) {
+            root.addHighlighted()
+            event.accepted = true
+        }
+        Keys.onEnterPressed: function(event) {
+            root.addHighlighted()
+            event.accepted = true
+        }
 
         Text {
             width: parent.width

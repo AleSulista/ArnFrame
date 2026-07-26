@@ -48,8 +48,8 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
     , m_device(new AudioPlaybackIODevice(this))
 {
     const QString saved = QSettings().value(QStringLiteral("preview/quality")).toString().toLower();
-    if (saved == QStringLiteral("full") || saved == QStringLiteral("half")
-        || saved == QStringLiteral("quarter")) {
+    if (saved == QStringLiteral("auto") || saved == QStringLiteral("full")
+        || saved == QStringLiteral("half") || saved == QStringLiteral("quarter")) {
         m_previewQuality = saved;
     }
 
@@ -126,6 +126,7 @@ void PlaybackEngine::setPlayheadUs(drift::TimeUs us)
     m_playheadUs = qMax<drift::TimeUs>(0, us);
     m_mixer.resetEffectRacks();
     m_clock.reset(m_playheadUs, m_sampleRate);
+    m_compositor.noteSeek(m_playheadUs);
     // reset() clears the running flag; resume the clock if we are still in play
     // so edits/seeks during playback don't freeze audio at one timeline spot.
     if (m_playing)
@@ -156,8 +157,8 @@ void PlaybackEngine::setPreviewQuality(const QString &quality)
     const QString normalized = quality.toLower();
     // An unrecognized value used to silently become "half", which quietly changed
     // what the user was looking at. Ignore it instead.
-    if (normalized != QStringLiteral("full") && normalized != QStringLiteral("half")
-        && normalized != QStringLiteral("quarter")) {
+    if (normalized != QStringLiteral("auto") && normalized != QStringLiteral("full")
+        && normalized != QStringLiteral("half") && normalized != QStringLiteral("quarter")) {
         qWarning("PlaybackEngine: ignoring unknown preview quality '%s'", qPrintable(quality));
         return;
     }
@@ -202,6 +203,14 @@ void PlaybackEngine::play()
     m_clock.start();
     m_playing = true;
 
+    const int fps = m_project ? qMax(1, m_project->fps()) : 30;
+    const int tickMs = qMax(1, static_cast<int>(drift::usToSeconds(drift::frameDurationUs(fps)) * 1000.0));
+    // Always adapt during play: Auto/Full start sharp and drop under load;
+    // Half/Quarter can still drop further if effects overrun their budget.
+    m_compositor.setFrameBudgetMs(tickMs);
+    m_compositor.setAdaptiveEnabled(true);
+    m_compositor.resetAdaptiveScale();
+
     QMetaObject::invokeMethod(
         m_device,
         [this] {
@@ -213,9 +222,6 @@ void PlaybackEngine::play()
     emit playingChanged();
 
     m_playheadTimer.start(kPlayheadUpdateMs);
-
-    const int fps = m_project ? qMax(1, m_project->fps()) : 30;
-    const int tickMs = qMax(1, static_cast<int>(drift::usToSeconds(drift::frameDurationUs(fps)) * 1000.0));
     m_compositeTimer.start(tickMs);
 
     onPlayheadTick();
@@ -233,6 +239,9 @@ void PlaybackEngine::pause()
     m_clock.pause();
     m_playheadUs = m_clock.pausedAt();
     m_mixer.resetEffectRacks();
+    // Paused frames should be sharp again — drop the playback downscale.
+    m_compositor.setAdaptiveEnabled(false);
+    m_compositor.resetAdaptiveScale();
     QMetaObject::invokeMethod(
         m_device,
         [this] {
@@ -309,17 +318,30 @@ FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
     } else if (m_previewQuality == QStringLiteral("half")) {
         options.previewScale = 0.5;
     } else {
+        // "auto" and "full" both start at project resolution; Auto then adapts
+        // downward from render cost, and both are capped to the preview widget.
         options.previewScale = 1.0;
     }
-    // During playback, cap temporal history so time_echo cannot multiply decode
-    // work unboundedly. Paused/scrubbed frames keep full history for fidelity.
-    options.maxTimeEchoHistoryFrames = m_playing ? 12 : -1;
 
-    if (m_project && m_previewRenderWidth > 0 && m_previewRenderHeight > 0
-        && m_previewQuality == QStringLiteral("full")) {
-        const double widthScale = static_cast<double>(m_previewRenderWidth) / qMax(1, m_project->width());
-        const double heightScale = static_cast<double>(m_previewRenderHeight) / qMax(1, m_project->height());
-        options.previewScale = qBound(0.1, qMin(widthScale, heightScale), 1.0);
+    // CapCut-style: while playing, keep temporal history short so time_echo
+    // cannot multiply reverse seeks every frame. Auto is the most aggressive.
+    // Paused/scrubbed frames keep full history for fidelity.
+    if (m_playing) {
+        options.maxTimeEchoHistoryFrames =
+            m_previewQuality == QStringLiteral("auto") ? 3 : 6;
+    } else {
+        options.maxTimeEchoHistoryFrames = -1;
+    }
+
+    // Always clamp to the preview widget when known — half/quarter of a 4K
+    // project can still exceed the panel and waste decode/GPU work.
+    if (m_project && m_previewRenderWidth > 0 && m_previewRenderHeight > 0) {
+        const double widthScale =
+            static_cast<double>(m_previewRenderWidth) / qMax(1, m_project->width());
+        const double heightScale =
+            static_cast<double>(m_previewRenderHeight) / qMax(1, m_project->height());
+        options.previewScale =
+            qBound(0.1, qMin(options.previewScale, qMin(widthScale, heightScale)), 1.0);
     }
 
     // Hide the text clip being edited in place so the QML inline editor stands in

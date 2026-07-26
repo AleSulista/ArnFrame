@@ -105,7 +105,7 @@ private:
     mutable QMutex m_frameMutex;
     drift::TimeUs m_playheadUs = 0;
     std::atomic<bool> m_playing = false;
-    QString m_previewQuality = QStringLiteral("full");
+    QString m_previewQuality = QStringLiteral("auto");
     QString m_editingClipId;
     int m_previewRenderWidth = 0;
     int m_previewRenderHeight = 0;

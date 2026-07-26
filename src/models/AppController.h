@@ -470,6 +470,13 @@ public:
     Q_INVOKABLE bool trackHidden(int trackIndex) const;
     Q_INVOKABLE void setTrackShowWaveform(int trackIndex, bool show);
     Q_INVOKABLE bool trackShowWaveform(int trackIndex) const;
+    // Per-track row height multiplier (DAW-style lane resize). Clamped to
+    // trackHeightScaleMin()..trackHeightScaleMax().
+    Q_INVOKABLE void setTrackHeightScale(int trackIndex, double scale);
+    Q_INVOKABLE double trackHeightScale(int trackIndex) const;
+    Q_INVOKABLE void nudgeTrackHeightScale(int trackIndex, int steps);
+    Q_INVOKABLE double trackHeightScaleMin() const { return 0.6; }
+    Q_INVOKABLE double trackHeightScaleMax() const { return 4.0; }
     Q_INVOKABLE void moveTrack(int fromIndex, int toIndex);
     Q_INVOKABLE void addTrack(const QString &type);
     Q_INVOKABLE void removeTrack(int trackIndex);
