@@ -53,6 +53,9 @@ PanelFrame {
     readonly property real minZoom: 0.05
     readonly property real maxZoom: 40.0
     readonly property real pxPerSecond: Theme.pixelsPerSecondBase * zoom
+    // Exposed for clip filmstrip viewport culling (Flickable ids are local).
+    readonly property real timelineViewX: flick.contentX
+    readonly property real timelineViewW: flick.width
 
     // Ruler tick interval (seconds): the smallest "nice" step whose labels still
     // have room to breathe at the current zoom, so timestamps never squash.
@@ -491,13 +494,21 @@ PanelFrame {
     function ensurePlayheadVisible() {
         const playheadX = EditorState.playheadSeconds * pxPerSecond;
         const margin = 64;
-        // Eased rather than teleporting: auto-scroll during playback used to jump
-        // by up to a full viewport.
+        var target = -1
         if (playheadX < flick.contentX + margin)
-            scrollToX(Math.max(0, playheadX - margin));
+            target = Math.max(0, playheadX - margin)
         else if (playheadX > flick.contentX + flick.width - margin)
-            scrollToX(Math.min(Math.max(0, flick.contentWidth - flick.width),
-                               playheadX - flick.width + margin));
+            target = Math.min(Math.max(0, flick.contentWidth - flick.width),
+                              playheadX - flick.width + margin)
+        if (target < 0)
+            return
+        // During play, assign contentX directly — restarting a NumberAnimation
+        // every ~16ms on a multi-hour Flickable freezes the UI.
+        if (EditorState.playing || flick.dragging || flick.flicking) {
+            flick.contentX = target
+            return
+        }
+        scrollToX(target)
     }
 
     // Smooth horizontal scroll helper. Skipped while the user is dragging the
@@ -758,17 +769,28 @@ PanelFrame {
                         }
 
                         // Time ticks live in the upper half of the seek strip.
+                        // Only instantiate ticks that intersect the viewport — a 2h
+                        // timeline at 1× zoom would otherwise create thousands of Items.
                         Item {
                             id: ruler
                             width: parent.width
                             height: Theme.timelineRulerHeight
                             z: 0
 
+                            readonly property real tickStepPx: root.tickStepSeconds * root.pxPerSecond
+                            readonly property int tickIndexMax: Math.max(0,
+                                Math.ceil(flick.contentWidth / Math.max(1, tickStepPx)))
+                            readonly property int firstVisibleTick: Math.max(0,
+                                Math.floor(flick.contentX / Math.max(1, tickStepPx)) - 1)
+                            readonly property int visibleTickCount: Math.min(
+                                tickIndexMax - firstVisibleTick + 1,
+                                Math.ceil(flick.width / Math.max(1, tickStepPx)) + 3)
+
                             Repeater {
-                                model: Math.ceil(flick.contentWidth
-                                                 / (root.tickStepSeconds * root.pxPerSecond)) + 1
+                                model: Math.max(0, ruler.visibleTickCount)
                                 delegate: Item {
-                                    readonly property real tickSeconds: index * root.tickStepSeconds
+                                    readonly property real tickSeconds:
+                                        (ruler.firstVisibleTick + index) * root.tickStepSeconds
                                     x: tickSeconds * root.pxPerSecond
                                     width: root.tickStepSeconds * root.pxPerSecond
                                     height: ruler.height

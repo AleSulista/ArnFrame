@@ -30,6 +30,10 @@ Item {
     function refreshOverlay() {
         if (interacting)
             return
+        // Playhead ticks ~60 Hz; rebuilding grips every tick during playback
+        // is wasted work and stalls the UI on long timelines.
+        if (EditorState.playing)
+            return
         overlayClips = EditorState.previewClipsAtPlayhead()
     }
 
@@ -46,6 +50,10 @@ Item {
         function onTracksChanged() { root.refreshOverlay() }
         function onSelectionChanged() { root.refreshOverlay() }
         function onPlayheadSecondsChanged() { root.refreshOverlay() }
+        function onPlayingChanged() {
+            if (!EditorState.playing)
+                root.refreshOverlay()
+        }
         function onInlineTextEditRequested(trackIndex, clipIndex) {
             root.pendingEditKey = trackIndex + ":" + clipIndex
             root.refreshOverlay()

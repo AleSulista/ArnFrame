@@ -55,7 +55,11 @@ ClipReaderWorker *ClipReaderPool::ensureWorker(std::map<QString, std::unique_ptr
         entry->worker->moveToThread(entry->thread.get());
         entry->thread->start();
 
-        QMetaObject::invokeMethod(entry->worker, "openPath", Qt::BlockingQueuedConnection, Q_ARG(QString, path));
+        // Open asynchronously. Callers that need frames/audio use BlockingQueued
+        // decode methods, which run after this open on the worker's event queue —
+        // so the GUI/audio threads are never stuck inside avformat_find_stream_info
+        // while holding the pool mutex (multi-hour files make that open very slow).
+        QMetaObject::invokeMethod(entry->worker, "openPath", Qt::QueuedConnection, Q_ARG(QString, path));
         it = workers.emplace(path, std::move(entry)).first;
     }
 

@@ -96,6 +96,8 @@ void PlaybackEngine::ensureAudioSink()
     if (m_project)
         m_sampleRate = m_project->sampleRate();
 
+    // Create the sink on the audio thread without blocking the GUI. play() only
+    // Queued-starts it afterward; a missing sink for one refill period is fine.
     QMetaObject::invokeMethod(
         m_device,
         [this] {
@@ -110,7 +112,7 @@ void PlaybackEngine::ensureAudioSink()
                 // the sink's played position, so buffer depth doesn't affect sync.
             }
         },
-        Qt::BlockingQueuedConnection);
+        Qt::QueuedConnection);
 }
 
 void PlaybackEngine::setProject(drift::Project *project)
@@ -211,13 +213,15 @@ void PlaybackEngine::play()
     m_compositor.setAdaptiveEnabled(true);
     m_compositor.resetAdaptiveScale();
 
+    // Never block the GUI on sink I/O. start() may pull the first audio buffer,
+    // which opens/seeks media — that must stay on the audio thread only.
     QMetaObject::invokeMethod(
         m_device,
         [this] {
             if (m_sink)
                 m_sink->start(m_device);
         },
-        Qt::BlockingQueuedConnection);
+        Qt::QueuedConnection);
 
     emit playingChanged();
 

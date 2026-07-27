@@ -149,15 +149,17 @@ Item {
             z: 4
         }
 
-        // Fade ramp overlay (always visible so fades read at a glance).
+        // Fade ramp overlays — sized only to the fade spans so a multi-hour clip
+        // does not allocate a hundreds-of-thousands-px Canvas framebuffer.
         Canvas {
-            id: fadeCanvas
-            anchors.fill: parent
+            id: fadeInCanvas
+            x: 0
+            y: 0
             z: 2
-            property real fadeInPx: Math.min(width, (clipItem.clipData.fadeIn || 0) * panel.pxPerSecond)
-            property real fadeOutPx: Math.min(width, (clipItem.clipData.fadeOut || 0) * panel.pxPerSecond)
-            onFadeInPxChanged: requestPaint()
-            onFadeOutPxChanged: requestPaint()
+            width: Math.max(0, Math.min(parent.width,
+                                        (clipItem.clipData.fadeIn || 0) * panel.pxPerSecond))
+            height: parent.height
+            visible: width > 0.5
             onWidthChanged: requestPaint()
             onHeightChanged: requestPaint()
             onPaint: {
@@ -166,30 +168,47 @@ Item {
                 ctx.fillStyle = "rgba(0,0,0,0.38)"
                 ctx.strokeStyle = "rgba(255,255,255,0.9)"
                 ctx.lineWidth = 1.5
-                if (fadeInPx > 0.5) {
-                    ctx.beginPath()
-                    ctx.moveTo(0, 0)
-                    ctx.lineTo(fadeInPx, 0)
-                    ctx.lineTo(0, height)
-                    ctx.closePath()
-                    ctx.fill()
-                    ctx.beginPath()
-                    ctx.moveTo(0, height)
-                    ctx.lineTo(fadeInPx, 0)
-                    ctx.stroke()
-                }
-                if (fadeOutPx > 0.5) {
-                    ctx.beginPath()
-                    ctx.moveTo(width, 0)
-                    ctx.lineTo(width - fadeOutPx, 0)
-                    ctx.lineTo(width, height)
-                    ctx.closePath()
-                    ctx.fill()
-                    ctx.beginPath()
-                    ctx.moveTo(width, height)
-                    ctx.lineTo(width - fadeOutPx, 0)
-                    ctx.stroke()
-                }
+                ctx.beginPath()
+                ctx.moveTo(0, 0)
+                ctx.lineTo(width, 0)
+                ctx.lineTo(0, height)
+                ctx.closePath()
+                ctx.fill()
+                ctx.beginPath()
+                ctx.moveTo(0, height)
+                ctx.lineTo(width, 0)
+                ctx.stroke()
+            }
+        }
+
+        Canvas {
+            id: fadeOutCanvas
+            y: 0
+            z: 2
+            width: Math.max(0, Math.min(parent.width,
+                                        (clipItem.clipData.fadeOut || 0) * panel.pxPerSecond))
+            height: parent.height
+            x: parent.width - width
+            visible: width > 0.5
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onXChanged: requestPaint()
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.reset()
+                ctx.fillStyle = "rgba(0,0,0,0.38)"
+                ctx.strokeStyle = "rgba(255,255,255,0.9)"
+                ctx.lineWidth = 1.5
+                ctx.beginPath()
+                ctx.moveTo(width, 0)
+                ctx.lineTo(0, 0)
+                ctx.lineTo(width, height)
+                ctx.closePath()
+                ctx.fill()
+                ctx.beginPath()
+                ctx.moveTo(width, height)
+                ctx.lineTo(0, 0)
+                ctx.stroke()
             }
         }
 
@@ -215,6 +234,10 @@ Item {
             sourceDuration: clipItem.clipData.sourceDuration
             // Image "strips" are a single poster frame.
             frameCount: clipItem.clipData.kind === "image" ? 1 : 8
+            // Viewport-cull tiles so multi-hour clips don't spawn thousands of Images.
+            worldX: clipItem.x
+            viewX: panel.timelineViewX
+            viewW: panel.timelineViewW
             z: 0
         }
 
@@ -302,56 +325,68 @@ Item {
             }
         }
 
-        Canvas {
-            id: waveformCanvas
+        // Waveform: paint into a capped-resolution buffer and stretch it so a
+        // multi-hour clip never allocates a hundreds-of-thousands-px Canvas.
+        Item {
+            id: waveformHost
             visible: clipItem.trackType === "audio"
                      || (clipItem.trackType === "video"
                          && clipItem.showWaveform)
-            property var peaks: clipItem.clipData.path
-                          ? EditorState.waveformPeaks(clipItem.clipData.path)
-                          : []
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.topMargin: clipItem.headerBandHeight
             anchors.bottom: parent.bottom
-            onPeaksChanged: requestPaint()
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
+            clip: true
 
-            Connections {
-                target: EditorState
-                function onWaveformReady(path) {
-                    if (path === clipItem.clipData.path)
-                        waveformCanvas.peaks = EditorState.waveformPeaks(path)
+            Canvas {
+                id: waveformCanvas
+                property var peaks: clipItem.clipData.path
+                              ? EditorState.waveformPeaks(clipItem.clipData.path)
+                              : []
+                // Cap buffer width; Scale stretches to the host.
+                width: Math.max(1, Math.min(2048, Math.floor(waveformHost.width)))
+                height: waveformHost.height
+                transform: Scale {
+                    xScale: waveformHost.width > 0 ? waveformHost.width / waveformCanvas.width : 1
+                    origin.x: 0
+                    origin.y: 0
                 }
-            }
+                onPeaksChanged: requestPaint()
+                onWidthChanged: requestPaint()
+                onHeightChanged: requestPaint()
 
-            onPaint: {
-                var ctx = getContext("2d");
-                ctx.clearRect(0, 0, width, height);
-                if (!peaks || peaks.length === 0)
-                    return;
-                // One filled column per screen pixel: zoomed-out columns
-                // take the max of covered peaks; zoomed-in columns
-                // reuse peaks so there are never gaps between bars.
-                ctx.fillStyle = Theme.waveformColor;
-                var mid = height / 2;
-                var w = Math.max(1, Math.floor(width));
-                var n = peaks.length;
-                for (var x = 0; x < w; x++) {
-                    var i0 = Math.floor(x * n / w);
-                    var i1 = Math.floor((x + 1) * n / w);
-                    if (i1 <= i0)
-                        i1 = Math.min(n, i0 + 1);
-                    var peak = 0;
-                    for (var i = i0; i < i1; i++) {
-                        if (peaks[i] > peak)
-                            peak = peaks[i];
+                Connections {
+                    target: EditorState
+                    function onWaveformReady(path) {
+                        if (path === clipItem.clipData.path)
+                            waveformCanvas.peaks = EditorState.waveformPeaks(path)
                     }
-                    var amp = peak * mid * 0.9;
-                    if (amp > 0.5)
-                        ctx.fillRect(x, mid - amp, 1, amp * 2);
+                }
+
+                onPaint: {
+                    var ctx = getContext("2d");
+                    ctx.clearRect(0, 0, width, height);
+                    if (!peaks || peaks.length === 0)
+                        return;
+                    ctx.fillStyle = Theme.waveformColor;
+                    var mid = height / 2;
+                    var w = Math.max(1, Math.floor(width));
+                    var n = peaks.length;
+                    for (var x = 0; x < w; x++) {
+                        var i0 = Math.floor(x * n / w);
+                        var i1 = Math.floor((x + 1) * n / w);
+                        if (i1 <= i0)
+                            i1 = Math.min(n, i0 + 1);
+                        var peak = 0;
+                        for (var i = i0; i < i1; i++) {
+                            if (peaks[i] > peak)
+                                peak = peaks[i];
+                        }
+                        var amp = peak * mid * 0.9;
+                        if (amp > 0.5)
+                            ctx.fillRect(x, mid - amp, 1, amp * 2);
+                    }
                 }
             }
         }
