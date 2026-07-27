@@ -73,8 +73,18 @@ private:
     bool ensureAudioDecoder();
     bool openSoftwareVideoDecoder();
     bool tryOpenHardwareDecoder();
+    bool hardwareDecodeIsWorthIt() const;
     void teardownVideoDecoder();
     bool fallbackFromHardwareDecoder();
+
+    // VAAPI VPP downscale so the GPU->CPU readback moves preview-sized pixels
+    // instead of full-resolution ones. Returns a software frame owned by the
+    // reader (valid until the next call), or nullptr to fall back to a plain
+    // full-size transfer.
+    bool ensureHwScaler(const AVFrame *hwFrame, int targetWidth, int targetHeight);
+    void teardownHwScaler();
+    AVFrame *hwFrameToSoftware(const AVFrame *hwFrame, int targetWidth, int targetHeight);
+
     bool transferHwFrameToImage(const AVFrame *hwFrame, QImage &out, int targetWidth, int targetHeight);
     bool convertFrame(const AVFrame *frame, QImage &out, int targetWidth, int targetHeight);
     bool convertFrameNv12(const AVFrame *frame, Nv12Frame &out, int targetWidth, int targetHeight);
@@ -109,6 +119,19 @@ private:
     bool m_hwAccelActive = false;
     bool m_hwAccelDisabled = false; // sticky after a failed VAAPI decode
     AVPixelFormat m_hwPixFmt = AV_PIX_FMT_NONE;
+
+    // scale_vaapi graph, rebuilt when the decode size or the decoder's frame
+    // pool changes. m_hwScalerFailed is sticky: a driver without working VPP
+    // falls back to full-size transfers rather than retrying per frame.
+    struct AVFilterGraph *m_vppGraph = nullptr;
+    struct AVFilterContext *m_vppSrc = nullptr;
+    struct AVFilterContext *m_vppSink = nullptr;
+    struct AVBufferRef *m_vppFramesCtx = nullptr;
+    AVFrame *m_vppScaled = nullptr;
+    AVFrame *m_swFrame = nullptr;
+    int m_vppW = 0;
+    int m_vppH = 0;
+    bool m_hwScalerFailed = false;
 
     // Sequential-decode state: lets playback decode forward without re-seeking
     // to a keyframe on every frame. Only seek on a backward jump or a large gap.

@@ -9,7 +9,9 @@ class PlaybackTest : public QObject
 
 private slots:
     void clockPausedPosition();
+    void clockHoldsStartUntilSinkSyncs();
     void clockWallFallbackWhileRunning();
+    void clockNeverRunsBackwardOnLateFirstSync();
     void produceAdvancesWithRenderedSamples();
     void playbackTracksSinkPosition();
     void seekWhileRunningKeepsClockAlive();
@@ -31,16 +33,45 @@ void PlaybackTest::clockPausedPosition()
     QCOMPARE(clock.pausedAt(), drift::secondsToUs(2.5));
 }
 
+// Opening the sink and pulling its first buffer takes a few hundred ms. Guessing
+// forward on wall time during that window and then correcting to the sink's
+// position snapped the playhead back to the start of playback.
+void PlaybackTest::clockHoldsStartUntilSinkSyncs()
+{
+    PlaybackClock clock;
+    clock.reset(drift::secondsToUs(2.5), 48000);
+    clock.start();
+    QTest::qWait(50);
+    QCOMPARE(clock.currentTimeUs(), drift::secondsToUs(2.5));
+}
+
+// With no sink reporting progress at all (no audio device), the playhead still has
+// to advance once the grace period is over, or video-only playback would freeze.
 void PlaybackTest::clockWallFallbackWhileRunning()
 {
     PlaybackClock clock;
     clock.reset(0, 48000);
     clock.start();
-    QTest::qWait(50);
-    QVERIFY(clock.currentTimeUs() >= drift::kUsPerMs * 40);
+    QTest::qWait(650);
+    QVERIFY(clock.currentTimeUs() > 0);
     clock.pause();
-    const drift::TimeUs paused = clock.pausedAt();
-    QVERIFY(paused >= drift::kUsPerMs * 40);
+    QVERIFY(clock.pausedAt() > 0);
+}
+
+void PlaybackTest::clockNeverRunsBackwardOnLateFirstSync()
+{
+    PlaybackClock clock;
+    clock.reset(0, 48000);
+    clock.start();
+
+    // Let the wall-clock fallback get going, then have the sink report that it has
+    // barely played anything — exactly what the first sync looks like in practice.
+    QTest::qWait(650);
+    const drift::TimeUs before = clock.currentTimeUs();
+    QVERIFY(before > 0);
+
+    clock.syncPlaybackUs(0);
+    QVERIFY(clock.currentTimeUs() >= before);
 }
 
 void PlaybackTest::produceAdvancesWithRenderedSamples()

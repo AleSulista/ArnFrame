@@ -46,4 +46,5 @@ private:
     drift::TimeUs m_anchorPlayedUs = 0;
     qint64 m_anchorWallNs = 0; // 0 until the first sink sync arrives
     qint64 m_startWallNs = 0;  // wall time at start(), for the pre-sync fallback
+    mutable drift::TimeUs m_lastReportedUs = 0; // monotonic guard on the visible playhead
 };

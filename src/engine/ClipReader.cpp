@@ -8,6 +8,8 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
@@ -77,6 +79,27 @@ QImage frameToRgba(const AVFrame *frame, SwsContext *&sws, int targetWidth, int 
     return copy;
 }
 
+// Pack an NV12 AVFrame into the flat Y-then-UV buffer the compositor uploads.
+Nv12Frame packNv12(const AVFrame *nv12, int targetWidth, int targetHeight)
+{
+    Nv12Frame out;
+    const qsizetype yBytes = qsizetype(targetWidth) * targetHeight;
+    const qsizetype uvBytes = qsizetype(targetWidth) * (targetHeight / 2);
+    out.data.resize(yBytes + uvBytes);
+    // Copy plane-by-plane in case linesize > width.
+    for (int y = 0; y < targetHeight; ++y) {
+        memcpy(out.data.data() + qsizetype(y) * targetWidth, nv12->data[0] + y * nv12->linesize[0],
+               size_t(targetWidth));
+    }
+    for (int y = 0; y < targetHeight / 2; ++y) {
+        memcpy(out.data.data() + yBytes + qsizetype(y) * targetWidth,
+               nv12->data[1] + y * nv12->linesize[1], size_t(targetWidth));
+    }
+    out.width = targetWidth;
+    out.height = targetHeight;
+    return out;
+}
+
 Nv12Frame frameToNv12(const AVFrame *frame, SwsContext *&sws, int targetWidth, int targetHeight)
 {
     Nv12Frame out;
@@ -90,6 +113,13 @@ Nv12Frame frameToNv12(const AVFrame *frame, SwsContext *&sws, int targetWidth, i
     targetHeight &= ~1;
     if (targetWidth < 2 || targetHeight < 2)
         return out;
+
+    // The VAAPI VPP path already produced NV12 at exactly this size — packing it
+    // directly skips a full-frame scale that would only be a copy.
+    if (frame->format == AV_PIX_FMT_NV12 && frame->width == targetWidth
+        && frame->height == targetHeight) {
+        return packNv12(frame, targetWidth, targetHeight);
+    }
 
     sws = sws_getCachedContext(sws, frame->width, frame->height,
                                static_cast<AVPixelFormat>(frame->format), targetWidth, targetHeight,
@@ -111,20 +141,7 @@ Nv12Frame frameToNv12(const AVFrame *frame, SwsContext *&sws, int targetWidth, i
 
     sws_scale(sws, frame->data, frame->linesize, 0, frame->height, nv12->data, nv12->linesize);
 
-    const qsizetype yBytes = qsizetype(targetWidth) * targetHeight;
-    const qsizetype uvBytes = qsizetype(targetWidth) * (targetHeight / 2);
-    out.data.resize(yBytes + uvBytes);
-    // Copy plane-by-plane in case linesize > width.
-    for (int y = 0; y < targetHeight; ++y) {
-        memcpy(out.data.data() + qsizetype(y) * targetWidth, nv12->data[0] + y * nv12->linesize[0],
-               size_t(targetWidth));
-    }
-    for (int y = 0; y < targetHeight / 2; ++y) {
-        memcpy(out.data.data() + yBytes + qsizetype(y) * targetWidth,
-               nv12->data[1] + y * nv12->linesize[1], size_t(targetWidth));
-    }
-    out.width = targetWidth;
-    out.height = targetHeight;
+    out = packNv12(nv12, targetWidth, targetHeight);
     av_frame_free(&nv12);
     return out;
 }
@@ -147,6 +164,7 @@ ClipReader::~ClipReader()
 
 void ClipReader::teardownVideoDecoder()
 {
+    teardownHwScaler();
     if (m_sws) {
         sws_freeContext(m_sws);
         m_sws = nullptr;
@@ -301,6 +319,7 @@ void ClipReader::close()
     m_videoStream = -1;
     m_audioStream = -1;
     m_hwAccelDisabled = false;
+    m_hwScalerFailed = false;
     m_audioPositioned = false;
     m_audioNextPtsUs = 0;
     m_audioLeftover.clear();
@@ -379,6 +398,39 @@ bool ClipReader::openSoftwareVideoDecoder()
     return true;
 }
 
+// VAAPI decode is ~8x faster than software, but the GPU->CPU readback that has to
+// follow costs ~1 ms/frame even after a VPP downscale, and no readback is needed at
+// all in software. Cheap streams decode for far less than that, so hwaccel makes
+// them slower — a 1008 kbit/s Constrained Baseline screen recording decodes in
+// 0.02 ms/frame in software but takes 2.4 ms/frame just to read back.
+// Measured on iHD, 1080p: 63 kbit/frame -> 0.02 ms/frame software,
+// 490 kbit/frame -> 1.30 ms/frame. The crossover sits well between the two.
+constexpr double kHwAccelMinKbitPerFrame = 250.0;
+
+bool ClipReader::hardwareDecodeIsWorthIt() const
+{
+    const AVStream *stream = m_fmt->streams[m_videoStream];
+    const AVCodecParameters *par = stream->codecpar;
+
+    // 4K and up is expensive in software at any bitrate, and with the VPP downscale
+    // the readback is bounded by the preview size rather than the source size.
+    if (int64_t(par->width) * par->height >= 3840LL * 2160)
+        return true;
+
+    int64_t bitRate = par->bit_rate;
+    if (bitRate <= 0)
+        bitRate = m_fmt->bit_rate; // Matroska usually omits the per-stream value
+    if (bitRate <= 0)
+        return true;
+
+    const AVRational rate = stream->avg_frame_rate;
+    if (rate.num <= 0 || rate.den <= 0)
+        return true;
+
+    const double fps = double(rate.num) / double(rate.den);
+    return (double(bitRate) / fps / 1000.0) >= kHwAccelMinKbitPerFrame;
+}
+
 bool ClipReader::tryOpenHardwareDecoder()
 {
     if (!m_fmt || m_videoStream < 0 || m_hwAccelActive || m_hwAccelDisabled)
@@ -386,6 +438,11 @@ bool ClipReader::tryOpenHardwareDecoder()
 
     // Allow forcing software decode on broken VAAPI stacks.
     if (qEnvironmentVariableIsSet("DRIFT_NO_VAAPI")) {
+        m_hwAccelDisabled = true;
+        return false;
+    }
+
+    if (!qEnvironmentVariableIsSet("DRIFT_FORCE_VAAPI") && !hardwareDecodeIsWorthIt()) {
         m_hwAccelDisabled = true;
         return false;
     }
@@ -470,21 +527,143 @@ bool ClipReader::ensureVideoDecoder()
     return openSoftwareVideoDecoder();
 }
 
-bool ClipReader::transferHwFrameToImage(const AVFrame *hwFrame, QImage &out, int targetWidth, int targetHeight)
+void ClipReader::teardownHwScaler()
 {
-    AVFrame *swFrame = av_frame_alloc();
-    if (!swFrame)
+    if (m_vppGraph)
+        avfilter_graph_free(&m_vppGraph);
+    m_vppSrc = nullptr;
+    m_vppSink = nullptr;
+    if (m_vppFramesCtx)
+        av_buffer_unref(&m_vppFramesCtx);
+    av_frame_free(&m_vppScaled);
+    av_frame_free(&m_swFrame);
+    m_vppW = 0;
+    m_vppH = 0;
+}
+
+bool ClipReader::ensureHwScaler(const AVFrame *hwFrame, int targetWidth, int targetHeight)
+{
+    if (m_hwScalerFailed || !hwFrame->hw_frames_ctx)
         return false;
 
-    // Transfer into a fresh software frame. On failure the destination may be
-    // partially populated — always free it before returning.
-    if (av_hwframe_transfer_data(swFrame, hwFrame, 0) < 0) {
-        av_frame_free(&swFrame);
+    // Rebuild when the caller's decode size changes, or when the decoder handed us
+    // a new frame pool (it reallocates on resolution changes and after a flush).
+    if (m_vppGraph && m_vppW == targetWidth && m_vppH == targetHeight && m_vppFramesCtx
+        && m_vppFramesCtx->data == hwFrame->hw_frames_ctx->data) {
+        return true;
+    }
+
+    teardownHwScaler();
+
+    m_vppGraph = avfilter_graph_alloc();
+    m_vppScaled = av_frame_alloc();
+    m_swFrame = av_frame_alloc();
+    if (!m_vppGraph || !m_vppScaled || !m_swFrame) {
+        teardownHwScaler();
+        m_hwScalerFailed = true;
         return false;
     }
 
+    const AVFilter *bufferFilter = avfilter_get_by_name("buffer");
+    const AVFilter *sinkFilter = avfilter_get_by_name("buffersink");
+    const AVFilter *scaleFilter = avfilter_get_by_name("scale_vaapi");
+    if (!bufferFilter || !sinkFilter || !scaleFilter) {
+        teardownHwScaler();
+        m_hwScalerFailed = true;
+        return false;
+    }
+
+    // The source has to know the hw frame pool before it is initialized —
+    // "buffer" rejects a hardware pix_fmt with a null hw_frames_ctx.
+    m_vppSrc = avfilter_graph_alloc_filter(m_vppGraph, bufferFilter, "in");
+    if (!m_vppSrc) {
+        teardownHwScaler();
+        m_hwScalerFailed = true;
+        return false;
+    }
+
+    AVBufferSrcParameters *params = av_buffersrc_parameters_alloc();
+    if (!params) {
+        teardownHwScaler();
+        m_hwScalerFailed = true;
+        return false;
+    }
+    params->format = hwFrame->format;
+    params->width = hwFrame->width;
+    params->height = hwFrame->height;
+    params->time_base = m_fmt->streams[m_videoStream]->time_base;
+    params->hw_frames_ctx = hwFrame->hw_frames_ctx;
+    const int paramsRc = av_buffersrc_parameters_set(m_vppSrc, params);
+    av_free(params);
+    if (paramsRc < 0 || avfilter_init_str(m_vppSrc, nullptr) < 0) {
+        teardownHwScaler();
+        m_hwScalerFailed = true;
+        return false;
+    }
+
+    AVFilterContext *scale = nullptr;
+    const QByteArray scaleArgs =
+        QByteArray("w=") + QByteArray::number(targetWidth) + ":h=" + QByteArray::number(targetHeight);
+    if (avfilter_graph_create_filter(&scale, scaleFilter, "vpp", scaleArgs.constData(), nullptr,
+                                     m_vppGraph)
+            < 0
+        || avfilter_graph_create_filter(&m_vppSink, sinkFilter, "out", nullptr, nullptr, m_vppGraph) < 0
+        || avfilter_link(m_vppSrc, 0, scale, 0) < 0 || avfilter_link(scale, 0, m_vppSink, 0) < 0
+        || avfilter_graph_config(m_vppGraph, nullptr) < 0) {
+        teardownHwScaler();
+        m_hwScalerFailed = true;
+        return false;
+    }
+
+    m_vppFramesCtx = av_buffer_ref(hwFrame->hw_frames_ctx);
+    m_vppW = targetWidth;
+    m_vppH = targetHeight;
+    return true;
+}
+
+AVFrame *ClipReader::hwFrameToSoftware(const AVFrame *hwFrame, int targetWidth, int targetHeight)
+{
+    // Downscale on the GPU first when we can: the readback is the dominant cost of
+    // the whole hwaccel path and it is proportional to the surface area, so moving
+    // preview-sized pixels instead of full-resolution ones is most of the win.
+    if (ensureHwScaler(hwFrame, targetWidth, targetHeight)) {
+        av_frame_unref(m_vppScaled);
+        av_frame_unref(m_swFrame);
+        if (av_buffersrc_add_frame_flags(m_vppSrc, const_cast<AVFrame *>(hwFrame),
+                                         AV_BUFFERSRC_FLAG_KEEP_REF)
+                >= 0
+            && av_buffersink_get_frame(m_vppSink, m_vppScaled) >= 0) {
+            const int rc = av_hwframe_transfer_data(m_swFrame, m_vppScaled, 0);
+            av_frame_unref(m_vppScaled);
+            if (rc >= 0)
+                return m_swFrame;
+            av_frame_unref(m_swFrame);
+        }
+        // VPP is configured but misbehaving — stop using it and transfer full size.
+        m_hwScalerFailed = true;
+        teardownHwScaler();
+    }
+
+    if (!m_swFrame) {
+        m_swFrame = av_frame_alloc();
+        if (!m_swFrame)
+            return nullptr;
+    }
+    av_frame_unref(m_swFrame);
+    if (av_hwframe_transfer_data(m_swFrame, hwFrame, 0) < 0) {
+        av_frame_unref(m_swFrame);
+        return nullptr;
+    }
+    return m_swFrame;
+}
+
+bool ClipReader::transferHwFrameToImage(const AVFrame *hwFrame, QImage &out, int targetWidth, int targetHeight)
+{
+    const AVFrame *swFrame = hwFrameToSoftware(hwFrame, targetWidth, targetHeight);
+    if (!swFrame)
+        return false;
+
     const QImage image = frameToRgba(swFrame, m_sws, targetWidth, targetHeight);
-    av_frame_free(&swFrame);
     if (image.isNull())
         return false;
 
@@ -518,22 +697,14 @@ bool ClipReader::convertFrameNv12(const AVFrame *frame, Nv12Frame &out, int targ
         return false;
 
     const AVFrame *swFrame = frame;
-    AVFrame *transferred = nullptr;
     if ((m_hwAccelActive && frame->format == m_hwPixFmt)
         || isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format))) {
-        transferred = av_frame_alloc();
-        if (!transferred)
+        swFrame = hwFrameToSoftware(frame, targetWidth, targetHeight);
+        if (!swFrame)
             return false;
-        if (av_hwframe_transfer_data(transferred, frame, 0) < 0) {
-            av_frame_free(&transferred);
-            return false;
-        }
-        swFrame = transferred;
     }
 
     out = frameToNv12(swFrame, m_swsNv12, targetWidth, targetHeight);
-    if (transferred)
-        av_frame_free(&transferred);
     return out.isValid();
 }
 

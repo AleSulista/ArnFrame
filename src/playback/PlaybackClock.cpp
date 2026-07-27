@@ -1,5 +1,18 @@
 #include "PlaybackClock.h"
 
+namespace {
+
+// The sink only reports a played position once audio actually flows, and opening
+// its stream plus pulling the first buffer takes a few hundred ms — longer when
+// that first buffer has to open a multi-hour file. Advancing the playhead on wall
+// time during that window and then correcting to the sink's position snapped it
+// back to where playback started, which restarted the preview from there. Hold at
+// the start position instead, and only advance on wall time past this grace period,
+// for the case where the sink never reports progress at all (no audio device).
+constexpr qint64 kSinkSyncGraceNs = 500'000'000;
+
+} // namespace
+
 qint64 PlaybackClock::nowNs()
 {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -18,6 +31,7 @@ void PlaybackClock::reset(drift::TimeUs playheadUs, int sampleRate)
     QMutexLocker lock(&m_anchorMutex);
     m_anchorPlayedUs = 0;
     m_anchorWallNs = 0;
+    m_lastReportedUs = m_pausedAtUs;
 }
 
 void PlaybackClock::start()
@@ -29,6 +43,7 @@ void PlaybackClock::start()
         m_anchorPlayedUs = 0;
         m_anchorWallNs = 0;
         m_startWallNs = nowNs();
+        m_lastReportedUs = m_startPlayheadUs;
     }
     m_running.store(true, std::memory_order_release);
 }
@@ -77,9 +92,20 @@ drift::TimeUs PlaybackClock::currentTimeUs() const
         return m_pausedAtUs;
 
     QMutexLocker lock(&m_anchorMutex);
-    if (m_anchorWallNs == 0) // no sink sync yet; advance on wall time from start
-        return m_startPlayheadUs + qMax<drift::TimeUs>(0, (nowNs() - m_startWallNs) / 1000);
+    drift::TimeUs positionUs;
+    if (m_anchorWallNs == 0) { // no sink sync yet
+        const qint64 sinceStartNs = nowNs() - m_startWallNs;
+        positionUs = sinceStartNs > kSinkSyncGraceNs
+                         ? m_startPlayheadUs + (sinceStartNs - kSinkSyncGraceNs) / 1000
+                         : m_startPlayheadUs;
+    } else {
+        const drift::TimeUs interpUs = (nowNs() - m_anchorWallNs) / 1000;
+        positionUs = m_startPlayheadUs + m_anchorPlayedUs + qMax<drift::TimeUs>(0, interpUs);
+    }
 
-    const drift::TimeUs interpUs = (nowNs() - m_anchorWallNs) / 1000;
-    return m_startPlayheadUs + m_anchorPlayedUs + qMax<drift::TimeUs>(0, interpUs);
+    // The visible playhead must never run backwards while playing. Any correction
+    // that would move it back — a late first sync, a sink that stalls and catches
+    // up — holds it still until the true position passes it again.
+    m_lastReportedUs = qMax(m_lastReportedUs, positionUs);
+    return m_lastReportedUs;
 }
