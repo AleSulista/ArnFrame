@@ -145,12 +145,28 @@ endif()
 set(JUCE_MODULES_ONLY ON CACHE BOOL "Only configure the JUCE modules" FORCE)
 
 option(DRIFT_FETCH_JUCE "Download JUCE when DRIFT_JUCE_DIR is not set" ON)
-set(DRIFT_JUCE_DIR "" CACHE PATH "Path to an existing JUCE source tree; overrides DRIFT_FETCH_JUCE")
+# STRING, not PATH, on purpose: CMake rewrites a relative PATH cache entry to an absolute one
+# against the working directory of the cmake invocation — the *build* directory. The manifests
+# vendor JUCE next to CMakeLists.txt and pass `-DDRIFT_JUCE_DIR=juce`, which a PATH would resolve
+# to <build>/juce and fail. As a STRING the value arrives verbatim and is resolved below, against
+# the source tree, which is what a relative path here can only sensibly mean.
+set(DRIFT_JUCE_DIR "" CACHE STRING
+    "JUCE source tree — absolute, or relative to this file; overrides DRIFT_FETCH_JUCE")
 set(DRIFT_JUCE_TAG "8.0.15" CACHE STRING "JUCE release tag to fetch when DRIFT_JUCE_DIR is unset")
 
 if(DRIFT_JUCE_DIR)
-    message(STATUS "JUCE: using ${DRIFT_JUCE_DIR}")
-    add_subdirectory("${DRIFT_JUCE_DIR}" "${CMAKE_BINARY_DIR}/juce-build")
+    if(IS_ABSOLUTE "${DRIFT_JUCE_DIR}")
+        set(_drift_juce_dir "${DRIFT_JUCE_DIR}")
+    else()
+        set(_drift_juce_dir "${CMAKE_CURRENT_SOURCE_DIR}/${DRIFT_JUCE_DIR}")
+    endif()
+    if(NOT EXISTS "${_drift_juce_dir}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "DRIFT_JUCE_DIR=${DRIFT_JUCE_DIR} does not point at a JUCE source tree "
+            "(looked in ${_drift_juce_dir}).")
+    endif()
+    message(STATUS "JUCE: using ${_drift_juce_dir}")
+    add_subdirectory("${_drift_juce_dir}" "${CMAKE_BINARY_DIR}/juce-build")
 elseif(DRIFT_FETCH_JUCE)
     message(STATUS "JUCE: fetching ${DRIFT_JUCE_TAG}")
     include(FetchContent)
