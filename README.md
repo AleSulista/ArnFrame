@@ -23,6 +23,33 @@ Drift is a free, open-source desktop video editor from CutWire Studios. It bring
 
 Built with **Qt 6**, **QML**, and **FFmpeg**. Preview and export share one compositor, so what you see is what you get.
 
+## Download
+
+Grab a build for your platform from the [latest release](https://github.com/CutWire-Studios/Drift/releases/latest):
+
+| Platform | Package |
+|----------|---------|
+| Linux | [AppImage](https://github.com/CutWire-Studios/Drift/releases/latest) · [Flatpak bundle](https://github.com/CutWire-Studios/Drift/releases/latest) |
+| Arch Linux | [`.pkg.tar.zst`](https://github.com/CutWire-Studios/Drift/releases/latest) |
+| Windows | [Installer (.exe)](https://github.com/CutWire-Studios/Drift/releases/latest) |
+| macOS | [Build from source](#build) |
+
+```bash
+# AppImage — any distro
+chmod +x Drift-*.AppImage && ./Drift-*.AppImage
+
+# Arch Linux
+sudo pacman -U drift-*.pkg.tar.zst
+
+# Flatpak bundle
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install --user Drift-*.flatpak
+```
+
+Fonts, stickers, speech models, and GPU/CPU acceleration runtimes are **not** bundled — install the ones you want from the Addon Manager in the app header (see [Addons](#addons)).
+
+See [all releases](https://github.com/CutWire-Studios/Drift/releases) for previous versions and changelogs.
+
 ## Screenshots
 
 <p align="center">
@@ -170,8 +197,28 @@ src/
 tests/            Unit tests (ctest) + tests/data (signed addon fixture)
 tools/            Headless probe + renderframe
 flatpak/          Flatpak / Flathub packaging
+packaging/arch/   PKGBUILD for the Arch package
+installer/windows/Inno Setup script for the Windows installer
+scripts/          Release-notes extraction and asset sync helpers
 cmake/            FindFFmpeg.cmake
 ```
+
+## Releasing
+
+Pushing a `vX.Y.Z` tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml), which
+builds the AppImage, Windows installer, Arch package, and Flatpak bundle, then publishes them as a
+GitHub release. Before tagging:
+
+1. Bump `project(Drift VERSION ...)` in `CMakeLists.txt` and `pkgver` in `packaging/arch/PKGBUILD`
+   — the workflow refuses to publish if either disagrees with the tag.
+2. Add a `<release version="X.Y.Z">` entry to `flatpak/org.cutwire.Drift.metainfo.xml`. Its notes
+   become the GitHub release body via `scripts/extract_release_notes.py`, so the software centre
+   and the release page can never say different things.
+3. Run the **Build** workflow manually (`workflow_dispatch`) to prove each platform green — a tag
+   is public the moment the release job finishes.
+
+Flathub is submitted separately from `flatpak/org.cutwire.Drift.flathub.yml`; pin its `commit:` to
+the tagged commit first.
 
 ### CMake targets
 

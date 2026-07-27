@@ -57,9 +57,22 @@
     </screenshot>
   </screenshots>
   <releases>
-    <release version="0.1.0" date="2026-07-23">
+    <release version="0.1.0" date="2026-07-27">
       <description>
-        <p>Initial public release of Drift — a free, open-source desktop video editor for creators.</p>
+        <p>The first public release of Drift — a free, open-source desktop video editor with no
+        subscription, no watermark and no account.</p>
+        <ul>
+          <li>Multi-track timeline with trim, split, snap, ripple and full undo</li>
+          <li>GPU effects, transitions and reusable look templates</li>
+          <li>Titles, shapes, stickers and emoji</li>
+          <li>Automatic captions from the speech in your video</li>
+          <li>Subject cutout, clip masks and green-screen keying</li>
+          <li>Speed changes, reverse, fades and beat-synced animation</li>
+          <li>Audio mixing, an effect chain and background noise removal</li>
+          <li>Project bundles that keep a project and its media together</li>
+          <li>Export to MP4 (H.264 + AAC) that matches the preview</li>
+          <li>Optional addons for fonts, stickers, speech models and acceleration runtimes</li>
+        </ul>
       </description>
     </release>
   </releases>

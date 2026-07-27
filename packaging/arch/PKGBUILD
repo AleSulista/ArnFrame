@@ -1,0 +1,49 @@
+# Maintainer: Suhas Dissanayake <suhasdissa@gmail.com>
+pkgname=drift
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Beginner-friendly open-source video editor built with Qt 6, QML and FFmpeg"
+arch=('x86_64')
+url="https://github.com/CutWire-Studios/Drift"
+license=('GPL-3.0-or-later')
+depends=(
+    'qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-multimedia-ffmpeg'
+    'ffmpeg' 'zstd' 'openssl' 'soundtouch'
+)
+makedepends=('cmake' 'ninja' 'git' 'pkgconf')
+# Defaults to the tagged release; CI overrides _commit (e.g. to $GITHUB_SHA)
+# to build the exact commit that triggered the workflow instead.
+_commit="${_commit:-v$pkgver}"
+source=("$pkgname::git+https://github.com/CutWire-Studios/Drift.git#commit=$_commit")
+sha256sums=('SKIP')
+
+# ONNX Runtime is never linked and never shipped: Drift dlopens whichever build the user installs
+# from the Acceleration category (src/engine/OrtRuntime.cpp), so the CPU / CUDA / WebGPU choice
+# stays theirs. Only the headers are needed to compile, and cmake/FetchOnnxRuntime.cmake downloads
+# them during build() — there is no ONNX Runtime package in the official repos to depend on.
+# DRIFT_BUNDLE_ONNXRUNTIME=OFF keeps the staged development copy out of the package.
+#
+# JUCE (audio effect DSP) is likewise fetched by CMake during build(); it is a source dependency
+# compiled into driftaudiodsp, not a runtime one.
+
+build() {
+    cd "$pkgname"
+    cmake -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DDRIFT_BUNDLE_ONNXRUNTIME=OFF
+    cmake --build build --parallel
+}
+
+check() {
+    cd "$pkgname"
+    QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+}
+
+package() {
+    cd "$pkgname"
+    # --component drift: the app and its bundled packages only. A plain install would also drop
+    # JUCE's ~50 MB of module sources into /usr/include, which is not this package's to ship.
+    DESTDIR="$pkgdir" cmake --install build --component drift
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

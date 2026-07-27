@@ -1,0 +1,352 @@
+name: Package
+
+# The one place every platform build is defined. Both callers — build.yml (manual, unversioned)
+# and release.yml (tag-triggered, publishes) — reuse this so a fix to a build never has to be
+# applied twice.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version string baked into artifact names"
+        required: true
+        type: string
+      platforms:
+        description: "all, flatpak, linux, windows or arch"
+        required: false
+        default: all
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: "6.10.3"
+  # Drift needs Quick, QuickControls2, QuickEffects, Widgets, OpenGL, Network, Concurrent and Test
+  # (qtbase + qtdeclarative, both in the base install); qtmultimedia is the only extra it links.
+  # qtimageformats is for the import side: without it webp/tiff stills cannot be added to a project.
+  QT_MODULES: >-
+    qtmultimedia
+    qtimageformats
+  QT_QPA_PLATFORM: offscreen
+  FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.deps
+  # Pinned to the FFmpeg *branch* QtMultimedia's ffmpeg backend bundles for QT_VERSION above (check
+  # doc.qt.io/qt-6/qtmultimedia-attribution-ffmpeg.html when bumping QT_VERSION). Drift links
+  # FFmpeg itself *and* loads Qt's multimedia backend for audio output, so both copies are in the
+  # process; sharing a branch is what keeps that from being two ABIs of the same library.
+  #
+  # The branch, not an exact autobuild: BtbN keeps only the last ~2 weeks of autobuild-<date> tags
+  # and deletes the rest, so an exact pin silently becomes a 404 on the first release after it
+  # ages out. The `latest` tag is permanent, and n7.1-latest never crosses a soversion.
+  FFMPEG_BRANCH: "n7.1-latest"
+  FFMPEG_SUFFIX: "7.1"
+
+jobs:
+  flatpak:
+    name: Flatpak bundle
+    runs-on: ubuntu-latest
+    if: inputs.platforms == 'all' || inputs.platforms == 'flatpak'
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install flatpak tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder appstream desktop-file-utils
+          flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Lint flatpak manifest and metadata
+        run: |
+          appstreamcli validate --no-net flatpak/org.cutwire.Drift.metainfo.xml
+          desktop-file-validate flatpak/org.cutwire.Drift.desktop
+          flatpak-builder --show-manifest flatpak/org.cutwire.Drift.yml > /dev/null
+          flatpak-builder --show-manifest flatpak/org.cutwire.Drift.flathub.yml > /dev/null
+
+      - name: Cache flatpak runtimes
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/flatpak
+          key: flatpak-runtimes-${{ hashFiles('flatpak/org.cutwire.Drift.yml') }}
+
+      # The local manifest (not the Flathub one) — it builds the working tree, so it validates the
+      # commit under test rather than whatever tag the Flathub manifest is pinned to.
+      - name: Build flatpak
+        run: |
+          flatpak-builder --user --force-clean --install-deps-from=flathub \
+            --repo="${{ runner.temp }}/flatpak-repo" \
+            "${{ runner.temp }}/flatpak-build" \
+            flatpak/org.cutwire.Drift.yml
+
+      - name: Export bundle
+        run: |
+          mkdir -p dist
+          flatpak build-bundle "${{ runner.temp }}/flatpak-repo" \
+            "dist/Drift-${{ inputs.version }}.flatpak" \
+            org.cutwire.Drift
+
+      - name: Upload flatpak bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: dist/*.flatpak
+
+  linux:
+    name: Linux AppImage
+    runs-on: ubuntu-22.04
+    if: inputs.platforms == 'all' || inputs.platforms == 'linux'
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # cmake is deliberately not installed from apt: the runner image already carries a newer one
+      # on PATH and apt's would only add ambiguity.
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential ninja-build pkg-config git \
+            libgl1-mesa-dev libegl1-mesa-dev libglib2.0-dev libdbus-1-dev \
+            libzstd-dev libssl-dev libsoundtouch-dev \
+            libpulse-dev libasound2-dev \
+            libfontconfig1-dev libfreetype6-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
+            libxcb1-dev libxcb-glx0-dev libxcb-keysyms1-dev libxcb-image0-dev libxcb-shm0-dev \
+            libxcb-icccm4-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shape0-dev \
+            libxcb-randr0-dev libxcb-render-util0-dev libxcb-xinerama0-dev libxcb-cursor-dev
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+          add-tools-to-path: true
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: deps-linux-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Fetch pinned FFmpeg
+        shell: bash
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}/.deps/ffmpeg"
+          mkdir -p "${GITHUB_WORKSPACE}/.deps/ffmpeg"
+          curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-${FFMPEG_BRANCH}-linux64-lgpl-shared-${FFMPEG_SUFFIX}.tar.xz" \
+            | tar -xJf - --strip-components=1 -C "${GITHUB_WORKSPACE}/.deps/ffmpeg"
+
+      # DRIFT_BUNDLE_ONNXRUNTIME=OFF: a packaged build ships no runtime at all. Drift dlopens the
+      # one the user installs from the Acceleration category, which is what keeps the CPU / CUDA /
+      # WebGPU choice theirs instead of the packager's. Only the headers are fetched, to compile.
+      - name: Configure
+        run: |
+          export PKG_CONFIG_PATH="${GITHUB_WORKSPACE}/.deps/ffmpeg/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR};${GITHUB_WORKSPACE}/.deps/ffmpeg" \
+            -DFETCHCONTENT_BASE_DIR="${FETCHCONTENT_BASE_DIR}" \
+            -DDRIFT_BUNDLE_ONNXRUNTIME=OFF
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      # The same command the README documents. Tests that need a GPU context or a model that is not
+      # in the repo skip themselves rather than failing.
+      - name: Test
+        run: QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+
+      - name: Stage install tree
+        run: |
+          cmake --install build --prefix "${GITHUB_WORKSPACE}/AppDir/usr" --component drift
+          mkdir -p "${GITHUB_WORKSPACE}/dist"
+
+      - name: Build AppImage
+        shell: bash
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O linuxdeploy.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage -O linuxdeploy-plugin-qt.AppImage
+          chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
+          export QMAKE="${QT_ROOT_DIR}/bin/qmake"
+          export VERSION="${{ inputs.version }}"
+          # Drift's own QML is compiled into the binary, but the Qt Quick modules it imports are
+          # not: without QML_SOURCES_PATHS the qt plugin has nothing to scan and ships an AppImage
+          # whose every import fails at startup.
+          export QML_SOURCES_PATHS="${GITHUB_WORKSPACE}/src/qml"
+          export LD_LIBRARY_PATH="${QT_ROOT_DIR}/lib:${GITHUB_WORKSPACE}/.deps/ffmpeg/lib:${LD_LIBRARY_PATH:-}"
+          ./linuxdeploy.AppImage --appdir AppDir --plugin qt --output appimage \
+            -d flatpak/org.cutwire.Drift.desktop \
+            -i flatpak/share/icons/hicolor/256x256/apps/org.cutwire.Drift.png \
+            -e AppDir/usr/bin/drift
+          appimage="$(ls ./*.AppImage | grep -iv linuxdeploy | head -n 1)"
+          mv "${appimage}" "dist/Drift-${{ inputs.version }}-x86_64.AppImage"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: dist/*.AppImage
+
+  windows:
+    name: Windows installer
+    runs-on: windows-2022
+    if: inputs.platforms == 'all' || inputs.platforms == 'windows'
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+          add-tools-to-path: true
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}\vcpkg_bincache
+          key: vcpkg-bincache-win-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            vcpkg-bincache-win-
+
+      # zstd (addon package decompression), openssl (addon signature verification) and soundtouch
+      # (voice-effect pitch shifting) are the three non-Qt, non-FFmpeg libraries Drift links. All
+      # three ship a CMake config here, which is what lets the MSVC build work with no pkg-config.
+      - name: Install vcpkg dependencies
+        shell: pwsh
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg_bincache
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          if (-not (Test-Path vcpkg\vcpkg.exe)) {
+            git clone --depth 1 https://github.com/microsoft/vcpkg.git vcpkg
+            .\vcpkg\bootstrap-vcpkg.bat
+          }
+          .\vcpkg\vcpkg.exe install zstd openssl soundtouch --triplet x64-windows
+
+      # Save even when a later step fails so the vcpkg build is not repeated on
+      # the next run (actions/cache only saves on job success).
+      - name: Save vcpkg binary cache
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}\vcpkg_bincache
+          key: vcpkg-bincache-win-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: deps-win-${{ hashFiles('CMakeLists.txt') }}
+
+      # Same pin as the Linux job, and for the same reason — see FFMPEG_BUILD_TAG above. These DLLs
+      # deliberately land on top of the ones windeployqt copies out of Qt.
+      - name: Fetch pinned FFmpeg
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force .deps\ffmpeg, .deps\ffmpeg_extracted -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path .deps\ffmpeg | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-$env:FFMPEG_BRANCH-win64-lgpl-shared-$env:FFMPEG_SUFFIX.zip" -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath .deps\ffmpeg_extracted -Force
+          $extractedRoot = (Get-ChildItem .deps\ffmpeg_extracted)[0].FullName
+          Copy-Item -Path "$extractedRoot\*" -Destination .deps\ffmpeg -Recurse -Force
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake `
+            -DCMAKE_PREFIX_PATH="${{ env.QT_ROOT_DIR }};${{ github.workspace }}\.deps\ffmpeg" `
+            -DFETCHCONTENT_BASE_DIR=${{ env.FETCHCONTENT_BASE_DIR }} `
+            -DDRIFT_BUNDLE_ONNXRUNTIME=OFF
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --config Release --target drift --parallel
+
+      - name: Stage runtime files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist\bin | Out-Null
+          Copy-Item build\Release\drift.exe dist\bin -Force
+          # --qmldir: Drift's own QML lives in the binary's resources, but the Qt Quick modules it
+          # imports have to be deployed, and qmlimportscanner reads the sources to find them.
+          & "${{ env.QT_ROOT_DIR }}\bin\windeployqt.exe" --release --no-translations `
+            --qmldir src\qml dist\bin\drift.exe
+          Copy-Item vcpkg\installed\x64-windows\bin\*.dll dist\bin -Force
+          Copy-Item .deps\ffmpeg\bin\*.dll dist\bin -Force
+          # Bundled effect/transition/template packages: a POST_BUILD step already put them beside
+          # the exe, and the app resolves them relative to it.
+          foreach ($dir in "effects", "transitions", "effect-templates", "audio-effects") {
+            Copy-Item "build\Release\$dir" dist\bin -Recurse -Force
+          }
+
+      - name: Build Inno Setup installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.6
+        with:
+          path: installer/windows/Drift.iss
+          options: |
+            /DMyAppVersion=${{ inputs.version }}
+            /DMyAppSource=${{ github.workspace }}\dist\bin
+
+      - name: Collect installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item installer\windows\output\Drift-Setup-x64.exe `
+            "dist\Drift-Setup-${{ inputs.version }}-x64.exe" -Force
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/*.exe
+
+  arch:
+    name: Arch package
+    runs-on: ubuntu-24.04
+    if: inputs.platforms == 'all' || inputs.platforms == 'arch'
+    timeout-minutes: 60
+    container:
+      image: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+
+      # makepkg refuses to run as root, and archlinux:base-devel's default
+      # user is root — create an unprivileged builder with passwordless sudo
+      # (needed for makepkg -s to pacman-install PKGBUILD's own depends).
+      - name: Set up builder user
+        run: |
+          pacman -Syu --noconfirm
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          chown -R builder:builder "${GITHUB_WORKSPACE}"
+
+      # The PKGBUILD's source is git+https with a #commit= pin that defaults
+      # to the latest tagged release (so a plain `makepkg` — e.g. a real AUR
+      # build — stays reproducible), but it reads _commit from the
+      # environment first, so pin it to the exact commit that triggered this
+      # workflow instead of the tag.
+      - name: Build package
+        run: su builder -c "cd '${GITHUB_WORKSPACE}/packaging/arch' && _commit='${{ github.sha }}' makepkg -s --noconfirm"
+
+      - name: Collect package
+        run: |
+          mkdir -p dist
+          cp packaging/arch/*.pkg.tar.zst dist/
+
+      - name: Upload Arch package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: dist/*.pkg.tar.zst

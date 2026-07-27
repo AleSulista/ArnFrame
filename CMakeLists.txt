@@ -95,15 +95,17 @@ endif()
 
 # Addon packages (.driftpkg) are solid-zstd compressed and Ed25519 signed. zstd upstream only
 # ships a CMake config in recent releases, so fall back to pkg-config.
+find_package(PkgConfig QUIET)
 find_package(zstd CONFIG QUIET)
 if(TARGET zstd::libzstd_shared)
     set(DRIFT_ZSTD_TARGET zstd::libzstd_shared)
 elseif(TARGET zstd::libzstd)
     set(DRIFT_ZSTD_TARGET zstd::libzstd)
-else()
-    find_package(PkgConfig REQUIRED)
+elseif(PkgConfig_FOUND)
     pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
     set(DRIFT_ZSTD_TARGET PkgConfig::ZSTD)
+else()
+    message(FATAL_ERROR "libzstd not found: no zstd CMake config and no pkg-config to fall back on")
 endif()
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 
@@ -113,9 +115,11 @@ find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 # so it is compatible with this project's GPL-3.0.
 # pkg-config first: SoundTouch's installed CMake config names an include directory that several
 # distributions do not actually ship, and an imported target with a non-existent path is a hard
-# configure error rather than something we can fall back from.
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(SOUNDTOUCH QUIET IMPORTED_TARGET soundtouch)
+# configure error rather than something we can fall back from. Where there is no pkg-config at all
+# (MSVC, where vcpkg's port does ship a working config), the CMake config below is the only path.
+if(PkgConfig_FOUND)
+    pkg_check_modules(SOUNDTOUCH QUIET IMPORTED_TARGET soundtouch)
+endif()
 if(TARGET PkgConfig::SOUNDTOUCH)
     set(DRIFT_SOUNDTOUCH_TARGET PkgConfig::SOUNDTOUCH)
 else()
@@ -133,6 +137,13 @@ endif()
 # Acquisition mirrors ONNX Runtime above: a local tree wins, otherwise fetch. flatpak-builder runs
 # offline, so packaged builds set DRIFT_JUCE_DIR at a source it vendored itself and turn the fetch
 # off (see flatpak/org.cutwire.Drift.yml).
+# Drift links exactly one JUCE module and calls none of JUCE's project helpers, so everything past
+# add_subdirectory(modules) is dead weight: it configures and builds juceaide, and — the part that
+# actually leaks — adds install() rules that drop JUCE's headers, its LV2 helper binary and its
+# CMake package config into any `cmake --install` prefix, i.e. into the AppImage and the distro
+# package. FORCE because it has to win over JUCE's own option() default either way it is acquired.
+set(JUCE_MODULES_ONLY ON CACHE BOOL "Only configure the JUCE modules" FORCE)
+
 option(DRIFT_FETCH_JUCE "Download JUCE when DRIFT_JUCE_DIR is not set" ON)
 set(DRIFT_JUCE_DIR "" CACHE PATH "Path to an existing JUCE source tree; overrides DRIFT_FETCH_JUCE")
 set(DRIFT_JUCE_TAG "8.0.15" CACHE STRING "JUCE release tag to fetch when DRIFT_JUCE_DIR is unset")
@@ -570,7 +581,11 @@ drift_bundle_onnxruntime(drift)
 # --- install (used by packaging, e.g. Flatpak; the dev workflow runs in-place) ---
 include(GNUInstallDirs)
 
-install(TARGETS drift RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+# Everything Drift installs is tagged with the "drift" component, so packaging can ask for the app
+# and nothing else: `cmake --install build --component drift`. JUCE's modules install ~50 MB of
+# their own sources into include/JUCE-<version>, and a plain `cmake --install` has no way to say no
+# to them. (The Flatpak manifests get the same result the other way round, by cleaning up /include.)
+install(TARGETS drift RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT drift)
 
 # File-based effect/transition/template/audio-effect packages ship next to the binary;
 # the app searches <appDir>/<subdir> (GpuPackageParse::defaultSearchPaths). Installing
@@ -578,20 +593,20 @@ install(TARGETS drift RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # supersede the bundled copies.
 foreach(_assetdir effects transitions effect-templates audio-effects)
     install(DIRECTORY ${CMAKE_SOURCE_DIR}/${_assetdir}
-            DESTINATION ${CMAKE_INSTALL_BINDIR})
+            DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT drift)
 endforeach()
 
 # Desktop integration for Flatpak / freedesktop.
 install(FILES flatpak/org.cutwire.Drift.desktop
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications COMPONENT drift)
 install(FILES flatpak/org.cutwire.Drift.metainfo.xml
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo COMPONENT drift)
 # 1024px source is intentionally skipped: flatpak build-export rejects icons
 # larger than 512x512.
 foreach(_size 64 128 256 512)
     install(FILES
         flatpak/share/icons/hicolor/${_size}x${_size}/apps/org.cutwire.Drift.png
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${_size}x${_size}/apps)
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${_size}x${_size}/apps COMPONENT drift)
 endforeach()
 
 # --- CLI tools (headless engine testing, no GUI) ----------------------------

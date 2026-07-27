@@ -4,6 +4,11 @@ runtime-version: "6.11"
 sdk: org.kde.Sdk
 command: drift
 
+# Flathub variant of org.cutwire.Drift.yml. The only difference is the drift module's source: this
+# one builds a tagged commit fetched from GitHub instead of the working tree, because Flathub builds
+# from its own repository and cannot see a local checkout. Everything else must stay in step with
+# the manifest next to it.
+
 finish-args:
   - --share=ipc
   - --socket=fallback-x11
@@ -52,6 +57,20 @@ modules:
         only-arches:
           - aarch64
 
+  # Pitch shifting for the voice effects. Not in org.kde.Platform, so it is built here; the app
+  # links it, which is fine for GPL-3.0 since LGPL-2.1 section 3 permits use under GPL v2 or later.
+  - name: soundtouch
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_SHARED_LIBS=ON
+      - -DSOUNDSTRETCH=OFF
+    sources:
+      - type: git
+        url: https://codeberg.org/soundtouch/soundtouch.git
+        tag: "2.4.1"
+        commit: b5d0e9ba61871ef135e67bebe3228136da4e8833
+
   - name: drift
     buildsystem: cmake-ninja
     builddir: true
@@ -60,9 +79,20 @@ modules:
       - -DDRIFT_FETCH_ONNXRUNTIME=OFF
       - -DDRIFT_BUNDLE_ONNXRUNTIME=OFF
       - -DONNXRUNTIME_ROOT=/app
+      # JUCE is checked out as a source below rather than fetched by CMake: the build runs with no
+      # network, so FetchContent would fail here.
+      - -DDRIFT_FETCH_JUCE=OFF
+      - -DDRIFT_JUCE_DIR=juce
     sources:
-      # TODO: pin to the real release tag and commit before submitting to Flathub.
+      # TODO: fill in the tagged release's commit sha before submitting to Flathub. flatpak-builder
+      # requires it — a tag alone is not a fixed input.
       - type: git
         url: https://github.com/CutWire-Studios/Drift.git
         tag: v0.1.0
         commit: "0000000000000000000000000000000000000000"
+      # Audio effect DSP. Only juce_dsp and its dependencies are compiled; nothing GUI-facing.
+      - type: git
+        url: https://github.com/juce-framework/JUCE.git
+        tag: 8.0.15
+        commit: 91ad83ae34a81e0833b1a2b0866f54846370ae53
+        dest: juce

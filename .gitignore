@@ -35,6 +35,18 @@ flatpak/build-dir/
 flatpak/repo/
 flatpak/dist/
 
+# Release build artifacts (produced by .github/workflows/package.yml, and by makepkg /
+# Inno Setup when those are run locally)
+/dist/
+/AppDir/
+/.deps/
+/vcpkg/
+/vcpkg_bincache/
+packaging/arch/src/
+packaging/arch/pkg/
+packaging/arch/*.pkg.tar.zst
+installer/windows/output/
+
 # OS
 .DS_Store
 
