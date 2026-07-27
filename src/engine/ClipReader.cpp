@@ -638,22 +638,9 @@ bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int
         }
     };
 
-    while (!done && av_read_frame(m_fmt, packet) >= 0) {
-        if (packet->stream_index != m_videoStream) {
-            av_packet_unref(packet);
-            continue;
-        }
-
-        int sendRc = avcodec_send_packet(m_videoCtx, packet);
-        av_packet_unref(packet);
-        if (sendRc == AVERROR(EAGAIN)) {
-            // Decoder is full; drain below then retry is handled by the next read.
-            // Fall through to receive.
-        } else if (sendRc < 0) {
-            markHwFailure();
-            continue;
-        }
-
+    // Everything the decoder has ready, keeping the frame closest to sourceUs. Shared with the
+    // end-of-stream drain below so both select the same way.
+    auto receiveFrames = [&] {
         while (!done) {
             const int rc = avcodec_receive_frame(m_videoCtx, frame);
             if (rc == AVERROR(EAGAIN) || rc == AVERROR_EOF)
@@ -691,6 +678,44 @@ bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int
                 break;
             }
         }
+    };
+
+    bool eof = false;
+    while (!done) {
+        if (av_read_frame(m_fmt, packet) < 0) {
+            eof = true;
+            break;
+        }
+        if (packet->stream_index != m_videoStream) {
+            av_packet_unref(packet);
+            continue;
+        }
+
+        int sendRc = avcodec_send_packet(m_videoCtx, packet);
+        av_packet_unref(packet);
+        if (sendRc == AVERROR(EAGAIN)) {
+            // Decoder is full; drain below then retry is handled by the next read.
+            // Fall through to receive.
+        } else if (sendRc < 0) {
+            markHwFailure();
+            continue;
+        }
+
+        receiveFrames();
+    }
+
+    // A frame-threaded decoder still holds several frames after the last packet is sent, so
+    // running out of packets is not the same as running out of frames. Without this drain the
+    // tail of every clip is undecodable — the loop above just ends and those frames are never
+    // received, which is exactly what a seek near the end of a clip asks for. The audio path
+    // has always drained here; the video path did not.
+    bool drained = false;
+    if (eof && !done && !sawHwFailure) {
+        avcodec_send_packet(m_videoCtx, nullptr);
+        receiveFrames();
+        // Leaves the decoder usable; the demuxer is at EOF, so the next call has to seek.
+        avcodec_flush_buffers(m_videoCtx);
+        drained = true;
     }
 
     QImage converted;
@@ -721,7 +746,7 @@ bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int
     if (convertedOk) {
         out = converted;
         storeCachedFrame(bestPtsUs, converted);
-        m_videoPositioned = true;
+        m_videoPositioned = !drained;
         return true;
     }
 
@@ -789,21 +814,8 @@ bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &o
         }
     };
 
-    while (!done && av_read_frame(m_fmt, packet) >= 0) {
-        if (packet->stream_index != m_videoStream) {
-            av_packet_unref(packet);
-            continue;
-        }
-
-        int sendRc = avcodec_send_packet(m_videoCtx, packet);
-        av_packet_unref(packet);
-        if (sendRc == AVERROR(EAGAIN)) {
-            // Fall through to receive.
-        } else if (sendRc < 0) {
-            markHwFailure();
-            continue;
-        }
-
+    // Same selection for the read loop and the end-of-stream drain below.
+    auto receiveFrames = [&] {
         while (!done) {
             const int rc = avcodec_receive_frame(m_videoCtx, frame);
             if (rc == AVERROR(EAGAIN) || rc == AVERROR_EOF)
@@ -835,6 +847,38 @@ bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &o
                 break;
             }
         }
+    };
+
+    bool eof = false;
+    while (!done) {
+        if (av_read_frame(m_fmt, packet) < 0) {
+            eof = true;
+            break;
+        }
+        if (packet->stream_index != m_videoStream) {
+            av_packet_unref(packet);
+            continue;
+        }
+
+        int sendRc = avcodec_send_packet(m_videoCtx, packet);
+        av_packet_unref(packet);
+        if (sendRc == AVERROR(EAGAIN)) {
+            // Fall through to receive.
+        } else if (sendRc < 0) {
+            markHwFailure();
+            continue;
+        }
+
+        receiveFrames();
+    }
+
+    // See decodeVideoFrameAtOnce: out of packets is not out of frames.
+    bool drained = false;
+    if (eof && !done && !sawHwFailure) {
+        avcodec_send_packet(m_videoCtx, nullptr);
+        receiveFrames();
+        avcodec_flush_buffers(m_videoCtx);
+        drained = true;
     }
 
     Nv12Frame converted;
@@ -864,7 +908,7 @@ bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &o
     if (convertedOk) {
         out = converted;
         storeCachedNv12(bestPtsUs, converted);
-        m_videoPositioned = true;
+        m_videoPositioned = !drained;
         return true;
     }
 

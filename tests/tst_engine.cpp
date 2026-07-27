@@ -879,20 +879,32 @@ void EngineTest::effectPresetStableIds()
     const QStringList ids = effectPresetIds();
     QVERIFY(ids.size() >= 16);
 
+    // Ids are persisted in project files, so they are API. New effects are namespaced
+    // ("category.name"); the bare ids below predate that and can never be renamed. Adding to this
+    // list has to be a deliberate act — that is the point of the test.
+    static const QSet<QString> legacyBareIds = {
+        QStringLiteral("beat_shake"),      QStringLiteral("bling_sparkle"),
+        QStringLiteral("block_glitch"),    QStringLiteral("bloom_glow"),
+        QStringLiteral("bokeh_dream"),     QStringLiteral("cinematic_grade"),
+        QStringLiteral("digital_glitch"),  QStringLiteral("droste_zoom"),
+        QStringLiteral("duotone"),         QStringLiteral("edge_neon"),
+        QStringLiteral("film_burn"),       QStringLiteral("halation"),
+        QStringLiteral("halftone_comic"),  QStringLiteral("kaleidoscope"),
+        QStringLiteral("lens_flare"),      QStringLiteral("light_leak"),
+        QStringLiteral("lightning_sky"),   QStringLiteral("motion_trail"),
+        QStringLiteral("oil_paint"),       QStringLiteral("rgb_split"),
+        QStringLiteral("ripple_water"),    QStringLiteral("scanline_glitch"),
+        QStringLiteral("shockwave_pulse"), QStringLiteral("sketch_pencil"),
+        QStringLiteral("spin_blur"),       QStringLiteral("star_filter"),
+        QStringLiteral("strobe_flash"),    QStringLiteral("super8_film"),
+        QStringLiteral("time_echo"),       QStringLiteral("vhs_crt"),
+        QStringLiteral("wave_warp"),       QStringLiteral("zoom_pulse"),
+    };
+
     QSet<QString> seen;
     for (const QString &id : ids) {
         QVERIFY2(!id.isEmpty(), "preset id must not be empty");
-        QVERIFY2(id.contains(QLatin1Char('.')) || id == QStringLiteral("rgb_split")
-                     || id == QStringLiteral("block_glitch")
-                     || id == QStringLiteral("scanline_glitch")
-                     || id == QStringLiteral("vhs_crt")
-                     || id == QStringLiteral("bloom_glow")
-                     || id == QStringLiteral("ripple_water")
-                     || id == QStringLiteral("edge_neon")
-                     || id == QStringLiteral("digital_glitch")
-                     || id == QStringLiteral("film_burn")
-                     || id == QStringLiteral("time_echo")
-                     || id == QStringLiteral("shockwave_pulse")
+        QVERIFY2(id.contains(QLatin1Char('.')) || legacyBareIds.contains(id)
                      || id.startsWith(QStringLiteral("face_")),
                  qPrintable(QStringLiteral("stable id: %1").arg(id)));
         QVERIFY2(!seen.contains(id), qPrintable(QStringLiteral("duplicate id: %1").arg(id)));

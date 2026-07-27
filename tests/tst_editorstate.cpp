@@ -43,6 +43,7 @@ private slots:
     void setTransitionKindAndDurationPersist();
     void replaceTransitionOnDrop();
     void overlapAutoAppliesCrossfade();
+    void separateAudioFromCombinedClip();
     void linkedAudioUnlinkAndMove();
     void keyframeGraphPropertySelection();
     void keyframesCanBeDisabledPerProperty();
@@ -246,6 +247,10 @@ void EditorStateTest::packagedProjectCarriesDerivedArtifacts()
 
     state.newProject();
     state.loadProject(QUrl::fromLocalFile(bundlePath));
+    // Opening a bundle extracts its media on a worker thread and only applies the project
+    // document once that finishes, so the timeline below is still the empty new project until
+    // the load reports in.
+    QTRY_COMPARE_WITH_TIMEOUT(state.lastMessage(), QStringLiteral("Project loaded"), 30000);
 
     QCOMPARE(state.projectMetadata().value(QStringLiteral("title")).toString(),
              QStringLiteral("Packaged"));
@@ -560,9 +565,10 @@ void EditorStateTest::effectBrowserCategoriesAndApply()
     AssetLibrary library;
     AppController state(&library);
 
-    // Four built in, plus any contributed by effect packages (currently "funny").
+    // Four built in, plus one per category contributed by the bundled effect packages. Counting
+    // exactly would just be a tally of how many packages ship today.
     const QVariantList categories = state.effectCategories();
-    QCOMPARE(categories.size(), 5);
+    QVERIFY(categories.size() >= 5);
     QCOMPARE(categories.first().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("glitch"));
     QCOMPARE(categories.first().toMap().value(QStringLiteral("label")).toString(),
              QStringLiteral("Glitch & Distortion"));
@@ -754,7 +760,10 @@ static void appendLinkedVideoAudioPair(drift::Project &project)
     project.tracks()[1].clips.append(audio);
 }
 
-void EditorStateTest::linkedAudioUnlinkAndMove()
+// Separating audio and unlinking are two different operations: a combined clip carries its audio
+// inside the video clip and has nothing to unlink, and separating it produces a linked pair that
+// still moves together until the link itself is broken.
+void EditorStateTest::separateAudioFromCombinedClip()
 {
     AssetLibrary library;
     AppController state(&library);
@@ -764,21 +773,53 @@ void EditorStateTest::linkedAudioUnlinkAndMove()
     QCOMPARE(state.project()->tracks().at(0).clips.size(), 1);
 
     state.selectClip(0, 0);
-    QVERIFY(state.canUnlinkSelection());
+    QVERIFY(state.canSeparateAudioSelection());
+    QVERIFY(!state.canUnlinkSelection());
     QVERIFY(state.selectionContains(0, 0));
 
     state.moveClip(0, 0, 2.0);
     QCOMPARE(state.project()->tracks().at(0).clips.at(0).timelineStart, drift::secondsToUs(2.0));
 
     state.selectClip(0, 0);
-    state.unlinkSelectedClips();
+    state.separateAudioFromSelection();
     QCOMPARE(state.project()->tracks().size(), 2);
     QCOMPARE(state.project()->tracks().at(1).clips.size(), 1);
     QCOMPARE(state.project()->tracks().at(1).clips.at(0).timelineStart, drift::secondsToUs(2.0));
-    QVERIFY(!state.canUnlinkSelection());
+    // The video must stop playing the audio it just handed over.
     QCOMPARE(state.project()->tracks().at(0).clips.at(0).suppressEmbeddedAudio, true);
 
+    // The two halves come out linked, so there is now something to unlink.
+    state.selectClip(0, 0);
+    QVERIFY(state.canUnlinkSelection());
+    QVERIFY(!state.canSeparateAudioSelection());
+}
+
+void EditorStateTest::linkedAudioUnlinkAndMove()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendLinkedVideoAudioPair(*state.project());
+
+    QCOMPARE(state.project()->tracks().size(), 2);
+    QCOMPARE(state.project()->tracks().at(0).clips.size(), 1);
+    QCOMPARE(state.project()->tracks().at(1).clips.size(), 1);
+
+    state.selectClip(0, 0);
+    QVERIFY(state.canUnlinkSelection());
+    QVERIFY(state.selectionContains(0, 0));
+
+    // Linked: moving the video carries its audio along.
+    state.moveClip(0, 0, 2.0);
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).timelineStart, drift::secondsToUs(2.0));
+    QCOMPARE(state.project()->tracks().at(1).clips.at(0).timelineStart, drift::secondsToUs(2.0));
+
+    state.selectClip(0, 0);
+    state.unlinkSelectedClips();
+    QVERIFY(!state.canUnlinkSelection());
+
+    // Unlinked: the audio stays where it was.
     state.moveClip(0, 0, 0.0);
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).timelineStart, drift::secondsToUs(0.0));
     QCOMPARE(state.project()->tracks().at(1).clips.at(0).timelineStart, drift::secondsToUs(2.0));
 }
 
