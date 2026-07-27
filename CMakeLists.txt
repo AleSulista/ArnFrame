@@ -113,10 +113,10 @@ find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 # hand-rolled granular one cancels the signal outright wherever the tap spacing lands on an odd
 # number of half-periods of the output. LGPL-2.1, whose section 3 allows use under GPL v2 or later,
 # so it is compatible with this project's GPL-3.0.
-# pkg-config first: SoundTouch's installed CMake config names an include directory that several
-# distributions do not actually ship, and an imported target with a non-existent path is a hard
-# configure error rather than something we can fall back from. Where there is no pkg-config at all
-# (MSVC, where vcpkg's port does ship a working config), the CMake config below is the only path.
+# pkg-config first: SoundTouch's installed CMake config names include directories that do not
+# exist, and a non-existent INTERFACE_INCLUDE_DIRECTORIES entry on an imported target is a hard
+# generate-time error rather than something we can fall back from. Where there is no pkg-config at
+# all (MSVC), the CMake config below is the only path, so it gets repaired instead.
 if(PkgConfig_FOUND)
     pkg_check_modules(SOUNDTOUCH QUIET IMPORTED_TARGET soundtouch)
 endif()
@@ -125,6 +125,24 @@ if(TARGET PkgConfig::SOUNDTOUCH)
 else()
     find_package(SoundTouch CONFIG REQUIRED)
     set(DRIFT_SOUNDTOUCH_TARGET SoundTouch::SoundTouch)
+    # Upstream 2.4.x exports "<prefix>/include;<prefix>/include;<prefix>/COMPONENT;<prefix>/
+    # SoundTouch" — two install() keywords that leaked into INCLUDES DESTINATION, plus a duplicate.
+    # Every packaging of that release carries it, vcpkg's included. <prefix>/include is the real
+    # one and the only one <soundtouch/SoundTouch.h> needs.
+    get_target_property(_st_includes SoundTouch::SoundTouch INTERFACE_INCLUDE_DIRECTORIES)
+    if(_st_includes)
+        set(_st_usable "")
+        foreach(_dir IN LISTS _st_includes)
+            if(IS_DIRECTORY "${_dir}")
+                list(APPEND _st_usable "${_dir}")
+            else()
+                message(STATUS "SoundTouch: ignoring exported include dir that does not exist: ${_dir}")
+            endif()
+        endforeach()
+        list(REMOVE_DUPLICATES _st_usable)
+        set_target_properties(SoundTouch::SoundTouch PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${_st_usable}")
+    endif()
 endif()
 
 # --- JUCE -------------------------------------------------------------------

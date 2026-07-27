@@ -60,6 +60,10 @@ modules:
       - -DCMAKE_BUILD_TYPE=Release
       - -DBUILD_SHARED_LIBS=ON
       - -DSOUNDSTRETCH=OFF
+      # Without this it lands in /app/lib64, where two things fail to look: pkg-config (so Drift
+      # falls through to SoundTouch's own broken CMake config) and the runtime linker, whose path
+      # inside the sandbox is /app/lib.
+      - -DCMAKE_INSTALL_LIBDIR=lib
     sources:
       - type: git
         url: https://codeberg.org/soundtouch/soundtouch.git
