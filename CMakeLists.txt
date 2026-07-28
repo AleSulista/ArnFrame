@@ -454,11 +454,12 @@ if(WIN32)
         OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/resources/windows/drift.ico")
 endif()
 
-# App icon for QApplication::setWindowIcon / ApplicationWindow (all platforms).
+# App icon for QApplication::setWindowIcon (all platforms). Rendered from Drift_icon.png,
+# as is resources/windows/drift.ico — keep the two in sync when the branding changes.
 qt_add_resources(drift "drift_app_icon"
     PREFIX "/app"
-    BASE resources/windows
-    FILES resources/windows/drift.png
+    BASE resources
+    FILES resources/drift.png
 )
 
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE true)

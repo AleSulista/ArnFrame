@@ -25,6 +25,10 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+; Path is relative to this script. Without these two, setup runs under the stock
+; Inno icon and the Apps & Features entry falls back to a generic one.
+SetupIconFile=..\..\resources\windows\drift.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
 OutputDir=output
 OutputBaseFilename=Drift-Setup-x64
 
