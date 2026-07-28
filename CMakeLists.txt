@@ -449,6 +449,10 @@ qt_add_executable(drift
 # Windows needs the icon embedded in the PE resource section for Explorer and
 # the taskbar; setWindowIcon alone is not enough for the .exe identity.
 if(WIN32)
+    # qt_add_executable() forwards to add_executable() without WIN32, so the linker defaults to the
+    # console subsystem and Windows opens a console window before the GUI comes up. Qt6::EntryPoint
+    # (linked in by Qt6::Core) supplies the WinMain that forwards to main().
+    set_target_properties(drift PROPERTIES WIN32_EXECUTABLE TRUE)
     target_sources(drift PRIVATE resources/windows/drift.rc)
     set_source_files_properties(resources/windows/drift.rc PROPERTIES
         OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/resources/windows/drift.ico")
@@ -587,35 +591,48 @@ target_compile_definitions(drift PRIVATE
     DRIFT_ADDON_CLIENT_TOKEN="${DRIFT_ADDON_CLIENT_TOKEN}"
 )
 
-# Ship file-based effect packages next to binaries that load the catalog.
+# Ship a file-based package directory next to the binaries that load the catalog.
+#
+# Several targets share one output directory (everything under tools/, the two engine tests), so
+# the copy is registered once per destination and depended on, rather than as a POST_BUILD step per
+# target: two `cmake -E copy_directory` processes writing the same tree concurrently — which is
+# what `cmake --build --parallel` does — fail with "Error copying directory".
+function(drift_stage_packages target assetdir)
+    get_target_property(_outdir ${target} RUNTIME_OUTPUT_DIRECTORY)
+    if(NOT _outdir)
+        set(_outdir "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+    file(RELATIVE_PATH _key "${CMAKE_BINARY_DIR}" "${_outdir}/${assetdir}")
+    string(MAKE_C_IDENTIFIER "drift_stage_${_key}" _stage)
+    # Multi-config generators (the Windows job uses Visual Studio) put binaries in <dir>/<config>,
+    # which is where the packaging step expects the staged packages as well.
+    get_property(_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+    if(_multi_config)
+        set(_outdir "${_outdir}/$<CONFIG>")
+    endif()
+    if(NOT TARGET ${_stage})
+        add_custom_target(${_stage}
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${CMAKE_SOURCE_DIR}/${assetdir}"
+                    "${_outdir}/${assetdir}"
+            COMMENT "Copy ${assetdir} packages into ${_outdir}"
+        )
+    endif()
+    add_dependencies(${target} ${_stage})
+endfunction()
+
 function(drift_copy_effects target)
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_SOURCE_DIR}/effects"
-                "$<TARGET_FILE_DIR:${target}>/effects"
-        COMMENT "Copy effects packages next to ${target}"
-    )
+    drift_stage_packages(${target} effects)
 endfunction()
 
-# Same, for file-based transition packages.
 function(drift_copy_transitions target)
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_SOURCE_DIR}/transitions"
-                "$<TARGET_FILE_DIR:${target}>/transitions"
-        COMMENT "Copy transition packages next to ${target}"
-    )
+    drift_stage_packages(${target} transitions)
 endfunction()
 
-# Same, for file-based audio effect packages. These ship as the "audio-effects" addon, so this
-# only makes the build tree self-contained — <appDir>/audio-effects is already a search root.
+# Audio effects ship as the "audio-effects" addon, so this only makes the build tree
+# self-contained — <appDir>/audio-effects is already a search root.
 function(drift_copy_audio_effects target)
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_SOURCE_DIR}/audio-effects"
-                "$<TARGET_FILE_DIR:${target}>/audio-effects"
-        COMMENT "Copy audio effect packages next to ${target}"
-    )
+    drift_stage_packages(${target} audio-effects)
 endfunction()
 
 # Stage an ONNX Runtime into <appDir>/onnxruntime/lib, which is one of the roots
@@ -637,12 +654,7 @@ function(drift_bundle_onnxruntime target)
 endfunction()
 
 function(drift_copy_effect_templates target)
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_SOURCE_DIR}/effect-templates"
-                "$<TARGET_FILE_DIR:${target}>/effect-templates"
-        COMMENT "Copy effect template packages next to ${target}"
-    )
+    drift_stage_packages(${target} effect-templates)
 endfunction()
 
 drift_copy_effects(drift)
