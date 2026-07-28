@@ -144,5 +144,7 @@ Button {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton
         cursorShape: root.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+        // Cursor-only overlays accept wheel by default and block parent Flickables.
+        onWheel: (wheel) => { wheel.accepted = false }
     }
 }

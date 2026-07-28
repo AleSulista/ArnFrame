@@ -246,16 +246,28 @@ PanelFrame {
                 height: parent.height
                 visible: root.currentTabId !== "subtitles"
                 contentWidth: width
+                // Include topPadding so the last controls stay reachable (SettingsTab pattern).
                 contentHeight: tabColumn.height + Theme.spacing3xl
                 clip: true
-                ScrollBar.vertical: AppScrollBar { }
+                boundsBehavior: Flickable.StopAtBounds
+                interactive: contentHeight > height
+                ScrollBar.vertical: AppScrollBar {
+                    policy: tabFlick.contentHeight > tabFlick.height
+                            ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+                }
+
+                // Tall tabs (Audio/Effects) leave contentY deep; reset when switching.
+                Connections {
+                    target: root
+                    function onActiveTabChanged() { tabFlick.contentY = 0 }
+                }
 
                 Column {
                     id: tabColumn
                     x: Theme.pagePadding
-                    y: Theme.pagePadding
                     width: parent.width - Theme.pagePadding * 2
                     spacing: Theme.spacingXl
+                    topPadding: Theme.pagePadding
 
                     Text {
                         text: tabsModel.get(root.activeTab).label

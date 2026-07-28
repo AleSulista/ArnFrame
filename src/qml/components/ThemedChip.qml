@@ -120,5 +120,6 @@ AbstractButton {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton
         cursorShape: root.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+        onWheel: (wheel) => { wheel.accepted = false }
     }
 }

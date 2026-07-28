@@ -40,18 +40,32 @@ Slider {
         return null
     }
 
-    onPressedChanged: {
-        if (pressed) {
-            _flickable = findFlickable(parent)
-            if (_flickable) {
-                _flickableWasInteractive = _flickable.interactive
-                _flickable.interactive = false
-            }
-        } else if (_flickable) {
+    function restoreFlickable() {
+        if (_flickable) {
             _flickable.interactive = _flickableWasInteractive
             _flickable = null
         }
     }
+
+    // Connections (not onPressedChanged) so callers can also handle pressedChanged
+    // for preview-drag without replacing this guard. Without it, a destroyed slider
+    // can leave the parent Flickable non-interactive.
+    Connections {
+        target: root
+        function onPressedChanged() {
+            if (root.pressed) {
+                root._flickable = root.findFlickable(root.parent)
+                if (root._flickable) {
+                    root._flickableWasInteractive = root._flickable.interactive
+                    root._flickable.interactive = false
+                }
+            } else {
+                root.restoreFlickable()
+            }
+        }
+    }
+
+    Component.onDestruction: restoreFlickable()
 
     background: Rectangle {
         x: root.leftPadding
@@ -110,9 +124,24 @@ Slider {
         text: root.valueFormatter(root.value)
     }
 
+    // Cursor-only overlay. Must forward wheel when inside a scrollable Flickable:
+    // MouseArea eats wheel by default, and rejecting it lets Slider::wheelEvent
+    // change the value instead of scrolling the panel (Audio/Effects tabs).
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton
         cursorShape: root.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+        onWheel: (wheel) => {
+            const flick = root.findFlickable(root.parent)
+            const maxY = flick ? Math.max(0, flick.contentHeight - flick.height) : 0
+            if (!flick || maxY <= 0) {
+                wheel.accepted = false
+                return
+            }
+            const dy = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y
+                                                : wheel.angleDelta.y / 8
+            flick.contentY = Math.max(0, Math.min(maxY, flick.contentY - dy))
+            wheel.accepted = true
+        }
     }
 }

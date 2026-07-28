@@ -22,12 +22,16 @@ Item {
     signal actionTriggered()
 
     implicitWidth: Math.min(260, parent ? parent.width : 260)
-    implicitHeight: column.implicitHeight
+    // Height follows the column directly — anchors.centerIn on a child whose
+    // parent sizes from that child's implicitHeight is circular and can collapse.
+    width: parent ? parent.width : implicitWidth
+    height: column.height
+    implicitHeight: column.height
 
     Column {
         id: column
-        anchors.centerIn: parent
         width: Math.min(root.width, 260)
+        anchors.horizontalCenter: parent.horizontalCenter
         spacing: Theme.spacingLg
 
         Rectangle {
