@@ -283,6 +283,12 @@ void EngineTest::faceTrackRoundTripsAndInterpolates()
 // or lands on the wrong frame — silent, and only visible in the composite.
 void EngineTest::matteWriterRoundTripsThroughClipReader()
 {
+    // MatteWriter encodes lossless H.264 and nothing else, so an LGPL FFmpeg (no x264) has
+    // nothing to run this against. Drift's own packages ship a GPL build; this is for anyone
+    // building against a distro's LGPL one.
+    if (!Exporter::videoCodecById(QStringLiteral("h264")).value(QStringLiteral("available")).toBool())
+        QSKIP("No H.264 encoder available in this FFmpeg build");
+
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     const QString path = dir.filePath(QStringLiteral("matte.mp4"));
@@ -2697,7 +2703,6 @@ void EngineTest::exporterProducesPlayableFileWithBackground()
     background.color = QColor(Qt::blue);
     project.setBackground(background);
 
-    const QString out = dir.filePath(QStringLiteral("out.mp4"));
     ExportSettings settings = Exporter::defaultSettings();
     settings.targetHeight = 0;
     settings.videoCodecId = QStringLiteral("h264");
@@ -2732,6 +2737,12 @@ void EngineTest::exporterProducesPlayableFileWithBackground()
         if (!found)
             QSKIP("No audio encoder available in this FFmpeg build");
     }
+
+    // The fallback codecs need not be mp4-muxable (an LGPL FFmpeg has no x264 and lands on ffv1),
+    // so let the pair pick the container rather than hardcoding one.
+    const QString out = dir.filePath(
+        QStringLiteral("out.") + Exporter::defaultSuffix(
+            Exporter::preferredContainer(settings.videoCodecId, settings.audioCodecId)));
 
     QString error;
     const bool ok = Exporter::run(project, settings, out, &error);

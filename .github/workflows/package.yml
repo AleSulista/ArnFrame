@@ -40,6 +40,10 @@ env:
   # The branch, not an exact autobuild: BtbN keeps only the last ~2 weeks of autobuild-<date> tags
   # and deletes the rest, so an exact pin silently becomes a 404 on the first release after it
   # ages out. The `latest` tag is permanent, and n7.1-latest never crosses a soversion.
+  #
+  # The gpl variant, not lgpl: x264 and x265 are GPL, so the lgpl builds carry no H.264/H.265
+  # encoder at all — which leaves the default export settings unencodable and MatteWriter with
+  # nothing to write a matte with. Drift is GPLv3 (see LICENSE), so linking them is fine.
   FFMPEG_BRANCH: "n7.1-latest"
   FFMPEG_SUFFIX: "7.1"
 
@@ -139,7 +143,7 @@ jobs:
         run: |
           rm -rf "${GITHUB_WORKSPACE}/.deps/ffmpeg"
           mkdir -p "${GITHUB_WORKSPACE}/.deps/ffmpeg"
-          curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-${FFMPEG_BRANCH}-linux64-lgpl-shared-${FFMPEG_SUFFIX}.tar.xz" \
+          curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-${FFMPEG_BRANCH}-linux64-gpl-shared-${FFMPEG_SUFFIX}.tar.xz" \
             | tar -xJf - --strip-components=1 -C "${GITHUB_WORKSPACE}/.deps/ffmpeg"
 
       # DRIFT_BUNDLE_ONNXRUNTIME=OFF: a packaged build ships no runtime at all. Drift dlopens the
@@ -260,7 +264,7 @@ jobs:
         run: |
           Remove-Item -Recurse -Force .deps\ffmpeg, .deps\ffmpeg_extracted -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path .deps\ffmpeg | Out-Null
-          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-$env:FFMPEG_BRANCH-win64-lgpl-shared-$env:FFMPEG_SUFFIX.zip" -OutFile ffmpeg.zip
+          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-$env:FFMPEG_BRANCH-win64-gpl-shared-$env:FFMPEG_SUFFIX.zip" -OutFile ffmpeg.zip
           Expand-Archive -Path ffmpeg.zip -DestinationPath .deps\ffmpeg_extracted -Force
           $extractedRoot = (Get-ChildItem .deps\ffmpeg_extracted)[0].FullName
           Copy-Item -Path "$extractedRoot\*" -Destination .deps\ffmpeg -Recurse -Force
