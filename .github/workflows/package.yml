@@ -128,7 +128,6 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: ${{ env.QT_MODULES }}
           cache: true
           add-tools-to-path: true
 
@@ -195,10 +194,16 @@ jobs:
           # whose every import fails at startup.
           export QML_SOURCES_PATHS="${GITHUB_WORKSPACE}/src/qml"
           export LD_LIBRARY_PATH="${QT_ROOT_DIR}/lib:${GITHUB_WORKSPACE}/.deps/ffmpeg/lib:${LD_LIBRARY_PATH:-}"
+          #
+          # The -l lines are OpenSSL: Qt's ossl TLS backend dlopens libssl/libcrypto by soname, so
+          # linuxdeploy sees no dependency to follow and the AppImage would ship with the
+          # cert-only backend — no HTTPS, which means no addon downloads.
           ./linuxdeploy.AppImage --appdir AppDir --plugin qt --output appimage \
             -d flatpak/org.cutwire.Drift.desktop \
             -i flatpak/share/icons/hicolor/256x256/apps/org.cutwire.Drift.png \
-            -e AppDir/usr/bin/drift
+            -e AppDir/usr/bin/drift \
+            -l /usr/lib/x86_64-linux-gnu/libssl.so.3 \
+            -l /usr/lib/x86_64-linux-gnu/libcrypto.so.3
           appimage="$(ls ./*.AppImage | grep -iv linuxdeploy | head -n 1)"
           mv "${appimage}" "dist/Drift-${{ inputs.version }}-x86_64.AppImage"
 

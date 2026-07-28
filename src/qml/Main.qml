@@ -15,7 +15,6 @@ ApplicationWindow {
     minimumHeight: Theme.windowMinimumHeight
     visible: true
     title: "CutWire Drift"
-    icon.source: "qrc:/app/drift.png"
     color: Theme.appBackground
 
     // Set true after the unsaved prompt resolves so onClosing can finish quit.
