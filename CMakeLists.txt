@@ -422,6 +422,21 @@ qt_add_executable(drift
     src/preview/PreviewItem.cpp
 )
 
+# Windows needs the icon embedded in the PE resource section for Explorer and
+# the taskbar; setWindowIcon alone is not enough for the .exe identity.
+if(WIN32)
+    target_sources(drift PRIVATE resources/windows/drift.rc)
+    set_source_files_properties(resources/windows/drift.rc PROPERTIES
+        OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/resources/windows/drift.ico")
+endif()
+
+# App icon for QApplication::setWindowIcon / ApplicationWindow (all platforms).
+qt_add_resources(drift "drift_app_icon"
+    PREFIX "/app"
+    BASE resources/windows
+    FILES resources/windows/drift.png
+)
+
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
 # App-wide notification queue; the visual host is components/ToastHost.qml.
 set_source_files_properties(src/qml/Toasts.qml PROPERTIES QT_QML_SINGLETON_TYPE true)

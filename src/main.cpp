@@ -15,6 +15,7 @@
 // QApplication (not QGuiApplication) is required so QFileDialog can use the
 // native platform file picker, which routes through xdg-desktop-portal.
 #include <QApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <QtQml/qqml.h>
@@ -34,6 +35,10 @@ int main(int argc, char *argv[])
     // Associates the window with the installed .desktop entry so shells (notably
     // Wayland) can find its icon and app metadata.
     QGuiApplication::setDesktopFileName(QStringLiteral("org.cutwire.Drift"));
+    // Title bar / taskbar icon when no desktop entry is available (Windows, and
+    // Linux runs from the build tree). The .exe still needs the Windows .rc icon
+    // for Explorer and pinned-taskbar identity.
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/app/drift.png")));
 
     // Registering the bundled fonts needs a QGuiApplication, and must happen before the compositor
     // thread starts touching QFontDatabase.
