@@ -165,8 +165,17 @@ jobs:
       # some of them guard on GpuEffectExecutor::isAvailable() and QSKIP, the rest compare against
       # whatever the compositor returned, which is a null QImage when there is no GL context.
       # Models and font bundles that are not in the repo do skip themselves.
+      #
+      # LD_LIBRARY_PATH is appended to rather than prepended so the libraries that already
+      # resolved keep resolving exactly where they did. What it adds is libpostproc.so.58, which
+      # only the gpl FFmpeg ships (postproc is GPL-only) and which libavfilter needs: CMake gives
+      # the test binaries a build RPATH covering that directory, but emits it as DT_RUNPATH, and
+      # the loader applies RUNPATH only to the binary's own NEEDED entries — never to a
+      # dependency's. libavfilter carries no RUNPATH of its own, so nothing found libpostproc.
       - name: Test
-        run: QT_QPA_PLATFORM=xcb xvfb-run -a -s "-screen 0 1280x1024x24" ctest --test-dir build --output-on-failure
+        run: |
+          export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:${GITHUB_WORKSPACE}/.deps/ffmpeg/lib"
+          QT_QPA_PLATFORM=xcb xvfb-run -a -s "-screen 0 1280x1024x24" ctest --test-dir build --output-on-failure
 
       - name: Stage install tree
         run: |
