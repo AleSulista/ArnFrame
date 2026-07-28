@@ -207,9 +207,16 @@ PanelFrame {
         snapGuideSeconds = snapped.guide
     }
 
-    function clearLandingPreview() {
+    // Drops only the landing outline. dropCreatesNewTrack belongs to the
+    // panel-level drop area: a track row leaving the drag must not clear it,
+    // since reaching the new-track slop always fires a leave on row 0.
+    function clearLandingOutline() {
         dropTrackIndex = -1
         snapGuideSeconds = -1
+    }
+
+    function clearLandingPreview() {
+        clearLandingOutline()
         dropCreatesNewTrack = false
     }
 
@@ -1030,7 +1037,7 @@ PanelFrame {
                                     onEntered: (drop) => updateAssetPreview(drop)
                                     onPositionChanged: (drop) => updateAssetPreview(drop)
                                     onExited: {
-                                        root.clearLandingPreview()
+                                        root.clearLandingOutline()
                                         root.clearEffectDropHighlight()
                                     }
                                     onDropped: (drop) => {
