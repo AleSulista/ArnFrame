@@ -10,7 +10,10 @@ depends=(
     'qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-multimedia-ffmpeg'
     'ffmpeg' 'zstd' 'openssl' 'soundtouch'
 )
-makedepends=('cmake' 'ninja' 'git' 'pkgconf')
+# xorg-server-xvfb is check()-only: the compositor tests need a real OpenGL context, and Qt's
+# offscreen platform plugin cannot provide one on a builder with no /dev/dri (llvmpipe is fine,
+# it just needs an X server to hand Qt a GL visual).
+makedepends=('cmake' 'ninja' 'git' 'pkgconf' 'xorg-server-xvfb')
 # Defaults to the tagged release; CI overrides _commit (e.g. to $GITHUB_SHA)
 # to build the exact commit that triggered the workflow instead.
 _commit="${_commit:-v$pkgver}"
@@ -37,7 +40,7 @@ build() {
 
 check() {
     cd "$pkgname"
-    QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+    QT_QPA_PLATFORM=xcb xvfb-run -a -s "-screen 0 1280x1024x24" ctest --test-dir build --output-on-failure
 }
 
 package() {

@@ -114,10 +114,20 @@ cmake --build build -j$(nproc)
 
 ```bash
 cd build
-QT_QPA_PLATFORM=offscreen ctest --output-on-failure
+ctest --output-on-failure
 ```
 
 Test targets: `Core`, `EditorState`, `Playback`, `Engine`, `MediaProbe`, `AddonPackage`.
+
+On a headless machine — CI, a container, a build server with no GPU — run it under Xvfb instead:
+
+```bash
+QT_QPA_PLATFORM=xcb xvfb-run -a -s "-screen 0 1280x1024x24" ctest --output-on-failure
+```
+
+`QT_QPA_PLATFORM=offscreen` will not work: that plugin cannot create an OpenGL context without a
+`/dev/dri` device, and the compositor tests then compare against a null frame. Software rendering
+is not the issue — llvmpipe passes the whole suite once there is an X server.
 
 `AddonPackage` verifies against a signed fixture in `tests/data/`, so that file has to be checked out with the repo.
 
