@@ -12,6 +12,7 @@
 
 #include <QList>
 
+#include <atomic>
 #include <map>
 #include <memory>
 
@@ -37,6 +38,12 @@ public:
     // clip after another on the caller's thread.
     void warmVideoFrames(const QList<VideoRequest> &requests);
 
+    // How far past the frame being composited each reader keeps decoding, in
+    // source time. Set per composite from the render options; 0 (the default)
+    // leaves the plain one-frame-ahead prefetch. Only the NV12 preview path
+    // buffers — export and thumbnails consume as fast as they decode anyway.
+    void setReadAheadUs(drift::TimeUs readAheadUs);
+
     QImage readVideoFrame(const QString &path, drift::TimeUs sourceUs, int maxWidth, int maxHeight);
     // Preview path: NV12 for cheaper GPU upload. Falls back empty when decode fails.
     Nv12Frame readVideoFrameNv12(const QString &path, drift::TimeUs sourceUs, int maxWidth, int maxHeight);
@@ -58,6 +65,7 @@ private:
     ClipReaderWorker *ensureWorker(std::map<QString, std::unique_ptr<WorkerEntry>> &workers, const QString &path);
 
     QMutex m_mutex;
+    std::atomic<drift::TimeUs> m_readAheadUs{0};
     std::map<QString, std::unique_ptr<WorkerEntry>> m_videoWorkers;
     std::map<QString, std::unique_ptr<WorkerEntry>> m_audioWorkers;
 };

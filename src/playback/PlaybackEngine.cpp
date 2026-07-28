@@ -8,6 +8,14 @@ namespace {
 
 constexpr int kPlayheadUpdateMs = 16; // ~60 Hz UI updates, independent of video decode
 
+// How much decoded source each clip's reader keeps buffered ahead of the
+// playhead during fast playback. This absorbs frames that decode slower than
+// realtime (long GOPs, a heavy transition) by spending the slack on either side
+// of them. It is deliberately seconds and not minutes: the frames are held in
+// RAM per clip — 2 s of 720p NV12 is ~83 MB — and every edit or seek discards
+// the part of the buffer past the change.
+constexpr drift::TimeUs kReadAheadUs = 2 * drift::kUsPerSecond;
+
 } // namespace
 
 AudioPlaybackIODevice::AudioPlaybackIODevice(PlaybackEngine *engine, QObject *parent)
@@ -396,6 +404,11 @@ FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
     // decode work unboundedly. Paused, scrubbed and quality-mode frames keep the
     // full history: those are exactly the cases where fidelity is the point.
     options.maxTimeEchoHistoryFrames = m_playing && !isQualityMode() ? 12 : -1;
+
+    // Buffer decoded frames ahead of the playhead only while realtime playback is
+    // actually running: paused and quality-mode frames have no deadline to miss,
+    // and read-ahead during editing is thrown away by the next edit.
+    options.readAheadUs = m_playing && !isQualityMode() ? kReadAheadUs : 0;
 
     if (m_project && m_previewRenderWidth > 0 && m_previewRenderHeight > 0
         && m_previewQuality == QStringLiteral("full")) {

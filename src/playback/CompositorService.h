@@ -82,6 +82,7 @@ private:
     std::atomic<drift::TimeUs> m_pendingTimeUs{0};
     std::atomic<int> m_pendingPreviewScalePercent{100};
     std::atomic<int> m_pendingMaxTimeEchoHistoryFrames{-1};
+    std::atomic<drift::TimeUs> m_pendingReadAheadUs{0};
     drift::TimeUs m_lastDispatchedTimeUs = -1;
     FrameCompositor::RenderOptions m_lastDispatchedOptions;
 

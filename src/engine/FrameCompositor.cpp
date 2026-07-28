@@ -868,6 +868,7 @@ bool FrameCompositor::prepare(drift::TimeUs timelineUs, const RenderOptions &opt
     QSet<QString> audioPaths;
     collectActivePaths(m_project, timelineUs, videoPaths, audioPaths);
     ClipReaderPool::instance().retainActivePaths(videoPaths, audioPaths);
+    ClipReaderPool::instance().setReadAheadUs(options.readAheadUs);
 
     // Start every clip's decode before compositing anything, so they run in
     // parallel across the per-path worker threads rather than serially below.

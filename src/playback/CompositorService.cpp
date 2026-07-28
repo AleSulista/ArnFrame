@@ -140,6 +140,7 @@ void CompositorService::requestComposite(drift::TimeUs timeUs, FrameCompositor::
         qBound(10, static_cast<int>(std::lround(options.previewScale * 100.0)), 100),
         std::memory_order_release);
     m_pendingMaxTimeEchoHistoryFrames.store(options.maxTimeEchoHistoryFrames, std::memory_order_release);
+    m_pendingReadAheadUs.store(options.readAheadUs, std::memory_order_release);
     if (m_requestPending.exchange(true, std::memory_order_acq_rel))
         return;
 
@@ -156,6 +157,7 @@ void CompositorService::onWorkerFrameReady(const GpuFrameTexture &frame, drift::
         static_cast<double>(m_pendingPreviewScalePercent.load(std::memory_order_acquire)) / 100.0;
     latestOptions.maxTimeEchoHistoryFrames =
         m_pendingMaxTimeEchoHistoryFrames.load(std::memory_order_acquire);
+    latestOptions.readAheadUs = m_pendingReadAheadUs.load(std::memory_order_acquire);
 
     // Quality mode shows every frame it renders, however far behind the request
     // it finished; only fast mode discards frames the playhead has run past.
@@ -170,7 +172,8 @@ void CompositorService::onWorkerFrameReady(const GpuFrameTexture &frame, drift::
 
     if (latest != m_lastDispatchedTimeUs
         || latestOptions.previewScale != m_lastDispatchedOptions.previewScale
-        || latestOptions.maxTimeEchoHistoryFrames != m_lastDispatchedOptions.maxTimeEchoHistoryFrames) {
+        || latestOptions.maxTimeEchoHistoryFrames != m_lastDispatchedOptions.maxTimeEchoHistoryFrames
+        || latestOptions.readAheadUs != m_lastDispatchedOptions.readAheadUs) {
         m_lastDispatchedTimeUs = latest;
         m_lastDispatchedOptions = latestOptions;
         if (!m_requestPending.exchange(true, std::memory_order_acq_rel))

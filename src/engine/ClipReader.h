@@ -64,7 +64,11 @@ public:
     // decode with the caller's compositing work. Match the format of the last
     // read so prefetch does not consume a frame the other format still needs.
     void prefetchNextVideoFrame(int maxWidth, int maxHeight);
-    void prefetchNextVideoFrameNv12(int maxWidth, int maxHeight);
+    // Preview read-ahead: decodes one frame and reports whether the cache is
+    // still short of readAheadUs of decoded source past the last frame the
+    // caller asked for. Callers step it one frame at a time so a real read never
+    // waits behind more than a single decode. 0 keeps the old one-frame prefetch.
+    bool prefetchNextVideoFrameNv12(int maxWidth, int maxHeight, drift::TimeUs readAheadUs = 0);
     int readAudioInterleaved(drift::TimeUs sourceStartUs, int sampleCount, int outputSampleRate,
                              float *interleavedStereoOut);
 
@@ -104,6 +108,9 @@ private:
     void storeCachedFrame(drift::TimeUs ptsUs, const QImage &image);
     bool lookupCachedNv12(drift::TimeUs sourceUs, Nv12Frame &out) const;
     void storeCachedNv12(drift::TimeUs ptsUs, const Nv12Frame &frame);
+    int nv12CacheCapacity() const;
+    void trimNv12Cache();
+    bool wantsMoreNv12ReadAhead() const;
 
     QString m_path;
     struct AVFormatContext *m_fmt = nullptr;
@@ -157,6 +164,18 @@ private:
     };
     QList<CachedNv12> m_nv12Cache;
     static constexpr int kMaxCachedFrames = 16;
+
+    // Preview read-ahead. m_lastRequestedNv12Us is the last position a caller
+    // actually asked for — prefetch must not advance it, or the buffer would
+    // always measure itself as one frame deep. m_prefetching marks those reads.
+    drift::TimeUs m_readAheadUs = 0;
+    drift::TimeUs m_lastRequestedNv12Us = 0;
+    bool m_prefetching = false;
+    // Read-ahead frames are held in RAM on top of the history above, so the depth
+    // is capped by bytes as well as by time: the same 2 s is 60 frames of a 25 fps
+    // 720p clip (~83 MB) but only a handful of 4K ones.
+    static constexpr qsizetype kNv12CacheByteBudget = 128 * 1024 * 1024;
+    static constexpr int kMaxReadAheadFrames = 300;
 
     // Sequential audio decode state (mirrors the video fast-path): keep the
     // resampler and demux position across buffers so contiguous playback decodes

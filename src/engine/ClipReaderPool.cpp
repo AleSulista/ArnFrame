@@ -66,6 +66,11 @@ ClipReaderWorker *ClipReaderPool::ensureWorker(std::map<QString, std::unique_ptr
     return it->second->worker;
 }
 
+void ClipReaderPool::setReadAheadUs(drift::TimeUs readAheadUs)
+{
+    m_readAheadUs.store(qMax<drift::TimeUs>(0, readAheadUs), std::memory_order_relaxed);
+}
+
 void ClipReaderPool::warmVideoFrames(const QList<VideoRequest> &requests)
 {
     for (const VideoRequest &request : requests) {
@@ -129,8 +134,7 @@ Nv12Frame ClipReaderPool::readVideoFrameNv12(const QString &path, drift::TimeUs 
                               Q_RETURN_ARG(Nv12Frame, frame), Q_ARG(drift::TimeUs, sourceUs),
                               Q_ARG(int, maxWidth), Q_ARG(int, maxHeight));
 
-    QMetaObject::invokeMethod(worker, "prefetchNextVideoNv12", Qt::QueuedConnection,
-                              Q_ARG(int, maxWidth), Q_ARG(int, maxHeight));
+    worker->requestPrefetchNv12(maxWidth, maxHeight, m_readAheadUs.load(std::memory_order_relaxed));
 
     return frame;
 }

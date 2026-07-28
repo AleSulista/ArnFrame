@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -300,8 +301,57 @@ void ClipReader::storeCachedNv12(drift::TimeUs ptsUs, const Nv12Frame &frame)
     }
 
     m_nv12Cache.prepend(CachedNv12{ptsUs, frame});
-    while (m_nv12Cache.size() > kMaxCachedFrames)
-        m_nv12Cache.removeLast();
+    trimNv12Cache();
+}
+
+int ClipReader::nv12CacheCapacity() const
+{
+    if (m_readAheadUs <= 0 || m_sourceFrameDurationUs <= 0)
+        return kMaxCachedFrames;
+
+    const int aheadFrames =
+        qBound(0, static_cast<int>(m_readAheadUs / m_sourceFrameDurationUs), kMaxReadAheadFrames);
+    // The history slots stay reserved on top of the read-ahead: time_echo and
+    // backward scrubbing read behind the playhead and must not lose their frames
+    // to the buffer in front of it.
+    int capacity = kMaxCachedFrames + aheadFrames;
+
+    const qsizetype frameBytes = m_nv12Cache.isEmpty() ? 0 : m_nv12Cache.constFirst().frame.data.size();
+    if (frameBytes > 0)
+        capacity = qMin<qsizetype>(capacity, qMax<qsizetype>(kMaxCachedFrames,
+                                                            kNv12CacheByteBudget / frameBytes));
+    return capacity;
+}
+
+void ClipReader::trimNv12Cache()
+{
+    const int capacity = nv12CacheCapacity();
+    while (m_nv12Cache.size() > capacity) {
+        // Evict what playback is furthest past, not what was decoded longest ago:
+        // plain insertion order would drop the read-ahead frames first, which are
+        // precisely the ones about to be shown. Frames behind the last requested
+        // position go before any frame in front of it.
+        int worst = 0;
+        drift::TimeUs worstRank = std::numeric_limits<drift::TimeUs>::min();
+        for (int i = 0; i < m_nv12Cache.size(); ++i) {
+            const drift::TimeUs delta = m_lastRequestedNv12Us - m_nv12Cache.at(i).ptsUs;
+            const drift::TimeUs rank = delta >= 0 ? delta + std::numeric_limits<qint32>::max() : -delta;
+            if (rank > worstRank) {
+                worstRank = rank;
+                worst = i;
+            }
+        }
+        m_nv12Cache.removeAt(worst);
+    }
+}
+
+bool ClipReader::wantsMoreNv12ReadAhead() const
+{
+    if (m_readAheadUs <= 0 || !m_videoPositioned || m_sourceFrameDurationUs <= 0)
+        return false;
+    if (m_nv12Cache.size() >= nv12CacheCapacity())
+        return false;
+    return m_lastVideoPtsUs - m_lastRequestedNv12Us < m_readAheadUs;
 }
 
 void ClipReader::close()
@@ -1089,6 +1139,9 @@ bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &o
 
 bool ClipReader::readVideoFrameAtNv12(drift::TimeUs sourceUs, Nv12Frame &out, int maxWidth, int maxHeight)
 {
+    if (!m_prefetching)
+        m_lastRequestedNv12Us = sourceUs;
+
     bool hwFailure = false;
     if (decodeVideoFrameAtOnceNv12(sourceUs, out, maxWidth, maxHeight, &hwFailure))
         return true;
@@ -1111,13 +1164,34 @@ void ClipReader::prefetchNextVideoFrame(int maxWidth, int maxHeight)
     readVideoFrameAt(m_lastVideoPtsUs + m_sourceFrameDurationUs, ignored, maxWidth, maxHeight);
 }
 
-void ClipReader::prefetchNextVideoFrameNv12(int maxWidth, int maxHeight)
+bool ClipReader::prefetchNextVideoFrameNv12(int maxWidth, int maxHeight, drift::TimeUs readAheadUs)
 {
+    // Sticky: the caller passes the current depth on every prefetch, so dropping
+    // to 0 (playback stopped) shrinks the cache back on the next call.
+    m_readAheadUs = qMax<drift::TimeUs>(0, readAheadUs);
+    trimNv12Cache();
+
     if (!m_videoPositioned || m_sourceFrameDurationUs <= 0)
-        return;
+        return false;
+
+    // Step over frames the buffer already holds. A cache hit leaves the decoder
+    // where it is, so walking by decoder position alone would ask for the same
+    // frame forever once the walk reaches an earlier run's frames — which is
+    // exactly what a backward seek into a buffered region sets up.
+    drift::TimeUs target = m_lastVideoPtsUs + m_sourceFrameDurationUs;
+    Nv12Frame cached;
+    while (target - m_lastRequestedNv12Us < m_readAheadUs && lookupCachedNv12(target, cached))
+        target += m_sourceFrameDurationUs;
+
+    if (m_readAheadUs > 0 && target - m_lastRequestedNv12Us >= m_readAheadUs)
+        return false;
 
     Nv12Frame ignored;
-    readVideoFrameAtNv12(m_lastVideoPtsUs + m_sourceFrameDurationUs, ignored, maxWidth, maxHeight);
+    m_prefetching = true;
+    const bool decoded = readVideoFrameAtNv12(target, ignored, maxWidth, maxHeight);
+    m_prefetching = false;
+
+    return decoded && wantsMoreNv12ReadAhead();
 }
 
 int ClipReader::readAudioInterleaved(drift::TimeUs sourceStartUs, int sampleCount, int outputSampleRate,

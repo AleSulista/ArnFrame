@@ -4,6 +4,7 @@
 
 #include "core/Time.h"
 
+#include <QAtomicInt>
 #include <QImage>
 #include <QMutex>
 #include <QObject>
@@ -18,6 +19,12 @@ class ClipReaderWorker : public QObject
 public:
     explicit ClipReaderWorker(QObject *parent = nullptr);
 
+    // Callable from any thread. Queues one read-ahead step if none is pending;
+    // that step re-arms itself until the reader has readAheadUs of decoded source
+    // buffered. Keeping a single step in flight is what bounds a decode request's
+    // wait to one frame — a queue of them would serialize ahead of it.
+    void requestPrefetchNv12(int maxWidth, int maxHeight, drift::TimeUs readAheadUs);
+
 public slots:
     void openPath(const QString &path);
     void closePath();
@@ -26,9 +33,10 @@ public slots:
     int decodeAudio(drift::TimeUs sourceStartUs, int sampleCount, int outputSampleRate,
                     float *interleavedStereoOut);
     void prefetchNextVideo(int maxWidth, int maxHeight);
-    void prefetchNextVideoNv12(int maxWidth, int maxHeight);
+    void prefetchNextVideoNv12(int maxWidth, int maxHeight, drift::TimeUs readAheadUs);
 
 private:
     ClipReader m_reader;
     QMutex m_mutex;
+    QAtomicInt m_prefetchPending{0};
 };

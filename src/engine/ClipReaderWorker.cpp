@@ -48,8 +48,29 @@ void ClipReaderWorker::prefetchNextVideo(int maxWidth, int maxHeight)
     m_reader.prefetchNextVideoFrame(maxWidth, maxHeight);
 }
 
-void ClipReaderWorker::prefetchNextVideoNv12(int maxWidth, int maxHeight)
+void ClipReaderWorker::requestPrefetchNv12(int maxWidth, int maxHeight, drift::TimeUs readAheadUs)
 {
-    QMutexLocker lock(&m_mutex);
-    m_reader.prefetchNextVideoFrameNv12(maxWidth, maxHeight);
+    if (!m_prefetchPending.testAndSetAcquire(0, 1))
+        return;
+
+    QMetaObject::invokeMethod(this, "prefetchNextVideoNv12", Qt::QueuedConnection,
+                              Q_ARG(int, maxWidth), Q_ARG(int, maxHeight),
+                              Q_ARG(drift::TimeUs, readAheadUs));
+}
+
+void ClipReaderWorker::prefetchNextVideoNv12(int maxWidth, int maxHeight, drift::TimeUs readAheadUs)
+{
+    m_prefetchPending.storeRelease(0);
+
+    bool more = false;
+    {
+        QMutexLocker lock(&m_mutex);
+        more = m_reader.prefetchNextVideoFrameNv12(maxWidth, maxHeight, readAheadUs);
+    }
+
+    // Re-post instead of looping: this yields the event queue and the reader
+    // mutex between frames, so a decode request that arrives mid-buffer waits
+    // for one frame rather than for the whole read-ahead.
+    if (more)
+        requestPrefetchNv12(maxWidth, maxHeight, readAheadUs);
 }
