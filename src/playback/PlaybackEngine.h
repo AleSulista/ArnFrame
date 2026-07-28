@@ -47,6 +47,7 @@ class PlaybackEngine : public QObject
     Q_PROPERTY(bool hasFrame READ hasFrame NOTIFY currentFrameChanged)
     Q_PROPERTY(bool playing READ isPlaying NOTIFY playingChanged)
     Q_PROPERTY(QString previewQuality READ previewQuality WRITE setPreviewQuality NOTIFY previewQualityChanged)
+    Q_PROPERTY(QString playbackMode READ playbackMode WRITE setPlaybackMode NOTIFY playbackModeChanged)
 
 public:
     explicit PlaybackEngine(QObject *parent = nullptr);
@@ -62,6 +63,10 @@ public:
     bool isPlaying() const { return m_playing; }
     QString previewQuality() const;
     void setPreviewQuality(const QString &quality);
+    // "fast": realtime playback with audio, late frames dropped. "quality":
+    // every frame is rendered and shown, silently and slower than realtime.
+    QString playbackMode() const;
+    void setPlaybackMode(const QString &mode);
 
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
@@ -76,6 +81,7 @@ signals:
     void currentFrameChanged();
     void playingChanged();
     void previewQualityChanged();
+    void playbackModeChanged();
     void playheadUsChanged(quint64 us);
 
 private:
@@ -85,8 +91,11 @@ private:
     void ensureAudioSink();
     void onPlayheadTick();
     void onCompositeTick();
+    void onCompositeFinished();
     void onFrameReady(const GpuFrameTexture &frame);
     void checkEndOfTimeline(drift::TimeUs timeUs);
+    bool isQualityMode() const { return m_playbackMode == QStringLiteral("quality"); }
+    drift::TimeUs frameStepUs() const;
     FrameCompositor::RenderOptions playbackRenderOptions() const;
 
     drift::Project *m_project = nullptr;
@@ -105,7 +114,11 @@ private:
     mutable QMutex m_frameMutex;
     drift::TimeUs m_playheadUs = 0;
     std::atomic<bool> m_playing = false;
-    QString m_previewQuality = QStringLiteral("auto");
+    QString m_previewQuality = QStringLiteral("full");
+    QString m_playbackMode = QStringLiteral("fast");
+    // Playhead position the in-flight quality-mode frame was requested for; a
+    // seek that lands elsewhere while it renders must not be stepped over.
+    drift::TimeUs m_qualityRequestUs = -1;
     QString m_editingClipId;
     int m_previewRenderWidth = 0;
     int m_previewRenderHeight = 0;

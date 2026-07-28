@@ -418,7 +418,6 @@ qt_add_executable(drift
     src/playback/ClipPreviewPlayer.cpp
     src/playback/CompositorService.h
     src/playback/CompositorService.cpp
-    src/playback/AdaptivePreviewPolicy.h
     src/preview/PreviewItem.h
     src/preview/PreviewItem.cpp
 )

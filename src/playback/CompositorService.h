@@ -1,6 +1,5 @@
 #pragma once
 
-#include "AdaptivePreviewPolicy.h"
 #include "engine/FrameCompositor.h"
 #include "engine/GpuCompositor.h"
 
@@ -24,11 +23,10 @@ public slots:
     // use-after-free. Use Project::detachedCopy() so Qt COW payloads are unique,
     // then share that snapshot via shared_ptr across queued invokes.
     void composite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options,
-                   std::shared_ptr<const drift::Project> snapshot, int generation);
+                   std::shared_ptr<const drift::Project> snapshot);
 
 signals:
-    void frameReady(const GpuFrameTexture &frame, drift::TimeUs timeUs, qint64 renderMs,
-                    int generation);
+    void frameReady(const GpuFrameTexture &frame, drift::TimeUs timeUs);
 
 private:
     FrameCompositor m_compositor;
@@ -51,27 +49,26 @@ public:
     void requestComposite(drift::TimeUs timeUs,
                           FrameCompositor::RenderOptions options = FrameCompositor::RenderOptions{});
 
-    // Target frame duration used by adaptive preview scaling. 0 disables budget
-    // adaptation (manual quality modes can still request a fixed scale).
-    void setFrameBudgetMs(qint64 budgetMs);
-    void setAdaptiveEnabled(bool enabled);
-    void resetAdaptiveScale();
-    // After a playhead seek, drop late pre-seek frames and restart monotonic present.
-    void noteSeek(drift::TimeUs playheadUs);
+    // Fast playback (the default) drops frames that finish after the playhead has
+    // moved on and downscales when it keeps happening. Turn this off to present
+    // every rendered frame at the requested scale, however long it takes.
+    void setDropLateFrames(bool drop);
 
     // Multiplier applied on top of the caller's previewScale during playback
-    // overload (1.0 = full requested quality). Driven by render-cost feedback.
+    // overload (1.0 = full requested quality). Driven by stale-frame feedback.
     double adaptiveScaleFactor() const;
 
 signals:
     void frameReady(const GpuFrameTexture &frame);
+    // One per completed request, whether or not a frame was produced or shown.
+    void compositeFinished();
 
 private slots:
-    void onWorkerFrameReady(const GpuFrameTexture &frame, drift::TimeUs timeUs, qint64 renderMs,
-                            int generation);
+    void onWorkerFrameReady(const GpuFrameTexture &frame, drift::TimeUs timeUs);
 
 private:
-    void dispatch(drift::TimeUs timeUs, const FrameCompositor::RenderOptions &options, int generation);
+    void dispatch(drift::TimeUs timeUs, const FrameCompositor::RenderOptions &options);
+    void noteFrameStale(bool stale);
     FrameCompositor::RenderOptions effectiveOptions(FrameCompositor::RenderOptions options) const;
 
     const drift::Project *m_project = nullptr;
@@ -83,20 +80,16 @@ private:
 
     std::atomic<bool> m_requestPending{false};
     std::atomic<drift::TimeUs> m_pendingTimeUs{0};
-    // Caller-requested scale *before* adaptive — catch-up frames re-apply the
-    // current adaptive factor instead of multiplying it twice.
-    std::atomic<int> m_pendingBaseScalePercent{100};
+    std::atomic<int> m_pendingPreviewScalePercent{100};
     std::atomic<int> m_pendingMaxTimeEchoHistoryFrames{-1};
-    std::atomic<int> m_pendingGeneration{0};
     drift::TimeUs m_lastDispatchedTimeUs = -1;
     FrameCompositor::RenderOptions m_lastDispatchedOptions;
-    int m_lastDispatchedGeneration = -1;
 
-    AdaptivePreviewPolicy::State m_adaptive;
-    bool m_adaptiveEnabled = true;
-    qint64 m_frameBudgetMs = 33;
-    drift::TimeUs m_lastPresentedTimeUs = -1;
-    drift::TimeUs m_minPresentableTimeUs = 0;
+    // Adaptive quality: consecutive on-time frames recover; stale frames drop scale.
+    int m_staleStreak = 0;
+    int m_onTimeStreak = 0;
+    double m_adaptiveScale = 1.0;
+    bool m_dropLateFrames = true;
 
     QThread m_thread;
     CompositorWorker *m_worker = nullptr;

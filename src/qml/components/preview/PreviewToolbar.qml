@@ -107,11 +107,29 @@ Item {
             rightPadding: Theme.spacing2xl
             font.pixelSize: Theme.fontSizeXs
             // Display is capitalised; the engine stores the lowercase value.
-            readonly property var values: ["auto", "full", "half", "quarter"]
-            model: [qsTr("Auto"), qsTr("Full"), qsTr("Half"), qsTr("Quarter")]
-            tooltip: qsTr("Preview quality — Auto stays smooth while editing; Full is sharp when paused")
+            readonly property var values: ["full", "half", "quarter"]
+            model: [qsTr("Full"), qsTr("Half"), qsTr("Quarter")]
+            tooltip: qsTr("Preview quality — lower is smoother while editing")
             currentIndex: Math.max(0, values.indexOf(EditorState.playback.previewQuality))
             onActivated: EditorState.playback.previewQuality = values[currentIndex]
+        }
+
+        ThemedComboBox {
+            id: playbackModeCombo
+            anchors.verticalCenter: parent.verticalCenter
+            implicitHeight: Theme.controlHeightSm
+            width: implicitContentWidth + leftPadding + rightPadding
+            leftPadding: Theme.spacingMd
+            rightPadding: Theme.spacing2xl
+            font.pixelSize: Theme.fontSizeXs
+            readonly property var values: ["fast", "quality"]
+            model: [qsTr("Fast"), qsTr("Quality")]
+            tooltip: qsTr("Playback mode\nFast: plays in real time with audio, skipping frames it "
+                          + "cannot render in time — use this for general playback.\n"
+                          + "Quality: renders and shows every single frame, silently and slower "
+                          + "than real time — use this to check complex transitions frame by frame.")
+            currentIndex: Math.max(0, values.indexOf(EditorState.playback.playbackMode))
+            onActivated: EditorState.playback.playbackMode = values[currentIndex]
         }
 
         Rectangle {

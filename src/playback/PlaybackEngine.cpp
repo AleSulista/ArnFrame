@@ -48,10 +48,16 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
     , m_device(new AudioPlaybackIODevice(this))
 {
     const QString saved = QSettings().value(QStringLiteral("preview/quality")).toString().toLower();
-    if (saved == QStringLiteral("auto") || saved == QStringLiteral("full")
-        || saved == QStringLiteral("half") || saved == QStringLiteral("quarter")) {
+    if (saved == QStringLiteral("full") || saved == QStringLiteral("half")
+        || saved == QStringLiteral("quarter")) {
         m_previewQuality = saved;
     }
+
+    const QString savedMode =
+        QSettings().value(QStringLiteral("preview/playbackMode")).toString().toLower();
+    if (savedMode == QStringLiteral("fast") || savedMode == QStringLiteral("quality"))
+        m_playbackMode = savedMode;
+    m_compositor.setDropLateFrames(!isQualityMode());
 
     // The pull device and sink run on a dedicated thread; the GUI thread stays
     // free while audio is decoded and mixed on refill.
@@ -64,6 +70,8 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
     connect(&m_playheadTimer, &QTimer::timeout, this, &PlaybackEngine::onPlayheadTick);
     connect(&m_compositeTimer, &QTimer::timeout, this, &PlaybackEngine::onCompositeTick);
     connect(&m_compositor, &CompositorService::frameReady, this, &PlaybackEngine::onFrameReady);
+    connect(&m_compositor, &CompositorService::compositeFinished, this,
+            &PlaybackEngine::onCompositeFinished);
 }
 
 PlaybackEngine::~PlaybackEngine()
@@ -128,13 +136,14 @@ void PlaybackEngine::setPlayheadUs(drift::TimeUs us)
     m_playheadUs = qMax<drift::TimeUs>(0, us);
     m_mixer.resetEffectRacks();
     m_clock.reset(m_playheadUs, m_sampleRate);
-    m_compositor.noteSeek(m_playheadUs);
     // reset() clears the running flag; resume the clock if we are still in play
     // so edits/seeks during playback don't freeze audio at one timeline spot.
-    if (m_playing)
-        m_clock.start();
-    else
+    // Quality mode has no clock — its loop picks the new playhead up on the next
+    // completed frame.
+    if (!m_playing)
         refreshFrame();
+    else if (!isQualityMode())
+        m_clock.start();
 }
 
 int PlaybackEngine::previewTextureId() const
@@ -159,8 +168,8 @@ void PlaybackEngine::setPreviewQuality(const QString &quality)
     const QString normalized = quality.toLower();
     // An unrecognized value used to silently become "half", which quietly changed
     // what the user was looking at. Ignore it instead.
-    if (normalized != QStringLiteral("auto") && normalized != QStringLiteral("full")
-        && normalized != QStringLiteral("half") && normalized != QStringLiteral("quarter")) {
+    if (normalized != QStringLiteral("full") && normalized != QStringLiteral("half")
+        && normalized != QStringLiteral("quarter")) {
         qWarning("PlaybackEngine: ignoring unknown preview quality '%s'", qPrintable(quality));
         return;
     }
@@ -171,6 +180,40 @@ void PlaybackEngine::setPreviewQuality(const QString &quality)
     QSettings().setValue(QStringLiteral("preview/quality"), m_previewQuality);
     emit previewQualityChanged();
     refreshFrame();
+}
+
+QString PlaybackEngine::playbackMode() const
+{
+    return m_playbackMode;
+}
+
+void PlaybackEngine::setPlaybackMode(const QString &mode)
+{
+    const QString normalized = mode.toLower();
+    if (normalized != QStringLiteral("fast") && normalized != QStringLiteral("quality")) {
+        qWarning("PlaybackEngine: ignoring unknown playback mode '%s'", qPrintable(mode));
+        return;
+    }
+    if (m_playbackMode == normalized)
+        return;
+
+    m_playbackMode = normalized;
+    QSettings().setValue(QStringLiteral("preview/playbackMode"), m_playbackMode);
+    m_compositor.setDropLateFrames(!isQualityMode());
+    emit playbackModeChanged();
+
+    // The two modes drive the playhead from different sources and differ on
+    // whether the sink runs, so switching mid-playback restarts the transport
+    // from where it currently sits.
+    if (m_playing) {
+        pause();
+        play();
+    }
+}
+
+drift::TimeUs PlaybackEngine::frameStepUs() const
+{
+    return drift::frameDurationUs(m_project ? qMax(1, m_project->fps()) : 30);
 }
 
 void PlaybackEngine::setPreviewRenderSize(int width, int height)
@@ -199,19 +242,22 @@ void PlaybackEngine::play()
     if (m_playing)
         return;
 
-    ensureAudioSink();
     m_mixer.resetEffectRacks();
     m_clock.reset(m_playheadUs, m_sampleRate);
-    m_clock.start();
     m_playing = true;
 
-    const int fps = m_project ? qMax(1, m_project->fps()) : 30;
-    const int tickMs = qMax(1, static_cast<int>(drift::usToSeconds(drift::frameDurationUs(fps)) * 1000.0));
-    // Always adapt during play: Auto/Full start sharp and drop under load;
-    // Half/Quarter can still drop further if effects overrun their budget.
-    m_compositor.setFrameBudgetMs(tickMs);
-    m_compositor.setAdaptiveEnabled(true);
-    m_compositor.resetAdaptiveScale();
+    if (isQualityMode()) {
+        // Quality mode is not realtime: the playhead steps one frame per
+        // completed composite, so there is no clock for audio to follow and the
+        // sink stays stopped. The loop re-arms itself from onCompositeFinished.
+        emit playingChanged();
+        m_qualityRequestUs = m_playheadUs;
+        m_compositor.requestComposite(m_playheadUs, playbackRenderOptions());
+        return;
+    }
+
+    ensureAudioSink();
+    m_clock.start();
 
     // Never block the GUI on sink I/O. start() may pull the first audio buffer,
     // which opens/seeks media — that must stay on the audio thread only.
@@ -226,6 +272,9 @@ void PlaybackEngine::play()
     emit playingChanged();
 
     m_playheadTimer.start(kPlayheadUpdateMs);
+
+    const int fps = m_project ? qMax(1, m_project->fps()) : 30;
+    const int tickMs = qMax(1, static_cast<int>(drift::usToSeconds(drift::frameDurationUs(fps)) * 1000.0));
     m_compositeTimer.start(tickMs);
 
     onPlayheadTick();
@@ -241,11 +290,11 @@ void PlaybackEngine::pause()
     m_playheadTimer.stop();
     m_compositeTimer.stop();
     m_clock.pause();
-    m_playheadUs = m_clock.pausedAt();
+    // In quality mode the frame loop owns the playhead; the clock never ran.
+    if (!isQualityMode())
+        m_playheadUs = m_clock.pausedAt();
+    m_qualityRequestUs = -1;
     m_mixer.resetEffectRacks();
-    // Paused frames should be sharp again — drop the playback downscale.
-    m_compositor.setAdaptiveEnabled(false);
-    m_compositor.resetAdaptiveScale();
     QMetaObject::invokeMethod(
         m_device,
         [this] {
@@ -302,6 +351,25 @@ void PlaybackEngine::onCompositeTick()
     m_compositor.requestComposite(m_clock.currentTimeUs(), playbackRenderOptions());
 }
 
+void PlaybackEngine::onCompositeFinished()
+{
+    if (!m_playing || !m_project || !isQualityMode())
+        return;
+
+    // Step forward only if the playhead is still where this frame was requested;
+    // a seek that arrived while it rendered is honoured instead of skipped past.
+    if (m_qualityRequestUs == m_playheadUs) {
+        m_playheadUs += frameStepUs();
+        emit playheadUsChanged(static_cast<quint64>(m_playheadUs));
+        checkEndOfTimeline(m_playheadUs);
+        if (m_playheadUs >= m_project->durationUs())
+            return;
+    }
+
+    m_qualityRequestUs = m_playheadUs;
+    m_compositor.requestComposite(m_playheadUs, playbackRenderOptions());
+}
+
 void PlaybackEngine::onFrameReady(const GpuFrameTexture &frame)
 {
     if (!frame.isValid())
@@ -322,30 +390,18 @@ FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
     } else if (m_previewQuality == QStringLiteral("half")) {
         options.previewScale = 0.5;
     } else {
-        // "auto" and "full" both start at project resolution; Auto then adapts
-        // downward from render cost, and both are capped to the preview widget.
         options.previewScale = 1.0;
     }
+    // During fast playback, cap temporal history so time_echo cannot multiply
+    // decode work unboundedly. Paused, scrubbed and quality-mode frames keep the
+    // full history: those are exactly the cases where fidelity is the point.
+    options.maxTimeEchoHistoryFrames = m_playing && !isQualityMode() ? 12 : -1;
 
-    // CapCut-style: while playing, keep temporal history short so time_echo
-    // cannot multiply reverse seeks every frame. Auto is the most aggressive.
-    // Paused/scrubbed frames keep full history for fidelity.
-    if (m_playing) {
-        options.maxTimeEchoHistoryFrames =
-            m_previewQuality == QStringLiteral("auto") ? 3 : 6;
-    } else {
-        options.maxTimeEchoHistoryFrames = -1;
-    }
-
-    // Always clamp to the preview widget when known — half/quarter of a 4K
-    // project can still exceed the panel and waste decode/GPU work.
-    if (m_project && m_previewRenderWidth > 0 && m_previewRenderHeight > 0) {
-        const double widthScale =
-            static_cast<double>(m_previewRenderWidth) / qMax(1, m_project->width());
-        const double heightScale =
-            static_cast<double>(m_previewRenderHeight) / qMax(1, m_project->height());
-        options.previewScale =
-            qBound(0.1, qMin(options.previewScale, qMin(widthScale, heightScale)), 1.0);
+    if (m_project && m_previewRenderWidth > 0 && m_previewRenderHeight > 0
+        && m_previewQuality == QStringLiteral("full")) {
+        const double widthScale = static_cast<double>(m_previewRenderWidth) / qMax(1, m_project->width());
+        const double heightScale = static_cast<double>(m_previewRenderHeight) / qMax(1, m_project->height());
+        options.previewScale = qBound(0.1, qMin(widthScale, heightScale), 1.0);
     }
 
     // Hide the text clip being edited in place so the QML inline editor stands in
