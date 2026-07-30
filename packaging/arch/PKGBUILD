@@ -28,13 +28,17 @@ sha256sums=('SKIP')
 #
 # JUCE (audio effect DSP) is likewise fetched by CMake during build(); it is a source dependency
 # compiled into driftaudiodsp, not a runtime one.
+#
+# DRIFT_UPDATE_FEED_URL is emptied because pacman owns updates for this copy: an in-app badge
+# pointing at a GitHub release the user is not meant to install by hand is noise.
 
 build() {
     cd "$pkgname"
     cmake -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr \
-        -DDRIFT_BUNDLE_ONNXRUNTIME=OFF
+        -DDRIFT_BUNDLE_ONNXRUNTIME=OFF \
+        -DDRIFT_UPDATE_FEED_URL=
     cmake --build build --parallel
 }
 

@@ -82,6 +82,9 @@ modules:
       # network, so FetchContent would fail here.
       - -DDRIFT_FETCH_JUCE=OFF
       - -DDRIFT_JUCE_DIR=juce
+      # Flathub updates this build, so the in-app update check is compiled out: an app that nags
+      # about a version flatpak will fetch on its own is noise the user cannot act on.
+      - -DDRIFT_UPDATE_FEED_URL=
     sources:
       - type: dir
         path: ..

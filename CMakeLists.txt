@@ -49,6 +49,17 @@ set(DRIFT_ADDON_INDEX_URL "https://drift-addons.cutwire.org/v1/index"
 set(DRIFT_ADDON_CLIENT_TOKEN "79a388bba9301cacc81cc6eb0724c81e948e1b27c69aee1b"
     CACHE STRING "Client token sent to the addon service as X-Drift-Client")
 
+# --- Update check -----------------------------------------------------------
+# Where src/models/UpdateChecker looks for a newer release, once a day, to raise the badge in the
+# header. GitHub's releases/latest is the source of truth because the release tag already is: it
+# excludes drafts and pre-releases, and needs no service of our own.
+#
+# Set it to an empty string for builds a package manager owns — the Flatpak manifests and the Arch
+# PKGBUILD all do. There, pacman or flatpak fetches the update on its own schedule and an in-app
+# nag is noise the user cannot act on (Flathub's quality guidelines say as much).
+set(DRIFT_UPDATE_FEED_URL "https://api.github.com/repos/CutWire-Studios/Drift/releases/latest"
+    CACHE STRING "Release feed polled for updates; empty disables the update check")
+
 find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets OpenGL Network QuickEffects)
 find_package(FFmpeg REQUIRED)
 
@@ -427,6 +438,9 @@ qt_add_executable(drift
     src/models/AddonEndpoint.h
     src/models/AddonManager.h
     src/models/AddonManager.cpp
+    src/models/VersionCompare.h
+    src/models/UpdateChecker.h
+    src/models/UpdateChecker.cpp
     src/models/AppController.h
     src/models/AppController.cpp
     src/models/EditorState.h
@@ -546,6 +560,7 @@ qt_add_qml_module(drift
         src/qml/components/ThemedDialog.qml
         src/qml/components/AddonManagerDialog.qml
         src/qml/components/MissingAddonsDialog.qml
+        src/qml/components/UpdateDialog.qml
         src/qml/components/ProjectSetupDialog.qml
         src/qml/components/LayoutChooserDialog.qml
         src/qml/components/ProjectPropertiesDialog.qml
@@ -593,6 +608,8 @@ target_include_directories(drift PRIVATE src src/preview)
 target_compile_definitions(drift PRIVATE
     DRIFT_ADDON_INDEX_URL="${DRIFT_ADDON_INDEX_URL}"
     DRIFT_ADDON_CLIENT_TOKEN="${DRIFT_ADDON_CLIENT_TOKEN}"
+    DRIFT_UPDATE_FEED_URL="${DRIFT_UPDATE_FEED_URL}"
+    DRIFT_VERSION="${PROJECT_VERSION}"
 )
 
 # Ship a file-based package directory next to the binaries that load the catalog.

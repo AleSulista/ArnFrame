@@ -1,6 +1,7 @@
 #include "AddonManager.h"
 
 #include "AddonEndpoint.h"
+#include "VersionCompare.h"
 #include "engine/AddonPackage.h"
 #include "engine/AddonRegistry.h"
 #include "engine/AudioEffectCatalog.h"
@@ -37,21 +38,6 @@ constexpr qint64 kIndexMaxAgeSeconds = 6 * 60 * 60;
 QString cachedIndexPath()
 {
     return QDir(addonsDir()).filePath(QStringLiteral("index.json"));
-}
-
-// Compare dotted numeric versions; trailing pre-release text is ignored, which is enough for the
-// "is there something newer" question the manager actually asks.
-int compareVersions(const QString &a, const QString &b)
-{
-    const QStringList left = a.split(QLatin1Char('.'));
-    const QStringList right = b.split(QLatin1Char('.'));
-    for (int i = 0; i < qMax(left.size(), right.size()); ++i) {
-        const int l = left.value(i).section(QLatin1Char('-'), 0, 0).toInt();
-        const int r = right.value(i).section(QLatin1Char('-'), 0, 0).toInt();
-        if (l != r)
-            return l < r ? -1 : 1;
-    }
-    return 0;
 }
 
 QStringList kindsOf(const QJsonObject &addon)
@@ -138,8 +124,9 @@ QVariantList AddonManager::catalog() const
         else if (m_failures.contains(id))
             state = QStringLiteral("failed");
         else if (installed)
-            state = compareVersions(installed->version, version) < 0 ? QStringLiteral("update-available")
-                                                                     : QStringLiteral("installed");
+            state = drift::compareVersions(installed->version, version) < 0
+                        ? QStringLiteral("update-available")
+                        : QStringLiteral("installed");
 
         int items = 0;
         for (const QJsonValue &value : addon.value(QStringLiteral("provides")).toArray())

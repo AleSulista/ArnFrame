@@ -6,6 +6,7 @@
 #include "models/AssetLibrary.h"
 #include "models/EditorState.h"
 #include "models/FileDialogs.h"
+#include "models/UpdateChecker.h"
 #include "ClipPreviewImageProvider.h"
 #include "DriftImageProvider.h"
 #include "SegmentImageProvider.h"
@@ -55,11 +56,13 @@ int main(int argc, char *argv[])
     static EditorState editorState(&assetLibrary);
     static FileDialogs fileDialogs;
     static AddonManager addonManager;
+    static UpdateChecker updateChecker;
     qmlRegisterSingletonInstance("Drift", 1, 0, "AssetLibrary", &assetLibrary);
     qmlRegisterSingletonInstance("Drift", 1, 0, "EditorState", &editorState);
     qmlRegisterSingletonInstance("Drift", 1, 0, "AppController", &editorState);
     qmlRegisterSingletonInstance("Drift", 1, 0, "FileDialogs", &fileDialogs);
     qmlRegisterSingletonInstance("Drift", 1, 0, "Addons", &addonManager);
+    qmlRegisterSingletonInstance("Drift", 1, 0, "Updates", &updateChecker);
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("drift"), new DriftImageProvider());

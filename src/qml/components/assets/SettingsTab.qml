@@ -275,6 +275,48 @@ Item {
                     }
                 }
             }
+
+            // Hidden entirely on builds a package manager updates (Flatpak, Arch): there is no
+            // switch to offer when the check is compiled out.
+            Text {
+                text: qsTr("Updates")
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+                topPadding: Theme.spacingMd
+                visible: Updates.supported
+            }
+
+            ThemedSwitch {
+                visible: Updates.supported
+                checked: Updates.enabled
+                text: qsTr("Check on startup")
+                tooltip: qsTr("Ask GitHub once a day whether a newer Drift has been released")
+                onToggled: Updates.enabled = checked
+            }
+
+            Row {
+                width: parent.width
+                spacing: Theme.spacingMd
+                visible: Updates.supported
+
+                ThemedButton {
+                    id: checkNowButton
+                    variant: "secondary"
+                    glyph: Theme.icons.refresh
+                    text: Updates.checking ? qsTr("Checking…") : qsTr("Check now")
+                    enabled: !Updates.checking
+                    onClicked: Updates.checkNow()
+                }
+
+                ThemedLabel {
+                    width: Math.max(0, parent.width - checkNowButton.width - parent.spacing)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: Updates.status.length > 0
+                          ? Updates.status
+                          : qsTr("Drift %1").arg(Updates.currentVersion)
+                }
+            }
         }
     }
 

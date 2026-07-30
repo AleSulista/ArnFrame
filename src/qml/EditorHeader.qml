@@ -276,6 +276,35 @@ Rectangle {
                 onClicked: root.Window.window.openAddonManager()
             }
 
+            // Only exists while there is a newer release to tell the user about; the check itself
+            // is silent, so this dot is the whole notification.
+            Item {
+                width: Theme.iconButtonSize
+                height: Theme.iconButtonSize
+                anchors.verticalCenter: parent.verticalCenter
+                visible: Updates.updateAvailable
+
+                IconButton {
+                    anchors.fill: parent
+                    glyph: Theme.icons.download
+                    variant: "ghost"
+                    tooltip: qsTr("Drift %1 is available").arg(Updates.latestVersion)
+                    onClicked: root.Window.window.openUpdateDialog()
+                }
+
+                Rectangle {
+                    width: 8
+                    height: 8
+                    radius: width / 2
+                    color: Theme.primary
+                    border.width: Theme.borderWidth
+                    border.color: Theme.panelBackground
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: 3
+                }
+            }
+
             Rectangle {
                 id: exportProgressBadge
                 width: Theme.iconButtonSize

@@ -104,6 +104,10 @@ ApplicationWindow {
         id: missingAddonsDialog
     }
 
+    UpdateDialog {
+        id: updateDialog
+    }
+
     SegmentationWindow {
         id: segmentationWindow
     }
@@ -142,6 +146,11 @@ ApplicationWindow {
             addonManagerDialog.open()
         else
             addonManagerDialog.openForKind(kind)
+    }
+
+    // Opened from the header badge, which only exists while there is something to show.
+    function openUpdateDialog() {
+        updateDialog.open()
     }
 
     function promptRecoveryIfNeeded() {
