@@ -141,8 +141,9 @@ Item {
     }
 
     // Add a new cue at the playhead, chaining it to its neighbours: the preceding cue's
-    // end snaps to the new start, and the new cue runs until the next cue's start (or a
-    // default length when there is none). This lets you add subtitles back to back.
+    // end is trimmed back to the new start if it would otherwise overlap (never extended),
+    // and the new cue runs until the next cue's start (or a default length when there is
+    // none). This lets you add subtitles back to back.
     function addCueAtPlayhead() {
         const t = root.localPlayhead
         if (t < 0)
@@ -166,7 +167,7 @@ Item {
             if (list[i].start > t && (nextStart < 0 || list[i].start < nextStart))
                 nextStart = list[i].start
         }
-        if (prevIdx >= 0)
+        if (prevIdx >= 0 && list[prevIdx].end > t)
             list[prevIdx].end = t
 
         let newEnd
