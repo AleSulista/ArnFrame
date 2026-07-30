@@ -24,6 +24,9 @@ int activeWordIndexAt(const QString &text, TimeUs startUs, TimeUs endUs, TimeUs 
 int subtitleCueIndexAt(const QList<SubtitleCue> &cues, TimeUs localUs);
 void sortSubtitleCues(QList<SubtitleCue> &cues);
 
+// Timeline label for a subtitle clip, e.g. "Subtitles (12)".
+QString subtitleClipName(const QList<SubtitleCue> &cues);
+
 // Re-pack Whisper (or other) segment cues into shorter display lines, matching openai-whisper's
 // VTT writer with word_timestamps + max_line_width / max_line_count. Words inside a segment get
 // proportional timing (true attention-based word timestamps aren't available from our ONNX

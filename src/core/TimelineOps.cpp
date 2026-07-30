@@ -192,6 +192,35 @@ bool splitClipAtOffset(Clip &head, Clip &tail, TimeUs offset)
         head.srcOut = head.srcIn + sourceOffset;
     }
 
+    // Cue times are relative to the parent clip's timeline start, so the tail's copies have to be
+    // rebased onto its new start; a cue straddling the cut is truncated on the left and resumes on
+    // the right.
+    if (!head.subtitleCues.isEmpty()) {
+        QList<SubtitleCue> headCues;
+        QList<SubtitleCue> tailCues;
+        for (const SubtitleCue &cue : head.subtitleCues) {
+            if (cue.startUs < offset) {
+                SubtitleCue left = cue;
+                left.endUs = qMin(cue.endUs, offset);
+                if (left.endUs > left.startUs)
+                    headCues.append(left);
+            }
+            if (cue.endUs > offset) {
+                SubtitleCue right = cue;
+                right.startUs = qMax<TimeUs>(cue.startUs - offset, 0);
+                right.endUs = cue.endUs - offset;
+                if (right.endUs > right.startUs)
+                    tailCues.append(right);
+            }
+        }
+        head.subtitleCues = headCues;
+        tail.subtitleCues = tailCues;
+        if (head.type == ClipType::Subtitle) {
+            head.name = subtitleClipName(head.subtitleCues);
+            tail.name = subtitleClipName(tail.subtitleCues);
+        }
+    }
+
     head.timelineDuration = offset;
     return true;
 }

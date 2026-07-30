@@ -7,6 +7,13 @@
 
 namespace drift {
 
+QString subtitleClipName(const QList<SubtitleCue> &cues)
+{
+    if (cues.isEmpty())
+        return QStringLiteral("Subtitles");
+    return QStringLiteral("Subtitles (%1)").arg(cues.size());
+}
+
 namespace {
 
 struct TimedWord

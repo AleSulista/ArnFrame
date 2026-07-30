@@ -631,13 +631,6 @@ QList<drift::SubtitleCue> subtitleCuesFromMap(const QVariantList &list)
     return cues;
 }
 
-QString subtitleClipName(const QList<drift::SubtitleCue> &cues)
-{
-    if (cues.isEmpty())
-        return QStringLiteral("Subtitles");
-    return QStringLiteral("Subtitles (%1)").arg(cues.size());
-}
-
 constexpr drift::TimeUs kDefaultSubtitleCueDurationUs = 3 * drift::kUsPerSecond;
 
 QVariantMap shapeStyleToMap(const drift::ShapeStyle &s)
@@ -2325,6 +2318,13 @@ void AppController::trimClipLeft(int trackIndex, int clipIndex, double newStart)
             clip.timelineStart = snappedStart;
             clip.timelineDuration += extendBy;
         }
+        // Cue times are relative to the clip's timeline start, so they have to travel with it or
+        // every subtitle would slide by the trim amount. Cues pushed outside the clip keep their
+        // (possibly negative) offsets so dragging the edge back restores them.
+        for (drift::SubtitleCue &cue : clip.subtitleCues) {
+            cue.startUs -= delta;
+            cue.endUs -= delta;
+        }
         syncSyntheticSourceRange(clip);
         syncLinkedPartnersFrom(m_project, clip);
         syncOverlapTransitions(m_project);
@@ -2712,7 +2712,7 @@ bool AppController::importSubtitleFile(const QUrl &url, double atSeconds)
     clip.srcIn = 0;
     clip.srcOut = duration;
     clip.subtitleCues = cues;
-    clip.name = subtitleClipName(cues);
+    clip.name = drift::subtitleClipName(cues);
     if (const drift::TextStyle *preset = drift::textStyleForPresetId(QStringLiteral("subtitle")))
         clip.textStyle = *preset;
     applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
@@ -2756,7 +2756,7 @@ bool AppController::importSubtitleFileIntoClip(int trackIndex, int clipIndex, co
     const drift::TimeUs duration = subtitleClipDurationForCues(cues);
     const drift::Project before = m_project;
     clip.subtitleCues = cues;
-    clip.name = subtitleClipName(cues);
+    clip.name = drift::subtitleClipName(cues);
     if (duration > clip.timelineDuration) {
         clip.timelineDuration = duration;
         clip.srcOut = duration;
@@ -4331,7 +4331,7 @@ void AppController::finalizeGeneratedSubtitles(drift::TimeUs timelineStart,
         clip.textStyle = *preset;
     applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
     clip.subtitleCues = cues;
-    clip.name = subtitleClipName(cues);
+    clip.name = drift::subtitleClipName(cues);
 
     track.clips.append(clip);
     pushProjectEdit(before, QStringLiteral("Subtitles generated"));
@@ -5277,7 +5277,7 @@ void AppController::setSubtitleCues(int trackIndex, int clipIndex, const QVarian
 
     const drift::Project before = m_project;
     clip.subtitleCues = subtitleCuesFromMap(cues);
-    clip.name = subtitleClipName(clip.subtitleCues);
+    clip.name = drift::subtitleClipName(clip.subtitleCues);
     pushProjectEdit(before, QStringLiteral("Subtitles updated"));
     finishEdit(QStringLiteral("Subtitles updated"));
 }
@@ -5299,7 +5299,7 @@ void AppController::previewSetSubtitleCues(int trackIndex, int clipIndex, const 
         beginPreviewDrag(QStringLiteral("Adjust subtitle timing"));
 
     clip.subtitleCues = subtitleCuesFromMap(cues);
-    clip.name = subtitleClipName(clip.subtitleCues);
+    clip.name = drift::subtitleClipName(clip.subtitleCues);
     emitPreviewFrame();
 }
 
@@ -5361,7 +5361,7 @@ void AppController::upsertSubtitleCueAtPlayhead(int trackIndex, int clipIndex, c
         drift::sortSubtitleCues(clip.subtitleCues);
     }
 
-    clip.name = subtitleClipName(clip.subtitleCues);
+    clip.name = drift::subtitleClipName(clip.subtitleCues);
     pushProjectEdit(before, QStringLiteral("Subtitle cue updated"));
     finishEdit(QStringLiteral("Subtitle cue updated"));
 }
