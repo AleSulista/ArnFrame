@@ -153,6 +153,8 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
 
     connect(&m_filmstripTiles, &FilmstripTileCache::tileReady, this,
             &AppController::filmstripTileReady);
+    connect(&m_waveformBlocks, &WaveformBlockCache::rangeReady, this,
+            &AppController::waveformRangeReady);
 
     m_undoStack.setUndoLimit(kMaxUndoSteps);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, &AppController::undoStackChanged);
@@ -7970,8 +7972,23 @@ void AppController::redo()
 
 namespace {
 
+// Raw max-abs amplitude wastes almost all of the lane: ordinary dialogue peaks around
+// -18 dBFS, i.e. 0.12 linear, which is a 4px sliver in a 40px lane. Plot dB over this window
+// instead — the scale audio is actually read on — so quiet material is legible without
+// clipping loud material. Full scale still maps to 1.0.
+constexpr double kWaveformFloorDb = 48.0;
+
+double waveformDisplayLevel(float peak)
+{
+    if (peak <= 0.0f)
+        return 0.0;
+    const double db = 20.0 * std::log10(static_cast<double>(peak));
+    return qBound(0.0, 1.0 + db / kWaveformFloorDb, 1.0);
+}
+
 // Max-reduce dense peaks over [first, last) into `buckets` display values. The 0.05 floor
-// keeps silent stretches drawn as a hairline rather than vanishing.
+// keeps silent stretches drawn as a hairline rather than vanishing; a negative input marks a
+// stretch that hasn't been decoded yet and comes back as 0 so nothing is drawn for it.
 QVariantList reduceDensePeaks(const QVector<float> &dense, int first, int last, int buckets)
 {
     QVariantList result;
@@ -7990,10 +8007,10 @@ QVariantList reduceDensePeaks(const QVector<float> &dense, int first, int last, 
         int i1 = first + static_cast<int>((static_cast<int64_t>(b + 1) * span) / buckets);
         if (i1 <= i0)
             i1 = qMin(last, i0 + 1);
-        float peak = 0.0f;
+        float peak = -1.0f;
         for (int i = i0; i < i1; ++i)
             peak = qMax(peak, dense[i]);
-        result.append(qBound(0.05, static_cast<double>(peak), 1.0));
+        result.append(peak < 0.0f ? 0.0 : qMax(0.05, waveformDisplayLevel(peak)));
     }
     return result;
 }
@@ -8042,17 +8059,17 @@ QVariantList AppController::waveformPeaks(const QString &path) const
 QVariantList AppController::waveformPeaksRange(const QString &path, double startSeconds,
                                                double durSeconds, int buckets) const
 {
-    if (durSeconds <= 0.0 || buckets <= 0)
+    if (path.isEmpty() || durSeconds <= 0.0 || buckets <= 0)
         return {};
 
-    const MediaWaveform::Dense *dense = densePeaksFor(path);
-    if (!dense || dense->durationSeconds <= 0.0 || dense->peaks.isEmpty())
+    // Block-backed: only the source span the clip's visible pixels cover is ever decoded, so
+    // a three-hour file costs a viewport's worth of audio instead of the whole timeline.
+    const int outCount = qBound(1, buckets, 4096);
+    const QVector<float> span = m_waveformBlocks.range(path, startSeconds, durSeconds, outCount);
+    if (span.isEmpty())
         return {};
 
-    const double perSecond = dense->peaks.size() / dense->durationSeconds;
-    const int first = static_cast<int>(std::floor(startSeconds * perSecond));
-    const int last = static_cast<int>(std::ceil((startSeconds + durSeconds) * perSecond));
-    return reduceDensePeaks(dense->peaks, first, last, qBound(1, buckets, 4096));
+    return reduceDensePeaks(span, 0, span.size(), span.size());
 }
 
 QVariantList AppController::subtitleWaveformPeaks(double startSeconds, double durSeconds,

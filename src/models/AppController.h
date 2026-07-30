@@ -5,6 +5,7 @@
 #include "engine/AudioOnsets.h"
 #include "engine/FilmstripTileCache.h"
 #include "engine/MediaWaveform.h"
+#include "engine/WaveformBlockCache.h"
 #include "engine/ProjectBundle.h"
 #include "engine/Sam2Segmenter.h"
 #include "ClipListModel.h"
@@ -628,6 +629,9 @@ signals:
     void exportFinished(bool success);
     void projectMutated();
     void waveformReady(const QString &path);
+    // A block of the timeline waveform landed. Separate from waveformReady so the dialogs,
+    // which want the whole file, don't re-fetch (and blank) on every block.
+    void waveformRangeReady(const QString &path);
     void filmstripTileReady(const QString &path);
     void subtitleWaveformReady(double startSeconds, double durSeconds, int sampleCount);
     void beatAnalysisChanged();
@@ -826,11 +830,12 @@ protected:
     };
     QList<ClipboardItem> m_clipboard;
 
-    // Waveform peaks are expensive (full-file decode); compute once off-thread and cache by
-    // path so timeline refreshes don't re-decode on the GUI thread. Stored dense (~100/sec,
-    // 4 bytes each) and sliced per query — QML only ever receives a screenful of values.
+    // Whole-file peaks, for the dialogs that show a complete clip at once (Denoise, Speed
+    // Curve). The timeline uses m_waveformBlocks instead — see waveformPeaksRange.
     mutable QHash<QString, MediaWaveform::Dense> m_waveformCache;
     mutable QSet<QString> m_waveformPending;
+
+    mutable WaveformBlockCache m_waveformBlocks;
 
     mutable FilmstripTileCache m_filmstripTiles;
 

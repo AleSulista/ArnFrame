@@ -391,7 +391,7 @@ Item {
 
                 Connections {
                     target: EditorState
-                    function onWaveformReady(path) {
+                    function onWaveformRangeReady(path) {
                         if (path === clipItem.clipData.path)
                             waveformCanvas.decodeRevision++
                     }
