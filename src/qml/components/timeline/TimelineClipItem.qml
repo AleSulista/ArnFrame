@@ -229,6 +229,9 @@ Item {
                          || clipItem.trackType === "shape"
                          || clipItem.clipData.kind === "image")
             filmstripPath: clipItem.clipData.filmstripPath
+            // Video only: on-demand tiles need a decodable video stream, and images/shapes
+            // have a single poster frame that the strip already covers exactly.
+            sourcePath: clipItem.clipData.kind === "video" ? (clipItem.clipData.path || "") : ""
             inPoint: clipItem.clipData.inPoint
             outPoint: clipItem.clipData.outPoint
             sourceDuration: clipItem.clipData.sourceDuration

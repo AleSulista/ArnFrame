@@ -15,6 +15,10 @@ Item {
     property int frameWidth: 120
     property int frameHeight: 68
 
+    // Media file behind the strip. Set for video clips only; when present each tile also
+    // requests its real frame on demand and fades it in over the coarse strip frame.
+    property string sourcePath: ""
+
     // Source window this clip covers, in seconds, plus the full source length. When set, each
     // tile maps to the source time it represents so the strip shows correct-timestamp frames and
     // stays anchored to the source when the clip is trimmed. Left at 0 (e.g. the Speed Curve
@@ -84,6 +88,38 @@ Item {
         return tileIndex % Math.max(1, frameCount)
     }
 
+    // On-demand tiles. The strip only holds `frameCount` frames for the whole source, so a long
+    // clip repeats the same image for thousands of px. Each visible tile additionally asks for
+    // the frame at its own timestamp, cached at a power-of-two second interval: the level is the
+    // largest interval that still fits inside one tile, so zooming in picks a finer level and
+    // panning at the same zoom reuses everything already decoded.
+    readonly property bool tilesEnabled: sourcePath.length > 0 && sourceMapped && pxPerSourceSec > 0
+    readonly property real secondsPerTile: pxPerSourceSec > 0 ? frameWidth / pxPerSourceSec : 0
+    readonly property int tileLevel: secondsPerTile > 0
+        ? Math.max(-3, Math.min(14, Math.floor(Math.log(secondsPerTile) / Math.LN2)))
+        : 0
+    // Bumped when a decode lands, to re-run the tile URL bindings.
+    property int tileRevision: 0
+
+    function tileUrlForTile(tileIndex) {
+        void tileRevision
+        if (!tilesEnabled)
+            return ""
+        var srcSec = (tileIndex + 0.5) * frameWidth / pxPerSourceSec
+        if (srcSec < 0 || srcSec >= sourceDuration)
+            return ""
+        var interval = Math.pow(2, tileLevel)
+        return EditorState.filmstripTileUrl(sourcePath, tileLevel, Math.floor(srcSec / interval))
+    }
+
+    Connections {
+        target: EditorState
+        function onFilmstripTileReady(path) {
+            if (path === root.sourcePath)
+                root.tileRevision++
+        }
+    }
+
     // True while the first frame is still decoding.
     readonly property bool loading: filmstripPath.length > 0 && !firstFrameReady
     property bool firstFrameReady: false
@@ -101,33 +137,57 @@ Item {
 
     Repeater {
         model: root.visibleTileCount
-        delegate: Image {
-            id: frame
+        delegate: Item {
+            id: tile
             required property int index
             readonly property int tileIndex: root.firstVisibleTile + index
 
             x: root.stripOriginX + tileIndex * root.frameWidth
             width: root.frameWidth
             height: root.height
-            source: EditorState.filmstripFrameUrl(root.filmstripPath,
-                                                  root.frameForTile(tileIndex), root.frameCount)
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
-            // Keep GPU textures small regardless of item layout.
-            sourceSize.width: root.frameWidth
-            sourceSize.height: root.frameHeight
 
-            opacity: status === Image.Ready ? 1 : 0
+            // Coarse frame from the strip: already on disk, so it draws immediately.
+            Image {
+                id: frame
+                anchors.fill: parent
+                source: EditorState.filmstripFrameUrl(root.filmstripPath,
+                                                      root.frameForTile(tile.tileIndex),
+                                                      root.frameCount)
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                // Keep GPU textures small regardless of item layout.
+                sourceSize.width: root.frameWidth
+                sourceSize.height: root.frameHeight
 
-            Behavior on opacity {
-                NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
+                opacity: status === Image.Ready ? 1 : 0
+
+                Behavior on opacity {
+                    NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
+                }
+
+                onStatusChanged: {
+                    if (tile.index !== 0)
+                        return
+                    if (status === Image.Ready || status === Image.Error)
+                        root.firstFrameReady = true
+                }
             }
 
-            onStatusChanged: {
-                if (index !== 0)
-                    return
-                if (status === Image.Ready || status === Image.Error)
-                    root.firstFrameReady = true
+            // This tile's own timestamp, decoded on demand. Sits on top so it replaces the
+            // repeated strip frame without a reload flicker once it arrives.
+            Image {
+                anchors.fill: parent
+                source: root.tileUrlForTile(tile.tileIndex)
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                sourceSize.width: root.frameWidth
+                sourceSize.height: root.frameHeight
+
+                opacity: status === Image.Ready ? 1 : 0
+
+                Behavior on opacity {
+                    NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
+                }
             }
         }
     }

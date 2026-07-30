@@ -3,6 +3,7 @@
 #include "core/Project.h"
 #include "core/Time.h"
 #include "engine/AudioOnsets.h"
+#include "engine/FilmstripTileCache.h"
 #include "engine/MediaWaveform.h"
 #include "engine/ProjectBundle.h"
 #include "engine/Sam2Segmenter.h"
@@ -562,6 +563,9 @@ public:
     Q_INVOKABLE QString imageUrl(const QString &path) const;
     // Same as imageUrl but requests a single frame of a filmstrip strip (see DriftImageProvider).
     Q_INVOKABLE QString filmstripFrameUrl(const QString &path, int frame, int count) const;
+    // Sharp on-demand frame for one filmstrip tile — see FilmstripTileCache. Empty until the
+    // decode lands, at which point filmstripTileReady() fires for that source.
+    Q_INVOKABLE QString filmstripTileUrl(const QString &path, int level, double index) const;
 
 signals:
     // A text clip was added with no text; the preview should open its inline
@@ -624,6 +628,7 @@ signals:
     void exportFinished(bool success);
     void projectMutated();
     void waveformReady(const QString &path);
+    void filmstripTileReady(const QString &path);
     void subtitleWaveformReady(double startSeconds, double durSeconds, int sampleCount);
     void beatAnalysisChanged();
     void guidesChanged();
@@ -826,6 +831,8 @@ protected:
     // 4 bytes each) and sliced per query — QML only ever receives a screenful of values.
     mutable QHash<QString, MediaWaveform::Dense> m_waveformCache;
     mutable QSet<QString> m_waveformPending;
+
+    mutable FilmstripTileCache m_filmstripTiles;
 
     // Subtitle-lane voice waveform: the mixed audio underneath a subtitle clip's
     // span, voice band-passed. Keyed by "<startUs>:<durUs>"; invalidated on edits.

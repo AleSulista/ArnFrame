@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -23,9 +24,13 @@ namespace {
 
 QString cacheDir()
 {
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-                        + QStringLiteral("/thumbnails");
-    QDir().mkpath(dir);
+    // Memoized: tile lookups hit this per visible tile, and mkpath is a syscall each time.
+    static const QString dir = [] {
+        const QString path = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                             + QStringLiteral("/thumbnails");
+        QDir().mkpath(path);
+        return path;
+    }();
     return dir;
 }
 
@@ -70,6 +75,16 @@ QString cacheStripPathFor(const QString &sourcePath)
 bool isValidCacheFile(const QString &path)
 {
     return QFile::exists(path) && QFileInfo(path).size() > 128;
+}
+
+QString tileGlob()
+{
+    return QStringLiteral("*_v%1_t*.jpg").arg(kThumbnailCacheVersion);
+}
+
+double tileSeconds(int level, qint64 index)
+{
+    return static_cast<double>(index) * std::pow(2.0, level);
 }
 
 QImage frameToImage(const AVFrame *frame, int width, int height)
@@ -319,6 +334,77 @@ QString MediaThumbnail::generateFilmstrip(const QString &sourcePath, const QStri
         return {};
 
     return outPath;
+}
+
+QString MediaThumbnail::tilePath(const QString &sourcePath, int level, qint64 index)
+{
+    const QString absolutePath = QFileInfo(sourcePath).absoluteFilePath();
+    if (absolutePath.isEmpty())
+        return {};
+
+    return cacheDir() + QLatin1Char('/') + cacheKeyFor(absolutePath)
+           + QStringLiteral("_t%1_%2.jpg").arg(level).arg(index);
+}
+
+QList<qint64> MediaThumbnail::generateTiles(const QString &sourcePath, int level,
+                                            const QList<qint64> &indices)
+{
+    QList<qint64> produced;
+    const QString absolutePath = QFileInfo(sourcePath).absoluteFilePath();
+    if (absolutePath.isEmpty() || indices.isEmpty() || !QFile::exists(absolutePath))
+        return produced;
+
+    QList<qint64> todo;
+    for (const qint64 index : indices) {
+        if (isValidCacheFile(tilePath(absolutePath, level, index)))
+            produced.append(index);
+        else
+            todo.append(index);
+    }
+    if (todo.isEmpty())
+        return produced;
+
+    std::sort(todo.begin(), todo.end());
+
+    AVFormatContext *fmt = nullptr;
+    int videoStreamIndex = -1;
+    AVCodecContext *codecCtx = nullptr;
+    if (!openVideoDecoder(absolutePath, &fmt, &videoStreamIndex, &codecCtx))
+        return produced;
+
+    for (const qint64 index : std::as_const(todo)) {
+        const int64_t timeUs = static_cast<int64_t>(tileSeconds(level, index) * 1'000'000.0);
+        QImage frame;
+        if (!seekAndDecodeFrame(fmt, videoStreamIndex, codecCtx, timeUs, frame,
+                                kFilmstripFrameWidth, kFilmstripFrameHeight))
+            continue;
+        if (frame.save(tilePath(absolutePath, level, index), "JPG", 85))
+            produced.append(index);
+    }
+
+    avcodec_free_context(&codecCtx);
+    avformat_close_input(&fmt);
+
+    return produced;
+}
+
+void MediaThumbnail::pruneTileCache(qint64 maxBytes)
+{
+    QDir dir(cacheDir());
+    // Tiles are written once and never rewritten, so modification time is insertion order.
+    QFileInfoList tiles = dir.entryInfoList({tileGlob()}, QDir::Files, QDir::Time | QDir::Reversed);
+
+    qint64 total = 0;
+    for (const QFileInfo &info : std::as_const(tiles))
+        total += info.size();
+
+    for (const QFileInfo &info : std::as_const(tiles)) {
+        if (total <= maxBytes)
+            break;
+        const qint64 size = info.size();
+        if (QFile::remove(info.absoluteFilePath()))
+            total -= size;
+    }
 }
 
 QString MediaThumbnail::generateAtTime(const QString &sourcePath, double sourceSeconds)

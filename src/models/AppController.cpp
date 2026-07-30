@@ -151,6 +151,9 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
                 &AppController::editCapabilitiesChanged);
     }
 
+    connect(&m_filmstripTiles, &FilmstripTileCache::tileReady, this,
+            &AppController::filmstripTileReady);
+
     m_undoStack.setUndoLimit(kMaxUndoSteps);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, &AppController::undoStackChanged);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, [this] {
@@ -1722,6 +1725,14 @@ QString AppController::filmstripFrameUrl(const QString &path, int frame, int cou
     if (path.isEmpty())
         return {};
     return imageUrl(path) + QStringLiteral("?frame=%1&count=%2").arg(frame).arg(count);
+}
+
+QString AppController::filmstripTileUrl(const QString &path, int level, double index) const
+{
+    if (path.isEmpty())
+        return {};
+    const QString tile = m_filmstripTiles.tile(path, level, static_cast<qint64>(index));
+    return tile.isEmpty() ? QString() : imageUrl(tile);
 }
 
 double AppController::snapTime(double seconds) const

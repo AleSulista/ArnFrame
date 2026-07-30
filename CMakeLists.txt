@@ -314,6 +314,8 @@ add_library(driftengine STATIC
     src/engine/MediaProbe.cpp
     src/engine/MediaThumbnail.h
     src/engine/MediaThumbnail.cpp
+    src/engine/FilmstripTileCache.h
+    src/engine/FilmstripTileCache.cpp
     src/engine/MediaWaveform.h
     src/engine/MediaWaveform.cpp
     src/engine/AudioOnsets.h
