@@ -96,6 +96,10 @@ Item {
                     TapHandler { onTapped: root.addRequested(assetIndex) }
                     DragHandler {
                         id: assetDrag
+                        // Without target: null the handler moves the card itself,
+                        // clobbering the Grid positioner's x/y.
+                        target: null
+                        acceptedButtons: Qt.LeftButton
                         onActiveChanged: {
                             if (active) {
                                 EditorState.draggingAssetIndex = assetIndex

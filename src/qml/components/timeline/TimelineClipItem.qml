@@ -325,8 +325,9 @@ Item {
             }
         }
 
-        // Waveform: paint into a capped-resolution buffer and stretch it so a
-        // multi-hour clip never allocates a hundreds-of-thousands-px Canvas.
+        // Waveform: only the slice of the clip that is on screen gets a Canvas, at 1:1 px,
+        // so a multi-hour clip neither allocates a hundreds-of-thousands-px buffer nor
+        // stretches a fixed peak list across it.
         Item {
             id: waveformHost
             visible: clipItem.trackType === "audio"
@@ -341,17 +342,46 @@ Item {
 
             Canvas {
                 id: waveformCanvas
-                property var peaks: clipItem.clipData.path
-                              ? EditorState.waveformPeaks(clipItem.clipData.path)
-                              : []
-                // Cap buffer width; Scale stretches to the host.
-                width: Math.max(1, Math.min(2048, Math.floor(waveformHost.width)))
-                height: waveformHost.height
-                transform: Scale {
-                    xScale: waveformHost.width > 0 ? waveformHost.width / waveformCanvas.width : 1
-                    origin.x: 0
-                    origin.y: 0
+
+                // Visible slice of the clip, snapped to a 256px grid so scrolling only
+                // re-queries peaks every step instead of every frame.
+                readonly property real windowStep: 256
+                readonly property real visibleLeft: {
+                    const left = panel.timelineViewX - clipItem.x - windowStep
+                    return Math.max(0, Math.floor(left / windowStep) * windowStep)
                 }
+                readonly property real visibleRight: {
+                    if (panel.timelineViewW <= 0)
+                        return waveformHost.width
+                    const right = panel.timelineViewX - clipItem.x + panel.timelineViewW + windowStep
+                    return Math.min(waveformHost.width,
+                                    Math.ceil(right / windowStep) * windowStep)
+                }
+                // Source seconds per px of clip body, so the strip maps to the trimmed
+                // window rather than the whole file.
+                readonly property real srcPerPx: {
+                    const span = (clipItem.clipData.outPoint || 0) - (clipItem.clipData.inPoint || 0)
+                    return waveformHost.width > 0 && span > 0 ? span / waveformHost.width : 0
+                }
+
+                x: visibleLeft
+                width: Math.max(1, Math.min(4096, Math.floor(visibleRight - visibleLeft)))
+                height: waveformHost.height
+
+                // Bumped when the off-thread decode lands, to re-run the peaks binding.
+                property int decodeRevision: 0
+
+                property var peaks: {
+                    void decodeRevision
+                    if (!clipItem.clipData.path || srcPerPx <= 0)
+                        return []
+                    return EditorState.waveformPeaksRange(
+                        clipItem.clipData.path,
+                        (clipItem.clipData.inPoint || 0) + x * srcPerPx,
+                        width * srcPerPx,
+                        Math.ceil(width))
+                }
+
                 onPeaksChanged: requestPaint()
                 onWidthChanged: requestPaint()
                 onHeightChanged: requestPaint()
@@ -360,7 +390,7 @@ Item {
                     target: EditorState
                     function onWaveformReady(path) {
                         if (path === clipItem.clipData.path)
-                            waveformCanvas.peaks = EditorState.waveformPeaks(path)
+                            waveformCanvas.decodeRevision++
                     }
                 }
 

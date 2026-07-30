@@ -31,35 +31,53 @@ Item {
 
     readonly property bool sourceMapped: sourceDuration > 0 && outPoint > inPoint && width > 0
 
+    // Tiles are laid out on a virtual grid spanning the whole source, not the clip body, so
+    // trimming the head slides the grid left by exactly as much as the clip's left edge moves
+    // right — the frames stay put on the timeline instead of riding along with the cursor.
+    readonly property real pxPerSourceSec: sourceMapped ? width / (outPoint - inPoint) : 0
+    readonly property real stripOriginX: sourceMapped ? -inPoint * pxPerSourceSec : 0
+    // Grid always reaches at least the clip's right edge, so a source shorter than the clip
+    // (stale/missing asset duration) still tiles the whole body.
+    readonly property real stripWidth: sourceMapped
+        ? Math.max(sourceDuration * pxPerSourceSec, width - stripOriginX)
+        : width
+
     readonly property int totalTiles: filmstripPath.length > 0 && width > 0
-        ? Math.max(1, Math.ceil(width / Math.max(1, frameWidth)))
+        ? Math.max(1, Math.ceil(stripWidth / Math.max(1, frameWidth)))
         : 0
 
-    // Inclusive range of tile indices that overlap the viewport (+ 1 tile overscan).
+    // Inclusive range of tile indices that overlap the viewport (+ 1 tile overscan), clamped to
+    // the tiles that actually fall inside the clip body.
+    readonly property int firstTileInBody: Math.max(
+        0, Math.floor(-stripOriginX / Math.max(1, frameWidth)))
+    readonly property int lastTileInBody: Math.min(
+        totalTiles - 1, Math.floor((width - stripOriginX) / Math.max(1, frameWidth)))
+
     readonly property int firstVisibleTile: {
         if (totalTiles <= 0)
             return 0
         if (viewW <= 0)
-            return 0
-        var localLeft = viewX - worldX
-        return Math.max(0, Math.floor(localLeft / Math.max(1, frameWidth)) - 1)
+            return Math.max(0, firstTileInBody)
+        var localLeft = viewX - worldX - stripOriginX
+        var tile = Math.floor(localLeft / Math.max(1, frameWidth)) - 1
+        return Math.max(firstTileInBody, Math.min(tile, Math.max(0, lastTileInBody)))
     }
 
     readonly property int visibleTileCount: {
-        if (totalTiles <= 0)
+        if (totalTiles <= 0 || lastTileInBody < firstVisibleTile)
             return 0
+        var span = lastTileInBody - firstVisibleTile + 1
         if (viewW <= 0) {
             // No viewport (Speed Curve): at most one pass of the strip frames.
-            return Math.min(totalTiles, Math.max(frameCount, 1))
+            return Math.min(span, Math.max(frameCount, 1))
         }
         var count = Math.ceil(viewW / Math.max(1, frameWidth)) + 3
-        return Math.min(totalTiles - firstVisibleTile, Math.max(1, count))
+        return Math.min(span, Math.max(1, count))
     }
 
     function frameForTile(tileIndex) {
         if (sourceMapped) {
-            var clipFraction = (tileIndex + 0.5) * frameWidth / width
-            var srcSec = inPoint + clipFraction * (outPoint - inPoint)
+            var srcSec = (tileIndex + 0.5) * frameWidth / pxPerSourceSec
             var f = Math.floor(srcSec / sourceDuration * frameCount)
             return Math.max(0, Math.min(frameCount - 1, f))
         }
@@ -88,7 +106,7 @@ Item {
             required property int index
             readonly property int tileIndex: root.firstVisibleTile + index
 
-            x: tileIndex * root.frameWidth
+            x: root.stripOriginX + tileIndex * root.frameWidth
             width: root.frameWidth
             height: root.height
             source: EditorState.filmstripFrameUrl(root.filmstripPath,

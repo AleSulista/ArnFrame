@@ -3,6 +3,7 @@
 #include "core/Project.h"
 #include "core/Time.h"
 #include "engine/AudioOnsets.h"
+#include "engine/MediaWaveform.h"
 #include "engine/ProjectBundle.h"
 #include "engine/Sam2Segmenter.h"
 #include "ClipListModel.h"
@@ -506,6 +507,10 @@ public:
     Q_INVOKABLE void redo();
     Q_INVOKABLE double snapTime(double seconds) const;
     Q_INVOKABLE QVariantList waveformPeaks(const QString &path) const;
+    // Peaks for just the source window [startSeconds, startSeconds + durSeconds), reduced to
+    // `buckets` values, so a clip only ever asks for as many peaks as it has visible pixels.
+    Q_INVOKABLE QVariantList waveformPeaksRange(const QString &path, double startSeconds,
+                                                double durSeconds, int buckets) const;
     // title / author / description / createdAt / modifiedAt, for the properties dialog.
     QVariantMap projectMetadata() const;
     Q_INVOKABLE void setProjectMetadata(const QString &title, const QString &author,
@@ -685,6 +690,9 @@ protected:
     int assetIndexForClip(const drift::Clip &clip) const;
     drift::TimeUs clipDurationForAssetIndex(int assetIndex) const;
     drift::TimeUs sourceDurationForClip(const drift::Clip &clip) const;
+    // Cached dense peaks for `path`, or nullptr while the off-thread decode is still running
+    // (waveformReady is emitted when it lands).
+    const MediaWaveform::Dense *densePeaksFor(const QString &path) const;
     void applyRippleShift(drift::Track &track, int fromClipIndex, drift::TimeUs delta);
     void restoreFilmstripsAfterLoad();
     void normalizeSelection();
@@ -813,9 +821,10 @@ protected:
     };
     QList<ClipboardItem> m_clipboard;
 
-    // Waveform peaks are expensive (full-file decode); compute once off-thread
-    // and cache by path so timeline refreshes don't re-decode on the GUI thread.
-    mutable QHash<QString, QVariantList> m_waveformCache;
+    // Waveform peaks are expensive (full-file decode); compute once off-thread and cache by
+    // path so timeline refreshes don't re-decode on the GUI thread. Stored dense (~100/sec,
+    // 4 bytes each) and sliced per query — QML only ever receives a screenful of values.
+    mutable QHash<QString, MediaWaveform::Dense> m_waveformCache;
     mutable QSet<QString> m_waveformPending;
 
     // Subtitle-lane voice waveform: the mixed audio underneath a subtitle clip's

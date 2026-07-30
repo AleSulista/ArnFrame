@@ -7957,24 +7957,56 @@ void AppController::redo()
     m_undoStack.redo();
 }
 
-QVariantList AppController::waveformPeaks(const QString &path) const
+namespace {
+
+// Max-reduce dense peaks over [first, last) into `buckets` display values. The 0.05 floor
+// keeps silent stretches drawn as a hairline rather than vanishing.
+QVariantList reduceDensePeaks(const QVector<float> &dense, int first, int last, int buckets)
+{
+    QVariantList result;
+    if (dense.isEmpty() || buckets <= 0)
+        return result;
+
+    first = qBound(0, first, dense.size());
+    last = qBound(first, last, dense.size());
+    if (last <= first)
+        return result;
+
+    const int span = last - first;
+    result.reserve(buckets);
+    for (int b = 0; b < buckets; ++b) {
+        int i0 = first + static_cast<int>((static_cast<int64_t>(b) * span) / buckets);
+        int i1 = first + static_cast<int>((static_cast<int64_t>(b + 1) * span) / buckets);
+        if (i1 <= i0)
+            i1 = qMin(last, i0 + 1);
+        float peak = 0.0f;
+        for (int i = i0; i < i1; ++i)
+            peak = qMax(peak, dense[i]);
+        result.append(qBound(0.05, static_cast<double>(peak), 1.0));
+    }
+    return result;
+}
+
+} // namespace
+
+const MediaWaveform::Dense *AppController::densePeaksFor(const QString &path) const
 {
     if (path.isEmpty())
-        return {};
+        return nullptr;
 
     const auto cached = m_waveformCache.constFind(path);
     if (cached != m_waveformCache.constEnd())
-        return cached.value();
+        return &cached.value();
 
     if (!m_waveformPending.contains(path)) {
         m_waveformPending.insert(path);
         AppController *self = const_cast<AppController *>(this);
         (void)QtConcurrent::run([self, path] {
-            const QVariantList peaks = MediaWaveform::peaks(path, 1000);
+            const MediaWaveform::Dense dense = MediaWaveform::densePeaks(path);
             QMetaObject::invokeMethod(
                 self,
-                [self, path, peaks] {
-                    self->m_waveformCache.insert(path, peaks);
+                [self, path, dense] {
+                    self->m_waveformCache.insert(path, dense);
                     self->m_waveformPending.remove(path);
                     emit self->waveformReady(path);
                 },
@@ -7982,7 +8014,34 @@ QVariantList AppController::waveformPeaks(const QString &path) const
         });
     }
 
-    return {};
+    return nullptr;
+}
+
+QVariantList AppController::waveformPeaks(const QString &path) const
+{
+    const MediaWaveform::Dense *dense = densePeaksFor(path);
+    if (!dense)
+        return {};
+
+    // Whole file at dialog resolution (Denoise / Speed Curve canvases).
+    const int buckets = qMin(2000, dense->peaks.size());
+    return reduceDensePeaks(dense->peaks, 0, dense->peaks.size(), buckets);
+}
+
+QVariantList AppController::waveformPeaksRange(const QString &path, double startSeconds,
+                                               double durSeconds, int buckets) const
+{
+    if (durSeconds <= 0.0 || buckets <= 0)
+        return {};
+
+    const MediaWaveform::Dense *dense = densePeaksFor(path);
+    if (!dense || dense->durationSeconds <= 0.0 || dense->peaks.isEmpty())
+        return {};
+
+    const double perSecond = dense->peaks.size() / dense->durationSeconds;
+    const int first = static_cast<int>(std::floor(startSeconds * perSecond));
+    const int last = static_cast<int>(std::ceil((startSeconds + durSeconds) * perSecond));
+    return reduceDensePeaks(dense->peaks, first, last, qBound(1, buckets, 4096));
 }
 
 QVariantList AppController::subtitleWaveformPeaks(double startSeconds, double durSeconds,

@@ -97,7 +97,11 @@ Item {
                         TapHandler {
                             onTapped: EditorState.addShapeClip(shapeCard.modelData.id, -1)
                         }
-                        DragHandler { id: shapeDrag }
+                        DragHandler {
+                            id: shapeDrag
+                            target: null
+                            acceptedButtons: Qt.LeftButton
+                        }
                     }
 
                     Text {

@@ -4,6 +4,8 @@
 #include <QVector>
 #include <QtMath>
 
+#include <cmath>
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -77,11 +79,12 @@ void ingestFramePeaks(const AVFrame *frame, int channels, int sampleCount, int64
     }
 }
 
-QVariantList downsamplePeaks(const QVector<float> &fine, int sampleCount)
+QVector<float> downsamplePeaks(const QVector<float> &fine, int sampleCount)
 {
-    QVariantList result;
     if (fine.isEmpty() || sampleCount <= 0)
-        return result;
+        return {};
+    if (fine.size() <= sampleCount)
+        return fine;
 
     QVector<float> buckets(sampleCount, 0.0f);
     for (int i = 0; i < fine.size(); ++i) {
@@ -89,17 +92,16 @@ QVariantList downsamplePeaks(const QVector<float> &fine, int sampleCount)
                               sampleCount - 1);
         buckets[idx] = qMax(buckets[idx], fine[i]);
     }
-    for (int i = 0; i < sampleCount; ++i)
-        result.append(qBound(0.05, static_cast<double>(buckets[i]), 1.0));
-    return result;
+    return buckets;
 }
 
 } // namespace
 
-QVariantList MediaWaveform::peaks(const QString &sourcePath, int sampleCount)
+MediaWaveform::Dense MediaWaveform::densePeaks(const QString &sourcePath, int peaksPerSecond,
+                                               int maxPeaks)
 {
-    QVariantList result;
-    if (sampleCount <= 0)
+    Dense result;
+    if (peaksPerSecond <= 0 || maxPeaks <= 0)
         return result;
 
     const QString absolutePath = QFileInfo(sourcePath).absoluteFilePath();
@@ -146,13 +148,20 @@ QVariantList MediaWaveform::peaks(const QString &sourcePath, int sampleCount)
     const int sampleRate = codecCtx->sample_rate > 0 ? codecCtx->sample_rate : codecPar->sample_rate;
     int64_t durationSamples = estimateDurationSamples(fmt, stream, sampleRate);
 
-    QVector<float> buckets(sampleCount, 0.0f);
+    const double knownDuration = (sampleRate > 0 && durationSamples > 0)
+        ? static_cast<double>(durationSamples) / sampleRate
+        : 0.0;
     // Fallback when container duration is missing: ~200 peaks/sec, then downsample.
+    const bool useFine = knownDuration <= 0.0;
+    const int sampleCount = useFine
+        ? 0
+        : qBound<int>(1, static_cast<int>(std::ceil(knownDuration * peaksPerSecond)), maxPeaks);
+
+    QVector<float> buckets(sampleCount, 0.0f);
     QVector<float> finePeaks;
     const int fineHop = qMax(1, sampleRate > 0 ? sampleRate / 200 : 1);
     float fineMax = 0.0f;
     int fineCount = 0;
-    const bool useFine = durationSamples <= 0;
 
     int64_t totalSamples = 0;
 
@@ -229,16 +238,28 @@ QVariantList MediaWaveform::peaks(const QString &sourcePath, int sampleCount)
     avformat_close_input(&fmt);
 
     if (totalSamples == 0) {
-        for (int i = 0; i < sampleCount; ++i)
-            result.append(0.15);
+        result.peaks = QVector<float>(sampleCount, 0.15f);
+        result.durationSeconds = knownDuration;
         return result;
     }
 
-    if (useFine)
-        return downsamplePeaks(finePeaks, sampleCount);
+    if (useFine) {
+        // Duration is whatever we actually decoded, at fineHop samples per fine peak.
+        const double decodedSeconds = sampleRate > 0
+            ? static_cast<double>(totalSamples) / sampleRate
+            : 0.0;
+        const int target = qBound<int>(
+            1, static_cast<int>(std::ceil(decodedSeconds * peaksPerSecond)), maxPeaks);
+        result.peaks = downsamplePeaks(finePeaks, target);
+        result.durationSeconds = decodedSeconds;
+        return result;
+    }
+
+    result.durationSeconds = knownDuration;
 
     // If the container overstated duration, peaks only filled a prefix — spread
-    // them across the full bucket range using the samples we actually decoded.
+    // them across the full bucket range using the samples we actually decoded, which
+    // also makes the decoded length the span the buckets now cover.
     if (durationSamples > totalSamples + totalSamples / 10) {
         QVector<float> fixed(sampleCount, 0.0f);
         for (int b = 0; b < sampleCount; ++b) {
@@ -251,11 +272,11 @@ QVariantList MediaWaveform::peaks(const QString &sourcePath, int sampleCount)
             fixed[b2] = qMax(fixed[b2], buckets[b]);
         }
         buckets = fixed;
+        if (sampleRate > 0)
+            result.durationSeconds = static_cast<double>(totalSamples) / sampleRate;
     }
 
-    for (int i = 0; i < sampleCount; ++i)
-        result.append(qBound(0.05, static_cast<double>(buckets[i]), 1.0));
-
+    result.peaks = buckets;
     return result;
 }
 
