@@ -61,10 +61,69 @@ See the [latest release](https://github.com/CutWire-Studios/Drift/releases/lates
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/main-window.png" alt="The Drift editor with the timeline, preview, and asset panels" width="900">
+  <img src="docs/screenshots/main-window.png" alt="The Drift editor: media bin on the left, video preview in the centre, clip inspector on the right, timeline below" width="900">
 </p>
 
-<p align="center"><em>The Drift editor — timeline, preview, and asset panels</em></p>
+<p align="center"><em>Media bin, preview, clip inspector, and timeline</em></p>
+
+<p align="center">
+  <img src="docs/screenshots/timeline.png" alt="Timeline with four stacked tracks: two image overlays, a title, and a video track showing filmstrip thumbnails" width="900">
+</p>
+
+<p align="center"><em>Multi-track timeline — overlays, titles, and video with filmstrip thumbnails</em></p>
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/effects-panel.png" alt="Effects browser showing live thumbnail previews of glitch and distortion presets" width="380"><br>
+      <strong>Effects</strong> — every preset previewed on a real frame
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/transitions-panel.png" alt="Transitions browser with animated previews of crossfade, wipe, and push presets" width="380"><br>
+      <strong>Transitions</strong> — drop one where two clips overlap
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/stickers-panel.png" alt="Sticker browser with emoji grouped into categories" width="380"><br>
+      <strong>Stickers &amp; emoji</strong> — categorised, searchable, drag onto the canvas
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/text-styles.png" alt="Text style presets including neon, karaoke pop, word background, and handwritten" width="380"><br>
+      <strong>Title styles</strong> — neon, karaoke, highlights, one-word colour
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/templates-panel.png" alt="Template browser showing multi-effect looks such as Beat Drop and Glitch Cut" width="380"><br>
+      <strong>Look templates</strong> — music-synced effect stacks in one click
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/audio-effects.png" alt="Audio effect browser with EQ, compressor, limiter, noise gate, de-esser, and voice leveler" width="380"><br>
+      <strong>Audio</strong> — EQ, compressor, gate, de-esser, voice changers
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/speed-fade.png" alt="Speed and fade inspector with speed presets, reverse, and fade in/out sliders" width="380"><br>
+      <strong>Speed &amp; fades</strong> — presets, custom ramps, reverse
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/subtitle-editor.png" alt="Subtitle editor listing timed caption lines, with the line at the playhead highlighted" width="380"><br>
+      <strong>Auto captions</strong> — from the speech, editable line by line
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/subject-cutout.png" alt="Subject cutout dialog with a click marker on the person and the isolated subject highlighted" width="380"><br>
+      <strong>Subject cutout</strong> — click the subject, get it on its own clip
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/export-dialog.png" alt="Export dialog with downscale presets and advanced encoder settings" width="420"><br>
+      <strong>Export</strong> — presets up front, encoder settings when you want them
+    </td>
+  </tr>
+</table>
 
 ## Features
 
@@ -142,6 +201,10 @@ is not the issue — llvmpipe passes the whole suite once there is an X server.
 ## Addons
 
 Fonts, emoji stickers, and speech models download at runtime rather than shipping in the binary. That keeps the install small and lets you take only what you need. Open the Addon Manager from the header (layers icon), or follow the install prompt in the font picker, stickers tab, or auto-subtitle panel.
+
+<p align="center">
+  <img src="docs/screenshots/addon-manager.png" alt="Addon Manager listing installable packs with size, item count, and licence" width="620">
+</p>
 
 Packages are `.driftpkg` archives — zstd-compressed, Ed25519-signed, and verified before install — under `<AppDataLocation>/addons/`. Format, registry, and installer live in `src/engine/AddonPackage.*`, `src/engine/AddonRegistry.*`, and `src/models/AddonManager.*`.
 
