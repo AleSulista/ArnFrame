@@ -3,7 +3,7 @@
 <component type="desktop-application">
   <id>org.cutwire.Drift</id>
   <name>Drift</name>
-  <summary>Create polished videos fast — free, open, and yours</summary>
+  <summary>Edit and export videos easily</summary>
   <description>
     <p>
       Drift is a free desktop video editor that feels simple from the first cut.
@@ -30,10 +30,9 @@
       <li>Project bundles that keep your media together</li>
     </ul>
   </description>
-  <!-- Placeholder brand colors; update once Drift has real branding. -->
   <branding>
-    <color type="primary" scheme_preference="light">#aebfff</color>
-    <color type="primary" scheme_preference="dark">#1c2a6e</color>
+    <color type="primary" scheme_preference="light">#ffc780</color>
+    <color type="primary" scheme_preference="dark">#5c3300</color>
   </branding>
   <launchable type="desktop-id">org.cutwire.Drift.desktop</launchable>
   <developer id="org.cutwire">
@@ -50,14 +49,54 @@
   <url type="homepage">https://github.com/CutWire-Studios/Drift</url>
   <url type="bugtracker">https://github.com/CutWire-Studios/Drift/issues</url>
   <url type="vcs-browser">https://github.com/CutWire-Studios/Drift</url>
+  <!-- Screenshot URLs are pinned to the release tag: Flathub rejects branch-based git URLs
+       because their contents change under the published listing. -->
   <screenshots>
-    <screenshot type="default" xml:lang="en">
-      <image>https://raw.githubusercontent.com/CutWire-Studios/Drift/main/docs/screenshots/main-window.png</image>
-      <caption>The Drift editor with the timeline, preview, and asset panels</caption>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/CutWire-Studios/Drift/v0.1.1/docs/screenshots/main-window.png</image>
+      <caption>The editor with the preview, timeline and panels</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/CutWire-Studios/Drift/v0.1.1/docs/screenshots/effects-panel.png</image>
+      <caption>Browsing effects to drop onto a clip</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/CutWire-Studios/Drift/v0.1.1/docs/screenshots/transitions-panel.png</image>
+      <caption>Choosing a transition between two clips</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/CutWire-Studios/Drift/v0.1.1/docs/screenshots/text-styles.png</image>
+      <caption>Styling a title with presets and colors</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/CutWire-Studios/Drift/v0.1.1/docs/screenshots/stickers-panel.png</image>
+      <caption>Adding stickers and emoji to a shot</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/CutWire-Studios/Drift/v0.1.1/docs/screenshots/subtitle-editor.png</image>
+      <caption>Editing captions generated from speech</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/CutWire-Studios/Drift/v0.1.1/docs/screenshots/subject-cutout.png</image>
+      <caption>Cutting a subject out of the frame</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/CutWire-Studios/Drift/v0.1.1/docs/screenshots/addon-manager.png</image>
+      <caption>Installing optional fonts, stickers and models</caption>
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.1" date="2026-07-31">
+      <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.1.1</url>
+      <description>
+        <p>A small fix-up release on top of the first public version.</p>
+        <ul>
+          <li>Curves in the keyframe editor are drawn sharply instead of blurred</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-07-27">
+      <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.1.0</url>
       <description>
         <p>The first public release of Drift — a free, open-source desktop video editor with no
         subscription, no watermark and no account.</p>

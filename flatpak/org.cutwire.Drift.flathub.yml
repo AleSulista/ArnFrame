@@ -70,10 +70,11 @@ modules:
       # inside the sandbox is /app/lib.
       - -DCMAKE_INSTALL_LIBDIR=lib
     sources:
-      - type: git
-        url: https://codeberg.org/soundtouch/soundtouch.git
-        tag: "2.4.1"
-        commit: b5d0e9ba61871ef135e67bebe3228136da4e8833
+      # Upstream's own release tarball rather than the Codeberg git repo: Codeberg 403s clones
+      # from CI runner IP ranges. Byte-identical to the 2.4.1 tag's tree.
+      - type: archive
+        url: https://www.surina.net/soundtouch/soundtouch-2.4.1.tar.gz
+        sha256: e07abf20ce8f95850c280132e1f61ad400fc1f4011b7fac698a503de6aab6733
 
   - name: drift
     buildsystem: cmake-ninja
@@ -91,11 +92,11 @@ modules:
       # about a version flatpak will fetch on its own is noise the user cannot act on.
       - -DDRIFT_UPDATE_FEED_URL=
     sources:
-      # TODO: fill in the tagged release's commit sha before submitting to Flathub. flatpak-builder
-      # requires it — a tag alone is not a fixed input.
+      # TODO: fill in v0.1.1's commit sha before opening the PR. flatpak-builder requires it —
+      # a tag alone is not a fixed input.
       - type: git
         url: https://github.com/CutWire-Studios/Drift.git
-        tag: v0.1.0
+        tag: v0.1.1
         commit: "0000000000000000000000000000000000000000"
       # Audio effect DSP. Only juce_dsp and its dependencies are compiled; nothing GUI-facing.
       - type: git

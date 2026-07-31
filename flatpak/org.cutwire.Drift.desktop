@@ -2,7 +2,7 @@
 Type=Application
 Name=Drift
 GenericName=Video Editor
-Comment=Beginner-friendly open-source video editor
+Comment=Edit and export videos easily
 Exec=drift
 Icon=org.cutwire.Drift
 Terminal=false
