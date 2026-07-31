@@ -532,7 +532,11 @@ Item {
                     // Detected beat grid + onset ticks, under the curves and key dots.
                     Canvas {
                         id: beatCanvas
-                        anchors.fill: parent
+                        // Viewport-sized, not content-sized — see curveCanvas.
+                        x: root.contentX
+                        width: viewport.width
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
                         z: 0
                         visible: root.hasGrid || root.hasOnsets
 
@@ -542,13 +546,17 @@ Item {
                             const a = root.beats
                             if (!a)
                                 return
+                            // Canvas-local x for an absolute timeline position. Rounding happens
+                            // after the shift, so a fractional scroll offset cannot push a 1px
+                            // tick onto a half-pixel and smear it across two columns.
+                            const localX = t => Math.round(root.xForSeconds(t) - root.contentX)
 
                             if (root.hasGrid) {
                                 const perBar = a.beatsPerBar || 4
                                 const first = a.firstDownbeat || 0
                                 for (let i = 0; i < a.beats.length; ++i) {
                                     const isBar = ((i - first) % perBar + perBar) % perBar === 0
-                                    const px = Math.round(root.xForSeconds(a.beats[i]))
+                                    const px = localX(a.beats[i])
                                     if (px < -2 || px > width + 2)
                                         continue
                                     ctx.fillStyle = String(isBar ? Theme.beatBarColor
@@ -567,7 +575,7 @@ Item {
                             for (let j = 0; j < onsets.length; ++j) {
                                 if (root.hasGrid && root.nearAnyBeat(onsets[j].seconds))
                                     continue
-                                const ox = Math.round(root.xForSeconds(onsets[j].seconds))
+                                const ox = localX(onsets[j].seconds)
                                 if (ox < -2 || ox > width + 2)
                                     continue
                                 // Centered rather than sitting on the floor: a 1px tick down
@@ -596,10 +604,23 @@ Item {
 
                     Canvas {
                         id: curveCanvas
-                        anchors.fill: parent
+                        // Only as wide as the visible strip, parked at the viewport's left edge
+                        // (content is offset by -contentX, so x: contentX cancels the scroll).
+                        // Filling the scrollable content instead would size the backing texture
+                        // to the whole timeline, and QSGPlainTexture silently rescales anything
+                        // past GL_MAX_TEXTURE_SIZE to fit — 16384px, which at 40x zoom is barely
+                        // 8 seconds of timeline. Past that the curves are drawn correctly and
+                        // then downsampled onto the GPU, which is what smeared them.
+                        x: root.contentX
+                        width: viewport.width
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
                         onPaint: {
                             const ctx = getContext("2d")
                             ctx.clearRect(0, 0, width, height)
+                            // Everything below is in absolute timeline coordinates.
+                            ctx.save()
+                            ctx.translate(-root.contentX, 0)
                             const spanX0 = root.xForSeconds(root.clipStart)
                             const spanX1 = root.xForSeconds(root.clipStart + root.clipDuration)
 
@@ -633,7 +654,10 @@ Item {
                                 // keyframes are switched off is faded further still — its curve
                                 // is a record of an animation that is not currently playing.
                                 const focused = root.isFocused(s)
-                                ctx.lineWidth = focused ? 1.8 : 1.2
+                                // Whole pixels. A 1.8px stroke lands ~40/100/40% across three
+                                // rows, which reads as a glow wherever the curve runs shallow —
+                                // exactly the flat tops and troughs between keys.
+                                ctx.lineWidth = focused ? 2 : 1
                                 ctx.globalAlpha = (root.curveEditing && !focused) ? 0.35 : 1.0
                                 if (entry.enabled === false)
                                     ctx.globalAlpha *= 0.45
@@ -683,6 +707,7 @@ Item {
                                 ctx.stroke()
                             }
                             ctx.globalAlpha = 1.0
+                            ctx.restore()
                         }
                         Connections {
                             target: root
