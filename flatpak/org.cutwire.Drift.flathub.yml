@@ -96,7 +96,7 @@ modules:
       # a tag alone is not a fixed input.
       - type: git
         url: https://github.com/CutWire-Studios/Drift.git
-        tag: v0.1.1
+        tag: v0.1.2
         commit: "0000000000000000000000000000000000000000"
       # Audio effect DSP. Only juce_dsp and its dependencies are compiled; nothing GUI-facing.
       - type: git
