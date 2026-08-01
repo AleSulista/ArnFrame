@@ -26,37 +26,28 @@ Built with **Qt 6**, **QML**, and **FFmpeg**. Preview and export share one compo
 
 ## Download
 
-**Drift 0.1.0** is out — the first public release. Grab a build for your platform:
+<p align="center">
+  <a href="https://flathub.org/apps/org.cutwire.Drift">
+    <img src="https://flathub.org/api/badge?locale=en" alt="Get it on Flathub" width="240">
+  </a>
+</p>
 
-| Platform | Package | Size |
-|----------|---------|------|
-| Linux (any distro) | [`Drift-0.1.0-x86_64.AppImage`](https://github.com/CutWire-Studios/Drift/releases/download/v0.1.0/Drift-0.1.0-x86_64.AppImage) | 86 MB |
-| Linux (Flatpak) | [`Drift-0.1.0.flatpak`](https://github.com/CutWire-Studios/Drift/releases/download/v0.1.0/Drift-0.1.0.flatpak) | 16 MB |
-| Arch Linux | [`drift-0.1.0-1-x86_64.pkg.tar.zst`](https://github.com/CutWire-Studios/Drift/releases/download/v0.1.0/drift-0.1.0-1-x86_64.pkg.tar.zst) | 16 MB |
-| Windows 10/11 | [`Drift-Setup-0.1.0-x64.exe`](https://github.com/CutWire-Studios/Drift/releases/download/v0.1.0/Drift-Setup-0.1.0-x64.exe) | 85 MB |
-| macOS | [Build from source](#build) | — |
-
-All builds are 64-bit x86 (`x86_64` / `x64`); there is no ARM build yet.
+**Linux** — install from Flathub:
 
 ```bash
-# AppImage — any distro
-chmod +x Drift-0.1.0-x86_64.AppImage && ./Drift-0.1.0-x86_64.AppImage
-
-# Arch Linux
-sudo pacman -U drift-0.1.0-1-x86_64.pkg.tar.zst
-
-# Flatpak bundle
-flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user Drift-0.1.0.flatpak
+flatpak install flathub org.cutwire.Drift
+flatpak run org.cutwire.Drift
 ```
 
-On Windows, run `Drift-Setup-0.1.0-x64.exe` and follow the installer.
+Or grab a build for your platform from the [latest release](https://github.com/CutWire-Studios/Drift/releases/latest):
 
-Fonts, stickers, speech models, and GPU/CPU acceleration runtimes are **not** bundled — install the ones you want from the Addon Manager in the app header (see [Addons](#addons)).
+| Platform | Package |
+|----------|---------|
+| Linux | [Flathub](https://flathub.org/apps/org.cutwire.Drift) · [AppImage](https://github.com/CutWire-Studios/Drift/releases/latest) |
+| Windows | [Installer (.exe)](https://github.com/CutWire-Studios/Drift/releases/latest) |
+| macOS | [Build from source](#macos) |
 
-A debug-symbol package for the Arch build ([`drift-debug-0.1.0-1-x86_64.pkg.tar.zst`](https://github.com/CutWire-Studios/Drift/releases/download/v0.1.0/drift-debug-0.1.0-1-x86_64.pkg.tar.zst)) is attached to the release for anyone filing a crash report.
-
-See the [latest release](https://github.com/CutWire-Studios/Drift/releases/latest) for the newest build, or [all releases](https://github.com/CutWire-Studios/Drift/releases) for previous versions and changelogs.
+See [all releases](https://github.com/CutWire-Studios/Drift/releases) for previous versions and full changelogs.
 
 ## Screenshots
 
