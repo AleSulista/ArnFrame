@@ -414,6 +414,10 @@ bool write(const QString &path, const WriteRequest &request, const ProgressFn &p
         return fail(error, QStringLiteral("cannot compress the project manifest"));
 
     QSaveFile out(path);
+    // Over the documents portal the sibling temp file QSaveFile normally writes may be refused, and
+    // the saved project must land at the path the portal handed us — never beside it. Writing the
+    // target directly is the correct outcome there; elsewhere the atomic temp-and-rename still runs.
+    out.setDirectWriteFallback(true);
     if (!out.open(QIODevice::WriteOnly))
         return fail(error, QStringLiteral("cannot write %1").arg(QFileInfo(path).fileName()));
 

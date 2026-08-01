@@ -32,7 +32,7 @@ QList<QUrl> FileDialogs::openFiles(const QString &title, const QStringList &name
 }
 
 QUrl FileDialogs::saveFile(const QString &title, const QStringList &nameFilters,
-                           const QString &defaultSuffix) const
+                           const QString &suggestedName, const QString &suffix) const
 {
     QFileDialog dialog;
     dialog.setWindowTitle(title);
@@ -40,8 +40,20 @@ QUrl FileDialogs::saveFile(const QString &title, const QStringList &nameFilters,
     dialog.setFileMode(QFileDialog::AnyFile);
     if (!nameFilters.isEmpty())
         dialog.setNameFilters(nameFilters);
-    if (!defaultSuffix.isEmpty())
-        dialog.setDefaultSuffix(defaultSuffix);
+
+    // The extension is put in the suggested name instead of QFileDialog::setDefaultSuffix: a file
+    // exported through the documents portal must not be renamed afterwards, and appending the
+    // suffix to what the portal returned writes to a path the portal never registered — the data
+    // lands next to the picked file as a hidden entry instead of at the chosen name.
+    QString name = suggestedName.trimmed();
+    name.replace(QLatin1Char('/'), QLatin1Char('_'));
+    name.replace(QLatin1Char('\\'), QLatin1Char('_'));
+    if (name.isEmpty())
+        name = tr("Untitled");
+    if (!suffix.isEmpty())
+        name += QLatin1Char('.') + suffix;
+    dialog.selectFile(name);
+
     if (dialog.exec() != QDialog::Accepted)
         return {};
     const QList<QUrl> urls = dialog.selectedUrls();

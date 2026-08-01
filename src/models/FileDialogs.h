@@ -17,6 +17,9 @@ public:
 
     Q_INVOKABLE QUrl openFile(const QString &title, const QStringList &nameFilters) const;
     Q_INVOKABLE QList<QUrl> openFiles(const QString &title, const QStringList &nameFilters) const;
+    // `suffix` is appended to `suggestedName` for the picker's initial file name; the path the
+    // dialog returns is used exactly as given.
     Q_INVOKABLE QUrl saveFile(const QString &title, const QStringList &nameFilters,
-                              const QString &defaultSuffix = QString()) const;
+                              const QString &suggestedName = QString(),
+                              const QString &suffix = QString()) const;
 };

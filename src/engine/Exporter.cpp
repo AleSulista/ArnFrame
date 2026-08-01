@@ -587,13 +587,21 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
     bool headerWritten = false;
     QString error;
 
-    const QString tmpPath = outputPath + QStringLiteral(".part");
+    // Encoded straight into the chosen path: a file handed over by the documents portal cannot be
+    // renamed or replaced, so writing a sibling ".part" and moving it into place would strand the
+    // result next to the file the user picked.
     const QByteArray outUtf8 = outputPath.toUtf8();
-    const QByteArray tmpUtf8 = tmpPath.toUtf8();
-    if (QFile::exists(tmpPath))
-        QFile::remove(tmpPath);
 
     avformat_alloc_output_context2(&fmt, nullptr, nullptr, outUtf8.constData());
+    if (!fmt) {
+        // Portal pickers hand back whatever name the user typed, extension or not; when there is
+        // nothing to guess from, fall back to the container this codec pair asks for.
+        const QString container = preferredContainer(settings.videoCodecId, settings.audioCodecId);
+        const QByteArray muxer = container == QLatin1String("mkv")
+                                     ? QByteArrayLiteral("matroska")
+                                     : container.toUtf8();
+        avformat_alloc_output_context2(&fmt, nullptr, muxer.constData(), outUtf8.constData());
+    }
     if (!fmt) {
         error = QStringLiteral("Could not determine output format");
         goto cleanup;
@@ -657,7 +665,7 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
         const AVPixelFormat outPixFmt = vctx->pix_fmt;
 
         if (!(fmt->oformat->flags & AVFMT_NOFILE)) {
-            if (avio_open(&fmt->pb, tmpUtf8.constData(), AVIO_FLAG_WRITE) < 0) {
+            if (avio_open(&fmt->pb, outUtf8.constData(), AVIO_FLAG_WRITE) < 0) {
                 error = QStringLiteral("Could not open the output file");
                 goto cleanup;
             }
@@ -822,17 +830,11 @@ cleanup:
         avformat_free_context(fmt);
     }
 
-    if (ok) {
-        if (QFile::exists(outputPath))
-            QFile::remove(outputPath);
-        if (!QFile::rename(tmpPath, outputPath)) {
-            QFile::remove(tmpPath);
-            ok = false;
-            error = QStringLiteral("Could not finalize the output file");
-        }
-    } else if (QFile::exists(tmpPath)) {
-        QFile::remove(tmpPath);
-    }
+    // A failed or cancelled run leaves a partial file at the destination. Best effort: the portal
+    // may refuse the unlink, in which case the half-written file stays and the caller reports the
+    // failure anyway.
+    if (!ok && QFile::exists(outputPath))
+        QFile::remove(outputPath);
 
     if (!ok && errorOut) {
         *errorOut = cancelled ? QStringLiteral("Export cancelled")

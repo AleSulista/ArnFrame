@@ -56,7 +56,8 @@ Rectangle {
             EditorState.saveProject(EditorState.fileUrl(EditorState.currentProjectPath))
             return !EditorState.hasUnsavedChanges
         }
-        var url = FileDialogs.saveFile(qsTr("Save Project"), root.projectFilter, "drift")
+        var url = FileDialogs.saveFile(qsTr("Save Project"), root.projectFilter,
+                                       EditorState.projectName, "drift")
         if (url == "")
             return false
         EditorState.saveProject(url)
@@ -66,7 +67,8 @@ Rectangle {
     // Save As with every source file copied in, so the result opens on a machine that has none of
     // the media. Always asks for a path: it is a different artefact from the working save.
     function packageProject() {
-        var url = FileDialogs.saveFile(qsTr("Save Shareable Copy"), root.projectFilter, "drift")
+        var url = FileDialogs.saveFile(qsTr("Save Shareable Copy"), root.projectFilter,
+                                       EditorState.projectName, "drift")
         if (url != "")
             EditorState.packageProject(url)
     }

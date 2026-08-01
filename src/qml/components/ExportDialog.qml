@@ -139,7 +139,8 @@ ThemedDialog {
         var container = EditorState.exportPreferredContainer(videoCodecId, audioCodecId)
         var filters = EditorState.exportSaveFilters(container)
         var suffix = EditorState.exportDefaultSuffix(container)
-        var url = FileDialogs.saveFile(qsTr("Export Video"), filters, suffix)
+        var url = FileDialogs.saveFile(qsTr("Export Video"), filters,
+                                       EditorState.projectName, suffix)
         if (url != "") {
             EditorState.exportWithSettings(url, buildSettings())
             Toasts.info(qsTr("Export started…"))

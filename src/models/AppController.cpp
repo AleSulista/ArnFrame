@@ -2786,13 +2786,11 @@ bool AppController::exportSubtitleFile(int trackIndex, int clipIndex, const QUrl
         return false;
     }
 
-    QString path = url.toLocalFile();
+    const QString path = url.toLocalFile();
     if (path.isEmpty()) {
         setLastMessage(QStringLiteral("No save location selected"));
         return false;
     }
-    if (!path.endsWith(QStringLiteral(".srt"), Qt::CaseInsensitive))
-        path += QStringLiteral(".srt");
 
     QString error;
     if (!drift::writeSrtFile(path, clip.subtitleCues, &error)) {
