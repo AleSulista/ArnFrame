@@ -9,6 +9,8 @@ body:
         Thanks for helping improve Drift. Fill in the fields below.
         You can attach screenshots or screen recordings on any text box.
 
+        **Before filing:** check the [unreleased changelog](https://github.com/CutWire-Studios/Drift/blob/main/CHANGELOG.md) — the bug may already be fixed on `main` since the last release.
+
   - type: dropdown
     id: os
     attributes:

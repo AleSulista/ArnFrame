@@ -8,6 +8,8 @@ body:
       value: |
         Use this for anything that doesn't fit Bug report or Feature request.
 
+        If this is about a bug or missing feature, check the [unreleased changelog](https://github.com/CutWire-Studios/Drift/blob/main/CHANGELOG.md) first — it may already be fixed or added on `main`.
+
   - type: dropdown
     id: topic
     attributes:

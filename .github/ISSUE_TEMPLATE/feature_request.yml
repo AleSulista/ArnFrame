@@ -8,6 +8,8 @@ body:
       value: |
         Thanks for sharing an idea for Drift. Pick a category, then describe what you'd like.
 
+        **Before filing:** check the [unreleased changelog](https://github.com/CutWire-Studios/Drift/blob/main/CHANGELOG.md) — the feature may already be in progress or landed on `main` since the last release.
+
   - type: dropdown
     id: category
     attributes:
