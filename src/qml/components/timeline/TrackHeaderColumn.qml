@@ -13,43 +13,18 @@ Item {
     // so headers stay aligned with their rows.
     property var tracks: []
     property real contentY: 0
-    // Extra space above track 0 while a library asset drag reserves a new-track
-    // lane in the timeline column — keeps headers lined up with their rows.
-    property real topInset: 0
 
-    // Track-header reorder: source index and live drop target while dragging.
+    // Track-header reorder: source index and live drop target while dragging,
+    // plus the insertion boundary the indicator line is drawn at.
     property int draggingTrackFrom: -1
     property int draggingTrackTo: -1
+    property int draggingTrackSlot: -1
 
     // Pending delete confirmation — index kept until Accept/Reject so the menu
     // can close without wiping the track immediately.
     property int pendingDeleteTrack: -1
 
     clip: true
-
-    // Placeholder header for the reserved new-track lane during asset drag.
-    Item {
-        visible: root.topInset > 0
-        width: parent.width
-        height: Math.max(0, root.topInset - Theme.trackGap)
-        y: -root.contentY
-
-        Rectangle {
-            anchors.right: parent.right
-            width: 1
-            height: parent.height
-            color: Theme.panelBorder
-        }
-
-        ThemedLabel {
-            anchors.right: parent.right
-            anchors.rightMargin: 12
-            anchors.verticalCenter: parent.verticalCenter
-            text: qsTr("New track")
-            size: "sm"
-            tone: "muted"
-        }
-    }
 
     ThemedDialog {
         id: confirmDeleteTrack
@@ -126,23 +101,35 @@ Item {
         return cursor
     }
 
-    // Target index for QList::move while dragging a track header.
-    function trackMoveTargetAtY(y) {
-        if (tracks.length === 0)
-            return -1
-        var cursor = root.topInset
+    // Boundary the dragged row would be inserted at, 0..tracks.length. Note the
+    // open upper end: the old version clamped to tracks.length - 1, so "after
+    // the last track" was not expressible and a downward drag could not reach
+    // the bottom slot.
+    function trackInsertSlotAtY(y) {
+        var cursor = 0
         for (var i = 0; i < tracks.length; i++) {
             const th = trackHeight(i)
             if (y < cursor + th / 2)
                 return i
             cursor += th + Theme.trackGap
         }
-        return tracks.length - 1
+        return tracks.length
+    }
+
+    // QList::move() destination for dragging `from` into that slot. Removing the
+    // row first shifts everything after it up by one, so a downward move lands a
+    // slot earlier than the raw boundary — without this the drag committed a
+    // move after a single pixel, because a row's own grip already sits past its
+    // own midpoint.
+    function trackMoveTargetForSlot(from, slot) {
+        const to = slot > from ? slot - 1 : slot
+        return Math.max(0, Math.min(tracks.length - 1, to))
     }
 
     function clearTrackDrag() {
         draggingTrackFrom = -1
         draggingTrackTo = -1
+        draggingTrackSlot = -1
     }
 
     Repeater {
@@ -159,8 +146,59 @@ Item {
                     + (index < root.tracks.length - 1 ? Theme.trackGap : 0)
             // Follows the timeline's vertical scroll so labels stay
             // aligned with their rows.
-            y: root.topInset + root.trackRowTop(index) - root.contentY
+            y: root.trackRowTop(index) - root.contentY
             opacity: root.draggingTrackFrom === index ? 0.45 : 1.0
+
+            // Reorder drag. Covers the whole header rather than just the grip:
+            // reaching for the header body is the instinctive gesture, and the
+            // grip alone was a ~22px target that was easy to miss entirely.
+            // Declared first so it sits below the toggle buttons and the
+            // right-click menu, which keep their own presses.
+            MouseArea {
+                id: trackHeaderDrag
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.LeftButton
+                preventStealing: true
+                cursorShape: root.draggingTrackFrom === index ? Qt.SizeAllCursor
+                                                              : Qt.ArrowCursor
+
+                // A press is not yet a reorder: without a threshold, clicking a
+                // header committed a move, because a row's grip already sits
+                // past its own midpoint.
+                property real pressY: 0
+                property bool moved: false
+                readonly property real threshold: 4
+
+                onPressed: (mouse) => {
+                    pressY = mouse.y
+                    moved = false
+                    root.draggingTrackFrom = index
+                    root.draggingTrackTo = index
+                    root.draggingTrackSlot = -1
+                }
+                onPositionChanged: (mouse) => {
+                    if (root.draggingTrackFrom < 0)
+                        return
+                    if (!moved && Math.abs(mouse.y - pressY) < threshold)
+                        return
+                    moved = true
+                    const local = mapToItem(root, mouse.x, mouse.y)
+                    root.draggingTrackSlot = root.trackInsertSlotAtY(local.y)
+                    root.draggingTrackTo = root.trackMoveTargetForSlot(
+                                               root.draggingTrackFrom,
+                                               root.draggingTrackSlot)
+                }
+                onReleased: {
+                    if (moved && root.draggingTrackFrom >= 0
+                            && root.draggingTrackTo >= 0
+                            && root.draggingTrackFrom !== root.draggingTrackTo)
+                        EditorState.moveTrack(root.draggingTrackFrom,
+                                              root.draggingTrackTo)
+                    root.clearTrackDrag()
+                }
+                onCanceled: root.clearTrackDrag()
+            }
 
             Rectangle {
                 anchors.right: parent.right
@@ -169,7 +207,7 @@ Item {
                 color: Theme.panelBorder
             }
 
-            // Drag handle — left-aligned reorder grip.
+            // Drag affordance — left-aligned reorder grip.
             IconGlyph {
                 anchors.left: parent.left
                 anchors.leftMargin: 8
@@ -177,42 +215,17 @@ Item {
                 anchors.verticalCenterOffset: index < root.tracks.length - 1 ? -Theme.trackGap / 2 : 0
                 glyph: Theme.icons.gripVertical
                 iconSize: 14
-                iconColor: trackDragMouse.containsMouse || root.draggingTrackFrom === index
+                iconColor: trackDragMouse.hovered || root.draggingTrackFrom === index
                            ? Theme.panelForeground : Theme.mutedForeground
 
                 ThemedToolTip {
-                    visible: trackDragMouse.containsMouse && root.draggingTrackFrom < 0
-                    text: qsTr("Drag to reorder track")
+                    visible: trackHeaderDrag.containsMouse && root.draggingTrackFrom < 0
+                    text: qsTr("Drag the header to reorder this track")
                 }
 
-                MouseArea {
-                    id: trackDragMouse
-                    anchors.fill: parent
-                    anchors.margins: -4
-                    hoverEnabled: true
-                    cursorShape: Qt.SizeAllCursor
-                    preventStealing: true
-
-                    onPressed: {
-                        root.draggingTrackFrom = index
-                        root.draggingTrackTo = index
-                    }
-                    onPositionChanged: (mouse) => {
-                        if (root.draggingTrackFrom < 0)
-                            return
-                        const local = mapToItem(root, mouse.x, mouse.y)
-                        root.draggingTrackTo = root.trackMoveTargetAtY(local.y)
-                    }
-                    onReleased: {
-                        if (root.draggingTrackFrom >= 0
-                                && root.draggingTrackTo >= 0
-                                && root.draggingTrackFrom !== root.draggingTrackTo)
-                            EditorState.moveTrack(root.draggingTrackFrom,
-                                                  root.draggingTrackTo)
-                        root.clearTrackDrag()
-                    }
-                    onCanceled: root.clearTrackDrag()
-                }
+                // Hover affordance only — the drag lives on the whole header
+                // row below, so the grab target is not a 14px icon.
+                HoverHandler { id: trackDragMouse }
             }
 
             Row {
@@ -406,7 +419,7 @@ Item {
 
     // Insertion line while reordering tracks.
     Rectangle {
-        visible: root.draggingTrackFrom >= 0 && root.draggingTrackTo >= 0
+        visible: root.draggingTrackSlot >= 0 && root.draggingTrackTo >= 0
                  && root.draggingTrackFrom !== root.draggingTrackTo
         width: parent.width - 8
         height: 2
@@ -414,14 +427,19 @@ Item {
         x: 4
         color: Theme.primary
         z: 10
+        // Drawn at the insertion boundary itself, in the same frame as the
+        // header rows — without -contentY it drifts off the boundary as soon as
+        // the tracks are scrolled.
         y: {
-            if (root.draggingTrackTo < 0)
+            const slot = root.draggingTrackSlot
+            if (slot < 0)
                 return 0
-            const from = root.draggingTrackFrom
-            const to = root.draggingTrackTo
-            if (from < to)
-                return root.trackRowTop(to) + root.trackHeight(to) - 1
-            return root.trackRowTop(to)
+            if (slot >= root.tracks.length) {
+                const last = root.tracks.length - 1
+                return root.trackRowTop(last) + root.trackHeight(last)
+                       - root.contentY - 1
+            }
+            return root.trackRowTop(slot) - root.contentY - 1
         }
     }
 }

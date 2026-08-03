@@ -98,25 +98,6 @@ Item {
                         visible: cardHover.hovered
                     }
 
-                    TapHandler { onTapped: root.addRequested(assetIndex) }
-                    DragHandler {
-                        id: assetDrag
-                        // Without target: null the handler moves the card itself,
-                        // clobbering the Grid positioner's x/y.
-                        target: null
-                        acceptedButtons: Qt.LeftButton
-                        onActiveChanged: {
-                            if (active) {
-                                EditorState.draggingAssetIndex = assetIndex
-                            } else {
-                                Qt.callLater(function() {
-                                    if (!assetDrag.active)
-                                        EditorState.draggingAssetIndex = -1
-                                })
-                            }
-                        }
-                    }
-
                     Rectangle {
                         width: Theme.assetCardWidth
                         height: Theme.assetCardWidth * 9 / 16
@@ -189,6 +170,38 @@ Item {
                                 color: Theme.onMedia
                                 font.pixelSize: Theme.fontSizeXs
                                 font.family: Theme.fontFamily
+                            }
+                        }
+
+                        // Both handlers live on this child, not on the Column
+                        // that owns the Drag attached property. With them on the
+                        // Column, QDrag::exec() ungrabs the very item Drag.active
+                        // is attached to, the handler deactivates inside
+                        // setActive(true), and the `Drag.active: assetDrag.active`
+                        // binding re-enters it — "Binding loop detected for
+                        // property active", and the drag dies mid-flight.
+                        // EffectBrowser and ShapesTab already nest them this way.
+                        TapHandler {
+                            // Unguarded, the tap competes with the drag for the
+                            // grab and fires an add on release after a drag.
+                            enabled: !assetDrag.active
+                            onTapped: root.addRequested(assetIndex)
+                        }
+                        DragHandler {
+                            id: assetDrag
+                            // Without target: null the handler moves the card itself,
+                            // clobbering the Grid positioner's x/y.
+                            target: null
+                            acceptedButtons: Qt.LeftButton
+                            onActiveChanged: {
+                                if (active) {
+                                    EditorState.draggingAssetIndex = assetIndex
+                                } else {
+                                    Qt.callLater(function() {
+                                        if (!assetDrag.active)
+                                            EditorState.draggingAssetIndex = -1
+                                    })
+                                }
                             }
                         }
                     }

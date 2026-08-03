@@ -220,6 +220,9 @@ public:
     Q_INVOKABLE void addClipFromAsset(int assetIndex);
     Q_INVOKABLE void addClipFromAssetAt(int assetIndex, int trackIndex, double atSeconds);
     Q_INVOKABLE void addClipFromAssetOnNewTrack(int assetIndex, double atSeconds);
+    // Same, but the new track goes at insertIndex rather than always on top, so
+    // a timeline drop can create a lane below the tracks as well as above them.
+    Q_INVOKABLE void addClipFromAssetOnNewTrackAt(int assetIndex, int insertIndex, double atSeconds);
     Q_INVOKABLE bool trackAcceptsAsset(int trackIndex, int assetIndex) const;
     Q_INVOKABLE QString trackTypeForAsset(int assetIndex) const;
     Q_INVOKABLE void addTextClip(const QString &text, double atSeconds);

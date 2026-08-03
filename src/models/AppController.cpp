@@ -1924,6 +1924,11 @@ QString AppController::trackTypeForAsset(int assetIndex) const
 
 void AppController::addClipFromAssetOnNewTrack(int assetIndex, double atSeconds)
 {
+    addClipFromAssetOnNewTrackAt(assetIndex, 0, atSeconds);
+}
+
+void AppController::addClipFromAssetOnNewTrackAt(int assetIndex, int insertIndex, double atSeconds)
+{
     if (!m_assetLibrary)
         return;
 
@@ -1933,7 +1938,7 @@ void AppController::addClipFromAssetOnNewTrack(int assetIndex, double atSeconds)
 
     const drift::ClipType clipType = drift::clipTypeFromString(asset.value(QStringLiteral("kind")).toString());
     const drift::Project before = m_project;
-    const int trackIndex = drift::insertTrackAtTopForClipType(m_project, clipType);
+    const int trackIndex = drift::insertTrackAboveForClipType(m_project, insertIndex, clipType);
 
     m_assetLibrary->ensureMedia(assetIndex);
     const QString thumbnailPath = m_assetLibrary->thumbnailAt(assetIndex);

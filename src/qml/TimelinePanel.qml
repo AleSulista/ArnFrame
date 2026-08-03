@@ -86,16 +86,16 @@ PanelFrame {
     readonly property int selectedTrack: EditorState.selectedTrack
     readonly property int selectedClip: EditorState.selectedClip
 
-    // Reserved row above existing tracks while dragging a library asset.
-    // Full track height (not a thin slop) so the new-track ghost can sit in a
-    // real lane. Kept for the whole drag — not only while dropCreatesNewTrack —
-    // so toggling the outline does not shift DropArea geometry mid-drag.
-    readonly property real assetDropTopSlop: {
-        if (EditorState.draggingAssetIndex < 0 || !timelineHasClips())
-            return 0
-        const type = EditorState.trackTypeForAsset(EditorState.draggingAssetIndex)
-        return trackBaseHeight(type) + Theme.trackGap
-    }
+    // True while a library asset is being dragged in from the media panel.
+    readonly property bool assetDragActive: EditorState.draggingAssetIndex >= 0
+
+    // Nothing here may depend on the drag: a reserved lane that appeared when a
+    // drag started shifted every track row, the Flickable's contentHeight and
+    // the drop overlay at the exact moment QDrag::exec() entered its nested
+    // event loop, so Mutter hit-tested against geometry that had just moved out
+    // from under it — the target vanished mid-drag and only the track already
+    // under the pointer would accept. A new track is signalled by an insertion
+    // line drawn over the tracks instead, which costs no layout.
 
     // Live snap guide (seconds; < 0 when hidden) shown while dragging a clip.
     property real snapGuideSeconds: -1
@@ -104,8 +104,11 @@ PanelFrame {
     property int dropTrackIndex: -1
     property real dropStartSeconds: 0
     property real dropDurationSeconds: 0
-    // True while dragging a library asset outside any compatible track row.
+    // True while a library asset would land on a brand-new track, and the index
+    // that track would be inserted at (0 = above everything, tracks.length =
+    // below everything).
     property bool dropCreatesNewTrack: false
+    property int dropNewTrackIndex: 0
     // Clip under an in-progress effect drag (for drop highlight).
     property int effectDropTrackIndex: -1
     property int effectDropClipIndex: -1
@@ -390,43 +393,88 @@ PanelFrame {
         return -1;
     }
 
+    // Depth of the "insert a new track here" band on a track row.
+    function newTrackEdge(index) {
+        return Math.min(Theme.newTrackHitSlop, trackHeight(index) / 4)
+    }
+
+    // Resolve a track-column y into a drop target, in the coordinates the track
+    // rows actually live in (no reserved lane, so column y == track y).
+    // Returns { newTrack: false, track: i } to land on an existing track, or
+    // { newTrack: true, insertIndex: n } to create one at that index.
+    //
+    // Landing on the top/bottom edge of a row means "new track above/below it",
+    // which is what makes a lane reachable underneath the last track — dropping
+    // in the empty space below the tracks appends one.
+    function assetDropTargetAtY(assetIndex, y) {
+        const count = tracks.length
+        if (count === 0)
+            return { "newTrack": true, "insertIndex": 0 }
+
+        var cursor = 0
+        for (var i = 0; i < count; i++) {
+            const h = trackHeight(i)
+            const rowEnd = cursor + h
+            // Claim the trailing gap too, so the 6px between rows resolves to a
+            // boundary rather than to nothing.
+            if (y < rowEnd + Theme.trackGap / 2) {
+                if (!EditorState.trackAcceptsAsset(i, assetIndex))
+                    return { "newTrack": true,
+                             "insertIndex": y < cursor + h / 2 ? i : i + 1 }
+                const edge = newTrackEdge(i)
+                // Only the topmost row needs a leading band: on every other row
+                // that boundary is already the previous row's trailing band, and
+                // claiming it twice just ate the middle of the track.
+                if (i === 0 && y < cursor + edge)
+                    return { "newTrack": true, "insertIndex": 0 }
+                if (y >= rowEnd - edge)
+                    return { "newTrack": true, "insertIndex": i + 1 }
+                return { "newTrack": false, "track": i }
+            }
+            cursor = rowEnd + Theme.trackGap
+        }
+        return { "newTrack": true, "insertIndex": count }
+    }
+
+    // Y of the boundary a new track would be inserted at, in track-column
+    // coordinates — where the insertion line is drawn.
+    function newTrackBoundaryY(insertIndex) {
+        var cursor = 0
+        for (var i = 0; i < insertIndex && i < tracks.length; i++)
+            cursor += trackHeight(i) + Theme.trackGap
+        return Math.max(0, cursor - Theme.trackGap / 2)
+    }
+
     function updateAssetDropPreview(assetIndex, dropX, dropY) {
         const duration = assetDurationSeconds(assetIndex)
         const desired = Math.max(0, dropX / pxPerSecond)
 
+        // Mirrors performAssetDrop: an empty project fills its existing track
+        // wherever you aim, rather than stacking a second one on top.
         if (!timelineHasClips()) {
-            const trackIdx = firstCompatibleTrackIndex(assetIndex)
-            if (trackIdx >= 0) {
+            const firstIdx = firstCompatibleTrackIndex(assetIndex)
+            if (firstIdx >= 0) {
                 dropCreatesNewTrack = false
-                showLandingPreview(trackIdx, desired, duration)
-            } else {
-                clearLandingPreview()
+                showLandingPreview(firstIdx, desired, duration)
+                return
             }
-            return
         }
 
-        if (assetDropTopSlop > 0 && dropY < assetDropTopSlop) {
-            const snapped = snapClipStart(desired, duration)
-            dropCreatesNewTrack = true
-            dropTrackIndex = -1
-            dropStartSeconds = snapped.start
-            dropDurationSeconds = duration
-            snapGuideSeconds = snapped.guide
-            return
-        }
+        const target = assetDropTargetAtY(assetIndex, dropY)
 
-        const trackIdx = trackIndexAtY(dropY - assetDropTopSlop)
-        if (trackIdx >= 0 && EditorState.trackAcceptsAsset(trackIdx, assetIndex)) {
+        if (!target.newTrack) {
             dropCreatesNewTrack = false
-            showLandingPreview(trackIdx, desired, duration)
-        } else {
-            const snapped = snapClipStart(desired, duration)
-            dropCreatesNewTrack = true
-            dropTrackIndex = -1
-            dropStartSeconds = snapped.start
-            dropDurationSeconds = duration
-            snapGuideSeconds = snapped.guide
+            showLandingPreview(target.track, desired, duration)
+            return
         }
+
+        const snapped = snapClipStart(desired, duration)
+        dropCreatesNewTrack = true
+        dropNewTrackIndex = target.insertIndex
+        dropTrackIndex = -1
+        dropStartSeconds = snapped.start
+        dropDurationSeconds = duration
+        snapGuideSeconds = snapped.guide
     }
 
     function performAssetDrop(assetIndex, dropX, dropY) {
@@ -435,23 +483,21 @@ PanelFrame {
             return
 
         function runAdd() {
+            // An empty project should fill its existing track rather than stack
+            // a second one on top of it.
             if (!timelineHasClips()) {
-                const trackIdx = firstCompatibleTrackIndex(assetIndex)
-                if (trackIdx >= 0)
-                    EditorState.addClipFromAssetAt(assetIndex, trackIdx, atSeconds)
-                return
+                const firstIdx = firstCompatibleTrackIndex(assetIndex)
+                if (firstIdx >= 0) {
+                    EditorState.addClipFromAssetAt(assetIndex, firstIdx, atSeconds)
+                    return
+                }
             }
 
-            if (assetDropTopSlop > 0 && dropY < assetDropTopSlop) {
-                EditorState.addClipFromAssetOnNewTrack(assetIndex, atSeconds)
-                return
-            }
-
-            const trackIdx = trackIndexAtY(dropY - assetDropTopSlop)
-            if (trackIdx >= 0 && EditorState.trackAcceptsAsset(trackIdx, assetIndex))
-                EditorState.addClipFromAssetAt(assetIndex, trackIdx, atSeconds)
+            const target = assetDropTargetAtY(assetIndex, dropY)
+            if (target.newTrack)
+                EditorState.addClipFromAssetOnNewTrackAt(assetIndex, target.insertIndex, atSeconds)
             else
-                EditorState.addClipFromAssetOnNewTrack(assetIndex, atSeconds)
+                EditorState.addClipFromAssetAt(assetIndex, target.track, atSeconds)
         }
 
         if (typeof Window !== "undefined" && Window.window && Window.window.configureAndAddAsset)
@@ -636,7 +682,6 @@ PanelFrame {
                                         - Theme.timelineBookmarkRowHeight)
                     tracks: root.tracks
                     contentY: flick.contentY
-                    topInset: root.assetDropTopSlop
                 }
             }
 
@@ -656,7 +701,7 @@ PanelFrame {
                 // all. totalTracksHeight() was already computed but never used.
                 contentHeight: Math.max(height,
                                         headerHeight + root.totalTracksHeight()
-                                        + root.assetDropTopSlop + Theme.trackGap)
+                                        + Theme.trackGap)
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.horizontal: AppScrollBar { policy: ScrollBar.AlwaysOn }
@@ -683,8 +728,7 @@ PanelFrame {
                         x: 0
                         y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
                         width: parent.width
-                        height: Math.max(root.totalTracksHeight() + root.assetDropTopSlop,
-                                         Theme.trackHeightVideo)
+                        height: Math.max(root.totalTracksHeight(), Theme.trackHeightVideo)
                         z: 150
                         acceptedButtons: Qt.NoButton
                         onWheel: (wheel) => root.handleTimelineWheel(wheel)
@@ -901,37 +945,6 @@ PanelFrame {
                         spacing: Theme.trackGap
                         z: 1
 
-                        // Reserved new-track lane while a library asset is dragged.
-                        // Always present for the drag (see assetDropTopSlop) so the
-                        // outline can toggle without shifting track DropAreas.
-                        Item {
-                            id: newTrackDropRow
-                            visible: root.assetDropTopSlop > 0
-                            width: parent.width
-                            height: visible ? root.assetDropTopSlop - Theme.trackGap : 0
-
-                            Rectangle {
-                                anchors.fill: parent
-                                color: Qt.rgba(Theme.panelAccent.r, Theme.panelAccent.g,
-                                               Theme.panelAccent.b, 0.14)
-                                border.width: Theme.borderWidth
-                                border.color: Theme.panelBorder
-                                radius: Theme.radiusSm
-                            }
-
-                            Rectangle {
-                                visible: root.dropCreatesNewTrack
-                                x: root.dropStartSeconds * root.pxPerSecond
-                                width: root.dropDurationSeconds * root.pxPerSecond
-                                height: parent.height
-                                radius: Theme.radiusSm
-                                color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.12)
-                                border.width: 2
-                                border.color: Theme.primary
-                                z: 5
-                            }
-                        }
-
                         Repeater {
                             model: root.tracks.length
                             delegate: Rectangle {
@@ -1005,26 +1018,16 @@ PanelFrame {
                                         }
                                         // Media fallback when the panel overlay does not
                                         // receive the drag (seen on some Wayland compositors).
-                                        // drop.x/y are already track-local — do not remap
-                                        // through timelineAssetDrop.
+                                        // drop.y is row-local, so lift it into track-column
+                                        // coordinates and reuse the same resolution the
+                                        // overlay uses — otherwise the two disagree about
+                                        // where the drop would land.
                                         const assetIndex = assetIndexFromDrop(drop)
                                         if (assetIndex < 0)
                                             return
-                                        if (!EditorState.trackAcceptsAsset(trackRow.trackIndex, assetIndex)) {
-                                            const duration = root.assetDurationSeconds(assetIndex)
-                                            const desired = Math.max(0, drop.x / root.pxPerSecond)
-                                            const snapped = root.snapClipStart(desired, duration)
-                                            root.dropCreatesNewTrack = true
-                                            root.dropTrackIndex = -1
-                                            root.dropStartSeconds = snapped.start
-                                            root.dropDurationSeconds = duration
-                                            root.snapGuideSeconds = snapped.guide
-                                            return
-                                        }
-                                        const duration = root.assetDurationSeconds(assetIndex)
-                                        const desired = Math.max(0, drop.x / root.pxPerSecond)
-                                        root.dropCreatesNewTrack = false
-                                        root.showLandingPreview(trackRow.trackIndex, desired, duration)
+                                        root.updateAssetDropPreview(
+                                            assetIndex, drop.x,
+                                            root.trackOffsetY(trackRow.trackIndex) + drop.y)
                                     }
 
                                     onEntered: (drop) => updateAssetPreview(drop)
@@ -1071,10 +1074,9 @@ PanelFrame {
                                         if (assetIndex < 0)
                                             return
                                         root.clearLandingPreview()
-                                        // Reconstruct overlay-local Y so performAssetDrop's
-                                        // trackIndexAtY path resolves to this row.
-                                        const dropY = root.assetDropTopSlop
-                                                    + root.trackOffsetY(trackRow.trackIndex)
+                                        // Reconstruct track-column Y so performAssetDrop
+                                        // resolves the same target this row saw.
+                                        const dropY = root.trackOffsetY(trackRow.trackIndex)
                                                     + drop.y
                                         root.performAssetDrop(assetIndex, drop.x, dropY)
                                     }
@@ -1286,12 +1288,21 @@ PanelFrame {
                     // and Mutter then never delivers drag moves to this DropArea.
                     DropArea {
                         id: timelineAssetDrop
-                        enabled: EditorState.draggingAssetIndex >= 0
+                        // No `enabled: draggingAssetIndex >= 0` gate: `keys` below
+                        // already excludes effect/shape/transition drags, and
+                        // gating on state written by the drag source in the same
+                        // tick meant that if it did not land before the first
+                        // DragEnter the overlay was skipped entirely — leaving only
+                        // the per-track DropAreas, which accept nothing but a
+                        // compatible track and never a new-track boundary.
                         x: 0
                         y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
                         width: parent.width
-                        height: Math.max(root.totalTracksHeight() + root.assetDropTopSlop,
-                                         Theme.trackHeightVideo)
+                        // Extends past the last track to the bottom of the
+                        // content area: dropping in that empty space is how a
+                        // track gets appended below the existing ones.
+                        height: Math.max(root.totalTracksHeight(),
+                                         flick.contentHeight - flick.headerHeight)
                         z: 250
                         keys: ["text/plain"]
 
@@ -1320,6 +1331,60 @@ PanelFrame {
                             const assetIndex = assetIndexFromDrop(drop)
                             root.clearLandingPreview()
                             root.performAssetDrop(assetIndex, drop.x, drop.y)
+                        }
+                    }
+
+                    // New-track indicator: a full-height ghost lane straddling the
+                    // boundary the track would be inserted at, with the clip that
+                    // would land in it. An overlay rather than a reserved row, so
+                    // no DropArea geometry moves while a drag is live — and drawn
+                    // at real track height so it reads as a track, not a hairline.
+                    Item {
+                        id: newTrackIndicator
+                        // Not also gated on the drag being active: dropCreatesNewTrack
+                        // is only ever set during one, and is cleared on exit, drop
+                        // and abandon — an extra condition here is one more way for
+                        // the ghost to silently not appear.
+                        visible: root.dropCreatesNewTrack
+                        readonly property real laneHeight:
+                            root.trackBaseHeight(EditorState.trackTypeForAsset(
+                                                     EditorState.draggingAssetIndex))
+                        x: 0
+                        y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
+                           + root.newTrackBoundaryY(root.dropNewTrackIndex)
+                           - laneHeight / 2
+                        width: parent.width
+                        height: laneHeight
+                        z: 240
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: Theme.radiusSm
+                            color: Qt.rgba(Theme.panelBackground.r, Theme.panelBackground.g,
+                                           Theme.panelBackground.b, 0.92)
+                            border.width: Theme.borderWidth
+                            border.color: Theme.primary
+                        }
+
+                        // The boundary itself, so it is unambiguous which gap the
+                        // lane is going into.
+                        Rectangle {
+                            width: parent.width
+                            height: 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: Theme.primary
+                        }
+
+                        Rectangle {
+                            x: root.dropStartSeconds * root.pxPerSecond
+                            width: Math.max(2, root.dropDurationSeconds * root.pxPerSecond)
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 2
+                            radius: Theme.radiusSm
+                            color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.3)
+                            border.width: 2
+                            border.color: Theme.primary
                         }
                     }
 
@@ -1628,6 +1693,12 @@ PanelFrame {
         function onPlayheadSecondsChanged() {
             if (EditorState.playing)
                 root.ensurePlayheadVisible()
+        }
+        // A drag abandoned outside the timeline never fires onExited/onDropped
+        // on any DropArea here, so the landing outline used to stay painted.
+        function onDraggingAssetIndexChanged() {
+            if (EditorState.draggingAssetIndex < 0)
+                root.clearLandingPreview()
         }
     }
 }
