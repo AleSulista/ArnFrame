@@ -75,6 +75,12 @@ Item {
             // No viewport (Speed Curve): at most one pass of the strip frames.
             return Math.min(span, Math.max(frameCount, 1))
         }
+        // A clip entirely outside the viewport still clamps to a tile inside its own body, so
+        // without this it would instantiate — and queue decodes for — a full screenful. With
+        // several clips on the timeline that multiplies every pan by the clip count.
+        var pad = frameWidth
+        if (worldX + width < viewX - pad || worldX > viewX + viewW + pad)
+            return 0
         var count = Math.ceil(viewW / Math.max(1, frameWidth)) + 3
         return Math.min(span, Math.max(1, count))
     }

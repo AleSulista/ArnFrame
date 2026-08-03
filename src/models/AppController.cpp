@@ -8704,6 +8704,10 @@ void AppController::remapProjectPaths(const QHash<QString, QString> &remap)
     if (remap.isEmpty())
         return;
 
+    // Tiles are keyed on the old paths, and a source that was missing is blacklisted until
+    // this runs — without it a relinked clip's filmstrip never comes back.
+    m_filmstripTiles.clear();
+
     const auto repoint = [&remap](QString &path) {
         const auto it = remap.constFind(path);
         if (it == remap.constEnd())
@@ -8739,6 +8743,7 @@ void AppController::newProject()
     m_project.resetToDefaultTimeline();
     m_project.setAuthor(QSettings().value(QStringLiteral("authorName")).toString());
     m_embeddedSources.clear();
+    m_filmstripTiles.clear();
     if (m_assetLibrary)
         m_assetLibrary->setProject(&m_project);
     m_playback.setProject(&m_project);
