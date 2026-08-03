@@ -13,6 +13,9 @@ Item {
     // so headers stay aligned with their rows.
     property var tracks: []
     property real contentY: 0
+    // Extra space above track 0 while a library asset drag reserves a new-track
+    // lane in the timeline column — keeps headers lined up with their rows.
+    property real topInset: 0
 
     // Track-header reorder: source index and live drop target while dragging.
     property int draggingTrackFrom: -1
@@ -23,6 +26,30 @@ Item {
     property int pendingDeleteTrack: -1
 
     clip: true
+
+    // Placeholder header for the reserved new-track lane during asset drag.
+    Item {
+        visible: root.topInset > 0
+        width: parent.width
+        height: Math.max(0, root.topInset - Theme.trackGap)
+        y: -root.contentY
+
+        Rectangle {
+            anchors.right: parent.right
+            width: 1
+            height: parent.height
+            color: Theme.panelBorder
+        }
+
+        ThemedLabel {
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("New track")
+            size: "sm"
+            tone: "muted"
+        }
+    }
 
     ThemedDialog {
         id: confirmDeleteTrack
@@ -103,7 +130,7 @@ Item {
     function trackMoveTargetAtY(y) {
         if (tracks.length === 0)
             return -1
-        var cursor = 0
+        var cursor = root.topInset
         for (var i = 0; i < tracks.length; i++) {
             const th = trackHeight(i)
             if (y < cursor + th / 2)
@@ -132,7 +159,7 @@ Item {
                     + (index < root.tracks.length - 1 ? Theme.trackGap : 0)
             // Follows the timeline's vertical scroll so labels stay
             // aligned with their rows.
-            y: root.trackRowTop(index) - root.contentY
+            y: root.topInset + root.trackRowTop(index) - root.contentY
             opacity: root.draggingTrackFrom === index ? 0.45 : 1.0
 
             Rectangle {

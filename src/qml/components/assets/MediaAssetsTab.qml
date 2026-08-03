@@ -80,6 +80,11 @@ Item {
                     Drag.supportedActions: Qt.CopyAction
                     Drag.keys: ["text/plain"]
                     Drag.mimeData: { "text/plain": assetIndex.toString() }
+                    // Default hotspot is (0,0) at the card top-left; Wayland
+                    // compositors (notably Mutter) then deliver drop Y far from
+                    // the grab point. Center on the thumbnail like effect cards.
+                    Drag.hotSpot.x: width / 2
+                    Drag.hotSpot.y: Theme.assetCardWidth * 9 / 32
 
                     // Grid cards had neither hover feedback nor a pointing
                     // cursor, while the list rows had both.
