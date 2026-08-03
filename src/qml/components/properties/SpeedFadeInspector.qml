@@ -111,16 +111,17 @@ Item {
             from: 0.25
             to: 4.0
             stepSize: 0.05
-            value: root.clipData.speed || 1.0
+            Binding on value {
+                when: !speedSlider.pressed
+                value: root.clipData.speed || 1.0
+            }
             onMoved: EditorState.previewSetClipSpeed(
                          EditorState.selectedTrack, EditorState.selectedClip, value)
             onPressedChanged: {
-                if (pressed) {
+                if (pressed)
                     EditorState.beginPreviewDrag(qsTr("Speed changed"))
-                } else {
+                else
                     EditorState.commitPreviewDrag()
-                    value = Qt.binding(() => root.clipData.speed || 1.0)
-                }
             }
         }
 
@@ -203,17 +204,18 @@ Item {
             from: 0
             to: parent.fadeMax
             stepSize: 0.05
-            value: root.clipData.fadeIn || 0
+            Binding on value {
+                when: !fadeInSlider.pressed
+                value: root.clipData.fadeIn || 0
+            }
             onMoved: EditorState.previewSetClipFade(
                          EditorState.selectedTrack, EditorState.selectedClip,
                          value, root.clipData.fadeOut || 0)
             onPressedChanged: {
-                if (pressed) {
+                if (pressed)
                     EditorState.beginPreviewDrag(qsTr("Adjust fade"))
-                } else {
+                else
                     EditorState.commitPreviewDrag()
-                    value = Qt.binding(() => root.clipData.fadeIn || 0)
-                }
             }
         }
 
@@ -230,17 +232,18 @@ Item {
             from: 0
             to: parent.fadeMax
             stepSize: 0.05
-            value: root.clipData.fadeOut || 0
+            Binding on value {
+                when: !fadeOutSlider.pressed
+                value: root.clipData.fadeOut || 0
+            }
             onMoved: EditorState.previewSetClipFade(
                          EditorState.selectedTrack, EditorState.selectedClip,
                          root.clipData.fadeIn || 0, value)
             onPressedChanged: {
-                if (pressed) {
+                if (pressed)
                     EditorState.beginPreviewDrag(qsTr("Adjust fade"))
-                } else {
+                else
                     EditorState.commitPreviewDrag()
-                    value = Qt.binding(() => root.clipData.fadeOut || 0)
-                }
             }
         }
 

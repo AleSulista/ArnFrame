@@ -178,12 +178,15 @@ Item {
             onActionTriggered: root.browseEffectsRequested()
         }
 
+        // Integer models keep delegates alive across preview ticks that rebuild
+        // selectedClipEffects as a fresh QVariantList (same as AudioInspector).
         Repeater {
-            model: root.selectedEffects
+            model: root.selectedEffects.length
             delegate: Column {
                 id: effectCard
-                required property var modelData
                 required property int index
+                readonly property var effectData: root.selectedEffects[index] || ({})
+                readonly property var effectParams: effectData.params || []
                 width: root.width
                 spacing: 6
 
@@ -201,7 +204,7 @@ Item {
                         anchors.leftMargin: 8
                         anchors.rightMargin: 4
                         Text {
-                            text: effectCard.modelData.label
+                            text: effectCard.effectData.label
                             color: Theme.panelForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSm
@@ -224,23 +227,24 @@ Item {
                 }
 
                 Repeater {
-                    model: effectCard.modelData.params || []
+                    model: effectCard.effectParams.length
                     delegate: Column {
                         id: paramRow
-                        required property var modelData
+                        required property int index
+                        readonly property var paramData: effectCard.effectParams[index] || ({})
                         width: root.width
                         spacing: 4
 
                         // Booleans have nothing to interpolate, so they keep the
                         // plain switch and stay off the keyframe strip.
                         Row {
-                            visible: !!paramRow.modelData.isBoolean
+                            visible: !!paramRow.paramData.isBoolean
                             width: parent.width
                             spacing: 8
                             Text {
                                 width: parent.width - 48
                                 elide: Text.ElideRight
-                                text: paramRow.modelData.label
+                                text: paramRow.paramData.label
                                 color: Theme.mutedForeground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -249,7 +253,7 @@ Item {
                             Text {
                                 width: 40
                                 horizontalAlignment: Text.AlignRight
-                                text: paramRow.modelData.value ? qsTr("On") : qsTr("Off")
+                                text: paramRow.paramData.value ? qsTr("On") : qsTr("Off")
                                 color: Theme.panelForeground
                                 font.family: Theme.monoFontFamily
                                 font.pixelSize: Theme.fontSizeXs
@@ -258,30 +262,30 @@ Item {
                         }
 
                         ThemedSwitch {
-                            visible: !!paramRow.modelData.isBoolean
-                            checked: !!paramRow.modelData.value
+                            visible: !!paramRow.paramData.isBoolean
+                            checked: !!paramRow.paramData.value
                             onToggled: EditorState.setEffectParam(
                                            EditorState.selectedTrack, EditorState.selectedClip,
-                                           effectCard.index, paramRow.modelData.key, checked ? 1 : 0)
+                                           effectCard.index, paramRow.paramData.key, checked ? 1 : 0)
                         }
 
                         PropertyKeyframeRow {
-                            visible: !paramRow.modelData.isBoolean
+                            visible: !paramRow.paramData.isBoolean
                             width: parent.width
                             // `def` is the param's static value, which the row falls
                             // back to whenever the track holds no keys.
                             propDef: ({
-                                key: paramRow.modelData.prop,
-                                label: paramRow.modelData.label,
-                                def: paramRow.modelData.value,
-                                decimals: Math.abs(paramRow.modelData.max
-                                                   - paramRow.modelData.min) >= 10 ? 1 : 2
+                                key: paramRow.paramData.prop,
+                                label: paramRow.paramData.label,
+                                def: paramRow.paramData.value,
+                                decimals: Math.abs(paramRow.paramData.max
+                                                   - paramRow.paramData.min) >= 10 ? 1 : 2
                             })
-                            keyframeList: (paramRow.modelData.keyframes
-                                           && paramRow.modelData.keyframes.points) || []
+                            keyframeList: (paramRow.paramData.keyframes
+                                           && paramRow.paramData.keyframes.points) || []
                             useSlider: true
-                            sliderFrom: paramRow.modelData.min
-                            sliderTo: paramRow.modelData.max
+                            sliderFrom: paramRow.paramData.min
+                            sliderTo: paramRow.paramData.max
                         }
                     }
                 }

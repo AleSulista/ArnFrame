@@ -64,12 +64,10 @@ Column {
     function syncEditors() {
         if (editing)
             return
-        if (useSlider) {
-            if (!valueSlider.pressed)
-                valueSlider.value = currentValue
-        } else if (!valueField.activeFocus) {
+        // Slider value tracks currentValue via Binding when !pressed; assigning
+        // here would break that Binding the same way a live `value:` does.
+        if (!useSlider && !valueField.activeFocus)
             valueField.text = formatValue(currentValue)
-        }
     }
 
     function formatValue(v) {
@@ -319,7 +317,12 @@ Column {
                 anchors.verticalCenter: parent.verticalCenter
                 from: root.sliderFrom
                 to: root.sliderTo
-                value: root.currentValue
+                // Keep the playhead/model binding off while pressed — same as
+                // PreviewPanel scrub — so preview ticks cannot fight the drag.
+                Binding on value {
+                    when: !valueSlider.pressed && !root.editing
+                    value: root.currentValue
+                }
                 onMoved: {
                     root.liveValue = value
                     EditorState.showKeyframeGraphProperty(root.propDef.key)
@@ -335,7 +338,6 @@ Column {
                     } else {
                         EditorState.commitPreviewDrag()
                         root.editing = false
-                        value = root.currentValue
                     }
                 }
             }
