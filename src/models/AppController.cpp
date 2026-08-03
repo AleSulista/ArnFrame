@@ -8099,16 +8099,27 @@ QVariantList AppController::subtitleWaveformPeaks(double startSeconds, double du
         const drift::Project snap = m_project;
         (void)QtConcurrent::run([self, snap, startUs, durUs, buckets, key, startSeconds, durSeconds] {
             const int rate = 8000; // enough for voice; keeps the render cheap
-            const int frames = static_cast<int>((static_cast<double>(durUs) / 1'000'000.0) * rate);
+            const qint64 frames =
+                static_cast<qint64>((static_cast<double>(durUs) / 1'000'000.0) * rate);
             QVariantList peaks;
             if (frames > 0) {
-                QVector<float> buf(static_cast<qsizetype>(frames) * 2, 0.0f);
                 AudioMixer mixer;
                 mixer.setProject(&snap);
-                mixer.mix(startUs, frames, rate, buf.data());
                 // Never ask for more buckets than PCM frames — extras would be empty.
-                const int peakBuckets = qMin(buckets, frames);
-                peaks = MediaWaveform::voicePeaksFromPcm(buf.constData(), frames, rate, peakBuckets);
+                const int peakBuckets = static_cast<int>(qMin<qint64>(buckets, frames));
+                // Mixed a window at a time. The lane spans every A/V clip on the timeline, so
+                // mixing it in one go meant holding the whole thing as PCM — ~400 MB for a
+                // feature-length movie, to draw at most 8192 columns. The windows are
+                // contiguous and in order, which is the pattern playback already uses, so the
+                // readers decode forward instead of re-seeking.
+                peaks = MediaWaveform::voicePeaks(
+                    frames, rate, peakBuckets,
+                    [&mixer, startUs, rate](float *out, qint64 frameOffset, int maxFrames) {
+                        const drift::TimeUs at =
+                            startUs + frameOffset * drift::kUsPerSecond / rate;
+                        mixer.mix(at, maxFrames, rate, out);
+                        return maxFrames;
+                    });
             }
             QMetaObject::invokeMethod(
                 self,
