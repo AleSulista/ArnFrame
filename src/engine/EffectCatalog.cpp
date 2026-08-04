@@ -56,12 +56,14 @@ void rebuildCatalogLocked(const QStringList &packageRoots)
         g_idIndex.insert(g_mergedCatalog.at(i).meta.id, i);
 
     QSet<QString> knownCats = {
+        QStringLiteral("color"),
         QStringLiteral("glitch"),
         QStringLiteral("retro"),
         QStringLiteral("dreamy"),
         QStringLiteral("impact"),
     };
     static const QHash<QString, QString> kCategoryLabels = {
+        {QStringLiteral("color"), QStringLiteral("Color")},
         {QStringLiteral("glitch"), QStringLiteral("Glitch & Distortion")},
         {QStringLiteral("retro"), QStringLiteral("Retro / Analog")},
         {QStringLiteral("dreamy"), QStringLiteral("Dreamy & Stylish")},
@@ -136,6 +138,7 @@ QStringList effectPresetIds()
 QList<QPair<QString, QString>> effectCategories()
 {
     QList<QPair<QString, QString>> cats = {
+        {QStringLiteral("color"), QStringLiteral("Color")},
         {QStringLiteral("glitch"), QStringLiteral("Glitch & Distortion")},
         {QStringLiteral("retro"), QStringLiteral("Retro / Analog")},
         {QStringLiteral("dreamy"), QStringLiteral("Dreamy & Stylish")},
