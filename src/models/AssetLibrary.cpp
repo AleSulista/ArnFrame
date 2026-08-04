@@ -140,6 +140,27 @@ AssetLibrary::AssetLibrary(QObject *parent)
     connect(this, &QAbstractItemModel::rowsInserted, this, &AssetLibrary::countChanged);
     connect(this, &QAbstractItemModel::rowsRemoved, this, &AssetLibrary::countChanged);
     connect(this, &QAbstractItemModel::modelReset, this, &AssetLibrary::countChanged);
+
+    connect(this, &QAbstractItemModel::rowsInserted, this, &AssetLibrary::snapshotOrder);
+    connect(this, &QAbstractItemModel::rowsRemoved, this, &AssetLibrary::snapshotOrder);
+    connect(this, &QAbstractItemModel::modelReset, this, &AssetLibrary::snapshotOrder);
+}
+
+void AssetLibrary::snapshotOrder()
+{
+    m_syncedOrder = m_project ? m_project->assetOrder() : QList<QString>{};
+}
+
+void AssetLibrary::syncToProject()
+{
+    // Undo/redo assigns the whole project behind this model's back. Resetting
+    // unconditionally would rebuild every card on every unrelated timeline
+    // undo, so only an actual order change is worth the churn.
+    if (!m_project || m_syncedOrder == m_project->assetOrder())
+        return;
+
+    beginResetModel();
+    endResetModel();
 }
 
 void AssetLibrary::setProject(drift::Project *project)
@@ -576,6 +597,25 @@ void AssetLibrary::sortByKind()
     });
     m_project->assetOrder() = order;
     endResetModel();
+}
+
+bool AssetLibrary::removeAssetAt(int index)
+{
+    if (!m_project || index < 0 || index >= m_project->assetOrder().size())
+        return false;
+
+    const QString assetId = m_project->assetIdAt(index);
+    beginRemoveRows({}, index, index);
+    m_project->assets().remove(assetId);
+    m_project->assetOrder().removeAll(assetId);
+    endRemoveRows();
+
+    // In-flight probe/thumb jobs already no-op when the id is gone; this just
+    // keeps the pending sets from retaining ids nothing will ever clear.
+    m_importPending.remove(assetId);
+    m_thumbPending.remove(assetId);
+    m_audioProbePending.remove(assetId);
+    return true;
 }
 
 void AssetLibrary::clear()

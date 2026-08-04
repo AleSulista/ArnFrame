@@ -161,6 +161,11 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     connect(&m_undoStack, &QUndoStack::indexChanged, this, [this] {
         m_timelineModel.refresh();
         m_clipListModel.refresh();
+        // Undo/redo swaps the whole project, including the asset table the
+        // media bin reads through; without this an undone removal leaves the
+        // model with a stale row count.
+        if (m_assetLibrary)
+            m_assetLibrary->syncToProject();
         normalizeSelection();
         setDirty(true);
         emit tracksChanged();
@@ -1382,6 +1387,43 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("audioEffects"), audioEffects},
         {QStringLiteral("keyframes"), keyframesToMap(clip)},
     };
+}
+
+int AppController::clipCountForAsset(int assetIndex) const
+{
+    if (!m_assetLibrary)
+        return 0;
+    const QString assetId = m_assetLibrary->assetIdAt(assetIndex);
+    if (assetId.isEmpty())
+        return 0;
+
+    int count = 0;
+    for (const drift::Track &track : m_project.tracks()) {
+        for (const drift::Clip &clip : track.clips) {
+            if (clip.assetId == assetId)
+                ++count;
+        }
+    }
+    return count;
+}
+
+bool AppController::removeAsset(int assetIndex)
+{
+    // Clips keep their own copy of the source path, so an orphaned assetId
+    // would still play but silently lose trim-past-the-cut, merge and
+    // separate-audio. Refuse instead; the caller reports the usage count.
+    if (!m_assetLibrary || clipCountForAsset(assetIndex) > 0)
+        return false;
+
+    const drift::Project before = m_project;
+    if (!m_assetLibrary->removeAssetAt(assetIndex))
+        return false;
+
+    // Rows after the removed one shift down, so any index captured at drag
+    // start now points at the wrong asset.
+    setDraggingAssetIndex(-1);
+    pushProjectEdit(before, QStringLiteral("Media removed"));
+    return true;
 }
 
 int AppController::assetIndexForClip(const drift::Clip &clip) const

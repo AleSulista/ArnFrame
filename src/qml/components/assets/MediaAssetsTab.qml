@@ -19,6 +19,9 @@ Item {
 
     // Emitted when a card/row is clicked or tapped to add its asset.
     signal addRequested(int assetIndex)
+    // Emitted from the card/row context menu. The parent owns the in-use
+    // check and the confirmation.
+    signal removeRequested(int assetIndex)
     // Emitted when the empty-state action asks to import media.
     signal importRequested()
 
@@ -204,6 +207,20 @@ Item {
                                 }
                             }
                         }
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: cardMenu.popup()
+                        }
+
+                        ThemedContextMenu {
+                            id: cardMenu
+
+                            ThemedMenuItem {
+                                text: qsTr("Remove from project")
+                                icon.name: Theme.icons.trash
+                                onTriggered: root.removeRequested(assetIndex)
+                            }
+                        }
                     }
 
                     Text {
@@ -326,7 +343,23 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.addRequested(assetIndex)
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: (mouse) => {
+                            if (mouse.button === Qt.RightButton)
+                                rowMenu.popup()
+                            else
+                                root.addRequested(assetIndex)
+                        }
+                    }
+
+                    ThemedContextMenu {
+                        id: rowMenu
+
+                        ThemedMenuItem {
+                            text: qsTr("Remove from project")
+                            icon.name: Theme.icons.trash
+                            onTriggered: root.removeRequested(assetIndex)
+                        }
                     }
                 }
             }

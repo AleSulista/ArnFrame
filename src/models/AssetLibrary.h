@@ -54,6 +54,11 @@ public:
     Q_INVOKABLE void ensureAllMedia();
     Q_INVOKABLE void sortByName();
     Q_INVOKABLE void sortByKind();
+    // Drops the row from the project's asset table. Callers own the undo
+    // snapshot and the in-use check; this only touches the bin.
+    bool removeAssetAt(int index);
+    // Re-reads the project after undo/redo has swapped it wholesale.
+    void syncToProject();
 
     QJsonArray toJsonArray() const;
     void loadFromJsonArray(const QJsonArray &assets);
@@ -78,10 +83,14 @@ private:
     void applyThumbResult(const QString &assetId, const QString &thumb, const QString &strip);
     void applyAudioPresence(const QString &assetId, bool hasAudio, int sampleRate, int channels);
     void emitAssetRowChanged(int index, const QList<int> &roles);
+    void snapshotOrder();
     const drift::MediaAsset *assetAtIndex(int index) const;
     drift::MediaAsset *assetAtIndex(int index);
 
     drift::Project *m_project = nullptr;
+    // Asset order as of the last row change this model itself made, so
+    // syncToProject() can tell an undone asset edit from every other undo.
+    QList<QString> m_syncedOrder;
     QSet<QString> m_importPending;
     QSet<QString> m_thumbPending;
     QSet<QString> m_audioProbePending;

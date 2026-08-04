@@ -46,6 +46,50 @@ PanelFrame {
     // True while an import is running, so the panel can show progress.
     property bool importing: false
 
+    // Asset awaiting confirmation in confirmAssetRemoval. The name is held
+    // separately because the row is gone by the time the toast reports it.
+    property int pendingRemovalIndex: -1
+    property string pendingRemovalName: ""
+
+    // Removing an asset a clip still points at would leave that clip playing
+    // but unable to trim past its cut or merge, so refuse rather than confirm.
+    function requestRemoveAsset(assetIndex) {
+        const inUse = EditorState.clipCountForAsset(assetIndex)
+        const name = AssetLibrary.assetAt(assetIndex).name
+        if (inUse > 0) {
+            Toasts.warning(qsTr("“%1” is still used by %n clip(s) on the timeline.", "", inUse).arg(name))
+            return
+        }
+        root.pendingRemovalIndex = assetIndex
+        root.pendingRemovalName = name
+        confirmAssetRemoval.open()
+    }
+
+    ThemedDialog {
+        id: confirmAssetRemoval
+        title: qsTr("Remove this media?")
+        acceptText: qsTr("Remove")
+        acceptVariant: "destructive"
+        preferredWidth: Theme.dialogWidthSm
+        // Enter must not commit a destructive action.
+        acceptOnReturn: false
+
+        contentItem: ThemedLabel {
+            width: parent ? parent.width : Theme.dialogWidthSm
+            wrapMode: Text.WordWrap
+            size: "sm"
+            text: qsTr("“%1” will be removed from this project. The file on disk is not deleted.")
+                  .arg(root.pendingRemovalName)
+        }
+
+        onAccepted: {
+            if (EditorState.removeAsset(root.pendingRemovalIndex))
+                Toasts.success(qsTr("Removed “%1”.").arg(root.pendingRemovalName))
+            root.pendingRemovalIndex = -1
+        }
+        onRejected: root.pendingRemovalIndex = -1
+    }
+
     function importMedia() {
         var urls = FileDialogs.openFiles(qsTr("Import Media"), [
             qsTr("Media files (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.mp3 *.wav *.aac *.flac *.ogg *.m4a *.png *.jpg *.jpeg *.gif *.webp *.bmp)")
@@ -593,6 +637,7 @@ PanelFrame {
                 importing: root.importing
                 assetVisibleFn: function(kind) { return root.assetVisible(kind) }
                 onAddRequested: (assetIndex) => root.addAssetToTimeline(assetIndex)
+                onRemoveRequested: (assetIndex) => root.requestRemoveAsset(assetIndex)
                 onImportRequested: root.importMedia()
             }
         }
