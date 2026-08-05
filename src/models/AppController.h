@@ -75,6 +75,9 @@ class AppController : public QObject
     Q_PROPERTY(bool segmenting READ segmenting NOTIFY segmentingChanged)
     Q_PROPERTY(double segmentProgress READ segmentProgress NOTIFY segmentProgressChanged)
     Q_PROPERTY(QString segmentStatus READ segmentStatus NOTIFY segmentStatusChanged)
+    Q_PROPERTY(bool reverseRendering READ reverseRendering NOTIFY reverseRenderingChanged)
+    Q_PROPERTY(double reverseRenderProgress READ reverseRenderProgress NOTIFY reverseRenderProgressChanged)
+    Q_PROPERTY(QString reverseRenderStatus READ reverseRenderStatus NOTIFY reverseRenderStatusChanged)
     Q_PROPERTY(bool denoising READ denoising NOTIFY denoisingChanged)
     Q_PROPERTY(double denoiseProgress READ denoiseProgress NOTIFY denoiseProgressChanged)
     Q_PROPERTY(QString denoiseStatus READ denoiseStatus NOTIFY denoiseStatusChanged)
@@ -164,6 +167,9 @@ public:
     bool segmenting() const { return m_segmenting; }
     double segmentProgress() const { return m_segmentProgress; }
     QString segmentStatus() const { return m_segmentStatus; }
+    bool reverseRendering() const { return m_reverseRendering; }
+    double reverseRenderProgress() const { return m_reverseProgress; }
+    QString reverseRenderStatus() const { return m_reverseStatus; }
     bool denoising() const { return m_denoising; }
     double denoiseProgress() const { return m_denoiseProgress; }
     QString denoiseStatus() const { return m_denoiseStatus; }
@@ -400,6 +406,16 @@ public:
     Q_INVOKABLE void setClipBlendMode(int trackIndex, int clipIndex, const QString &mode);
     Q_INVOKABLE void setClipSpeed(int trackIndex, int clipIndex, double speed);
     Q_INVOKABLE void setClipReverse(int trackIndex, int clipIndex, bool reverse);
+    // Turns reverse on for a video clip and renders the proxy that makes it play back smoothly.
+    // Reverse itself applies immediately; cancelling the render leaves the clip reversed on the
+    // slow live-decode path, which is what clipHasReverseProxy reports.
+    // Entry point for the Reverse control. Clips a proxy would do nothing for (audio, or one
+    // already covered by a render) reverse straight away; anything else emits
+    // reverseConfirmRequested so the dialog can ask before starting a render.
+    Q_INVOKABLE void requestClipReverse(int trackIndex, int clipIndex);
+    Q_INVOKABLE void applyClipReverse(int trackIndex, int clipIndex);
+    Q_INVOKABLE void cancelReverseRender();
+    Q_INVOKABLE bool clipHasReverseProxy(int trackIndex, int clipIndex) const;
     Q_INVOKABLE void setClipFlip(int trackIndex, int clipIndex, bool flipH, bool flipV);
     Q_INVOKABLE void setClipRotationSnap(int trackIndex, int clipIndex, double degrees);
     Q_INVOKABLE bool canMergeSelection() const;
@@ -597,6 +613,11 @@ signals:
     void segmentingChanged();
     void segmentProgressChanged();
     void segmentStatusChanged();
+    void reverseRenderingChanged();
+    void reverseRenderProgressChanged();
+    void reverseRenderStatusChanged();
+    void reverseRenderFinished(bool ok, const QString &message);
+    void reverseConfirmRequested(int trackIndex, int clipIndex, double seconds);
     void segmentationFinished(bool ok, const QString &message);
     void denoisingChanged();
     void denoiseProgressChanged();
@@ -704,6 +725,8 @@ protected:
     int assetIndexForClip(const drift::Clip &clip) const;
     drift::TimeUs clipDurationForAssetIndex(int assetIndex) const;
     drift::TimeUs sourceDurationForClip(const drift::Clip &clip) const;
+    void startReverseRender(const QString &sourcePath, drift::TimeUs coverInUs,
+                            drift::TimeUs coverOutUs);
     // Cached dense peaks for `path`, or nullptr while the off-thread decode is still running
     // (waveformReady is emitted when it lands).
     const MediaWaveform::Dense *densePeaksFor(const QString &path) const;
@@ -773,6 +796,11 @@ protected:
     int m_speedCurveClipIndex = -1;
     int m_speedCurveRevision = 0;
     bool m_speedCurveActive = false;
+
+    bool m_reverseRendering = false;
+    double m_reverseProgress = 0.0;
+    QString m_reverseStatus;
+    QAtomicInt m_reverseCancel = 0;
 
     bool m_denoising = false;
     double m_denoiseProgress = 0.0;

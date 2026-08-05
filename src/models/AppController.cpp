@@ -28,6 +28,8 @@
 #include "engine/MediaWaveform.h"
 #include "engine/FaceLandmarker.h"
 #include "engine/FaceTrack.h"
+#include "engine/ReverseProxyCache.h"
+#include "engine/ReverseRenderer.h"
 #include "engine/Sam2Segmenter.h"
 #include "engine/StickerCatalog.h"
 #include "SegmentImageStore.h"
@@ -5711,6 +5713,161 @@ void AppController::setClipReverse(int trackIndex, int clipIndex, bool reverse)
     clip.reverse = reverse;
     pushProjectEdit(before, reverse ? QStringLiteral("Reverse on") : QStringLiteral("Reverse off"));
     finishEdit(reverse ? QStringLiteral("Clip reversed") : QStringLiteral("Clip forward"));
+}
+
+void AppController::requestClipReverse(int trackIndex, int clipIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Clip clip = track.clips.at(clipIndex);
+    const bool needsRender =
+        clip.type == drift::ClipType::Video && !clip.path.isEmpty() && clip.srcOut > clip.srcIn
+        && drift::ReverseProxyCache::instance()
+               .lookup(clip.path, clip.srcIn, clip.srcOut, nullptr)
+               .isEmpty();
+    if (!needsRender) {
+        setClipReverse(trackIndex, clipIndex, true);
+        return;
+    }
+
+    emit reverseConfirmRequested(trackIndex, clipIndex,
+                                 drift::usToSeconds(clip.srcOut - clip.srcIn));
+}
+
+void AppController::applyClipReverse(int trackIndex, int clipIndex)
+{
+    if (m_reverseRendering) {
+        setLastMessage(QStringLiteral("A clip is already being reversed"));
+        return;
+    }
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    // By value: setClipReverse below runs a full edit cycle, and reading the clip back out of the
+    // project afterwards would mean trusting indices across it.
+    const drift::Clip clip = track.clips.at(clipIndex);
+    const drift::TimeUs sourceDuration = sourceDurationForClip(clip);
+
+    setClipReverse(trackIndex, clipIndex, true);
+
+    // Audio reverses by flipping decoded blocks, which is already cheap. Only video pays the
+    // per-frame keyframe seek a proxy exists to avoid.
+    if (clip.type != drift::ClipType::Video || clip.path.isEmpty() || clip.srcOut <= clip.srcIn)
+        return;
+    if (!drift::ReverseProxyCache::instance()
+             .lookup(clip.path, clip.srcIn, clip.srcOut, nullptr)
+             .isEmpty())
+        return;
+
+    // Padding either side so ordinary trim-handle nudges stay inside the rendered range instead
+    // of dropping the clip back onto the live path.
+    constexpr drift::TimeUs kPadUs = 2 * drift::kUsPerSecond;
+    const drift::TimeUs coverIn = qMax<drift::TimeUs>(0, clip.srcIn - kPadUs);
+    drift::TimeUs coverOut = clip.srcOut + kPadUs;
+    if (sourceDuration > 0)
+        coverOut = qMin(coverOut, sourceDuration);
+
+    startReverseRender(clip.path, coverIn, qMax(coverOut, clip.srcOut));
+}
+
+void AppController::startReverseRender(const QString &sourcePath, drift::TimeUs coverInUs,
+                                       drift::TimeUs coverOutUs)
+{
+    m_reverseCancel.storeRelaxed(0);
+    m_reverseProgress = 0.0;
+    emit reverseRenderProgressChanged();
+    m_reverseStatus = QStringLiteral("Getting ready…");
+    emit reverseRenderStatusChanged();
+    m_reverseRendering = true;
+    emit reverseRenderingChanged();
+
+    // Playback deliberately keeps running: renderReversed opens its own demuxer rather than
+    // driving the shared decode pool, so the clip stays watchable (on the slow path) meanwhile.
+    (void)QtConcurrent::run([this, sourcePath, coverInUs, coverOutUs]() {
+        auto setProgress = [this](double fraction, const QString &status) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, fraction, status]() {
+                    m_reverseProgress = fraction;
+                    emit reverseRenderProgressChanged();
+                    if (!status.isEmpty() && status != m_reverseStatus) {
+                        m_reverseStatus = status;
+                        emit reverseRenderStatusChanged();
+                    }
+                },
+                Qt::QueuedConnection);
+        };
+
+        auto finish = [this, sourcePath, coverInUs, coverOutUs](bool ok, const QString &message,
+                                                                const QString &proxyPath) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, ok, message, proxyPath, sourcePath, coverInUs, coverOutUs]() {
+                    m_reverseRendering = false;
+                    emit reverseRenderingChanged();
+                    m_reverseProgress = ok ? 1.0 : 0.0;
+                    emit reverseRenderProgressChanged();
+                    m_reverseStatus = ok ? QStringLiteral("Done") : message;
+                    emit reverseRenderStatusChanged();
+                    if (ok) {
+                        drift::ReverseProxyCache::instance().insert(sourcePath, coverInUs,
+                                                                    coverOutUs, proxyPath);
+                    }
+                    setLastMessage(message);
+                    // No pushProjectEdit: the proxy is a cache, not project content, and it must
+                    // not land in the undo stack. This only asks the compositor to re-read, which
+                    // now resolves to the proxy.
+                    emitPreviewFrame();
+                    emit reverseRenderFinished(ok, message);
+                },
+                Qt::QueuedConnection);
+        };
+
+        const QString proxyPath = drift::newReversePath();
+        if (proxyPath.isEmpty()) {
+            finish(false, QStringLiteral("Could not create a reversed file"), {});
+            return;
+        }
+
+        QString error;
+        const bool ok = drift::renderReversed(
+            sourcePath, coverInUs, coverOutUs, proxyPath, &error, [&](double fraction) {
+                setProgress(fraction, QStringLiteral("Reversing video…"));
+                return m_reverseCancel.loadRelaxed() == 0;
+            });
+        finish(ok, ok ? QStringLiteral("Reversed clip ready") : error, proxyPath);
+    });
+}
+
+void AppController::cancelReverseRender()
+{
+    if (m_reverseRendering)
+        m_reverseCancel.storeRelaxed(1);
+}
+
+bool AppController::clipHasReverseProxy(int trackIndex, int clipIndex) const
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return true;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return true;
+
+    // Anything with nothing to render reports true, so the "not rendered" hint stays hidden for
+    // clips a proxy would do nothing for.
+    const drift::Clip &clip = track.clips.at(clipIndex);
+    if (!clip.reverse || clip.type != drift::ClipType::Video || clip.path.isEmpty())
+        return true;
+    return !drift::ReverseProxyCache::instance()
+                .lookup(clip.path, clip.srcIn, clip.srcOut, nullptr)
+                .isEmpty();
 }
 
 void AppController::setClipFlip(int trackIndex, int clipIndex, bool flipH, bool flipV)

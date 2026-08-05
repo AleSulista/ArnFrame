@@ -8,6 +8,7 @@
 #include "GpuCompositor.h"
 #include "GpuEffectExecutor.h"
 #include "MaskApplier.h"
+#include "ReverseProxyCache.h"
 #include "TextRaster.h"
 #include "TransitionCatalog.h"
 #include "core/Clip.h"
@@ -58,8 +59,11 @@ void collectActivePaths(const drift::Project *project, drift::TimeUs timelineUs,
                 continue;
 
             if ((track.type == drift::TrackType::Video || track.type == drift::TrackType::Shape)
-                && clip.type != drift::ClipType::Text)
-                videoPaths.insert(clip.path);
+                && clip.type != drift::ClipType::Text) {
+                // The reversed proxy, when there is one, is what the composite actually reads —
+                // retaining clip.path instead would tear down the proxy's worker every frame.
+                videoPaths.insert(drift::videoReadPath(clip));
+            }
             if (track.type == drift::TrackType::Audio
                 || (track.type == drift::TrackType::Video && clip.type == drift::ClipType::Video)) {
                 audioPaths.insert(clip.path);
@@ -99,8 +103,9 @@ QList<ClipReaderPool::VideoRequest> collectVideoRequests(const drift::Project *p
             if (clip.type != drift::ClipType::Video || clip.path.isEmpty())
                 continue;
 
-            requests.append(ClipReaderPool::VideoRequest{clip.path, clip.timelineToSourceUs(timelineUs),
-                                                         maxWidth, maxHeight});
+            const drift::VideoRead read = drift::resolveVideoRead(clip, timelineUs);
+            requests.append(
+                ClipReaderPool::VideoRequest{read.path, read.sourceUs, maxWidth, maxHeight});
         }
     }
     return requests;
@@ -228,8 +233,8 @@ QImage decodeClipMediaFrame(const drift::Clip &clip, drift::TimeUs timelineUs, i
         return decodedStillImage(clip.path, maxWidth, maxHeight);
 
     if (clip.type == drift::ClipType::Video) {
-        const drift::TimeUs sourceUs = clip.timelineToSourceUs(timelineUs);
-        return ClipReaderPool::instance().readVideoFrame(clip.path, sourceUs, maxWidth, maxHeight);
+        const drift::VideoRead read = drift::resolveVideoRead(clip, timelineUs);
+        return ClipReaderPool::instance().readVideoFrame(read.path, read.sourceUs, maxWidth, maxHeight);
     }
 
     return {};
@@ -511,9 +516,9 @@ void fillGpuLayerPixels(GpuLayer &layer, const drift::Clip &clip, drift::TimeUs 
 
     const drift::Effect *timeEcho = findTimeEchoEffect(clip.effects);
     if (!timeEcho && clip.type == drift::ClipType::Video) {
-        const drift::TimeUs sourceUs = clip.timelineToSourceUs(timelineUs);
+        const drift::VideoRead read = drift::resolveVideoRead(clip, timelineUs);
         const Nv12Frame nv12 =
-            ClipReaderPool::instance().readVideoFrameNv12(clip.path, sourceUs, maxWidth, maxHeight);
+            ClipReaderPool::instance().readVideoFrameNv12(read.path, read.sourceUs, maxWidth, maxHeight);
         if (nv12.isValid()) {
             layer.nv12 = nv12.data;
             layer.nv12Width = nv12.width;

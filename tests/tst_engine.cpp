@@ -38,6 +38,8 @@
 #include "engine/GpuEffectExecutor.h"
 #include "engine/MaskApplier.h"
 #include "engine/MatteWriter.h"
+#include "engine/ReverseProxyCache.h"
+#include "engine/ReverseRenderer.h"
 #include "engine/ClipReaderPool.h"
 #include "engine/TransitionCatalog.h"
 #include "core/Transition.h"
@@ -49,6 +51,9 @@ class EngineTest : public QObject
 private slots:
     void initTestCase();
     void matteWriterRoundTripsThroughClipReader();
+    void reverseRendererPlaysSourceBackwards();
+    void reverseProxyLookupIsByContainmentAndSourceIdentity();
+    void resolveVideoReadMirrorsTheClipOntoTheProxy();
     void faceTrackRoundTripsAndInterpolates();
     void emojiCatalogNeedsFontAddon();
     void emojiRasterisesGlyph();
@@ -157,6 +162,10 @@ private:
 
 void EngineTest::initTestCase()
 {
+    // Several subsystems here write into QStandardPaths::AppDataLocation (reversed proxies, the
+    // matte and denoise caches). Test mode keeps a test run out of the developer's real app data.
+    QStandardPaths::setTestModeEnabled(true);
+
     const QString effectsDir = QString::fromUtf8(DRIFT_TEST_EFFECTS_DIR);
     QVERIFY2(QDir(effectsDir).exists(), qPrintable(effectsDir));
     reloadEffectCatalog({effectsDir});
@@ -338,6 +347,156 @@ void EngineTest::matteWriterRoundTripsThroughClipReader()
         }
         QCOMPARE(band, i);
     }
+}
+
+// The whole point of a proxy is that reading it forwards shows the source backwards. An off-by-one
+// or a batch stitched together in the wrong order is invisible in a still and obvious in motion,
+// so the ordering is pinned here rather than left to the eye.
+void EngineTest::reverseRendererPlaysSourceBackwards()
+{
+    if (!Exporter::videoCodecById(QStringLiteral("h264")).value(QStringLiteral("available")).toBool())
+        QSKIP("No H.264 encoder available in this FFmpeg build");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString sourcePath = dir.filePath(QStringLiteral("forward.mp4"));
+    const QString proxyPath = dir.filePath(QStringLiteral("reversed.mp4"));
+    const QSize size(320, 240);
+    const int frames = 10;
+    const int fps = 30;
+
+    // Same band-per-frame trick as the matte round-trip: frame i is the only one with a white band
+    // at row i * 20, so a frame can be identified from its pixels alone.
+    drift::MatteWriter writer;
+    QString error;
+    QVERIFY2(writer.open(sourcePath, size, fps, 1, &error), qPrintable(error));
+    for (int i = 0; i < frames; ++i) {
+        QImage mask(size, QImage::Format_Grayscale8);
+        mask.fill(0);
+        QPainter p(&mask);
+        p.fillRect(QRect(0, i * 20, size.width(), 20), Qt::white);
+        p.end();
+        QVERIFY2(writer.writeFrame(mask, &error), qPrintable(error));
+    }
+    QVERIFY2(writer.finish(&error), qPrintable(error));
+
+    const drift::TimeUs coverOut = drift::TimeUs(frames) * drift::kUsPerSecond / fps;
+    QVERIFY2(drift::renderReversed(sourcePath, 0, coverOut, proxyPath, &error, {}),
+             qPrintable(error));
+    QVERIFY(QFileInfo::exists(proxyPath));
+    QVERIFY(!QFileInfo::exists(proxyPath + QStringLiteral(".part")));
+
+    // Each source frame keeps the mirror of its own timestamp, so source frame i lands at
+    // coverOut - i frames into the proxy. Walking the proxy forwards must walk the source back.
+    for (int j = 1; j <= frames; ++j) {
+        const drift::TimeUs us = drift::TimeUs(j) * drift::kUsPerSecond / fps;
+        const QImage frame = ClipReaderPool::instance().readVideoFrame(proxyPath, us, 0, 0);
+        QVERIFY2(!frame.isNull(), qPrintable(QStringLiteral("proxy frame %1 did not decode").arg(j)));
+
+        int band = -1;
+        for (int b = 0; b < frames + 2; ++b) {
+            if (qRed(frame.pixel(size.width() / 2, b * 20 + 10)) > 128) {
+                band = b;
+                break;
+            }
+        }
+        QCOMPARE(band, frames - j);
+    }
+}
+
+// A proxy stays usable while the clip it was rendered for is trimmed inward, split or copied, and
+// stops being usable the moment the source underneath it changes. Both halves matter: the first is
+// what keeps ordinary editing smooth, the second is what stops a stale render being served as if
+// it were the current source.
+void EngineTest::reverseProxyLookupIsByContainmentAndSourceIdentity()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString sourcePath = dir.filePath(QStringLiteral("source.mp4"));
+    const QString proxyPath = dir.filePath(QStringLiteral("proxy.mp4"));
+
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    source.write(QByteArray(1024, 'a'));
+    source.close();
+    QFile proxy(proxyPath);
+    QVERIFY(proxy.open(QIODevice::WriteOnly));
+    proxy.write(QByteArray(16, 'b'));
+    proxy.close();
+
+    const drift::TimeUs coverIn = 0;
+    const drift::TimeUs coverOut = 10 * drift::kUsPerSecond;
+    drift::ReverseProxyCache::instance().insert(sourcePath, coverIn, coverOut, proxyPath);
+
+    drift::TimeUs coverEnd = 0;
+    QCOMPARE(drift::ReverseProxyCache::instance().lookup(sourcePath, 2 * drift::kUsPerSecond,
+                                                         8 * drift::kUsPerSecond, &coverEnd),
+             proxyPath);
+    QCOMPARE(coverEnd, coverOut);
+
+    // Exactly the rendered range still counts as covered.
+    QCOMPARE(drift::ReverseProxyCache::instance().lookup(sourcePath, coverIn, coverOut, &coverEnd),
+             proxyPath);
+
+    // Extending past what was rendered drops back to the live path rather than showing the wrong
+    // frames at the ends.
+    QVERIFY(drift::ReverseProxyCache::instance()
+                .lookup(sourcePath, coverIn, 12 * drift::kUsPerSecond, &coverEnd)
+                .isEmpty());
+
+    // A source replaced in place keeps its path, so identity has to come from the file itself.
+    QVERIFY(source.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    source.write(QByteArray(2048, 'c'));
+    source.close();
+    QVERIFY(drift::ReverseProxyCache::instance()
+                .lookup(sourcePath, 2 * drift::kUsPerSecond, 8 * drift::kUsPerSecond, &coverEnd)
+                .isEmpty());
+}
+
+void EngineTest::resolveVideoReadMirrorsTheClipOntoTheProxy()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString sourcePath = dir.filePath(QStringLiteral("clip.mp4"));
+    const QString proxyPath = dir.filePath(QStringLiteral("clip-reversed.mp4"));
+
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    source.write(QByteArray(512, 'a'));
+    source.close();
+    QFile proxy(proxyPath);
+    QVERIFY(proxy.open(QIODevice::WriteOnly));
+    proxy.write(QByteArray(16, 'b'));
+    proxy.close();
+
+    drift::Clip clip;
+    clip.type = drift::ClipType::Video;
+    clip.path = sourcePath;
+    clip.timelineStart = 5 * drift::kUsPerSecond;
+    clip.timelineDuration = 4 * drift::kUsPerSecond;
+    clip.srcIn = 3 * drift::kUsPerSecond;
+    clip.srcOut = 7 * drift::kUsPerSecond;
+
+    // Without the reverse flag nothing is redirected, even with a proxy sitting in the cache.
+    const drift::TimeUs coverOut = 9 * drift::kUsPerSecond;
+    drift::ReverseProxyCache::instance().insert(sourcePath, drift::kUsPerSecond, coverOut, proxyPath);
+    drift::VideoRead read = drift::resolveVideoRead(clip, clip.timelineStart);
+    QCOMPARE(read.path, sourcePath);
+    QCOMPARE(read.sourceUs, clip.srcIn);
+
+    // Reversed, the clip's first timeline frame is the source's last, and that is the proxy frame
+    // furthest from its start. Getting this backwards shows up as a clip that plays the right way
+    // round but from the wrong end.
+    clip.reverse = true;
+    read = drift::resolveVideoRead(clip, clip.timelineStart);
+    QCOMPARE(read.path, proxyPath);
+    QCOMPARE(read.sourceUs, coverOut - clip.srcOut);
+
+    read = drift::resolveVideoRead(clip, clip.timelineStart + clip.timelineDuration);
+    QCOMPARE(read.path, proxyPath);
+    QCOMPARE(read.sourceUs, coverOut - clip.srcIn);
+
+    QCOMPARE(drift::videoReadPath(clip), proxyPath);
 }
 
 void EngineTest::effectProcessorPassthroughWithoutEffects()

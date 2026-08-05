@@ -96,6 +96,10 @@ ApplicationWindow {
         id: subtitleProgressDialog
     }
 
+    ReverseProgressDialog {
+        id: reverseProgressDialog
+    }
+
     AddonManagerDialog {
         id: addonManagerDialog
     }

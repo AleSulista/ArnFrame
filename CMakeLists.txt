@@ -401,6 +401,10 @@ add_library(driftengine STATIC
     src/engine/DeepFilterDenoiser.cpp
     src/engine/MatteWriter.h
     src/engine/MatteWriter.cpp
+    src/engine/ReverseProxyCache.h
+    src/engine/ReverseProxyCache.cpp
+    src/engine/ReverseRenderer.h
+    src/engine/ReverseRenderer.cpp
     src/engine/AudioFileWriter.h
     src/engine/AudioFileWriter.cpp
     src/engine/ProjectBundle.h
@@ -567,6 +571,7 @@ qt_add_qml_module(drift
         src/qml/components/PackageProgressDialog.qml
         src/qml/components/ExportDialog.qml
         src/qml/components/ExportProgressDialog.qml
+        src/qml/components/ReverseProgressDialog.qml
         src/qml/components/SubtitleProgressDialog.qml
         src/qml/components/CircularProgress.qml
         src/qml/components/RecoveryDialog.qml

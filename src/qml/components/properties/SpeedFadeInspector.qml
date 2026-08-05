@@ -143,9 +143,43 @@ Item {
                 void root.clipDataRevision
                 return !!root.clipData.reverse
             }
-            onClicked: EditorState.setClipReverse(
-                           EditorState.selectedTrack, EditorState.selectedClip,
-                           !root.clipData.reverse)
+            // Turning reverse off is free. Turning it on may need a rendered copy first, which
+            // requestClipReverse decides and confirms through ReverseProgressDialog.
+            onClicked: {
+                if (root.clipData.reverse)
+                    EditorState.setClipReverse(EditorState.selectedTrack,
+                                               EditorState.selectedClip, false)
+                else
+                    EditorState.requestClipReverse(EditorState.selectedTrack,
+                                                   EditorState.selectedClip)
+            }
+        }
+
+        // Shown when a reversed video clip has no rendered copy covering it — after a cancelled
+        // render, or after a trim pushed the clip past the range that was rendered.
+        Row {
+            width: parent.width
+            spacing: Theme.spacingLg
+            visible: {
+                void root.clipDataRevision
+                void EditorState.reverseRendering
+                return root.clipKind === "video" && !!root.clipData.reverse
+                       && !EditorState.clipHasReverseProxy(EditorState.selectedTrack,
+                                                           EditorState.selectedClip)
+            }
+
+            ThemedLabel {
+                width: parent.width - renderReversedButton.width - Theme.spacingLg
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("Not rendered — playback may stutter")
+            }
+
+            ThemedButton {
+                id: renderReversedButton
+                text: qsTr("Render")
+                onClicked: EditorState.requestClipReverse(EditorState.selectedTrack,
+                                                          EditorState.selectedClip)
+            }
         }
 
         Rectangle {
