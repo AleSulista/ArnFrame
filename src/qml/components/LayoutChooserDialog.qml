@@ -210,6 +210,13 @@ ThemedDialog {
         EditorState.markProjectLayoutChosen()
     }
 
+    // First-launch dismiss: keep the default canvas and treat the layout step as done so
+    // ProjectSetupDialog / this chooser stay quiet — and the essential-packs nudge can follow.
+    onRejected: {
+        if (!fromSettings)
+            EditorState.markProjectLayoutChosen()
+    }
+
     contentItem: Column {
         spacing: Theme.spacingXl
         width: parent ? parent.width : 600

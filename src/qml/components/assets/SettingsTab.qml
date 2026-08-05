@@ -317,6 +317,28 @@ Item {
                           : qsTr("Drift %1").arg(Updates.currentVersion)
                 }
             }
+
+            Text {
+                text: qsTr("Extra packs")
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+                topPadding: Theme.spacingMd
+            }
+
+            ThemedSwitch {
+                checked: Addons.remindEssential
+                text: qsTr("Remind about essential packs")
+                tooltip: qsTr("On startup, offer the video, transitions, and audio packs if they are not installed")
+                onToggled: Addons.remindEssential = checked
+            }
+
+            ThemedSwitch {
+                checked: Addons.remindUpdates
+                text: qsTr("Remind about pack updates")
+                tooltip: qsTr("On startup, offer updates for packs you already have installed")
+                onToggled: Addons.remindUpdates = checked
+            }
         }
     }
 

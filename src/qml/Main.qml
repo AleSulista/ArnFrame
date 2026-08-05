@@ -74,6 +74,17 @@ ApplicationWindow {
         layoutChooserDialog.openChooser()
     }
 
+    // After recovery / first-run layout settle: offer essential packs and addon updates once.
+    function promptAddonStartupIfNeeded() {
+        if (recoveryDialog.visible || layoutChooserDialog.visible || missingAddonsDialog.visible)
+            return
+        if (EditorState.recoveryAvailable)
+            return
+        if (!EditorState.projectLayoutChosen)
+            return
+        addonStartupDialog.considerOpen()
+    }
+
     // Settings / header: reopen platform layout picker anytime.
     function openLayoutChooser() {
         layoutChooserDialog.openFromSettings()
@@ -85,11 +96,15 @@ ApplicationWindow {
 
     LayoutChooserDialog {
         id: layoutChooserDialog
+        onClosed: Qt.callLater(window.promptAddonStartupIfNeeded)
     }
 
     RecoveryDialog {
         id: recoveryDialog
-        onClosed: Qt.callLater(window.promptLayoutChooserIfNeeded)
+        onClosed: {
+            Qt.callLater(window.promptLayoutChooserIfNeeded)
+            Qt.callLater(window.promptAddonStartupIfNeeded)
+        }
     }
 
     SubtitleProgressDialog {
@@ -102,6 +117,10 @@ ApplicationWindow {
 
     AddonManagerDialog {
         id: addonManagerDialog
+    }
+
+    AddonStartupDialog {
+        id: addonStartupDialog
     }
 
     MissingAddonsDialog {
@@ -176,6 +195,7 @@ ApplicationWindow {
                 stop()
                 attempts = 0
                 Qt.callLater(window.promptLayoutChooserIfNeeded)
+                Qt.callLater(window.promptAddonStartupIfNeeded)
                 return
             }
             promptRecoveryIfNeeded()
@@ -188,7 +208,12 @@ ApplicationWindow {
         id: layoutChooserOpenTimer
         interval: 120
         repeat: false
-        onTriggered: window.promptLayoutChooserIfNeeded()
+        onTriggered: {
+            window.promptLayoutChooserIfNeeded()
+            // Returning users already have a layout; the chooser no-ops and we still
+            // need a chance to offer essential packs / updates once the UI is up.
+            window.promptAddonStartupIfNeeded()
+        }
     }
 
     Component.onCompleted: {
@@ -206,15 +231,19 @@ ApplicationWindow {
     Connections {
         target: EditorState
         function onRecoveryChanged() {
-            if (EditorState.recoveryAvailable)
+            if (EditorState.recoveryAvailable) {
                 recoveryOpenTimer.start()
-            else
+            } else {
                 Qt.callLater(window.promptLayoutChooserIfNeeded)
+                Qt.callLater(window.promptAddonStartupIfNeeded)
+            }
         }
 
         function onProjectLayoutChosenChanged() {
             if (!EditorState.projectLayoutChosen)
                 layoutChooserOpenTimer.restart()
+            else
+                Qt.callLater(window.promptAddonStartupIfNeeded)
         }
 
         // --- Error and status surfacing -------------------------------------
@@ -272,6 +301,17 @@ ApplicationWindow {
         // the timeline was silent.
         function onTransformBlocked(reason) {
             Toasts.warning(reason)
+        }
+    }
+
+    Connections {
+        target: Addons
+        function onRefreshingChanged() {
+            if (!Addons.refreshing)
+                Qt.callLater(window.promptAddonStartupIfNeeded)
+        }
+        function onCatalogChanged() {
+            Qt.callLater(window.promptAddonStartupIfNeeded)
         }
     }
 

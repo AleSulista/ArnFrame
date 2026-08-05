@@ -24,6 +24,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSaveFile>
+#include <QSettings>
 #include <QtConcurrent>
 
 #include <atomic>
@@ -35,9 +36,22 @@ namespace {
 
 constexpr qint64 kIndexMaxAgeSeconds = 6 * 60 * 60;
 
+// The packs every install is nudged to keep as addons so shader/audio fixes can ship without an
+// app release. Order matches the Extras category order (video → transitions → audio).
+const QStringList kEssentialAddonIds = {
+    QStringLiteral("effects.core"),
+    QStringLiteral("transitions.core"),
+    QStringLiteral("audioeffects.core"),
+};
+
 QString cachedIndexPath()
 {
     return QDir(addonsDir()).filePath(QStringLiteral("index.json"));
+}
+
+QString settingsKey(const char *name)
+{
+    return QLatin1String("addons/") + QLatin1String(name);
 }
 
 QStringList kindsOf(const QJsonObject &addon)
@@ -92,6 +106,32 @@ QString AddonManager::status() const
 bool AddonManager::refreshing() const
 {
     return m_refreshing;
+}
+
+bool AddonManager::remindEssential() const
+{
+    return QSettings().value(settingsKey("remindEssential"), true).toBool();
+}
+
+void AddonManager::setRemindEssential(bool remind)
+{
+    if (remind == remindEssential())
+        return;
+    QSettings().setValue(settingsKey("remindEssential"), remind);
+    emit remindEssentialChanged();
+}
+
+bool AddonManager::remindUpdates() const
+{
+    return QSettings().value(settingsKey("remindUpdates"), true).toBool();
+}
+
+void AddonManager::setRemindUpdates(bool remind)
+{
+    if (remind == remindUpdates())
+        return;
+    QSettings().setValue(settingsKey("remindUpdates"), remind);
+    emit remindUpdatesChanged();
 }
 
 void AddonManager::setStatus(const QString &status)
@@ -171,6 +211,46 @@ QString AddonManager::firstAddonForKind(const QString &kind) const
             return addon.value(QStringLiteral("id")).toString();
     }
     return {};
+}
+
+QVariantList AddonManager::missingEssentialAddons() const
+{
+    QVariantList rows;
+    for (const QString &id : kEssentialAddonIds) {
+        if (installedAddon(id))
+            continue;
+        for (const QJsonObject &addon : m_remote) {
+            if (addon.value(QStringLiteral("id")).toString() != id)
+                continue;
+            rows.append(QVariantMap{
+                {QStringLiteral("id"), id},
+                {QStringLiteral("name"), addon.value(QStringLiteral("name")).toString()},
+                {QStringLiteral("version"), addon.value(QStringLiteral("version")).toString()},
+                {QStringLiteral("description"), addon.value(QStringLiteral("description")).toString()},
+                {QStringLiteral("downloadSize"), addon.value(QStringLiteral("downloadSize")).toDouble()},
+            });
+            break;
+        }
+    }
+    return rows;
+}
+
+QVariantList AddonManager::updatableAddons() const
+{
+    QVariantList rows;
+    for (const QVariant &row : catalog()) {
+        const QVariantMap map = row.toMap();
+        if (map.value(QStringLiteral("state")).toString() != QLatin1String("update-available"))
+            continue;
+        rows.append(QVariantMap{
+            {QStringLiteral("id"), map.value(QStringLiteral("id"))},
+            {QStringLiteral("name"), map.value(QStringLiteral("name"))},
+            {QStringLiteral("version"), map.value(QStringLiteral("version"))},
+            {QStringLiteral("installedVersion"), map.value(QStringLiteral("installedVersion"))},
+            {QStringLiteral("downloadSize"), map.value(QStringLiteral("downloadSize"))},
+        });
+    }
+    return rows;
 }
 
 bool AddonManager::runtimeAvailable() const
