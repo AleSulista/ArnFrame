@@ -31,6 +31,8 @@ private slots:
     void undoTrackMute();
     void packagedProjectCarriesDerivedArtifacts();
     void undoBookmarkAdd();
+    void bookmarkNavigationAndToggle();
+    void bookmarkSnapTarget();
     void moveTrackReordersAndRemapsSelection();
     void addTrackInsertsEmptyTrackByType();
     void projectPersistenceRoundTrip();
@@ -153,6 +155,57 @@ void EditorStateTest::undoBookmarkAdd()
     QVERIFY(state.undoAvailable());
     state.undo();
     QCOMPARE(state.bookmarks().size(), 0);
+}
+
+void EditorStateTest::bookmarkNavigationAndToggle()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    // Project duration follows the longest clip; without one the playhead clamps to 0.
+    state.addTextClip(QStringLiteral("Pad"), 0.0);
+    state.setClipDuration(0, 0, 10.0);
+
+    state.addBookmark(1.0, QStringLiteral("A"));
+    state.addBookmark(3.0, QStringLiteral("B"));
+    state.addBookmark(5.0, QStringLiteral("C"));
+    QCOMPARE(state.bookmarks().size(), 3);
+
+    state.setPlayheadSeconds(2.0);
+    state.goToNextBookmark();
+    QCOMPARE(state.playheadSeconds(), 3.0);
+
+    state.goToNextBookmark();
+    QCOMPARE(state.playheadSeconds(), 5.0);
+
+    // Wrap to the earliest mark.
+    state.goToNextBookmark();
+    QCOMPARE(state.playheadSeconds(), 1.0);
+
+    state.goToPreviousBookmark();
+    QCOMPARE(state.playheadSeconds(), 5.0);
+
+    state.updateBookmark(1, 3.0, QStringLiteral("Bridge"));
+    QCOMPARE(state.bookmarks().at(1).toMap().value(QStringLiteral("label")).toString(),
+             QStringLiteral("Bridge"));
+
+    // Toggle at an existing mark removes it; toggle elsewhere adds one.
+    state.setPlayheadSeconds(3.0);
+    state.toggleBookmarkAtPlayhead();
+    QCOMPARE(state.bookmarks().size(), 2);
+
+    state.setPlayheadSeconds(4.0);
+    state.toggleBookmarkAtPlayhead();
+    QCOMPARE(state.bookmarks().size(), 3);
+}
+
+void EditorStateTest::bookmarkSnapTarget()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.setSnapEnabled(true);
+    state.addBookmark(2.0, QStringLiteral("Snap me"));
+    // Within the 150ms snap window of the bookmark.
+    QCOMPARE(state.snapTime(2.05), 2.0);
 }
 
 void EditorStateTest::moveTrackReordersAndRemapsSelection()

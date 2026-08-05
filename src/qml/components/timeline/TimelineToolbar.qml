@@ -123,8 +123,13 @@ Item {
         IconButton {
             glyph: Theme.icons.bookmark
             variant: "text"
-            tooltip: qsTr("Add bookmark at current time")
-            onClicked: EditorState.addBookmark(EditorState.playheadSeconds, "Mark " + Math.round(EditorState.playheadSeconds))
+            tooltip: {
+                const keys = EditorState.shortcutFor("toggleBookmark")
+                return keys.length > 0
+                    ? qsTr("Add/remove bookmark at current time (%1)").arg(keys)
+                    : qsTr("Add/remove bookmark at current time")
+            }
+            onClicked: EditorState.toggleBookmarkAtPlayhead()
         }
         IconButton {
             glyph: Theme.icons.undo

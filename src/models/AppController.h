@@ -531,7 +531,15 @@ public:
     Q_INVOKABLE void removeTrack(int trackIndex);
     Q_INVOKABLE void addBookmark(double seconds, const QString &label);
     Q_INVOKABLE void removeBookmark(int index);
+    Q_INVOKABLE void updateBookmark(int index, double seconds, const QString &label);
     Q_INVOKABLE void goToBookmark(int index);
+    // Seek to the next/previous bookmark by time (wraps). No-op when empty.
+    Q_INVOKABLE void goToNextBookmark();
+    Q_INVOKABLE void goToPreviousBookmark();
+    // Add at the playhead, or remove the nearest bookmark when one already sits
+    // within the snap threshold — same key for mark and unmark.
+    Q_INVOKABLE void toggleBookmarkAtPlayhead();
+    Q_INVOKABLE void removeBookmarkNearPlayhead();
     Q_INVOKABLE void freezeFrameAtPlayhead();
     Q_INVOKABLE void copySelection();
     Q_INVOKABLE void cutSelection();
@@ -734,6 +742,8 @@ protected:
                               double outDy, bool corner);
     // Recollects m_beatSnapTargets from whichever layers are currently visible.
     void rebuildBeatSnapTargets();
+    // Beat onsets plus project bookmarks — anything clips should magnet to when snap is on.
+    QList<drift::TimeUs> extraSnapTargets() const;
     void refreshSegmentationPreview();
     void runSegmentationSeed(int generation);
     void finalizeFaceDetection(const QString &clipId, const QString &trackPath,

@@ -1342,6 +1342,9 @@ QHash<QString, QString> defaultShortcuts()
         {QStringLiteral("nudgeLeft"), QStringLiteral("Alt+Left")},
         {QStringLiteral("nudgeRight"), QStringLiteral("Alt+Right")},
         {QStringLiteral("toggleGuides"), QStringLiteral("G")},
+        {QStringLiteral("toggleBookmark"), QStringLiteral("M")},
+        {QStringLiteral("nextBookmark"), QStringLiteral("Shift+M")},
+        {QStringLiteral("previousBookmark"), QStringLiteral("Ctrl+Shift+M")},
     };
 }
 
@@ -1667,6 +1670,9 @@ QVariantList AppController::actions() const
         action(QStringLiteral("nudgeLeft"), QStringLiteral("Move selection left a little")),
         action(QStringLiteral("nudgeRight"), QStringLiteral("Move selection right a little")),
         action(QStringLiteral("toggleGuides"), QStringLiteral("Toggle guides")),
+        action(QStringLiteral("toggleBookmark"), QStringLiteral("Add/remove bookmark at current time")),
+        action(QStringLiteral("nextBookmark"), QStringLiteral("Go to next bookmark")),
+        action(QStringLiteral("previousBookmark"), QStringLiteral("Go to previous bookmark")),
     };
 }
 
@@ -1948,7 +1954,7 @@ QString AppController::filmstripTileUrl(const QString &path, int level, double i
 double AppController::snapTime(double seconds) const
 {
     return drift::usToSeconds(drift::snapTime(m_project, drift::secondsToUs(seconds), m_snapEnabled,
-                                              m_playheadUs, m_beatSnapTargets));
+                                              m_playheadUs, extraSnapTargets()));
 }
 
 drift::TimeUs AppController::clipDurationForAssetIndex(int assetIndex) const
@@ -2520,7 +2526,7 @@ void AppController::trimClipLeft(int trackIndex, int clipIndex, double newStart)
 
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs snappedStart = drift::snapTime(m_project, drift::secondsToUs(newStart), m_snapEnabled,
-                                                       m_playheadUs, m_beatSnapTargets);
+                                                       m_playheadUs, extraSnapTargets());
     const drift::TimeUs delta = snappedStart - clip.timelineStart;
     if (delta == 0)
         return;
@@ -2608,7 +2614,7 @@ void AppController::trimClipRight(int trackIndex, int clipIndex, double newEnd)
 
     drift::Clip &clip = track.clips[clipIndex];
     const drift::TimeUs snappedEnd = drift::snapTime(m_project, drift::secondsToUs(newEnd), m_snapEnabled,
-                                                     m_playheadUs, m_beatSnapTargets);
+                                                     m_playheadUs, extraSnapTargets());
     drift::TimeUs newDuration = snappedEnd - clip.timelineStart;
 
     const bool syntheticVisual = isSyntheticTimelineClip(clip.type);
@@ -2789,7 +2795,7 @@ void AppController::moveClipToTrack(int trackIndex, int clipIndex, int newTrackI
     drift::Clip moved = clip;
     moved.timelineStart = drift::resolveClipStart(m_project, toTrack, -1, drift::secondsToUs(newStart),
                                                   moved.timelineDuration, m_snapEnabled, m_playheadUs,
-                                                  m_beatSnapTargets);
+                                                  extraSnapTargets());
     toTrack.clips.append(moved);
     const int newClipIndex = toTrack.clips.size() - 1;
 
@@ -5344,7 +5350,7 @@ void AppController::setClipStart(int trackIndex, int clipIndex, double start)
     const drift::TimeUs oldStart = clip.timelineStart;
     clip.timelineStart = drift::resolveClipStart(m_project, track, clipIndex, drift::secondsToUs(start),
                                                  clip.timelineDuration, m_snapEnabled, m_playheadUs,
-                                                 m_beatSnapTargets);
+                                                 extraSnapTargets());
     applyRippleShift(track, clipIndex, clip.timelineStart - oldStart);
     pushProjectEdit(before, QStringLiteral("Start updated"));
     finishEdit(QStringLiteral("Start updated"));
@@ -8221,11 +8227,127 @@ void AppController::removeBookmark(int index)
     finishEdit(QStringLiteral("Bookmark removed"));
 }
 
+void AppController::updateBookmark(int index, double seconds, const QString &label)
+{
+    if (index < 0 || index >= m_project.bookmarks().size())
+        return;
+
+    const drift::TimeUs timeUs = qMax<drift::TimeUs>(0, drift::secondsToUs(seconds));
+    const QString resolvedLabel = label.isEmpty() ? QStringLiteral("Bookmark") : label;
+    drift::Bookmark &bookmark = m_project.bookmarks()[index];
+    if (bookmark.timeUs == timeUs && bookmark.label == resolvedLabel)
+        return;
+
+    const drift::Project before = m_project;
+    bookmark.timeUs = timeUs;
+    bookmark.label = resolvedLabel;
+    pushProjectEdit(before, QStringLiteral("Edit bookmark"));
+    finishEdit(QStringLiteral("Bookmark updated"));
+}
+
 void AppController::goToBookmark(int index)
 {
     if (index < 0 || index >= m_project.bookmarks().size())
         return;
     setPlayheadUs(m_project.bookmarks().at(index).timeUs);
+}
+
+namespace {
+
+int nearestBookmarkIndex(const QList<drift::Bookmark> &bookmarks, drift::TimeUs timeUs,
+                         drift::TimeUs maxDistanceUs)
+{
+    int bestIndex = -1;
+    drift::TimeUs bestDistance = maxDistanceUs;
+    for (int i = 0; i < bookmarks.size(); ++i) {
+        const drift::TimeUs distance = qAbs(bookmarks.at(i).timeUs - timeUs);
+        if (distance <= bestDistance) {
+            bestDistance = distance;
+            bestIndex = i;
+        }
+    }
+    return bestIndex;
+}
+
+int nextBookmarkIndex(const QList<drift::Bookmark> &bookmarks, drift::TimeUs playheadUs)
+{
+    int bestIndex = -1;
+    drift::TimeUs bestTime = 0;
+    int earliestIndex = -1;
+    drift::TimeUs earliestTime = 0;
+    for (int i = 0; i < bookmarks.size(); ++i) {
+        const drift::TimeUs timeUs = bookmarks.at(i).timeUs;
+        if (earliestIndex < 0 || timeUs < earliestTime) {
+            earliestIndex = i;
+            earliestTime = timeUs;
+        }
+        if (timeUs <= playheadUs)
+            continue;
+        if (bestIndex < 0 || timeUs < bestTime) {
+            bestIndex = i;
+            bestTime = timeUs;
+        }
+    }
+    return bestIndex >= 0 ? bestIndex : earliestIndex;
+}
+
+int previousBookmarkIndex(const QList<drift::Bookmark> &bookmarks, drift::TimeUs playheadUs)
+{
+    int bestIndex = -1;
+    drift::TimeUs bestTime = 0;
+    int latestIndex = -1;
+    drift::TimeUs latestTime = 0;
+    for (int i = 0; i < bookmarks.size(); ++i) {
+        const drift::TimeUs timeUs = bookmarks.at(i).timeUs;
+        if (latestIndex < 0 || timeUs > latestTime) {
+            latestIndex = i;
+            latestTime = timeUs;
+        }
+        if (timeUs >= playheadUs)
+            continue;
+        if (bestIndex < 0 || timeUs > bestTime) {
+            bestIndex = i;
+            bestTime = timeUs;
+        }
+    }
+    return bestIndex >= 0 ? bestIndex : latestIndex;
+}
+
+} // namespace
+
+void AppController::goToNextBookmark()
+{
+    const int index = nextBookmarkIndex(m_project.bookmarks(), m_playheadUs);
+    if (index >= 0)
+        goToBookmark(index);
+}
+
+void AppController::goToPreviousBookmark()
+{
+    const int index = previousBookmarkIndex(m_project.bookmarks(), m_playheadUs);
+    if (index >= 0)
+        goToBookmark(index);
+}
+
+void AppController::toggleBookmarkAtPlayhead()
+{
+    const int near = nearestBookmarkIndex(m_project.bookmarks(), m_playheadUs,
+                                          drift::kSnapThresholdUs);
+    if (near >= 0) {
+        removeBookmark(near);
+        return;
+    }
+
+    const int markNumber = m_project.bookmarks().size() + 1;
+    addBookmark(playheadSeconds(), QStringLiteral("Mark %1").arg(markNumber));
+}
+
+void AppController::removeBookmarkNearPlayhead()
+{
+    const int near = nearestBookmarkIndex(m_project.bookmarks(), m_playheadUs,
+                                          drift::kSnapThresholdUs);
+    if (near >= 0)
+        removeBookmark(near);
 }
 
 void AppController::freezeFrameAtPlayhead()
@@ -8449,6 +8571,12 @@ void AppController::triggerAction(const QString &actionId)
         nudgeSelection(0.1);
     else if (actionId == QStringLiteral("toggleGuides"))
         setGuidesEnabled(!guidesEnabled());
+    else if (actionId == QStringLiteral("toggleBookmark"))
+        toggleBookmarkAtPlayhead();
+    else if (actionId == QStringLiteral("nextBookmark"))
+        goToNextBookmark();
+    else if (actionId == QStringLiteral("previousBookmark"))
+        goToPreviousBookmark();
 }
 
 void AppController::undo()
@@ -8817,6 +8945,14 @@ void AppController::rebuildBeatSnapTargets()
         if (!crowded)
             m_beatSnapTargets.append(at);
     }
+}
+
+QList<drift::TimeUs> AppController::extraSnapTargets() const
+{
+    QList<drift::TimeUs> targets = m_beatSnapTargets;
+    for (const drift::Bookmark &bookmark : m_project.bookmarks())
+        targets.append(bookmark.timeUs);
+    return targets;
 }
 
 void AppController::setBeatGridVisible(bool visible)

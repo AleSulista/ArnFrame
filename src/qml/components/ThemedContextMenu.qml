@@ -5,8 +5,8 @@ import Drift
 // Themed right-click menu.
 //
 // The app previously had no context menus at all: right-clicking a clip, track,
-// ruler or bookmark did nothing, so several actions were reachable only by
-// unlabelled keyboard shortcut or not at all.
+// or ruler did nothing, so several actions were reachable only by unlabelled
+// keyboard shortcut or not at all. Bookmarks now have a context menu too.
 //
 // Use with ThemedMenuItem for entries.
 Menu {

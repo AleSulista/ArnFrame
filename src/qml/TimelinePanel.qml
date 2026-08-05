@@ -843,19 +843,43 @@ PanelFrame {
                             height: Theme.timelineBookmarkRowHeight
                             z: 2
 
+                            property int renameIndex: -1
+
                             Repeater {
                                 model: EditorState.bookmarks
-                                delegate: Rectangle {
-                                    x: modelData.seconds * root.pxPerSecond - width / 2
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 8
-                                    height: 8
-                                    radius: 4
-                                    color: Theme.primary
-                                    z: 3
+                                delegate: Item {
+                                    id: bookmarkDelegate
+                                    x: (bookmarkMouse.dragging
+                                        ? bookmarkMouse.dragSeconds
+                                        : modelData.seconds) * root.pxPerSecond - width / 2
+                                    width: 10
+                                    height: parent.height
+                                    z: bookmarkMouse.containsMouse || bookmarkMouse.dragging ? 4 : 3
+
+                                    // Stem into the ruler so markers read as jump flags, not dots.
+                                    Rectangle {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        y: 0
+                                        width: 1
+                                        height: parent.height + 6
+                                        color: Theme.primary
+                                        opacity: 0.7
+                                    }
+
+                                    Rectangle {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 8
+                                        height: 8
+                                        rotation: 45
+                                        radius: 1
+                                        color: Theme.primary
+                                        border.width: bookmarkMouse.containsMouse ? Theme.borderWidth : 0
+                                        border.color: Theme.primaryForeground
+                                    }
 
                                     ThemedToolTip {
-                                        visible: bookmarkMouse.containsMouse
+                                        visible: bookmarkMouse.containsMouse && !bookmarkMouse.dragging
                                         text: modelData.label + " @ "
                                               + root.formatTime(modelData.seconds)
                                     }
@@ -865,11 +889,90 @@ PanelFrame {
                                         anchors.fill: parent
                                         anchors.margins: -6
                                         hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        // Stop the seek strip from eating bookmark clicks.
+                                        cursorShape: pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+                                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                        // Stop the seek strip from eating bookmark clicks / drags.
                                         preventStealing: true
-                                        onClicked: EditorState.goToBookmark(index)
+
+                                        property bool dragging: false
+                                        property bool didDrag: false
+                                        property real dragSeconds: modelData.seconds
+                                        property real pressX: 0
+
+                                        onPressed: (mouse) => {
+                                            if (mouse.button !== Qt.LeftButton)
+                                                return
+                                            didDrag = false
+                                            dragging = false
+                                            pressX = mouse.x
+                                            dragSeconds = modelData.seconds
+                                        }
+                                        onPositionChanged: (mouse) => {
+                                            if (!pressed || !(mouse.buttons & Qt.LeftButton))
+                                                return
+                                            if (!didDrag && Math.abs(mouse.x - pressX) < 3)
+                                                return
+                                            didDrag = true
+                                            dragging = true
+                                            const globalX = mapToItem(bookmarkRow, mouse.x, 0).x
+                                            dragSeconds = EditorState.snapTime(
+                                                Math.max(0, globalX / root.pxPerSecond))
+                                        }
+                                        onReleased: (mouse) => {
+                                            if (mouse.button === Qt.LeftButton && didDrag) {
+                                                EditorState.updateBookmark(
+                                                    index, dragSeconds, modelData.label)
+                                            }
+                                            dragging = false
+                                            // Keep didDrag through onClicked (fires after release).
+                                            Qt.callLater(function() { didDrag = false })
+                                        }
+                                        onClicked: (mouse) => {
+                                            if (mouse.button === Qt.RightButton) {
+                                                bookmarkContextMenu.bookmarkIndex = index
+                                                bookmarkContextMenu.bookmarkLabel = modelData.label
+                                                bookmarkContextMenu.bookmarkSeconds = modelData.seconds
+                                                bookmarkContextMenu.popup()
+                                                return
+                                            }
+                                            if (!didDrag)
+                                                EditorState.goToBookmark(index)
+                                        }
+                                        onDoubleClicked: (mouse) => {
+                                            if (mouse.button !== Qt.LeftButton)
+                                                return
+                                            bookmarkRow.renameIndex = index
+                                            bookmarkRenameField.text = modelData.label
+                                            bookmarkRenameDialog.open()
+                                        }
                                     }
+                                }
+                            }
+
+                            ThemedContextMenu {
+                                id: bookmarkContextMenu
+                                property int bookmarkIndex: -1
+                                property string bookmarkLabel: ""
+                                property real bookmarkSeconds: 0
+
+                                ThemedMenuItem {
+                                    text: qsTr("Go to bookmark")
+                                    icon.name: Theme.icons.bookmark
+                                    onTriggered: EditorState.goToBookmark(bookmarkContextMenu.bookmarkIndex)
+                                }
+                                ThemedMenuItem {
+                                    text: qsTr("Rename…")
+                                    onTriggered: {
+                                        bookmarkRow.renameIndex = bookmarkContextMenu.bookmarkIndex
+                                        bookmarkRenameField.text = bookmarkContextMenu.bookmarkLabel
+                                        bookmarkRenameDialog.open()
+                                    }
+                                }
+                                ThemedMenuSeparator { }
+                                ThemedMenuItem {
+                                    text: qsTr("Delete")
+                                    icon.name: Theme.icons.trash
+                                    onTriggered: EditorState.removeBookmark(bookmarkContextMenu.bookmarkIndex)
                                 }
                             }
                         }
@@ -1700,5 +1803,51 @@ PanelFrame {
             if (EditorState.draggingAssetIndex < 0)
                 root.clearLandingPreview()
         }
+    }
+
+    ThemedDialog {
+        id: bookmarkRenameDialog
+        title: qsTr("Rename bookmark")
+        acceptText: qsTr("Rename")
+        preferredWidth: Theme.dialogWidthSm
+
+        contentItem: Column {
+            width: parent ? parent.width : Theme.dialogWidthSm
+            spacing: Theme.spacingMd
+
+            ThemedLabel {
+                width: parent.width
+                text: qsTr("Label")
+                size: "sm"
+            }
+            ThemedTextField {
+                id: bookmarkRenameField
+                width: parent.width
+                placeholderText: qsTr("Bookmark name")
+                // Focus the field once the dialog is up so typing starts immediately.
+                Component.onCompleted: Qt.callLater(function() {
+                    if (bookmarkRenameDialog.visible)
+                        forceActiveFocus()
+                })
+            }
+        }
+
+        onOpened: {
+            bookmarkRenameField.forceActiveFocus()
+            bookmarkRenameField.selectAll()
+        }
+        onAccepted: {
+            if (bookmarkRow.renameIndex < 0)
+                return
+            const bookmarks = EditorState.bookmarks
+            if (bookmarkRow.renameIndex >= bookmarks.length)
+                return
+            const seconds = bookmarks[bookmarkRow.renameIndex].seconds
+            const label = bookmarkRenameField.text.trim()
+            EditorState.updateBookmark(bookmarkRow.renameIndex, seconds,
+                                       label.length > 0 ? label : qsTr("Bookmark"))
+            bookmarkRow.renameIndex = -1
+        }
+        onRejected: bookmarkRow.renameIndex = -1
     }
 }
