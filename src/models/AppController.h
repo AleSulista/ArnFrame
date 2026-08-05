@@ -91,6 +91,10 @@ class AppController : public QObject
     Q_PROPERTY(QVariantList speedCurvePoints READ speedCurvePoints NOTIFY speedCurveChanged)
     Q_PROPERTY(int speedCurveRevision READ speedCurveRevision NOTIFY speedCurveFrameChanged)
     Q_PROPERTY(QSize speedCurveFrameSize READ speedCurveFrameSize NOTIFY speedCurveFrameChanged)
+    Q_PROPERTY(double speedCurveSourceStart READ speedCurveSourceStart NOTIFY speedCurveSessionChanged)
+    // Whole media length, not the clip's trimmed span — the filmstrip's frames are sampled across
+    // the source file, so placing them needs both.
+    Q_PROPERTY(double speedCurveMediaDuration READ speedCurveMediaDuration NOTIFY speedCurveSessionChanged)
     Q_PROPERTY(double speedCurveSourceDuration READ speedCurveSourceDuration NOTIFY speedCurveSessionChanged)
     Q_PROPERTY(double speedCurveRetimedDuration READ speedCurveRetimedDuration NOTIFY speedCurveChanged)
     Q_PROPERTY(double speedCurvePosition READ speedCurvePosition NOTIFY speedCurvePositionChanged)
@@ -270,6 +274,8 @@ public:
     Q_INVOKABLE void setSpeedCurvePoints(const QVariantList &points);
     int speedCurveRevision() const { return m_speedCurveRevision; }
     QSize speedCurveFrameSize() const { return m_speedCurvePlayer.frameSize(); }
+    double speedCurveSourceStart() const;
+    double speedCurveMediaDuration() const;
     double speedCurveSourceDuration() const;
     double speedCurveRetimedDuration() const;
     double speedCurvePosition() const;
@@ -530,6 +536,11 @@ public:
     Q_INVOKABLE void redo();
     Q_INVOKABLE double snapTime(double seconds) const;
     Q_INVOKABLE QVariantList waveformPeaks(const QString &path) const;
+    // Whole-file peaks sliced to a source window, for a dialog whose x axis is a clip's trimmed
+    // range rather than the whole file. Shares the dense cache and the waveformReady signal with
+    // waveformPeaks() — unlike waveformPeaksRange(), which is block-backed for the timeline.
+    Q_INVOKABLE QVariantList waveformPeaksForSourceRange(const QString &path, double startSeconds,
+                                                         double durSeconds) const;
     // Peaks for just the source window [startSeconds, startSeconds + durSeconds), reduced to
     // `buckets` values, so a clip only ever asks for as many peaks as it has visible pixels.
     Q_INVOKABLE QVariantList waveformPeaksRange(const QString &path, double startSeconds,

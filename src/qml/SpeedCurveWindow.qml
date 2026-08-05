@@ -260,9 +260,15 @@ Window {
                 anchors.fill: parent
                 anchors.margins: Theme.borderWidth
                 filmstripPath: EditorState.speedCurveFilmstripPath
-                // One pass of the strip's eight frames across the whole clip, rather than the
-                // repeating tile the timeline draws — here the x axis *is* the source.
+                // One pass of the strip's eight frames across the clip, rather than the repeating
+                // tile the timeline draws — here the x axis *is* the source.
                 frameWidth: width / frameCount
+                // The strip's frames are sampled across the whole media file, but this axis covers
+                // only the clip's trimmed window, which is what the curve is plotted over. Without
+                // the mapping a trimmed clip shows the wrong frames under the ramp.
+                inPoint: EditorState.speedCurveSourceStart
+                outPoint: EditorState.speedCurveSourceStart + EditorState.speedCurveSourceDuration
+                sourceDuration: EditorState.speedCurveMediaDuration
             }
 
             Canvas {
@@ -271,8 +277,16 @@ Window {
                 anchors.margins: Theme.borderWidth
                 visible: !EditorState.speedCurveFilmstripPath
 
+                // The x axis here is the clip's trimmed source window, the same one the filmstrip
+                // above spans and the same one the curve is plotted over — not the whole file.
+                function sourcePeaks(path) {
+                    return EditorState.waveformPeaksForSourceRange(
+                               path, EditorState.speedCurveSourceStart,
+                               EditorState.speedCurveSourceDuration)
+                }
+
                 property var peaks: EditorState.speedCurveClipPath
-                                    ? EditorState.waveformPeaks(EditorState.speedCurveClipPath) : []
+                                    ? sourcePeaks(EditorState.speedCurveClipPath) : []
 
                 onPeaksChanged: requestPaint()
                 onWidthChanged: requestPaint()
@@ -281,7 +295,7 @@ Window {
                     target: EditorState
                     function onWaveformReady(path) {
                         if (path === EditorState.speedCurveClipPath)
-                            waveCanvas.peaks = EditorState.waveformPeaks(path)
+                            waveCanvas.peaks = waveCanvas.sourcePeaks(path)
                     }
                 }
 

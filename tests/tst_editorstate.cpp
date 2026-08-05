@@ -51,6 +51,8 @@ private slots:
     void effectRemovalRemapsGraphSelection();
     void denoiseAddsCleanedClipOnTrackAbove();
     void speedCurveOnAudioClipRetimesAndReplaces();
+    void waveformPeaksForSourceRangeSlicesToTheTrimmedWindow();
+    void speedCurveSessionExposesTrimmedSourceWindow();
     void shapeStylePartialUpdateAndUndo();
 };
 
@@ -1186,6 +1188,126 @@ void EditorStateTest::speedCurveOnAudioClipRetimesAndReplaces()
     QCOMPARE(project.tracks().size(), 2);
     QCOMPARE(project.tracks().at(1).clips.size(), 1);
     QVERIFY(!project.tracks().at(1).clips.at(0).hasSpeedCurve());
+}
+
+// The speed-curve editor plots its ramp over the clip's trimmed source window, so the waveform
+// behind it has to cover that window and nothing else. Drawing the whole file put the audio under
+// the wrong part of the curve on any clip that had been trimmed.
+void EditorStateTest::waveformPeaksForSourceRangeSlicesToTheTrimmedWindow()
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.filePath(QStringLiteral("half-tone.wav"));
+    // Four seconds: a tone for the first two, silence for the last two. Concatenated from two
+    // sources rather than gated with volume=enable, which leaves the tail audible.
+    QProcess proc;
+    proc.start(ffmpeg, {QStringLiteral("-y"),
+                        QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                        QStringLiteral("sine=frequency=440:sample_rate=48000:duration=2"),
+                        QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                        QStringLiteral("anullsrc=r=48000:cl=mono:d=2"),
+                        QStringLiteral("-filter_complex"),
+                        QStringLiteral("[0:a][1:a]concat=n=2:v=0:a=1[out]"),
+                        QStringLiteral("-map"), QStringLiteral("[out]"),
+                        QStringLiteral("-c:a"), QStringLiteral("pcm_s16le"), source});
+    QVERIFY(proc.waitForFinished(60000) && proc.exitCode() == 0);
+
+    AssetLibrary library;
+    AppController state(&library);
+
+    // The first call kicks off the decode and comes back empty; the peaks land on waveformReady.
+    QSignalSpy ready(&state, &AppController::waveformReady);
+    QVERIFY(state.waveformPeaksForSourceRange(source, 0.0, 2.0).isEmpty());
+    QVERIFY2(ready.wait(60000), "waveform decode did not finish");
+
+    const QVariantList loud = state.waveformPeaksForSourceRange(source, 0.0, 2.0);
+    const QVariantList quiet = state.waveformPeaksForSourceRange(source, 2.0, 2.0);
+    QVERIFY(loud.size() > 10);
+    QCOMPARE(quiet.size(), loud.size());
+
+    // reduceDensePeaks floors silence at 0.05 so it still draws as a hairline.
+    for (const QVariant &v : loud)
+        QVERIFY2(v.toDouble() > 0.2, qPrintable(QString::number(v.toDouble())));
+    for (const QVariant &v : quiet)
+        QVERIFY2(v.toDouble() <= 0.06, qPrintable(QString::number(v.toDouble())));
+
+    // The whole-file call is what the editor used to draw: it spans both halves, so it cannot be
+    // standing in for either window.
+    const QVariantList whole = state.waveformPeaks(source);
+    QVERIFY(whole.size() > 10);
+    double wholeMin = 1.0;
+    double wholeMax = 0.0;
+    for (const QVariant &v : whole) {
+        wholeMin = qMin(wholeMin, v.toDouble());
+        wholeMax = qMax(wholeMax, v.toDouble());
+    }
+    QVERIFY(wholeMax > 0.2);
+    QVERIFY(wholeMin <= 0.06);
+}
+
+// The curve editor's filmstrip and waveform both span the clip's trimmed window while the strip's
+// frames are sampled across the whole media file, so the session has to publish all three numbers.
+// A zero media duration would silently drop the strip back to spreading the whole file across the
+// clip, which is the bug this guards.
+void EditorStateTest::speedCurveSessionExposesTrimmedSourceWindow()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    drift::Project &project = *state.project();
+
+    drift::MediaAsset asset;
+    asset.id = QStringLiteral("asset-video");
+    asset.path = QStringLiteral("/tmp/video.mp4");
+    asset.name = QStringLiteral("Video");
+    asset.kind = drift::MediaKind::Video;
+    asset.durationUs = drift::secondsToUs(20.0);
+    project.assets().insert(asset.id, asset);
+    project.assetOrder().append(asset.id);
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-video");
+    clip.assetId = asset.id;
+    clip.type = drift::ClipType::Video;
+    clip.name = asset.name;
+    clip.path = asset.path;
+    clip.filmstripPath = QStringLiteral("/tmp/video.strip.jpg");
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(7.0);
+    clip.srcIn = drift::secondsToUs(5.0);
+    clip.srcOut = drift::secondsToUs(12.0);
+
+    drift::Track track{.type = drift::TrackType::Video};
+    track.clips.append(clip);
+    project.tracks().clear();
+    project.tracks().append(track);
+
+    state.beginSpeedCurveSession(0, 0);
+    QVERIFY2(state.speedCurveSessionActive(), qPrintable(state.lastMessage()));
+
+    QVERIFY(std::fabs(state.speedCurveSourceStart() - 5.0) < 1e-6);
+    QVERIFY(std::fabs(state.speedCurveSourceDuration() - 7.0) < 1e-6);
+    QVERIFY(std::fabs(state.speedCurveMediaDuration() - 20.0) < 1e-6);
+
+    // What ClipFilmstrip.sourceMapped needs: a real source length and a non-empty window inside it.
+    QVERIFY(state.speedCurveMediaDuration() > 0.0);
+    QVERIFY(state.speedCurveSourceDuration() > 0.0);
+    QVERIFY(state.speedCurveSourceStart() + state.speedCurveSourceDuration()
+            <= state.speedCurveMediaDuration());
+
+    // With no asset entry the length still has to come out positive, or the strip silently falls
+    // back to spreading the whole file across the clip.
+    project.assets().clear();
+    project.assetOrder().clear();
+    state.endSpeedCurveSession();
+    state.beginSpeedCurveSession(0, 0);
+    QVERIFY(state.speedCurveSessionActive());
+    QVERIFY(state.speedCurveMediaDuration() >= state.speedCurveSourceStart()
+                                                  + state.speedCurveSourceDuration());
 }
 
 QTEST_MAIN(EditorStateTest)

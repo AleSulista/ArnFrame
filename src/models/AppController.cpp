@@ -3194,6 +3194,16 @@ void AppController::setSpeedCurvePoints(const QVariantList &points)
     emit speedCurveChanged();
 }
 
+double AppController::speedCurveSourceStart() const
+{
+    return drift::usToSeconds(m_speedCurveClip.srcIn);
+}
+
+double AppController::speedCurveMediaDuration() const
+{
+    return drift::usToSeconds(sourceDurationForClip(m_speedCurveClip));
+}
+
 double AppController::speedCurveSourceDuration() const
 {
     return drift::usToSeconds(m_speedCurveClip.srcOut - m_speedCurveClip.srcIn);
@@ -8278,6 +8288,20 @@ QVariantList AppController::waveformPeaks(const QString &path) const
     // Whole file at dialog resolution (Denoise / Speed Curve canvases).
     const int buckets = qMin(2000, dense->peaks.size());
     return reduceDensePeaks(dense->peaks, 0, dense->peaks.size(), buckets);
+}
+
+QVariantList AppController::waveformPeaksForSourceRange(const QString &path, double startSeconds,
+                                                        double durSeconds) const
+{
+    const MediaWaveform::Dense *dense = densePeaksFor(path);
+    if (!dense || dense->durationSeconds <= 0.0 || durSeconds <= 0.0)
+        return {};
+
+    const double peaksPerSecond = dense->peaks.size() / dense->durationSeconds;
+    const int first = static_cast<int>(startSeconds * peaksPerSecond);
+    const int last = static_cast<int>((startSeconds + durSeconds) * peaksPerSecond);
+    // reduceDensePeaks clamps the range, so a window running past the decoded end is safe.
+    return reduceDensePeaks(dense->peaks, first, last, qMin(2000, qMax(1, last - first)));
 }
 
 QVariantList AppController::waveformPeaksRange(const QString &path, double startSeconds,
