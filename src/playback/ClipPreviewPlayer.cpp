@@ -329,7 +329,8 @@ int ClipPreviewPlayer::fillAudio(float *buffer, int sampleCount)
     }
 
     const drift::TimeUs timeUs = m_clock.produceTimeUs();
-    const QVector<float> mixed = AudioMixer::readClipAudio(clip, timeUs, sampleCount, m_sampleRate);
+    const QVector<float> mixed =
+        AudioMixer::readClipAudio(clip, timeUs, sampleCount, m_sampleRate, &m_retimer);
     const int frames = qMin(sampleCount, static_cast<int>(mixed.size() / 2));
     std::memcpy(buffer, mixed.constData(), static_cast<size_t>(frames) * 2 * sizeof(float));
     if (frames < sampleCount) {

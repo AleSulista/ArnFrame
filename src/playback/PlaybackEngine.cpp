@@ -142,7 +142,10 @@ void PlaybackEngine::setProject(drift::Project *project)
 void PlaybackEngine::setPlayheadUs(drift::TimeUs us)
 {
     m_playheadUs = qMax<drift::TimeUs>(0, us);
-    m_mixer.resetEffectRacks();
+    // Only real seeks reach here — the playhead tick emits its position directly rather than
+    // routing back through this setter. That matters: the mixer's per-clip DSP is streaming, and a
+    // reset on every tick would leave a retimed clip permanently re-priming instead of playing.
+    m_mixer.resetClipAudioState();
     m_clock.reset(m_playheadUs, m_sampleRate);
     // reset() clears the running flag; resume the clock if we are still in play
     // so edits/seeks during playback don't freeze audio at one timeline spot.
@@ -250,7 +253,7 @@ void PlaybackEngine::play()
     if (m_playing)
         return;
 
-    m_mixer.resetEffectRacks();
+    m_mixer.resetClipAudioState();
     m_clock.reset(m_playheadUs, m_sampleRate);
     m_playing = true;
 
@@ -302,7 +305,7 @@ void PlaybackEngine::pause()
     if (!isQualityMode())
         m_playheadUs = m_clock.pausedAt();
     m_qualityRequestUs = -1;
-    m_mixer.resetEffectRacks();
+    m_mixer.resetClipAudioState();
     QMetaObject::invokeMethod(
         m_device,
         [this] {

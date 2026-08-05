@@ -3281,9 +3281,29 @@ void AppController::applySpeedCurve()
                    + QStringLiteral(" (retimed)");
     remapKeyframesForRetime(retimed, source);
 
+    // The retimed copy replaces the clip it was made from rather than joining it. Left in place the
+    // original keeps playing underneath at the original rate: its audio sums into the mix, and it
+    // shows through wherever the retimed duration differs. A detached audio companion goes with it
+    // for the same reason — the copy carries its own audio.
+    QSet<QString> replacedIds{source.id};
+    for (const drift::ClipRef &ref : drift::linkedPartners(m_project, source))
+        replacedIds.insert(m_project.tracks().at(ref.trackIndex).clips.at(ref.clipIndex).id);
+
     const int newTrack =
         drift::insertTrackAboveForClipType(m_project, m_speedCurveTrack, source.type);
     m_project.tracks()[newTrack].clips.append(retimed);
+
+    for (drift::Track &t : m_project.tracks()) {
+        for (int i = t.clips.size() - 1; i >= 0; --i) {
+            if (replacedIds.contains(t.clips.at(i).id))
+                t.clips.removeAt(i);
+        }
+        for (int i = t.transitions.size() - 1; i >= 0; --i) {
+            const drift::Transition &transition = t.transitions.at(i);
+            if (replacedIds.contains(transition.fromClipId) || replacedIds.contains(transition.toClipId))
+                t.transitions.removeAt(i);
+        }
+    }
 
     pushProjectEdit(before, QStringLiteral("Custom speed applied"));
     finishEdit(QStringLiteral("Custom speed applied"));
@@ -5064,6 +5084,7 @@ void AppController::previewSetClipSpeed(int trackIndex, int clipIndex, double sp
 
     clip.speed = qBound(0.25, speed, 4.0);
     clip.syncSrcOutFromSpeed(sourceDurationForClip(clip));
+    syncLinkedPartnersFrom(m_project, clip);
     emitPreviewFrame();
 }
 
@@ -5666,6 +5687,7 @@ void AppController::setClipSpeed(int trackIndex, int clipIndex, double speed)
     const drift::Project before = m_project;
     clip.speed = qBound(0.25, speed, 4.0);
     clip.syncSrcOutFromSpeed(sourceDurationForClip(clip));
+    syncLinkedPartnersFrom(m_project, clip);
     pushProjectEdit(before, QStringLiteral("Speed changed"));
     finishEdit(QStringLiteral("Clip speed updated"));
 }

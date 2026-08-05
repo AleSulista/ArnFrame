@@ -295,6 +295,8 @@ add_library(driftaudiodsp STATIC
     src/engine/audio/AudioEffectFactory.cpp
     src/engine/audio/AudioEffectRack.h
     src/engine/audio/AudioEffectRack.cpp
+    src/engine/audio/ClipAudioRetimer.h
+    src/engine/audio/ClipAudioRetimer.cpp
 )
 # Nothing here is a QObject, and AUTOMOC would otherwise scan JUCE's amalgamated sources.
 set_target_properties(driftaudiodsp PROPERTIES AUTOMOC OFF)
@@ -376,8 +378,6 @@ add_library(driftengine STATIC
     src/engine/FrameCompositor.cpp
     src/engine/MaskApplier.h
     src/engine/MaskApplier.cpp
-    src/engine/AudioAtempo.h
-    src/engine/AudioAtempo.cpp
     src/engine/AudioEffectCatalog.h
     src/engine/AudioEffectCatalog.cpp
     src/engine/EffectTemplateCatalog.h

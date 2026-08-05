@@ -23,6 +23,7 @@
 #include "engine/AudioEffectCatalog.h"
 #include "engine/audio/AudioEffectFactory.h"
 #include "engine/audio/AudioEffectRack.h"
+#include "engine/audio/ClipAudioRetimer.h"
 #include "engine/AudioFileWriter.h"
 #include "engine/AudioOnsets.h"
 #include "engine/DeepFilterDenoiser.h"
@@ -124,7 +125,14 @@ private slots:
     void maskApplierEllipseMasksCorners();
     void exporterProducesPlayableFileWithBackground();
     void mixerHasNoBlockBoundaryDropout();
-    void mixerSurvivesConcurrentEffectRackReset();
+    void mixerSurvivesConcurrentClipAudioReset();
+    void retimedClipAudioIsNotSilent();
+    void retimedAudioPreservesPitch();
+    void retimedAudioLengthTracksTimeline();
+    void retimedAudioSurvivesBlockSizeChanges();
+    void reversedRetimedAudioIsNotSilent();
+    void rampedSpeedCurveRetimesAudioClip();
+    void clipAudioRetimerStreamsSyntheticSource();
     void audioEffectCatalogLoadsPackages();
     void audioEffectFactoryBuildsEveryCatalogEntry();
     void audioEffectChainAltersSignal();
@@ -2897,7 +2905,357 @@ void EngineTest::mixerHasNoBlockBoundaryDropout()
 // mix() is running on the audio thread. Taking a reference into the hash instead of a strong
 // reference — and touching the hash at all without a lock — segfaults inside the rack's buffers
 // once the timing lines up, which is what "crashed after a while" looks like from the outside.
-void EngineTest::mixerSurvivesConcurrentEffectRackReset()
+namespace {
+
+constexpr int kToneRate = 48000;
+constexpr drift::TimeUs kToneSourceUs = 2'000'000;
+constexpr double kTonePi = 3.14159265358979323846;
+
+// One audio clip covering the whole tone, retimed either by a constant speed or by a curve.
+drift::Project makeRetimedToneProject(const QString &path, double speed, bool reverse,
+                                      const drift::SpeedCurve &curve = {})
+{
+    drift::Project project;
+    project.setSampleRate(kToneRate);
+    project.tracks().clear(); // drop the default timeline so the clip is the only thing in the mix
+    drift::Track track{.type = drift::TrackType::Audio};
+    drift::Clip clip;
+    clip.id = QStringLiteral("tone");
+    clip.type = drift::ClipType::Audio;
+    clip.path = path;
+    clip.timelineStart = 0;
+    clip.srcIn = 0;
+    clip.srcOut = kToneSourceUs;
+    clip.speed = speed;
+    clip.reverse = reverse;
+    clip.speedCurve = curve;
+    clip.timelineDuration = static_cast<drift::TimeUs>(kToneSourceUs / speed);
+    if (!curve.isEmpty())
+        clip.syncDurationFromSpeedCurve();
+    track.clips.append(clip);
+    project.tracks().append(track);
+    return project;
+}
+
+double blockRms(const QVector<float> &interleaved, int frames)
+{
+    double sumSq = 0.0;
+    for (int i = 0; i < frames * 2; ++i)
+        sumSq += static_cast<double>(interleaved[i]) * interleaved[i];
+    return std::sqrt(sumSq / (frames * 2));
+}
+
+// Mixes `blocks` contiguous buffers and returns each one's RMS, appending the samples to `collected`
+// when it is given. A whole-run RMS would pass a design that emits one good buffer in four, which is
+// exactly what a stretcher without a FIFO produces — the per-block figures are the point.
+QList<double> mixBlockRms(AudioMixer &mixer, int blocks, int frames, QVector<float> *collected = nullptr)
+{
+    QVector<float> buffer(frames * 2);
+    QList<double> rms;
+    for (int b = 0; b < blocks; ++b) {
+        const drift::TimeUs t =
+            static_cast<drift::TimeUs>(b) * frames * drift::kUsPerSecond / kToneRate;
+        mixer.mix(t, frames, kToneRate, buffer.data());
+        rms.append(blockRms(buffer, frames));
+        if (collected)
+            collected->append(buffer);
+    }
+    return rms;
+}
+
+double goertzelMagnitude(const QVector<float> &interleaved, double frequency)
+{
+    const int frames = interleaved.size() / 2;
+    const double w = 2.0 * kTonePi * frequency / kToneRate;
+    const double coeff = 2.0 * std::cos(w);
+    double s1 = 0.0;
+    double s2 = 0.0;
+    for (int i = 0; i < frames; ++i) {
+        const double s = interleaved[i * 2] + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s;
+    }
+    return std::sqrt(qMax(0.0, s1 * s1 + s2 * s2 - coeff * s1 * s2));
+}
+
+} // namespace
+
+// Regression gate for the silence a stateless per-block stretcher produced: it rebuilt its filter
+// from scratch every buffer, and a WSOLA stretcher fed one short buffer with no history emits
+// nothing at all.
+void EngineTest::retimedClipAudioIsNotSilent()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeToneAudio(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    struct Case
+    {
+        const char *name;
+        double speed;
+        drift::SpeedCurve curve;
+    };
+    const QList<Case> cases{
+        {"0.5x", 0.5, {}},
+        {"2.0x", 2.0, {}},
+        {"flat curve 0.75x", 1.0, drift::SpeedCurve::flat(0.75)},
+    };
+
+    for (const Case &c : cases) {
+        drift::Project project = makeRetimedToneProject(path, c.speed, false, c.curve);
+        AudioMixer mixer;
+        mixer.setProject(&project);
+
+        constexpr int kFrames = 1024;
+        const drift::TimeUs durationUs = project.tracks().at(0).clips.at(0).timelineDuration;
+        const int blocks = static_cast<int>(durationUs * kToneRate / drift::kUsPerSecond / kFrames) - 2;
+        QVERIFY(blocks > 20);
+
+        QVector<float> collected;
+        const QList<double> rms = mixBlockRms(mixer, blocks, kFrames, &collected);
+        QVERIFY2(blockRms(collected, collected.size() / 2) > 0.05, c.name);
+        for (int b = 2; b < rms.size(); ++b) {
+            QVERIFY2(rms.at(b) > 0.02,
+                     qPrintable(QStringLiteral("%1: block %2 rms %3")
+                                    .arg(QString::fromUtf8(c.name))
+                                    .arg(b)
+                                    .arg(rms.at(b))));
+        }
+    }
+}
+
+// A tempo change that took the pitch with it would be a resample, not a stretch.
+void EngineTest::retimedAudioPreservesPitch()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeToneAudio(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    for (double speed : {0.5, 2.0}) {
+        drift::Project project = makeRetimedToneProject(path, speed, false);
+        AudioMixer mixer;
+        mixer.setProject(&project);
+
+        QVector<float> collected;
+        mixBlockRms(mixer, 40, 1024, &collected);
+
+        const double tone = goertzelMagnitude(collected, 440.0);
+        QVERIFY2(tone > 10.0 * goertzelMagnitude(collected, 220.0), qPrintable(QString::number(speed)));
+        QVERIFY2(tone > 10.0 * goertzelMagnitude(collected, 880.0), qPrintable(QString::number(speed)));
+    }
+}
+
+// The retimer walks the source itself, so a cursor that ran fast or slow would show up as audio
+// that ends early or keeps going past the clip.
+void EngineTest::retimedAudioLengthTracksTimeline()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeToneAudio(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    drift::Project project = makeRetimedToneProject(path, 0.5, false);
+    AudioMixer mixer;
+    mixer.setProject(&project);
+
+    constexpr int kFrames = 1024;
+    const int blocks = static_cast<int>(5'000'000LL * kToneRate / drift::kUsPerSecond / kFrames);
+    QVector<float> collected;
+    mixBlockRms(mixer, blocks, kFrames, &collected);
+
+    int lastAudible = -1;
+    for (int i = 0; i < collected.size() / 2; ++i) {
+        if (std::fabs(collected[i * 2]) > 0.01)
+            lastAudible = i;
+    }
+    QVERIFY(lastAudible > 0);
+    const drift::TimeUs endUs =
+        static_cast<drift::TimeUs>(lastAudible) * drift::kUsPerSecond / kToneRate;
+    QVERIFY2(std::llabs(endUs - 4'000'000) < 150'000, qPrintable(QString::number(endUs)));
+}
+
+// Preview asks for whatever the sink wants; export asks for one video frame's worth. Nothing in the
+// pipeline may be sized off a single block length.
+void EngineTest::retimedAudioSurvivesBlockSizeChanges()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeToneAudio(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    drift::Project project = makeRetimedToneProject(path, 0.5, false);
+    AudioMixer mixer;
+    mixer.setProject(&project);
+
+    const QList<int> sizes{1024, 1600, 256};
+    QVector<float> buffer(1600 * 2);
+    drift::TimeUs t = 0;
+    for (int b = 0; b < 90; ++b) {
+        const int frames = sizes.at(b % sizes.size());
+        mixer.mix(t, frames, kToneRate, buffer.data());
+        if (b >= 2) {
+            QVERIFY2(blockRms(buffer, frames) > 0.02,
+                     qPrintable(QStringLiteral("block %1 of %2 frames").arg(b).arg(frames)));
+        }
+        t += static_cast<drift::TimeUs>(frames) * drift::kUsPerSecond / kToneRate;
+    }
+}
+
+void EngineTest::reversedRetimedAudioIsNotSilent()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeToneAudio(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    drift::Project project = makeRetimedToneProject(path, 0.5, true);
+    AudioMixer mixer;
+    mixer.setProject(&project);
+
+    constexpr int kFrames = 1024;
+    const QList<double> rms = mixBlockRms(mixer, 120, kFrames);
+    for (int b = 2; b < rms.size(); ++b)
+        QVERIFY2(rms.at(b) > 0.02, qPrintable(QStringLiteral("block %1 rms %2").arg(b).arg(rms.at(b))));
+}
+
+// A ramp on an audio-track clip, which is the case with no picture to fall back on: the mixer has
+// to change tempo every block and still come out with continuous sound over the whole retimed
+// length. A flat curve would not exercise the per-block tempo at all.
+void EngineTest::rampedSpeedCurveRetimesAudioClip()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeToneAudio(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    QList<drift::SpeedPoint> points;
+    points.append(drift::SpeedPoint{.pos = 0.0, .speed = 0.5});
+    points.append(drift::SpeedPoint{.pos = 1.0, .speed = 2.0});
+    drift::SpeedCurve curve;
+    curve.setPoints(points);
+
+    drift::Project project = makeRetimedToneProject(path, 1.0, false, curve);
+    const drift::Clip &clip = project.tracks().at(0).clips.at(0);
+    QCOMPARE(clip.type, drift::ClipType::Audio);
+    QVERIFY(clip.hasSpeedCurve());
+    // Timeline length is the integral of 1/speed over the source: (2/3)·ln4 ≈ 0.924 of it here.
+    // Asserting the number rather than just "it changed" is what would catch the ramp being read
+    // as its endpoint value or its average.
+    QVERIFY2(std::llabs(clip.timelineDuration - 1'848'000) < 60'000,
+             qPrintable(QString::number(clip.timelineDuration)));
+
+    AudioMixer mixer;
+    mixer.setProject(&project);
+
+    constexpr int kFrames = 1024;
+    const int blocks = static_cast<int>(clip.timelineDuration * kToneRate / drift::kUsPerSecond / kFrames) - 2;
+    QVERIFY(blocks > 20);
+
+    QVector<float> collected;
+    const QList<double> rms = mixBlockRms(mixer, blocks, kFrames, &collected);
+    for (int b = 2; b < rms.size(); ++b)
+        QVERIFY2(rms.at(b) > 0.02, qPrintable(QStringLiteral("block %1 rms %2").arg(b).arg(rms.at(b))));
+
+    // Pitch has to hold across the whole ramp, not just at the ends.
+    const double tone = goertzelMagnitude(collected, 440.0);
+    QVERIFY(tone > 10.0 * goertzelMagnitude(collected, 220.0));
+    QVERIFY(tone > 10.0 * goertzelMagnitude(collected, 880.0));
+}
+
+// The retimer on its own, with a generated source: no ffmpeg, no decoder timing, and the source
+// frame count is observable, which is what pins the input and output rates together.
+void EngineTest::clipAudioRetimerStreamsSyntheticSource()
+{
+    constexpr int kFrames = 1024;
+    constexpr int kBlocks = 400;
+
+    qint64 pulled = 0;
+    auto tonePull = [&pulled](drift::TimeUs startUs, int frames, float *dst) {
+        const qint64 startFrame = startUs * kToneRate / drift::kUsPerSecond;
+        for (int i = 0; i < frames; ++i) {
+            const double phase = 2.0 * kTonePi * 440.0 * static_cast<double>(startFrame + i) / kToneRate;
+            dst[i * 2] = dst[i * 2 + 1] = static_cast<float>(std::sin(phase));
+        }
+        pulled += frames;
+        return frames;
+    };
+
+    QVector<float> out(kFrames * 2);
+    for (double tempo : {0.5, 1.5, 4.0}) {
+        drift::ClipAudioRetimer retimer;
+        pulled = 0;
+        for (int b = 0; b < kBlocks; ++b) {
+            drift::ClipAudioBlock block;
+            block.identity = 1;
+            block.sampleRate = kToneRate;
+            block.timelineStartUs =
+                static_cast<drift::TimeUs>(b) * kFrames * drift::kUsPerSecond / kToneRate;
+            block.tempo = tempo;
+            retimer.process(block, tonePull, kFrames, out.data());
+            if (b >= 2) {
+                QVERIFY2(blockRms(out, kFrames) > 0.2,
+                         qPrintable(QStringLiteral("tempo %1 block %2").arg(tempo).arg(b)));
+            }
+        }
+        // Consumption is what proves the loop is closed: a stretcher fed the wrong amount either
+        // starves or piles up a backlog, and both are silent failures over a short run.
+        const double expected = static_cast<double>(kBlocks) * kFrames * tempo;
+        QVERIFY2(std::fabs(pulled - expected) / expected < 0.1,
+                 qPrintable(QStringLiteral("tempo %1 pulled %2, expected %3")
+                                .arg(tempo)
+                                .arg(pulled)
+                                .arg(expected)));
+    }
+
+    // A ramp changes tempo every block; the total source consumed must still match its integral.
+    {
+        drift::ClipAudioRetimer retimer;
+        pulled = 0;
+        double integral = 0.0;
+        for (int b = 0; b < kBlocks; ++b) {
+            const double tempo = 0.5 + 1.5 * static_cast<double>(b) / (kBlocks - 1);
+            integral += tempo * kFrames;
+            drift::ClipAudioBlock block;
+            block.identity = 2;
+            block.sampleRate = kToneRate;
+            block.timelineStartUs =
+                static_cast<drift::TimeUs>(b) * kFrames * drift::kUsPerSecond / kToneRate;
+            block.tempo = tempo;
+            retimer.process(block, tonePull, kFrames, out.data());
+            if (b >= 2)
+                QVERIFY2(blockRms(out, kFrames) > 0.2, qPrintable(QStringLiteral("ramp block %1").arg(b)));
+        }
+        QVERIFY2(std::fabs(pulled - integral) / integral < 0.1,
+                 qPrintable(QStringLiteral("ramp pulled %1, expected %2").arg(pulled).arg(integral)));
+    }
+
+    // A source that gives nothing must produce silence and stop asking, not spin.
+    {
+        drift::ClipAudioRetimer retimer;
+        int calls = 0;
+        auto emptyPull = [&calls](drift::TimeUs, int, float *) {
+            ++calls;
+            return 0;
+        };
+        drift::ClipAudioBlock block;
+        block.identity = 3;
+        block.sampleRate = kToneRate;
+        block.tempo = 0.5;
+        retimer.process(block, emptyPull, kFrames, out.data());
+        QCOMPARE(blockRms(out, kFrames), 0.0);
+        QCOMPARE(calls, 1);
+    }
+}
+
+void EngineTest::mixerSurvivesConcurrentClipAudioReset()
 {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -2925,6 +3283,17 @@ void EngineTest::mixerSurvivesConcurrentEffectRackReset()
     track.clips.append(clip);
     project.tracks().append(track);
 
+    // A retimed clip with no effect chain reaches the same per-clip state through a different door:
+    // it needs its stretcher whether or not it has a rack.
+    drift::Track retimedTrack{.type = drift::TrackType::Audio};
+    drift::Clip retimed = clip;
+    retimed.id = QStringLiteral("tone-slow");
+    retimed.audioEffects.clear();
+    retimed.speed = 0.5;
+    retimed.timelineDuration = kDurationUs * 2;
+    retimedTrack.clips.append(retimed);
+    project.tracks().append(retimedTrack);
+
     AudioMixer mixer;
     mixer.setProject(&project);
 
@@ -2939,7 +3308,7 @@ void EngineTest::mixerSurvivesConcurrentEffectRackReset()
     }));
     QScopedPointer<QThread> resetThread(QThread::create([&mixer, &stop] {
         while (!stop.load(std::memory_order_relaxed))
-            mixer.resetEffectRacks();
+            mixer.resetClipAudioState();
     }));
 
     mixThread->start();

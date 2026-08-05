@@ -50,6 +50,7 @@ private slots:
     void effectParamKeyframes();
     void effectRemovalRemapsGraphSelection();
     void denoiseAddsCleanedClipOnTrackAbove();
+    void speedCurveOnAudioClipRetimesAndReplaces();
     void shapeStylePartialUpdateAndUndo();
 };
 
@@ -1108,6 +1109,83 @@ void EditorStateTest::shapeStylePartialUpdateAndUndo()
     state.undo();
     style = state.selectedClipData().value(QStringLiteral("shapeStyle")).toMap();
     QCOMPARE(style.value(QStringLiteral("fillKind")).toString(), QStringLiteral("solid"));
+}
+
+// A ramp on an audio clip goes through exactly the same session, apply and replace flow a video
+// clip does — the only difference is that the editor has a waveform to draw instead of a filmstrip.
+void EditorStateTest::speedCurveOnAudioClipRetimesAndReplaces()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    drift::Project &project = *state.project();
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-audio");
+    clip.type = drift::ClipType::Audio;
+    clip.name = QStringLiteral("Tone");
+    clip.path = QStringLiteral("/tmp/tone.wav");
+    clip.timelineStart = drift::secondsToUs(1.0);
+    clip.timelineDuration = drift::secondsToUs(4.0);
+    clip.srcIn = 0;
+    clip.srcOut = drift::secondsToUs(4.0);
+    clip.volume.setKeyframe(0, 1.0);
+    clip.volume.setKeyframe(drift::secondsToUs(4.0), 0.0);
+
+    drift::Track track{.type = drift::TrackType::Audio};
+    track.clips.append(clip);
+    // A video track above the audio one, so "directly above the clip's own track" is
+    // distinguishable from "at the very top".
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+    project.tracks().append(track);
+    const int sourceTrack = 1;
+
+    state.beginSpeedCurveSession(sourceTrack, 0);
+    QVERIFY2(state.speedCurveSessionActive(), qPrintable(state.lastMessage()));
+    QCOMPARE(state.speedCurveClipPath(), clip.path);
+    // No filmstrip on an audio clip, which is what makes the editor fall back to the waveform.
+    QVERIFY(state.speedCurveFilmstripPath().isEmpty());
+
+    // Ramp from half speed up to double, so the retimed duration is neither the source length nor
+    // a simple scale of it.
+    state.setSpeedCurvePoints(QVariantList{
+        QVariantMap{{QStringLiteral("pos"), 0.0}, {QStringLiteral("speed"), 0.5}},
+        QVariantMap{{QStringLiteral("pos"), 1.0}, {QStringLiteral("speed"), 2.0}},
+    });
+    // Timeline length is the integral of 1/speed over the source, (2/3)·ln4 ≈ 0.924 of it here —
+    // not the endpoint speed and not the average of the two.
+    const double retimedSeconds = state.speedCurveRetimedDuration();
+    QVERIFY2(std::fabs(retimedSeconds - 3.697) < 0.12, qPrintable(QString::number(retimedSeconds)));
+
+    state.applySpeedCurve();
+
+    // The retimed copy lands on a new audio track directly above the source track.
+    QCOMPARE(project.tracks().size(), 3);
+    QCOMPARE(project.tracks().at(1).type, drift::TrackType::Audio);
+    QCOMPARE(project.tracks().at(1).clips.size(), 1);
+
+    const drift::Clip &retimed = project.tracks().at(1).clips.at(0);
+    QVERIFY(retimed.hasSpeedCurve());
+    QCOMPARE(retimed.type, drift::ClipType::Audio);
+    QCOMPARE(retimed.timelineStart, clip.timelineStart);
+    QCOMPARE(retimed.srcIn, clip.srcIn);
+    QCOMPARE(retimed.srcOut, clip.srcOut);
+    QCOMPARE(retimed.timelineDuration,
+             retimed.speedCurve.retimedDurationUs(retimed.srcOut - retimed.srcIn));
+    // Volume automation has to follow the retime, or the fade would land at the wrong moment. The
+    // key that sat at the clip's old end belongs at its new one, not at the same wall-clock offset.
+    QCOMPARE(retimed.volume.keyframes().size(), clip.volume.keyframes().size());
+    QCOMPARE(retimed.volume.keyframes().firstKey(), drift::TimeUs{0});
+    QVERIFY2(std::llabs(retimed.volume.keyframes().lastKey() - retimed.timelineDuration) < 100'000,
+             qPrintable(QString::number(retimed.volume.keyframes().lastKey())));
+
+    // The clip it was made from is gone rather than left playing underneath at the original rate.
+    QCOMPARE(project.tracks().at(2).clips.size(), 0);
+
+    state.undo();
+    QCOMPARE(project.tracks().size(), 2);
+    QCOMPARE(project.tracks().at(1).clips.size(), 1);
+    QVERIFY(!project.tracks().at(1).clips.at(0).hasSpeedCurve());
 }
 
 QTEST_MAIN(EditorStateTest)
