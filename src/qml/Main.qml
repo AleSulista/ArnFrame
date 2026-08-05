@@ -66,8 +66,17 @@ ApplicationWindow {
         projectSetupDialog.openForAsset(assetIndex, runner)
     }
 
+    // "Decide later" closes the first-run chooser without settling on a canvas size.
+    // Tracked separately from EditorState.projectLayoutChosen — which means "the canvas
+    // size is decided" and gates ProjectSetupDialog — so the chooser and the
+    // essential-packs nudge can move on while the first video/image clip still gets
+    // offered a setup step. Session-only, matching projectLayoutChosen itself.
+    property bool layoutPromptDismissed: false
+
     function promptLayoutChooserIfNeeded() {
         if (EditorState.recoveryAvailable || EditorState.projectLayoutChosen)
+            return
+        if (window.layoutPromptDismissed)
             return
         if (layoutChooserDialog.visible || recoveryDialog.visible)
             return
@@ -80,7 +89,9 @@ ApplicationWindow {
             return
         if (EditorState.recoveryAvailable)
             return
-        if (!EditorState.projectLayoutChosen)
+        // Either the layout was decided, or the user waved the chooser away — both
+        // mean the first-run layout step is behind us and the nudge may follow.
+        if (!EditorState.projectLayoutChosen && !window.layoutPromptDismissed)
             return
         addonStartupDialog.considerOpen()
     }
@@ -96,6 +107,9 @@ ApplicationWindow {
 
     LayoutChooserDialog {
         id: layoutChooserDialog
+        // rejected() fires before closed(), so the flag is already set by the time the
+        // nudge below checks it.
+        onFirstRunDismissed: window.layoutPromptDismissed = true
         onClosed: Qt.callLater(window.promptAddonStartupIfNeeded)
     }
 
@@ -240,10 +254,15 @@ ApplicationWindow {
         }
 
         function onProjectLayoutChosenChanged() {
-            if (!EditorState.projectLayoutChosen)
+            if (!EditorState.projectLayoutChosen) {
+                // New Project reasserts this even when already false, so the layout
+                // question is genuinely open again — including for a user who chose
+                // "Decide later" last time round.
+                window.layoutPromptDismissed = false
                 layoutChooserOpenTimer.restart()
-            else
+            } else {
                 Qt.callLater(window.promptAddonStartupIfNeeded)
+            }
         }
 
         // --- Error and status surfacing -------------------------------------

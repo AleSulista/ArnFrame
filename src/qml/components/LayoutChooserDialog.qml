@@ -210,11 +210,16 @@ ThemedDialog {
         EditorState.markProjectLayoutChosen()
     }
 
-    // First-launch dismiss: keep the default canvas and treat the layout step as done so
-    // ProjectSetupDialog / this chooser stay quiet — and the essential-packs nudge can follow.
+    // First-launch dismiss. This used to call markProjectLayoutChosen(), which stopped
+    // the chooser reopening and let the essential-packs nudge follow — but the same
+    // flag also gates ProjectSetupDialog, so "Decide later" silently meant "never ask",
+    // and dropping the first clip no longer offered to set the canvas up. The canvas is
+    // still undecided here, so report the dismissal instead of faking a decision.
+    signal firstRunDismissed()
+
     onRejected: {
         if (!fromSettings)
-            EditorState.markProjectLayoutChosen()
+            root.firstRunDismissed()
     }
 
     contentItem: Column {
