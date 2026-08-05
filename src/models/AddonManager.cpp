@@ -535,11 +535,13 @@ void AddonManager::beginExtract(const QString &id, const QString &packagePath)
                 if (!ok) {
                     if (finished && finished->cancelled) {
                         emit catalogChanged();
+                        emit transferFailed(id, QStringLiteral("Cancelled"));
                         return;
                     }
                     m_failures.insert(id, message);
                     setStatus(message);
                     emit catalogChanged();
+                    emit transferFailed(id, message);
                     return;
                 }
 
@@ -552,6 +554,7 @@ void AddonManager::beginExtract(const QString &id, const QString &packagePath)
                 }
                 reloadForKinds(kinds);
                 emit catalogChanged();
+                emit transferSucceeded(id);
             });
 
     watcher->setFuture(QtConcurrent::run([transfer, packagePath, destination]() -> QPair<bool, QString> {
@@ -574,6 +577,7 @@ void AddonManager::failTransfer(const QString &id, const QString &message)
     m_failures.insert(id, message);
     setStatus(message);
     emit catalogChanged();
+    emit transferFailed(id, message);
 }
 
 void AddonManager::cancel(const QString &id)

@@ -481,11 +481,12 @@ ThemedDialog {
                     border.width: Theme.borderWidth
                     border.color: Theme.primary
 
+                    // A morph between two aspect ratios, not an entrance.
                     Behavior on width {
-                        NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
+                        NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easingInOut }
                     }
                     Behavior on height {
-                        NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
+                        NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easingInOut }
                     }
 
                     Text {

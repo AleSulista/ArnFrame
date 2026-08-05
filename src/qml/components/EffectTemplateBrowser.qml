@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Window
 import Drift
 
 // Beat-synced multi-effect presets: category chips + card grid.
@@ -33,8 +34,23 @@ Column {
         EditorState.applyEffectTemplate(EditorState.selectedTrack, EditorState.selectedClip, templateId)
     }
 
+    // Without the pack installed the catalog is empty and the grid rendered nothing,
+    // unlike the sibling audio and transitions tabs which both offer an install CTA.
+    EmptyState {
+        width: parent.width
+        height: visible ? root.height : 0
+        visible: root.catalog.length === 0
+        glyph: Theme.icons.wand
+        title: qsTr("No effect templates")
+        hint: qsTr("Install the Effect Templates pack from Extras to browse presets here.")
+        actionText: qsTr("Get extras")
+        onActionTriggered: root.Window.window.openAddonManager()
+    }
+
     Text {
         id: browserTip
+        visible: root.catalog.length > 0
+        height: visible ? implicitHeight : 0
         width: parent.width - 24
         leftPadding: 12
         rightPadding: 12
@@ -52,19 +68,26 @@ Column {
 
     ThemedTextField {
         id: search
+        visible: root.catalog.length > 0
+        height: visible ? implicitHeight : 0
         width: parent.width - 24
         x: 12
         placeholderText: qsTr("Search templates")
         font.family: Theme.fontFamily
     }
 
-    Item { width: 1; height: Theme.spacingMd }
+    Item {
+        width: 1
+        height: root.catalog.length > 0 ? Theme.spacingMd : 0
+    }
 
     Flickable {
         id: categoryFlick
+        // Two independent reasons to hide the chips: there is nothing installed to
+        // categorise, or a search is active and spans every category anyway.
+        visible: root.catalog.length > 0 && root.query.length === 0
         width: parent.width
-        height: root.query.length > 0 ? 0 : 34
-        visible: root.query.length === 0
+        height: visible ? 34 : 0
         contentWidth: categoryRow.width + 24
         clip: true
 
@@ -88,9 +111,12 @@ Column {
     }
 
     Flickable {
+        visible: root.catalog.length > 0
         width: parent.width
-        height: Math.max(0, root.height - browserTip.height - search.height - Theme.spacingMd
-                         - (root.query.length > 0 ? 0 : categoryFlick.height))
+        height: visible
+                ? Math.max(0, root.height - browserTip.height - search.height - Theme.spacingMd
+                              - (root.query.length > 0 ? 0 : categoryFlick.height))
+                : 0
         contentHeight: Math.max(emptySearchHint.height, presetGrid.height) + 24
         clip: true
         ScrollBar.vertical: AppScrollBar { }
@@ -142,6 +168,15 @@ Column {
                         border.width: 1
                         border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.35)
                         clip: true
+                        // Matches the media cards in MediaAssetsTab; these snapped.
+                        scale: cardHover.hovered ? 1.03 : 1.0
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
+                        Behavior on scale {
+                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
 
                         HoverHandler { id: cardHover }
 

@@ -105,6 +105,7 @@ Item {
 
         ThemedSlider {
             id: speedSlider
+            label: qsTr("Speed")
             visible: root.clipKind === "video" || root.clipKind === "audio"
             enabled: !speedColumn.hasSpeedCurve
             width: parent.width
@@ -234,6 +235,7 @@ Item {
 
         ThemedSlider {
             id: fadeInSlider
+            label: qsTr("Fade in")
             width: parent.width
             from: 0
             to: parent.fadeMax
@@ -262,6 +264,7 @@ Item {
 
         ThemedSlider {
             id: fadeOutSlider
+            label: qsTr("Fade out")
             width: parent.width
             from: 0
             to: parent.fadeMax

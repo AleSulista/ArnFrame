@@ -69,11 +69,33 @@ ThemedDialog {
             Addons.remindUpdates = false
     }
 
+    // True from the moment installs are kicked off until every one has reported an
+    // outcome. The dialog used to close() immediately here, which orphaned its own
+    // progress rows below and left hundreds of MB downloading with no indication
+    // that anything was happening — or that anything had failed.
+    property bool installing: false
+    property int pendingCount: 0
+
     function installListed() {
+        if (installing || actionIds.length === 0)
+            return
         persistReminders()
+        root.installing = true
+        root.pendingCount = actionIds.length
         for (var i = 0; i < actionIds.length; ++i)
             Addons.install(actionIds[i])
-        close()
+    }
+
+    // Counts a transfer out whichever way it ended. Failures are surfaced as toasts
+    // from Main.qml, so this only has to decide when the dialog is done.
+    function noteTransferSettled(id) {
+        if (!root.installing || root.actionIds.indexOf(id) < 0)
+            return
+        root.pendingCount = Math.max(0, root.pendingCount - 1)
+        if (root.pendingCount === 0) {
+            root.installing = false
+            root.close()
+        }
     }
 
     function dismiss() {
@@ -83,7 +105,7 @@ ThemedDialog {
 
     Shortcut {
         sequences: ["Return", "Enter"]
-        enabled: root.visible
+        enabled: root.visible && !root.installing
         onActivated: root.installListed()
     }
 
@@ -94,172 +116,197 @@ ThemedDialog {
             next[id] = { fraction: fraction, phase: phase }
             root.transfers = next
         }
+        function onTransferSucceeded(id) { root.noteTransferSettled(id) }
+        function onTransferFailed(id, reason) { root.noteTransferSettled(id) }
     }
 
-    contentItem: Column {
-        spacing: Theme.spacingLg
+    // One row per pack plus two checkboxes and a button row grows past the window on
+    // a short display, which used to push the button row off-screen entirely.
+    contentItem: Flickable {
+        id: contentFlick
         width: parent ? parent.width : Theme.dialogWidthMd
-
-        ThemedLabel {
-            width: parent.width
-            size: "sm"
-            visible: root.showEssential
-            text: qsTr("Install the essential packs for effects, transitions, and audio. "
-                       + "You can keep using Drift without them — installing unlocks updates "
-                       + "when they improve.")
+        implicitHeight: Math.min(startupColumn.height, root.availableContentHeight)
+        contentWidth: width
+        contentHeight: startupColumn.height
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        interactive: contentHeight > height
+        ScrollBar.vertical: AppScrollBar {
+            policy: contentFlick.contentHeight > contentFlick.height
+                    ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
         }
 
-        Repeater {
-            model: root.essentialAddons
+        Column {
+            id: startupColumn
+            spacing: Theme.spacingLg
+            width: contentFlick.width
 
-            Rectangle {
-                id: essentialRow
-
-                required property var modelData
-
-                readonly property var transfer: root.transfers[modelData.id]
-
-                width: parent ? parent.width : 0
-                height: essentialBody.implicitHeight + Theme.spacingXl
-                radius: Theme.radiusMd
-                color: Theme.panelSecondaryBg
-                border.width: Theme.borderWidth
-                border.color: Theme.panelSecondaryBorder
-
-                Column {
-                    id: essentialBody
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.leftMargin: Theme.spacingXl
-                    anchors.rightMargin: Theme.spacingXl
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Theme.spacingXs
-
-                    ThemedLabel {
-                        width: parent.width
-                        text: essentialRow.modelData.name
-                        tone: "default"
-                        size: "sm"
-                        font.weight: Font.Medium
-                        elide: Text.ElideRight
-                    }
-
-                    ThemedLabel {
-                        width: parent.width
-                        text: essentialRow.transfer
-                              ? qsTr("%1… %2%").arg(essentialRow.transfer.phase)
-                                                .arg(Math.round(essentialRow.transfer.fraction * 100))
-                              : (essentialRow.modelData.description || essentialRow.modelData.id)
-                        elide: Text.ElideRight
-                    }
-                }
+            ThemedLabel {
+                width: parent.width
+                size: "sm"
+                visible: root.showEssential
+                text: qsTr("Install the essential packs for effects, transitions, and audio. "
+                           + "You can keep using Drift without them — installing unlocks updates "
+                           + "when they improve.")
             }
-        }
 
-        ThemedCheckBox {
-            width: parent.width
-            visible: root.showEssential
-            checked: root.dontRemindEssential
-            text: qsTr("Don't remind me of essential addons")
-            onToggled: root.dontRemindEssential = checked
-        }
+            Repeater {
+                model: root.essentialAddons
 
-        Rectangle {
-            width: parent.width
-            height: Theme.borderWidth
-            color: Theme.panelBorder
-            visible: root.showEssential && root.showUpdates
-        }
+                Rectangle {
+                    id: essentialRow
 
-        ThemedLabel {
-            width: parent.width
-            size: "sm"
-            visible: root.showUpdates
-            text: qsTr("Updates are available for packs you already have installed.")
-        }
+                    required property var modelData
 
-        Repeater {
-            model: root.updateAddons
+                    readonly property var transfer: root.transfers[modelData.id]
 
-            Rectangle {
-                id: updateRow
+                    width: parent ? parent.width : 0
+                    height: essentialBody.implicitHeight + Theme.spacingXl
+                    radius: Theme.radiusMd
+                    color: Theme.panelSecondaryBg
+                    border.width: Theme.borderWidth
+                    border.color: Theme.panelSecondaryBorder
 
-                required property var modelData
+                    Column {
+                        id: essentialBody
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.leftMargin: Theme.spacingXl
+                        anchors.rightMargin: Theme.spacingXl
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Theme.spacingXs
 
-                readonly property var transfer: root.transfers[modelData.id]
-
-                width: parent ? parent.width : 0
-                height: updateBody.implicitHeight + Theme.spacingXl
-                radius: Theme.radiusMd
-                color: Theme.panelSecondaryBg
-                border.width: Theme.borderWidth
-                border.color: Theme.panelSecondaryBorder
-
-                Column {
-                    id: updateBody
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.leftMargin: Theme.spacingXl
-                    anchors.rightMargin: Theme.spacingXl
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Theme.spacingXs
-
-                    ThemedLabel {
-                        width: parent.width
-                        text: updateRow.modelData.name
-                        tone: "default"
-                        size: "sm"
-                        font.weight: Font.Medium
-                        elide: Text.ElideRight
-                    }
-
-                    ThemedLabel {
-                        width: parent.width
-                        text: {
-                            if (updateRow.transfer)
-                                return qsTr("%1… %2%").arg(updateRow.transfer.phase)
-                                                      .arg(Math.round(updateRow.transfer.fraction * 100))
-                            return qsTr("%1 → %2").arg(updateRow.modelData.installedVersion)
-                                                  .arg(updateRow.modelData.version)
+                        ThemedLabel {
+                            width: parent.width
+                            text: essentialRow.modelData.name
+                            tone: "default"
+                            size: "sm"
+                            font.weight: Font.Medium
+                            elide: Text.ElideRight
                         }
-                        elide: Text.ElideRight
+
+                        ThemedLabel {
+                            width: parent.width
+                            text: essentialRow.transfer
+                                  ? qsTr("%1… %2%").arg(essentialRow.transfer.phase)
+                                                    .arg(Math.round(essentialRow.transfer.fraction * 100))
+                                  : (essentialRow.modelData.description || essentialRow.modelData.id)
+                            elide: Text.ElideRight
+                        }
                     }
                 }
             }
-        }
 
-        ThemedCheckBox {
-            width: parent.width
-            visible: root.showUpdates
-            checked: root.dontRemindUpdates
-            text: qsTr("Don't remind me of future addon updates")
-            onToggled: root.dontRemindUpdates = checked
-        }
-
-        Item {
-            width: parent.width
-            height: installButton.height
-
-            ThemedButton {
-                anchors.left: parent.left
-                variant: "ghost"
-                text: qsTr("Later")
-                onClicked: root.dismiss()
+            ThemedCheckBox {
+                width: parent.width
+                visible: root.showEssential
+                checked: root.dontRemindEssential
+                text: qsTr("Don't remind me of essential addons")
+                onToggled: root.dontRemindEssential = checked
             }
 
-            ThemedButton {
-                id: installButton
-                anchors.right: parent.right
-                variant: "primary"
-                glyph: Theme.icons.download
-                text: {
-                    if (root.showEssential && root.showUpdates)
-                        return qsTr("Install & update")
-                    if (root.showUpdates)
-                        return root.updateAddons.length === 1 ? qsTr("Update") : qsTr("Update all")
-                    return root.essentialAddons.length === 1 ? qsTr("Install") : qsTr("Install all")
+            Rectangle {
+                width: parent.width
+                height: Theme.borderWidth
+                color: Theme.panelBorder
+                visible: root.showEssential && root.showUpdates
+            }
+
+            ThemedLabel {
+                width: parent.width
+                size: "sm"
+                visible: root.showUpdates
+                text: qsTr("Updates are available for packs you already have installed.")
+            }
+
+            Repeater {
+                model: root.updateAddons
+
+                Rectangle {
+                    id: updateRow
+
+                    required property var modelData
+
+                    readonly property var transfer: root.transfers[modelData.id]
+
+                    width: parent ? parent.width : 0
+                    height: updateBody.implicitHeight + Theme.spacingXl
+                    radius: Theme.radiusMd
+                    color: Theme.panelSecondaryBg
+                    border.width: Theme.borderWidth
+                    border.color: Theme.panelSecondaryBorder
+
+                    Column {
+                        id: updateBody
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.leftMargin: Theme.spacingXl
+                        anchors.rightMargin: Theme.spacingXl
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Theme.spacingXs
+
+                        ThemedLabel {
+                            width: parent.width
+                            text: updateRow.modelData.name
+                            tone: "default"
+                            size: "sm"
+                            font.weight: Font.Medium
+                            elide: Text.ElideRight
+                        }
+
+                        ThemedLabel {
+                            width: parent.width
+                            text: {
+                                if (updateRow.transfer)
+                                    return qsTr("%1… %2%").arg(updateRow.transfer.phase)
+                                                          .arg(Math.round(updateRow.transfer.fraction * 100))
+                                return qsTr("%1 → %2").arg(updateRow.modelData.installedVersion)
+                                                      .arg(updateRow.modelData.version)
+                            }
+                            elide: Text.ElideRight
+                        }
+                    }
                 }
-                onClicked: root.installListed()
+            }
+
+            ThemedCheckBox {
+                width: parent.width
+                visible: root.showUpdates
+                checked: root.dontRemindUpdates
+                text: qsTr("Don't remind me of future addon updates")
+                onToggled: root.dontRemindUpdates = checked
+            }
+
+            Item {
+                width: parent.width
+                height: installButton.height
+
+                ThemedButton {
+                    anchors.left: parent.left
+                    variant: "ghost"
+                    // Downloads keep running in the background either way; this only
+                    // stops watching them.
+                    text: root.installing ? qsTr("Hide") : qsTr("Later")
+                    onClicked: root.dismiss()
+                }
+
+                ThemedButton {
+                    id: installButton
+                    anchors.right: parent.right
+                    variant: "primary"
+                    glyph: Theme.icons.download
+                    enabled: !root.installing
+                    text: {
+                        if (root.installing)
+                            return qsTr("Installing…")
+                        if (root.showEssential && root.showUpdates)
+                            return qsTr("Install & update")
+                        if (root.showUpdates)
+                            return root.updateAddons.length === 1 ? qsTr("Update") : qsTr("Update all")
+                        return root.essentialAddons.length === 1 ? qsTr("Install") : qsTr("Install all")
+                    }
+                    onClicked: root.installListed()
+                }
             }
         }
     }

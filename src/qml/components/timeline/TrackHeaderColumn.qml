@@ -218,6 +218,10 @@ Item {
                 iconColor: trackDragMouse.hovered || root.draggingTrackFrom === index
                            ? Theme.panelForeground : Theme.mutedForeground
 
+                Behavior on iconColor {
+                    ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                }
+
                 ThemedToolTip {
                     visible: trackHeaderDrag.containsMouse && root.draggingTrackFrom < 0
                     text: qsTr("Drag the header to reorder this track")

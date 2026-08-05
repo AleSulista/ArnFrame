@@ -30,18 +30,10 @@ PanelFrame {
         cutHoverClip = -1
     }
 
-    // CapCut: V = Select, B = Blade. Escape while a cut tool is active is
-    // handled in Main.qml so it exits the tool without clearing the selection.
-    Shortcut {
-        sequence: "V"
-        context: Qt.ApplicationShortcut
-        onActivated: root.timelineTool = ""
-    }
-    Shortcut {
-        sequence: "B"
-        context: Qt.ApplicationShortcut
-        onActivated: root.timelineTool = "split"
-    }
+    // CapCut: V = Select, B = Blade. These are registered actions ("selectTool" /
+    // "bladeTool") so they appear in the shortcut list and can be rebound; the tool
+    // state lives here rather than in the backend, so Main.qml dispatches them
+    // alongside Escape, which exits the tool without clearing the selection.
 
     // Y offset of a track row within the track column (excludes ruler/bookmark).
     function trackOffsetY(index) {
@@ -589,7 +581,7 @@ PanelFrame {
         target: flick
         property: "contentX"
         duration: Theme.durationBase
-        easing.type: Theme.easing
+        easing.type: Theme.easingInOut
     }
 
     Column {

@@ -191,6 +191,7 @@ Item {
                 }
                 ThemedSlider {
                     id: maskParamSlider
+                    label: modelData.label
                     width: parent.width
                     from: modelData.min
                     to: modelData.max

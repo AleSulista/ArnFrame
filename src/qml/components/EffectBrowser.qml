@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Window
 import Drift
 
 // Browsable effect preset picker: category chips + card grid.
@@ -34,8 +35,26 @@ Column {
         EditorState.addEffect(EditorState.selectedTrack, EditorState.selectedClip, effectId)
     }
 
+    // With the effects pack uninstalled the catalog is empty, activeCategory falls
+    // back to "" and the grid rendered nothing — a blank panel with a stray tip line,
+    // while the sibling audio and transitions tabs both offered an install CTA.
+    // Startup now prompts for these packs and users can decline, so uninstalled is a
+    // normal first-run state rather than an edge case.
+    EmptyState {
+        width: parent.width
+        height: visible ? root.height : 0
+        visible: root.catalog.length === 0
+        glyph: Theme.icons.wand
+        title: qsTr("No effects")
+        hint: qsTr("Install the Effects pack from Extras to browse presets here.")
+        actionText: qsTr("Get extras")
+        onActionTriggered: root.Window.window.openAddonManager()
+    }
+
     Text {
         id: browserTip
+        visible: root.catalog.length > 0
+        height: visible ? implicitHeight : 0
         width: parent.width - 24
         leftPadding: 12
         rightPadding: 12
@@ -53,19 +72,26 @@ Column {
 
     ThemedTextField {
         id: search
+        visible: root.catalog.length > 0
+        height: visible ? implicitHeight : 0
         width: parent.width - 24
         x: 12
         placeholderText: qsTr("Search effects")
         font.family: Theme.fontFamily
     }
 
-    Item { width: 1; height: Theme.spacingMd }
+    Item {
+        width: 1
+        height: root.catalog.length > 0 ? Theme.spacingMd : 0
+    }
 
     Flickable {
         id: categoryFlick
+        // Two independent reasons to hide the chips: there is nothing installed to
+        // categorise, or a search is active and spans every category anyway.
+        visible: root.catalog.length > 0 && root.query.length === 0
         width: parent.width
-        height: root.query.length > 0 ? 0 : 34
-        visible: root.query.length === 0
+        height: visible ? 34 : 0
         contentWidth: categoryRow.width + 24
         clip: true
 
@@ -89,9 +115,12 @@ Column {
     }
 
     Flickable {
+        visible: root.catalog.length > 0
         width: parent.width
-        height: Math.max(0, root.height - browserTip.height - search.height - Theme.spacingMd
-                         - (root.query.length > 0 ? 0 : categoryFlick.height))
+        height: visible
+                ? Math.max(0, root.height - browserTip.height - search.height - Theme.spacingMd
+                              - (root.query.length > 0 ? 0 : categoryFlick.height))
+                : 0
         contentHeight: Math.max(emptySearchHint.height, presetGrid.height) + 24
         clip: true
         ScrollBar.vertical: AppScrollBar { }
@@ -128,7 +157,17 @@ Column {
                     required property var modelData
                     width: Theme.assetCardWidth
                     spacing: 4
+                    // Lift on grab: the card dims and grows slightly, so it reads
+                    // as picked up rather than merely faded.
                     opacity: presetDrag.active ? 0.85 : 1
+                    scale: presetDrag.active ? 1.04 : 1.0
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                    }
+                    Behavior on scale {
+                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                    }
 
                     readonly property string thumb: presetCard.modelData.thumbnailPath || ""
 
@@ -148,6 +187,19 @@ Column {
                         border.width: presetDrag.active ? 1 : 0
                         border.color: Theme.primary
                         clip: true
+                        // Matches the media cards in MediaAssetsTab, which already
+                        // grow and animate on hover; these snapped.
+                        scale: cardHover.hovered ? 1.03 : 1.0
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
+                        Behavior on scale {
+                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
+                        Behavior on border.width {
+                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
 
                         HoverHandler { id: cardHover }
 

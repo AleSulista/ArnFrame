@@ -172,6 +172,7 @@ Window {
 
                 ThemedSlider {
                     id: frameSlider
+                    label: qsTr("Frame")
                     width: parent.width - 220
                     anchors.verticalCenter: parent.verticalCenter
                     from: 0

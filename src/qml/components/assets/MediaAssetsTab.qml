@@ -128,6 +128,18 @@ Item {
 
                     property int assetIndex: index
 
+                    // Lift on grab: dims and grows slightly, so the card reads as
+                    // picked up rather than just sitting there while a ghost moves.
+                    opacity: assetDrag.active ? 0.85 : 1
+                    scale: assetDrag.active ? 1.04 : 1.0
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                    }
+                    Behavior on scale {
+                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                    }
+
                     Drag.active: assetDrag.active
                     Drag.dragType: Drag.Automatic
                     Drag.supportedActions: Qt.CopyAction

@@ -189,23 +189,42 @@ Popup {
         radius: Theme.radiusMd
     }
 
+    // Opacity plus scale, matching ThemedContextMenu.
     enter: Transition {
-        NumberAnimation {
-            property: "opacity"
-            from: 0.0
-            to: 1.0
-            duration: Theme.durationFast
-            easing.type: Theme.easing
+        ParallelAnimation {
+            NumberAnimation {
+                property: "opacity"
+                from: 0.0
+                to: 1.0
+                duration: Theme.durationBase
+                easing.type: Theme.easing
+            }
+            NumberAnimation {
+                property: "scale"
+                from: 0.96
+                to: 1.0
+                duration: Theme.durationBase
+                easing.type: Theme.easing
+            }
         }
     }
 
     exit: Transition {
-        NumberAnimation {
-            property: "opacity"
-            from: 1.0
-            to: 0.0
-            duration: Theme.durationFast
-            easing.type: Theme.easing
+        ParallelAnimation {
+            NumberAnimation {
+                property: "opacity"
+                from: 1.0
+                to: 0.0
+                duration: Theme.durationFast
+                easing.type: Theme.easing
+            }
+            NumberAnimation {
+                property: "scale"
+                from: 1.0
+                to: 0.96
+                duration: Theme.durationFast
+                easing.type: Theme.easing
+            }
         }
     }
 

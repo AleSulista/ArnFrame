@@ -149,7 +149,17 @@ Column {
                     required property var modelData
                     width: Theme.assetCardWidth
                     spacing: 4
+                    // Lift on grab: the card dims and grows slightly, so it reads
+                    // as picked up rather than merely faded.
                     opacity: presetDrag.active ? 0.85 : 1
+                    scale: presetDrag.active ? 1.04 : 1.0
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                    }
+                    Behavior on scale {
+                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                    }
 
                     readonly property string thumb: presetCard.modelData.thumbnailPath || ""
                     readonly property string iconGlyph: presetCard.modelData.icon || "audio-lines"
@@ -170,6 +180,18 @@ Column {
                         border.width: presetDrag.active ? 1 : 0
                         border.color: Theme.primary
                         clip: true
+                        // Matches the media cards in MediaAssetsTab; these snapped.
+                        scale: cardHover.hovered ? 1.03 : 1.0
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
+                        Behavior on scale {
+                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
+                        Behavior on border.width {
+                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
 
                         HoverHandler { id: cardHover }
 

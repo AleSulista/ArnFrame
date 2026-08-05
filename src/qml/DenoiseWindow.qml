@@ -261,6 +261,7 @@ Window {
 
             ThemedSlider {
                 id: windowSlider
+                label: qsTr("Preview from")
                 width: parent.width - 260
                 anchors.verticalCenter: parent.verticalCenter
                 from: 0

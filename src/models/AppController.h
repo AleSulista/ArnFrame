@@ -132,6 +132,11 @@ class AppController : public QObject
     Q_PROPERTY(bool packaging READ packaging NOTIFY packagingChanged)
     Q_PROPERTY(double packageProgress READ packageProgress NOTIFY packageProgressChanged)
     Q_PROPERTY(QString lastMessage READ lastMessage NOTIFY lastMessageChanged)
+    // Severity of lastMessage: "info" | "success" | "warning" | "error". Exists so
+    // the QML toast host does not have to guess from the message wording — it used
+    // to regex the prose, and none of the real failure strings matched, so a
+    // corrupt-project open rendered as a neutral info toast.
+    Q_PROPERTY(QString lastMessageSeverity READ lastMessageSeverity NOTIFY lastMessageChanged)
     Q_PROPERTY(int draggingAssetIndex READ draggingAssetIndex WRITE setDraggingAssetIndex NOTIFY draggingAssetIndexChanged)
     Q_PROPERTY(bool hasUnsavedChanges READ hasUnsavedChanges NOTIFY dirtyChanged)
     Q_PROPERTY(QString currentProjectPath READ currentProjectPath NOTIFY currentProjectPathChanged)
@@ -207,6 +212,7 @@ public:
     QVariantList bookmarks() const;
     QString projectName() const;
     QString lastMessage() const { return m_lastMessage; }
+    QString lastMessageSeverity() const { return m_lastMessageSeverity; }
     int draggingAssetIndex() const { return m_draggingAssetIndex; }
     void setDraggingAssetIndex(int index);
     bool hasUnsavedChanges() const { return m_dirty; }
@@ -550,7 +556,14 @@ public:
     // heightPx scales the cursor to the hovered clip/track height.
     Q_INVOKABLE void setTimelineTrimCursor(int side, int heightPx = 0);
     Q_INVOKABLE QString shortcutFor(const QString &actionId) const;
-    Q_INVOKABLE void setShortcut(const QString &actionId, const QString &keys);
+    // Returns an empty string on success, or the label of the action already bound to
+    // `keys` when the binding is refused. Qt resolves an ambiguous application
+    // shortcut by firing *neither* action, so a silent double-binding would break
+    // both with no indication anywhere.
+    Q_INVOKABLE QString setShortcut(const QString &actionId, const QString &keys);
+    // Restores every default binding. Backspace clears a binding and persists the
+    // empty string, so without this there was no route back from having cleared one.
+    Q_INVOKABLE void resetShortcuts();
     Q_INVOKABLE void triggerAction(const QString &actionId);
     Q_INVOKABLE void togglePlayback();
     Q_INVOKABLE void undo();
@@ -759,7 +772,10 @@ protected:
     bool renderDenoisedAudio(const QString &path, drift::TimeUs srcIn, drift::TimeUs span,
                              const QString &outPath, const QString &originalPath,
                              double progressFrom, double progressTo, QString *errorOut);
-    void setLastMessage(const QString &message);
+    // Defaulted severity so the existing call sites, which report ordinary status,
+    // stay unchanged; pass "error"/"warning" explicitly where a failure is reported.
+    void setLastMessage(const QString &message,
+                        const QString &severity = QStringLiteral("info"));
     drift::TimeUs playheadUs() const { return m_playheadUs; }
     void setPlayheadUs(drift::TimeUs us);
 
@@ -897,6 +913,7 @@ protected:
     QHash<QString, QString> m_shortcuts;
     int m_draggingAssetIndex = -1;
     QString m_lastMessage;
+    QString m_lastMessageSeverity = QStringLiteral("info");
     bool m_inlineTextEditing = false;
     bool m_previewDragActive = false;
     drift::Project m_previewDragBefore;

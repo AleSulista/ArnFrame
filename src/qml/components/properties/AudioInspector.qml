@@ -315,6 +315,7 @@ Item {
 
                             ThemedSlider {
                                 id: audioParamSlider
+                                label: audioParamRow.paramData.label
                                 visible: !audioParamRow.paramData.isBoolean
                                 width: parent.width
                                 from: audioParamRow.paramData.min

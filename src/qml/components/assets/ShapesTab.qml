@@ -104,6 +104,17 @@ Item {
                     width: Theme.assetCardWidth
                     spacing: Theme.spacingSm
 
+                    // Lift on grab — matches the media and effect cards.
+                    opacity: shapeDrag.active ? 0.85 : 1
+                    scale: shapeDrag.active ? 1.04 : 1.0
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                    }
+                    Behavior on scale {
+                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                    }
+
                     Drag.active: shapeDrag.active
                     Drag.dragType: Drag.Automatic
                     Drag.supportedActions: Qt.CopyAction

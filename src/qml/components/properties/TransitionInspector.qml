@@ -288,6 +288,7 @@ Item {
 
                     ThemedSlider {
                         id: trParamSlider
+                        label: trParamRow.paramData.label
                         visible: !trParamRow.paramData.isBoolean
                         width: parent.width
                         from: trParamRow.paramData.min

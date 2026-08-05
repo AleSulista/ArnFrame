@@ -178,6 +178,28 @@ PanelFrame {
     property int activeTab: 0
     property bool sortByKind: false
 
+    // Fades the tab body in on a tab change instead of hard-cutting to it. Driven
+    // as one property the bodies share, rather than fading the whole content
+    // Column, so the panel header does not flash along with it. Fade-in only, not
+    // a crossfade: the bodies are Column siblings, and overlapping two would
+    // double-count height and jump the layout mid-transition.
+    property real tabOpacity: 1.0
+
+    onActiveTabChanged: {
+        root.tabOpacity = 0
+        tabFadeIn.restart()
+    }
+
+    NumberAnimation {
+        id: tabFadeIn
+        target: root
+        property: "tabOpacity"
+        from: 0.0
+        to: 1.0
+        duration: Theme.durationBase
+        easing.type: Theme.easing
+    }
+
     DropArea {
         id: assetDropArea
         anchors.fill: parent
@@ -228,6 +250,7 @@ PanelFrame {
         EmptyState {
             anchors.centerIn: parent
             glyph: Theme.icons.spinner
+            glyphSpinning: root.importing
             title: qsTr("Importing…")
             hint: qsTr("Reading media and generating thumbnails.")
         }
@@ -401,36 +424,42 @@ PanelFrame {
             TextAssetsTab {
                 visible: tabsModel.get(activeTab).tabId === "text"
                 width: parent.width
+                opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
             }
 
             SoundsTab {
                 visible: tabsModel.get(activeTab).tabId === "sounds"
                 width: parent.width
+                opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
             }
 
             StickersTab {
                 visible: tabsModel.get(activeTab).tabId === "stickers"
                 width: parent.width
+                opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
             }
 
             ShapesTab {
                 visible: tabsModel.get(activeTab).tabId === "shapes"
                 width: parent.width
+                opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
             }
 
             SettingsTab {
                 visible: tabsModel.get(activeTab).tabId === "settings"
                 width: parent.width
+                opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
             }
 
             ShortcutsTab {
                 visible: tabsModel.get(activeTab).tabId === "shortcuts"
                 width: parent.width
+                opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
             }
 
@@ -438,12 +467,14 @@ PanelFrame {
             EffectBrowser {
                 visible: tabsModel.get(activeTab).tabId === "effects"
                 width: parent.width
+                opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
             }
 
             EffectTemplateBrowser {
                 visible: tabsModel.get(activeTab).tabId === "templates"
                 width: parent.width
+                opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
             }
 
@@ -452,6 +483,7 @@ PanelFrame {
                 id: transitionsBrowser
                 visible: tabsModel.get(activeTab).tabId === "transitions"
                 width: parent.width
+                opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
 
                 readonly property var categories: EditorState.transitionCategories()
@@ -591,7 +623,16 @@ PanelFrame {
                                     required property var modelData
                                     width: Theme.assetCardWidth
                                     spacing: 4
+                                    // Lift on grab — matches the media and effect cards.
                                     opacity: transitionDrag.active ? 0.85 : 1
+                                    scale: transitionDrag.active ? 1.04 : 1.0
+
+                                    Behavior on opacity {
+                                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                    }
+                                    Behavior on scale {
+                                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                    }
 
                                     readonly property string strip: transitionCard.modelData.previewStripPath || ""
                                     readonly property int frameCount: Math.max(1, transitionCard.modelData.previewFrames || 1)
@@ -718,6 +759,7 @@ PanelFrame {
             MediaAssetsTab {
                 visible: kindsForTab(tabsModel.get(activeTab).tabId).length > 0
                 width: parent.width
+                opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
                 gridMode: assetsContent.gridMode
                 importing: root.importing

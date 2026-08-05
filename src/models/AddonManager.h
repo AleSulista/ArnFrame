@@ -91,6 +91,11 @@ signals:
     void progressChanged(const QString &id, double fraction, const QString &phase);
     // A kind's content changed on disk and its catalog has already been reloaded.
     void kindChanged(const QString &kind);
+    // Per-transfer outcome. `status` is a mixed-purpose display string — it carries
+    // store errors, per-transfer failures and the empty success state alike — so
+    // these exist to let callers react to an outcome without reading its prose.
+    void transferFailed(const QString &id, const QString &reason);
+    void transferSucceeded(const QString &id);
 
 private:
     struct Transfer;

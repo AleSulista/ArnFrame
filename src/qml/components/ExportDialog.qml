@@ -149,279 +149,299 @@ ThemedDialog {
         }
     }
 
-    contentItem: Column {
-        spacing: Theme.spacingXl
+    // With Advanced open this content is ~800px tall against a 560px minimum
+    // window height, so it has to scroll: unscrolled, the dialog overflowed the
+    // window and took the Export/Cancel buttons off-screen with it.
+    contentItem: Flickable {
+        id: contentFlick
         width: parent ? parent.width : Theme.dialogWidthLg
-
-        ThemedLabel {
-            width: parent.width
-            size: "sm"
-            text: qsTr("Saves what you see in the preview. Pick a size — the picture shape stays the same.")
-        }
-
-        ThemedLabel {
-            text: qsTr("Downscale")
-        }
-
-        Flow {
-            width: parent.width
-            spacing: Theme.spacingMd
-
-            Repeater {
-                model: root.scaleOptions
-
-                delegate: ThemedChip {
-                    required property var modelData
-                    text: modelData.label
-                    selected: root.scaleId === modelData.id
-                    tooltip: qsTr("Export at %1×%2").arg(modelData.width).arg(modelData.height)
-                    onClicked: {
-                        root.scaleId = modelData.id
-                        root.targetHeight = modelData.targetHeight
-                        if (modelData.videoBitrateKbps)
-                            root.videoBitrateKbps = modelData.videoBitrateKbps
-                    }
-                }
-            }
-        }
-
-        // Advanced disclosure
-        Item {
-            width: parent.width
-            height: advancedHeader.implicitHeight
-
-            Row {
-                id: advancedHeader
-                spacing: Theme.spacingSm
-                anchors.left: parent.left
-
-                IconGlyph {
-                    anchors.verticalCenter: parent.verticalCenter
-                    glyph: Theme.icons.chevronRight
-                    iconSize: Theme.iconSizeSm
-                    iconColor: Theme.mutedForeground
-                    rotation: root.advancedOpen ? 90 : 0
-                    Behavior on rotation {
-                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                    }
-                }
-
-                ThemedLabel {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Advanced")
-                }
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.advancedOpen = !root.advancedOpen
-            }
-
-            Accessible.role: Accessible.Button
-            Accessible.name: qsTr("Advanced")
-            Accessible.checkable: true
-            Accessible.checked: root.advancedOpen
-            Accessible.onPressAction: root.advancedOpen = !root.advancedOpen
+        implicitHeight: Math.min(exportColumn.height, root.availableContentHeight)
+        contentWidth: width
+        contentHeight: exportColumn.height
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        interactive: contentHeight > height
+        ScrollBar.vertical: AppScrollBar {
+            policy: contentFlick.contentHeight > contentFlick.height
+                    ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
         }
 
         Column {
-            width: parent.width
+            id: exportColumn
             spacing: Theme.spacingXl
-            visible: root.advancedOpen
-            height: visible ? implicitHeight : 0
-            clip: true
+            width: contentFlick.width
 
-            // Video encoder
-            Column {
+            ThemedLabel {
                 width: parent.width
-                spacing: Theme.spacingSm
+                size: "sm"
+                text: qsTr("Saves what you see in the preview. Pick a size — the picture shape stays the same.")
+            }
 
-                ThemedLabel {
-                    text: qsTr("Video encoder")
-                    size: "sm"
-                }
+            ThemedLabel {
+                text: qsTr("Downscale")
+            }
 
-                ThemedComboBox {
-                    id: videoCodecCombo
-                    width: parent.width
-                    textRole: "label"
-                    valueRole: "id"
-                    model: root.videoCodecs
-                    onActivated: function (index) {
-                        var item = root.videoCodecs[index]
-                        if (!item || !item.available) {
-                            currentIndex = Math.max(0, indexOfValue(root.videoCodecId))
-                            return
+            Flow {
+                width: parent.width
+                spacing: Theme.spacingMd
+
+                Repeater {
+                    model: root.scaleOptions
+
+                    delegate: ThemedChip {
+                        required property var modelData
+                        text: modelData.label
+                        selected: root.scaleId === modelData.id
+                        tooltip: qsTr("Export at %1×%2").arg(modelData.width).arg(modelData.height)
+                        onClicked: {
+                            root.scaleId = modelData.id
+                            root.targetHeight = modelData.targetHeight
+                            if (modelData.videoBitrateKbps)
+                                root.videoBitrateKbps = modelData.videoBitrateKbps
                         }
-                        root.videoCodecId = item.id
-                        root.applyVideoCodecDefaults(item)
-                        root.refreshCodecMeta()
-                        root.syncComboIndices()
                     }
                 }
             }
 
-            // Rate control (hidden for lossless)
-            Column {
+            // Advanced disclosure
+            Item {
                 width: parent.width
-                spacing: Theme.spacingMd
-                visible: !root.videoLossless
+                height: advancedHeader.implicitHeight
 
                 Row {
-                    spacing: Theme.spacingMd
+                    id: advancedHeader
+                    spacing: Theme.spacingSm
+                    anchors.left: parent.left
 
-                    ThemedToggleButton {
-                        text: qsTr("Constant Quality")
-                        checked: root.rateControl === "crf"
-                        enabled: root.videoSupportsCrf
-                        onClicked: {
-                            if (root.videoSupportsCrf)
-                                root.rateControl = "crf"
+                    IconGlyph {
+                        anchors.verticalCenter: parent.verticalCenter
+                        glyph: Theme.icons.chevronRight
+                        iconSize: Theme.iconSizeSm
+                        iconColor: Theme.mutedForeground
+                        rotation: root.advancedOpen ? 90 : 0
+                        Behavior on rotation {
+                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
                         }
                     }
 
-                    ThemedToggleButton {
-                        text: qsTr("Bitrate")
-                        checked: root.rateControl === "bitrate"
-                        enabled: root.videoSupportsBitrate
-                        onClicked: {
-                            if (root.videoSupportsBitrate)
-                                root.rateControl = "bitrate"
+                    ThemedLabel {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Advanced")
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.advancedOpen = !root.advancedOpen
+                }
+
+                Accessible.role: Accessible.Button
+                Accessible.name: qsTr("Advanced")
+                Accessible.checkable: true
+                Accessible.checked: root.advancedOpen
+                Accessible.onPressAction: root.advancedOpen = !root.advancedOpen
+            }
+
+            Column {
+                width: parent.width
+                spacing: Theme.spacingXl
+                visible: root.advancedOpen
+                height: visible ? implicitHeight : 0
+                clip: true
+
+                // Video encoder
+                Column {
+                    width: parent.width
+                    spacing: Theme.spacingSm
+
+                    ThemedLabel {
+                        text: qsTr("Video encoder")
+                        size: "sm"
+                    }
+
+                    ThemedComboBox {
+                        id: videoCodecCombo
+                        width: parent.width
+                        textRole: "label"
+                        valueRole: "id"
+                        model: root.videoCodecs
+                        onActivated: function (index) {
+                            var item = root.videoCodecs[index]
+                            if (!item || !item.available) {
+                                currentIndex = Math.max(0, indexOfValue(root.videoCodecId))
+                                return
+                            }
+                            root.videoCodecId = item.id
+                            root.applyVideoCodecDefaults(item)
+                            root.refreshCodecMeta()
+                            root.syncComboIndices()
                         }
                     }
                 }
 
+                // Rate control (hidden for lossless)
                 Column {
                     width: parent.width
-                    spacing: Theme.spacingSm
-                    visible: root.rateControl === "crf" && root.videoSupportsCrf
+                    spacing: Theme.spacingMd
+                    visible: !root.videoLossless
 
                     Row {
-                        width: parent.width
-                        ThemedLabel {
-                            text: qsTr("RF %1").arg(root.crf)
-                            size: "sm"
+                        spacing: Theme.spacingMd
+
+                        ThemedToggleButton {
+                            text: qsTr("Constant Quality")
+                            checked: root.rateControl === "crf"
+                            enabled: root.videoSupportsCrf
+                            onClicked: {
+                                if (root.videoSupportsCrf)
+                                    root.rateControl = "crf"
+                            }
+                        }
+
+                        ThemedToggleButton {
+                            text: qsTr("Bitrate")
+                            checked: root.rateControl === "bitrate"
+                            enabled: root.videoSupportsBitrate
+                            onClicked: {
+                                if (root.videoSupportsBitrate)
+                                    root.rateControl = "bitrate"
+                            }
                         }
                     }
 
-                    ThemedSlider {
+                    Column {
                         width: parent.width
-                        from: 0
-                        to: 51
-                        stepSize: 1
-                        value: root.crf
-                        valueFormatter: function (v) { return qsTr("RF %1").arg(Math.round(v)) }
-                        onMoved: root.crf = Math.round(value)
+                        spacing: Theme.spacingSm
+                        visible: root.rateControl === "crf" && root.videoSupportsCrf
+
+                        Row {
+                            width: parent.width
+                            ThemedLabel {
+                                text: qsTr("RF %1").arg(root.crf)
+                                size: "sm"
+                            }
+                        }
+
+                        ThemedSlider {
+                            width: parent.width
+                            label: qsTr("Quality (RF)")
+                            from: 0
+                            to: 51
+                            stepSize: 1
+                            value: root.crf
+                            valueFormatter: function (v) { return qsTr("RF %1").arg(Math.round(v)) }
+                            onMoved: root.crf = Math.round(value)
+                        }
+
+                        RowLayout {
+                            width: parent.width
+
+                            ThemedLabel {
+                                text: qsTr("Higher quality")
+                                size: "xs"
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            ThemedLabel {
+                                text: qsTr("Lower quality")
+                                size: "xs"
+                            }
+                        }
                     }
 
                     RowLayout {
                         width: parent.width
+                        spacing: Theme.spacingMd
+                        visible: root.rateControl === "bitrate" && root.videoSupportsBitrate
 
                         ThemedLabel {
-                            text: qsTr("Higher quality")
-                            size: "xs"
+                            text: qsTr("Bitrate (kbps)")
+                            size: "sm"
                         }
 
-                        Item { Layout.fillWidth: true }
-
-                        ThemedLabel {
-                            text: qsTr("Lower quality")
-                            size: "xs"
+                        ThemedNumberField {
+                            Layout.preferredWidth: 120
+                            from: 100
+                            to: 100000
+                            step: 100
+                            unit: qsTr("kbps")
+                            value: root.videoBitrateKbps
+                            onEdited: function (v) { root.videoBitrateKbps = Math.round(v) }
                         }
                     }
                 }
 
-                RowLayout {
+                // Preset
+                Column {
                     width: parent.width
-                    spacing: Theme.spacingMd
-                    visible: root.rateControl === "bitrate" && root.videoSupportsBitrate
+                    spacing: Theme.spacingSm
+                    visible: root.videoSupportsPreset && root.videoPresetList.length > 0
+
+                    ThemedLabel {
+                        text: qsTr("Preset")
+                        size: "sm"
+                    }
+
+                    ThemedComboBox {
+                        id: presetCombo
+                        width: parent.width
+                        model: root.videoPresetList
+                        onActivated: function (index) {
+                            if (index >= 0 && index < root.videoPresetList.length)
+                                root.videoPreset = root.videoPresetList[index]
+                        }
+                    }
+                }
+
+                // Audio
+                GridLayout {
+                    width: parent.width
+                    columns: 2
+                    columnSpacing: Theme.spacingLg
+                    rowSpacing: Theme.spacingSm
+
+                    ThemedLabel {
+                        text: qsTr("Audio encoder")
+                        size: "sm"
+                        Layout.fillWidth: true
+                    }
 
                     ThemedLabel {
                         text: qsTr("Bitrate (kbps)")
                         size: "sm"
+                        Layout.fillWidth: true
+                        visible: !root.audioLossless
+                    }
+
+                    ThemedComboBox {
+                        id: audioCodecCombo
+                        Layout.fillWidth: true
+                        textRole: "label"
+                        valueRole: "id"
+                        model: root.audioCodecs
+                        onActivated: function (index) {
+                            var item = root.audioCodecs[index]
+                            if (!item || !item.available) {
+                                currentIndex = Math.max(0, indexOfValue(root.audioCodecId))
+                                return
+                            }
+                            root.audioCodecId = item.id
+                            root.refreshCodecMeta()
+                        }
                     }
 
                     ThemedNumberField {
-                        Layout.preferredWidth: 120
-                        from: 100
-                        to: 100000
-                        step: 100
+                        Layout.fillWidth: true
+                        visible: !root.audioLossless
+                        from: 32
+                        to: 512
+                        step: 16
                         unit: qsTr("kbps")
-                        value: root.videoBitrateKbps
-                        onEdited: function (v) { root.videoBitrateKbps = Math.round(v) }
+                        value: root.audioBitrateKbps
+                        onEdited: function (v) { root.audioBitrateKbps = Math.round(v) }
                     }
-                }
-            }
-
-            // Preset
-            Column {
-                width: parent.width
-                spacing: Theme.spacingSm
-                visible: root.videoSupportsPreset && root.videoPresetList.length > 0
-
-                ThemedLabel {
-                    text: qsTr("Preset")
-                    size: "sm"
-                }
-
-                ThemedComboBox {
-                    id: presetCombo
-                    width: parent.width
-                    model: root.videoPresetList
-                    onActivated: function (index) {
-                        if (index >= 0 && index < root.videoPresetList.length)
-                            root.videoPreset = root.videoPresetList[index]
-                    }
-                }
-            }
-
-            // Audio
-            GridLayout {
-                width: parent.width
-                columns: 2
-                columnSpacing: Theme.spacingLg
-                rowSpacing: Theme.spacingSm
-
-                ThemedLabel {
-                    text: qsTr("Audio encoder")
-                    size: "sm"
-                    Layout.fillWidth: true
-                }
-
-                ThemedLabel {
-                    text: qsTr("Bitrate (kbps)")
-                    size: "sm"
-                    Layout.fillWidth: true
-                    visible: !root.audioLossless
-                }
-
-                ThemedComboBox {
-                    id: audioCodecCombo
-                    Layout.fillWidth: true
-                    textRole: "label"
-                    valueRole: "id"
-                    model: root.audioCodecs
-                    onActivated: function (index) {
-                        var item = root.audioCodecs[index]
-                        if (!item || !item.available) {
-                            currentIndex = Math.max(0, indexOfValue(root.audioCodecId))
-                            return
-                        }
-                        root.audioCodecId = item.id
-                        root.refreshCodecMeta()
-                    }
-                }
-
-                ThemedNumberField {
-                    Layout.fillWidth: true
-                    visible: !root.audioLossless
-                    from: 32
-                    to: 512
-                    step: 16
-                    unit: qsTr("kbps")
-                    value: root.audioBitrateKbps
-                    onEdited: function (v) { root.audioBitrateKbps = Math.round(v) }
                 }
             }
         }

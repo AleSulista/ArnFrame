@@ -289,11 +289,16 @@ ApplicationWindow {
             const message = EditorState.lastMessage
             if (message.length === 0)
                 return
-            // The backend has no severity channel, so infer it from the wording.
-            if (/fail|error|could not|unable|invalid|denied/i.test(message))
-                Toasts.error(message)
-            else
-                Toasts.info(message)
+            // Severity comes from the backend. This used to infer it by regexing the
+            // message prose, which matched none of the real failure strings — a
+            // corrupt-project open read as a neutral info toast that auto-dismissed
+            // in five seconds, identical to "Project saved".
+            switch (EditorState.lastMessageSeverity) {
+            case "error":   Toasts.error(message); break
+            case "warning": Toasts.warning(message); break
+            case "success": Toasts.success(message); break
+            default:        Toasts.info(message); break
+            }
         }
 
         // Raised when an edit is refused (e.g. transforming a locked clip).
@@ -312,6 +317,15 @@ ApplicationWindow {
         }
         function onCatalogChanged() {
             Qt.callLater(window.promptAddonStartupIfNeeded)
+        }
+
+        // A download or signature failure only reached the addon manager dialog's
+        // status line, so a pack that failed to install while that dialog was closed
+        // — the normal case for the startup prompt — failed completely silently.
+        function onTransferFailed(id, reason) {
+            if (reason === "Cancelled")
+                return
+            Toasts.error(qsTr("Couldn’t install “%1”: %2").arg(id).arg(reason))
         }
     }
 
@@ -334,9 +348,33 @@ ApplicationWindow {
                         timelinePanel.timelineTool = ""
                         return
                     }
+                    // Tool modes are QML state, so they are dispatched here rather
+                    // than by triggerAction.
+                    if (modelData.id === "selectTool") {
+                        timelinePanel.timelineTool = ""
+                        return
+                    }
+                    if (modelData.id === "bladeTool") {
+                        timelinePanel.timelineTool = "split"
+                        return
+                    }
                     EditorState.triggerAction(modelData.id)
                 }
             }
+        }
+    }
+
+    // There is no menu bar and no help overlay, so the only route to the shortcut
+    // list was an unlabelled icon in a vertical rail that can itself be scrolled out
+    // of view on a short window. F1 is the conventional way in and reuses the tab
+    // that already exists.
+    Shortcut {
+        sequence: "F1"
+        context: Qt.ApplicationShortcut
+        onActivated: {
+            if (window.previewFullscreen)
+                window.togglePreviewFullscreen()
+            assetsPanel.showTab("shortcuts")
         }
     }
 

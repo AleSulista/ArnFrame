@@ -13,6 +13,11 @@ Slider {
     property bool showValueTooltip: true
     property var valueFormatter: function (v) { return Number(v).toFixed(2) }
 
+    // What this slider controls, for assistive tech. The role was already declared
+    // but no name ever was, so every instance announced as an unlabelled "slider".
+    // Callers should set it; the formatter is a fallback, not a substitute.
+    property string label: ""
+
     from: 0
     to: 1
     live: true
@@ -25,6 +30,8 @@ Slider {
     opacity: enabled ? 1 : 0.5
 
     Accessible.role: Accessible.Slider
+    Accessible.name: label
+    Accessible.description: valueFormatter ? String(valueFormatter(value)) : String(value)
 
     // Guard against callers that bind inverted ranges (Qt debug asserts in qBound).
     onFromChanged: if (from > to) to = from
@@ -83,9 +90,10 @@ Slider {
 
             // Eases programmatic value changes (a preset chip, a reset button)
             // without fighting the drag, which sets position continuously.
+            // Must share the handle's curve below, or fill and handle desync.
             Behavior on width {
                 enabled: !root.pressed
-                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingInOut }
             }
         }
     }
@@ -106,7 +114,7 @@ Slider {
 
         Behavior on x {
             enabled: !root.pressed
-            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easingInOut }
         }
         Behavior on color {
             ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }

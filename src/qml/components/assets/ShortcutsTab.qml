@@ -100,6 +100,19 @@ Item {
                     }
                 }
             }
+
+            // Clearing a binding persists the empty string, so without this there was
+            // no way back from having cleared one.
+            ThemedButton {
+                text: qsTr("Reset to defaults")
+                variant: "secondary"
+                glyph: Theme.icons.undo
+                topPadding: Theme.spacingMd + 1
+                onClicked: {
+                    EditorState.resetShortcuts()
+                    Toasts.success(qsTr("Shortcuts reset to defaults."))
+                }
+            }
         }
     }
 }

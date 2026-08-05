@@ -274,7 +274,25 @@ PanelFrame {
                 // Tall tabs (Audio/Effects) leave contentY deep; reset when switching.
                 Connections {
                     target: root
-                    function onActiveTabChanged() { tabFlick.contentY = 0 }
+                    function onActiveTabChanged() {
+                        tabFlick.contentY = 0
+                        tabColumn.opacity = 0
+                        tabFadeIn.restart()
+                    }
+                }
+
+                // Fade the new tab in rather than hard-cutting to it. Fade-in only,
+                // not a crossfade: the inspectors share a Column, which excludes
+                // invisible items from layout, so overlapping two of them would
+                // double-count height and jump the panel mid-transition.
+                NumberAnimation {
+                    id: tabFadeIn
+                    target: tabColumn
+                    property: "opacity"
+                    from: 0.0
+                    to: 1.0
+                    duration: Theme.durationBase
+                    easing.type: Theme.easing
                 }
 
                 Column {

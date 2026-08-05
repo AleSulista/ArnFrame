@@ -206,11 +206,20 @@ QtObject {
 
     // --- Motion ----------------------------------------------------------------
     // durationFast: hover/press tints. durationBase: dialogs, tab crossfades.
-    // durationSlow: layout-affecting reveals.
+    // durationSlow: layout-affecting reveals. durationPress: press feedback.
     readonly property int durationFast: 90
     readonly property int durationBase: 140
     readonly property int durationSlow: 220
-    readonly property int easing: Easing.OutCubic
+    readonly property int durationPress: 120
+    // Strong ease-out (~cubic-bezier(0.22, 1, 0.36, 1)) for anything entering or
+    // leaving: it starts fast, so the interface answers in the frame the user is
+    // watching. OutCubic was too weak to read as deliberate.
+    readonly property int easing: Easing.OutQuint
+    // Strong ease-in-out (~cubic-bezier(0.76, 0, 0.24, 1)) for things already on
+    // screen that move or morph, where a fast start reads as a jerk.
+    readonly property int easingInOut: Easing.InOutQuart
+    // Press feedback: pressable chrome dips to this scale while held.
+    readonly property real pressScale: 0.97
     readonly property int tooltipDelay: 400
 
     // --- Dialog widths ---------------------------------------------------------
@@ -339,6 +348,7 @@ QtObject {
         sortByName: "arrow-down-a-z",
         sortByKind: "tags",
         gripVertical: "grip-vertical",
+        ellipsis: "ellipsis",
         save: "save",
         setStart: "arrow-left-to-line",
         setEnd: "arrow-right-to-line",

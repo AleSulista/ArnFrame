@@ -288,6 +288,7 @@ Item {
 
             ThemedSlider {
                 id: innerRatioSlider
+                label: qsTr("Inner radius")
                 width: parent.width
                 from: 0.05
                 to: 0.95
@@ -315,6 +316,7 @@ Item {
 
             ThemedSlider {
                 id: headSizeSlider
+                label: qsTr("Head size")
                 width: parent.width
                 from: 0.05
                 to: 0.9
@@ -342,6 +344,7 @@ Item {
 
             ThemedSlider {
                 id: thicknessSlider
+                label: qsTr("Thickness")
                 width: parent.width
                 from: 0.05
                 to: 1.0
@@ -375,6 +378,7 @@ Item {
 
             ThemedSlider {
                 id: tailXSlider
+                label: qsTr("Tail position")
                 width: parent.width
                 from: 0.08
                 to: 0.92
@@ -396,6 +400,7 @@ Item {
 
             ThemedSlider {
                 id: tailSizeSlider
+                label: qsTr("Tail size")
                 width: parent.width
                 from: 0.05
                 to: 0.5

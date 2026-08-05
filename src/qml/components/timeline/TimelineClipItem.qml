@@ -134,6 +134,13 @@ Item {
         value: Theme.clipSelectionRingWidth
     }
 
+    // No `Behavior on y` here. A drop settle looks appealing but cannot work at this
+    // seam: onReleased reads clipItem.y through mapToItem to decide the target track,
+    // and MouseArea.drag writes y directly during the drag. Animating y makes that
+    // read lag the pointer, so trackIndexAtY resolves back to the origin track and a
+    // cross-track drag silently becomes a same-track move. Gating the Behavior on
+    // drag.active does not save it — Qt clears drag.active only after onReleased
+    // returns, so y is already reset by then and the settle never plays anyway.
     Rectangle {
         id: clipBackground
         anchors.fill: parent

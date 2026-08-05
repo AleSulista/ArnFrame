@@ -264,6 +264,7 @@ Item {
                 }
                 ThemedSlider {
                     width: parent.width
+                    label: qsTr("Blur strength")
                     from: 1
                     to: 100
                     stepSize: 1
