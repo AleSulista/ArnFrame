@@ -1001,6 +1001,7 @@ QVariantMap effectToMap(const drift::Effect &effect, int effectIndex, drift::Tim
         {QStringLiteral("label"), def ? def->meta.displayName : effect.name},
         {QStringLiteral("params"), params},
         {QStringLiteral("compositorOnly"), def ? def->meta.compositorOnly : false},
+        {QStringLiteral("enabled"), effect.enabled},
     };
 }
 
@@ -1033,6 +1034,7 @@ QVariantMap audioEffectToMap(const drift::Effect &effect)
         {QStringLiteral("thumbnailPath"), def ? def->thumbnailPath : QString()},
         {QStringLiteral("params"), params},
         {QStringLiteral("missing"), def == nullptr},
+        {QStringLiteral("enabled"), effect.enabled},
     };
 }
 
@@ -1641,6 +1643,43 @@ void AppController::dropKeyframeGraphPropertiesForEffect(int removedIndex)
         next.append(effectIndex > removedIndex
                         ? QStringLiteral("fx.%1.%2").arg(effectIndex - 1).arg(paramKey)
                         : prop);
+    }
+    if (next == m_keyframeGraphHiddenProperties)
+        return;
+    m_keyframeGraphHiddenProperties = next;
+    emit keyframeGraphVisibilityChanged();
+}
+
+// Moving an effect between slots is the same addressing problem as remove: rewrite every
+// fx.N.* entry so the hidden set still points at the same parameters after the swap.
+void AppController::remapKeyframeGraphPropertiesForEffectMove(int fromIndex, int toIndex)
+{
+    if (fromIndex == toIndex)
+        return;
+    QStringList next;
+    next.reserve(m_keyframeGraphHiddenProperties.size());
+    for (const QString &prop : std::as_const(m_keyframeGraphHiddenProperties)) {
+        int effectIndex = -1;
+        QString paramKey;
+        if (!parseEffectProp(prop, &effectIndex, &paramKey)) {
+            next.append(prop);
+            continue;
+        }
+        int mapped = effectIndex;
+        if (effectIndex == fromIndex) {
+            mapped = toIndex;
+        } else if (fromIndex < toIndex) {
+            // Shifted left toward the vacated slot.
+            if (effectIndex > fromIndex && effectIndex <= toIndex)
+                mapped = effectIndex - 1;
+        } else {
+            // Shifted right toward the vacated slot.
+            if (effectIndex >= toIndex && effectIndex < fromIndex)
+                mapped = effectIndex + 1;
+        }
+        next.append(mapped == effectIndex
+                        ? prop
+                        : QStringLiteral("fx.%1.%2").arg(mapped).arg(paramKey));
     }
     if (next == m_keyframeGraphHiddenProperties)
         return;
@@ -7583,6 +7622,51 @@ void AppController::removeEffect(int trackIndex, int clipIndex, int effectIndex)
     finishEdit(QStringLiteral("Effect removed"));
 }
 
+void AppController::setEffectEnabled(int trackIndex, int clipIndex, int effectIndex, bool enabled)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (effectIndex < 0 || effectIndex >= clip.effects.size())
+        return;
+    if (clip.effects[effectIndex].enabled == enabled)
+        return;
+
+    const drift::Project before = m_project;
+    clip.effects[effectIndex].enabled = enabled;
+    pushProjectEdit(before, enabled ? QStringLiteral("Enable effect")
+                                    : QStringLiteral("Disable effect"));
+    finishEdit(enabled ? QStringLiteral("Effect enabled") : QStringLiteral("Effect disabled"));
+}
+
+void AppController::moveEffect(int trackIndex, int clipIndex, int fromIndex, int toIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (fromIndex < 0 || fromIndex >= clip.effects.size())
+        return;
+    toIndex = qBound(0, toIndex, clip.effects.size() - 1);
+    if (fromIndex == toIndex)
+        return;
+
+    const drift::Project before = m_project;
+    clip.effects.move(fromIndex, toIndex);
+    remapKeyframeGraphPropertiesForEffectMove(fromIndex, toIndex);
+    pushProjectEdit(before, QStringLiteral("Reorder effect"));
+    finishEdit(QStringLiteral("Effect reordered"));
+}
+
 void AppController::setEffectParam(int trackIndex, int clipIndex, int effectIndex, const QString &key,
                                    double value)
 {
@@ -7702,6 +7786,51 @@ void AppController::removeAudioEffect(int trackIndex, int clipIndex, int effectI
     clip.audioEffects.removeAt(effectIndex);
     pushProjectEdit(before, QStringLiteral("Remove audio effect"));
     finishEdit(QStringLiteral("Audio effect removed"));
+}
+
+void AppController::setAudioEffectEnabled(int trackIndex, int clipIndex, int effectIndex, bool enabled)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (effectIndex < 0 || effectIndex >= clip.audioEffects.size())
+        return;
+    if (clip.audioEffects[effectIndex].enabled == enabled)
+        return;
+
+    const drift::Project before = m_project;
+    clip.audioEffects[effectIndex].enabled = enabled;
+    pushProjectEdit(before, enabled ? QStringLiteral("Enable audio effect")
+                                    : QStringLiteral("Disable audio effect"));
+    finishEdit(enabled ? QStringLiteral("Audio effect enabled")
+                       : QStringLiteral("Audio effect disabled"));
+}
+
+void AppController::moveAudioEffect(int trackIndex, int clipIndex, int fromIndex, int toIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (fromIndex < 0 || fromIndex >= clip.audioEffects.size())
+        return;
+    toIndex = qBound(0, toIndex, clip.audioEffects.size() - 1);
+    if (fromIndex == toIndex)
+        return;
+
+    const drift::Project before = m_project;
+    clip.audioEffects.move(fromIndex, toIndex);
+    pushProjectEdit(before, QStringLiteral("Reorder audio effect"));
+    finishEdit(QStringLiteral("Audio effect reordered"));
 }
 
 void AppController::previewSetAudioEffectParam(int trackIndex, int clipIndex, int effectIndex,

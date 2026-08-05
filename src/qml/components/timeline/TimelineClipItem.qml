@@ -28,6 +28,22 @@ Item {
     property string trackType: panel.tracks[trackIndex].type
     property bool showWaveform: panel.tracks[trackIndex].showWaveform === true
     property var clipEffects: clipData.effects || []
+    property var clipAudioEffects: clipData.audioEffects || []
+    readonly property bool hasAnyEffects: clipEffects.length > 0 || clipAudioEffects.length > 0
+    readonly property string effectsLabelText: {
+        const names = []
+        for (var i = 0; i < clipEffects.length; i++) {
+            const fx = clipEffects[i]
+            const label = fx.label || qsTr("Effect")
+            names.push(fx.enabled === false ? qsTr("%1 (off)").arg(label) : label)
+        }
+        for (var j = 0; j < clipAudioEffects.length; j++) {
+            const afx = clipAudioEffects[j]
+            const alabel = afx.label || qsTr("Effect")
+            names.push(afx.enabled === false ? qsTr("%1 (off)").arg(alabel) : alabel)
+        }
+        return names.join(" · ")
+    }
     property bool effectDropTarget: panel.effectDropTrackIndex === trackIndex
                                     && panel.effectDropClipIndex === clipIndex
     readonly property bool timelineFadeHandles: trackType !== "text"
@@ -61,7 +77,7 @@ Item {
     // and clamped so it can never swallow a
     // short (25px) text or subtitle row.
     readonly property real headerBandHeight: {
-        const wanted = clipEffects.length > 0
+        const wanted = clipItem.hasAnyEffects
             ? Theme.clipHeaderBandHeight * 1.6
             : Theme.clipHeaderBandHeight
         return Math.min(wanted, Math.max(0, height * 0.5))
@@ -272,13 +288,8 @@ Item {
 
                 Text {
                     width: parent.width
-                    visible: clipItem.clipEffects.length > 0
-                    text: {
-                        const names = []
-                        for (var i = 0; i < clipItem.clipEffects.length; i++)
-                            names.push(clipItem.clipEffects[i].label || qsTr("Effect"))
-                        return names.join(" · ")
-                    }
+                    visible: clipItem.hasAnyEffects
+                    text: clipItem.effectsLabelText
                     color: Theme.panelSecondaryForeground
                     font.pixelSize: Theme.fontSizeTiny
                     font.family: Theme.fontFamily
@@ -314,13 +325,8 @@ Item {
 
             Text {
                 width: parent.width
-                visible: clipItem.clipEffects.length > 0
-                text: {
-                    const names = []
-                    for (var i = 0; i < clipItem.clipEffects.length; i++)
-                        names.push(clipItem.clipEffects[i].label || qsTr("Effect"))
-                    return names.join(" · ")
-                }
+                visible: clipItem.hasAnyEffects
+                text: clipItem.effectsLabelText
                 color: Theme.panelSecondaryForeground
                 font.pixelSize: Theme.fontSizeTiny
                 font.family: Theme.fontFamily

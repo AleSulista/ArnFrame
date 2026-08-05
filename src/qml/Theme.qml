@@ -328,6 +328,7 @@ QtObject {
         image: "image",
         shapes: "shapes",
         chevronDown: "chevron-down",
+        chevronUp: "chevron-up",
         chevronsRight: "chevrons-right",
         x: "x",
         messageSquare: "message-square",

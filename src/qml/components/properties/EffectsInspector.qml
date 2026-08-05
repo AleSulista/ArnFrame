@@ -187,6 +187,7 @@ Item {
                 required property int index
                 readonly property var effectData: root.selectedEffects[index] || ({})
                 readonly property var effectParams: effectData.params || []
+                readonly property bool effectEnabled: effectData.enabled !== false
                 width: root.width
                 spacing: 6
 
@@ -203,15 +204,51 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.leftMargin: 8
                         anchors.rightMargin: 4
+                        spacing: 2
+
                         Text {
                             text: effectCard.effectData.label
-                            color: Theme.panelForeground
+                            color: effectCard.effectEnabled
+                                   ? Theme.panelForeground : Theme.mutedForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSm
                             font.weight: Font.Medium
-                            width: parent.width - 28
+                            width: parent.width - 22 * 4 - 8
                             elide: Text.ElideRight
                             anchors.verticalCenter: parent.verticalCenter
+                        }
+                        IconButton {
+                            glyph: Theme.icons.chevronUp
+                            variant: "ghost"
+                            buttonSize: 22
+                            iconSize: 12
+                            enabled: effectCard.index > 0
+                            tooltip: qsTr("Move effect up")
+                            onClicked: EditorState.moveEffect(
+                                           EditorState.selectedTrack, EditorState.selectedClip,
+                                           effectCard.index, effectCard.index - 1)
+                        }
+                        IconButton {
+                            glyph: Theme.icons.chevronDown
+                            variant: "ghost"
+                            buttonSize: 22
+                            iconSize: 12
+                            enabled: effectCard.index < root.selectedEffects.length - 1
+                            tooltip: qsTr("Move effect down")
+                            onClicked: EditorState.moveEffect(
+                                           EditorState.selectedTrack, EditorState.selectedClip,
+                                           effectCard.index, effectCard.index + 1)
+                        }
+                        IconButton {
+                            glyph: effectCard.effectEnabled ? Theme.icons.eye : Theme.icons.eyeOff
+                            variant: "ghost"
+                            buttonSize: 22
+                            iconSize: 12
+                            tooltip: effectCard.effectEnabled
+                                     ? qsTr("Disable effect") : qsTr("Enable effect")
+                            onClicked: EditorState.setEffectEnabled(
+                                           EditorState.selectedTrack, EditorState.selectedClip,
+                                           effectCard.index, !effectCard.effectEnabled)
                         }
                         IconButton {
                             glyph: Theme.icons.x
@@ -226,66 +263,72 @@ Item {
                     }
                 }
 
-                Repeater {
-                    model: effectCard.effectParams.length
-                    delegate: Column {
-                        id: paramRow
-                        required property int index
-                        readonly property var paramData: effectCard.effectParams[index] || ({})
-                        width: root.width
-                        spacing: 4
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    opacity: effectCard.effectEnabled ? 1 : 0.45
 
-                        // Booleans have nothing to interpolate, so they keep the
-                        // plain switch and stay off the keyframe strip.
-                        Row {
-                            visible: !!paramRow.paramData.isBoolean
-                            width: parent.width
-                            spacing: 8
-                            Text {
-                                width: parent.width - 48
-                                elide: Text.ElideRight
-                                text: paramRow.paramData.label
-                                color: Theme.mutedForeground
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeXs
-                                anchors.verticalCenter: parent.verticalCenter
+                    Repeater {
+                        model: effectCard.effectParams.length
+                        delegate: Column {
+                            id: paramRow
+                            required property int index
+                            readonly property var paramData: effectCard.effectParams[index] || ({})
+                            width: root.width
+                            spacing: 4
+
+                            // Booleans have nothing to interpolate, so they keep the
+                            // plain switch and stay off the keyframe strip.
+                            Row {
+                                visible: !!paramRow.paramData.isBoolean
+                                width: parent.width
+                                spacing: 8
+                                Text {
+                                    width: parent.width - 48
+                                    elide: Text.ElideRight
+                                    text: paramRow.paramData.label
+                                    color: Theme.mutedForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    width: 40
+                                    horizontalAlignment: Text.AlignRight
+                                    text: paramRow.paramData.value ? qsTr("On") : qsTr("Off")
+                                    color: Theme.panelForeground
+                                    font.family: Theme.monoFontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
-                            Text {
-                                width: 40
-                                horizontalAlignment: Text.AlignRight
-                                text: paramRow.paramData.value ? qsTr("On") : qsTr("Off")
-                                color: Theme.panelForeground
-                                font.family: Theme.monoFontFamily
-                                font.pixelSize: Theme.fontSizeXs
-                                anchors.verticalCenter: parent.verticalCenter
+
+                            ThemedSwitch {
+                                visible: !!paramRow.paramData.isBoolean
+                                checked: !!paramRow.paramData.value
+                                onToggled: EditorState.setEffectParam(
+                                               EditorState.selectedTrack, EditorState.selectedClip,
+                                               effectCard.index, paramRow.paramData.key, checked ? 1 : 0)
                             }
-                        }
 
-                        ThemedSwitch {
-                            visible: !!paramRow.paramData.isBoolean
-                            checked: !!paramRow.paramData.value
-                            onToggled: EditorState.setEffectParam(
-                                           EditorState.selectedTrack, EditorState.selectedClip,
-                                           effectCard.index, paramRow.paramData.key, checked ? 1 : 0)
-                        }
-
-                        PropertyKeyframeRow {
-                            visible: !paramRow.paramData.isBoolean
-                            width: parent.width
-                            // `def` is the param's static value, which the row falls
-                            // back to whenever the track holds no keys.
-                            propDef: ({
-                                key: paramRow.paramData.prop,
-                                label: paramRow.paramData.label,
-                                def: paramRow.paramData.value,
-                                decimals: Math.abs(paramRow.paramData.max
-                                                   - paramRow.paramData.min) >= 10 ? 1 : 2
-                            })
-                            keyframeList: (paramRow.paramData.keyframes
-                                           && paramRow.paramData.keyframes.points) || []
-                            useSlider: true
-                            sliderFrom: paramRow.paramData.min
-                            sliderTo: paramRow.paramData.max
+                            PropertyKeyframeRow {
+                                visible: !paramRow.paramData.isBoolean
+                                width: parent.width
+                                // `def` is the param's static value, which the row falls
+                                // back to whenever the track holds no keys.
+                                propDef: ({
+                                    key: paramRow.paramData.prop,
+                                    label: paramRow.paramData.label,
+                                    def: paramRow.paramData.value,
+                                    decimals: Math.abs(paramRow.paramData.max
+                                                       - paramRow.paramData.min) >= 10 ? 1 : 2
+                                })
+                                keyframeList: (paramRow.paramData.keyframes
+                                               && paramRow.paramData.keyframes.points) || []
+                                useSlider: true
+                                sliderFrom: paramRow.paramData.min
+                                sliderTo: paramRow.paramData.max
+                            }
                         }
                     }
                 }

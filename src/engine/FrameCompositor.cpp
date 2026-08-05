@@ -114,6 +114,8 @@ QList<ClipReaderPool::VideoRequest> collectVideoRequests(const drift::Project *p
 const drift::Effect *findTimeEchoEffect(const QList<drift::Effect> &effects)
 {
     for (const drift::Effect &effect : effects) {
+        if (!effect.enabled)
+            continue;
         if (effect.catalogId == QStringLiteral("time_echo"))
             return &effect;
     }
@@ -125,6 +127,8 @@ const drift::Effect *findTimeEchoEffect(const QList<drift::Effect> &effects)
 bool chainNeedsFace(const QList<drift::Effect> &effects)
 {
     for (const drift::Effect &effect : effects) {
+        if (!effect.enabled)
+            continue;
         const EffectPresetEntry *def =
             effect.catalogId.isEmpty() ? nullptr : effectDefForId(effect.catalogId);
         if (def && def->needsFace)
@@ -157,6 +161,8 @@ QList<drift::Effect> resolvedClipEffects(const drift::Clip &clip, drift::TimeUs 
     QList<drift::Effect> filtered;
     filtered.reserve(clip.effects.size());
     for (const drift::Effect &effect : clip.effects) {
+        if (!effect.enabled)
+            continue;
         if (effect.catalogId != QStringLiteral("time_echo"))
             filtered.append(effect.resolvedAt(clipTimeUs));
     }
