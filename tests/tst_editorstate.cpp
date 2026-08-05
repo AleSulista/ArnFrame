@@ -54,6 +54,8 @@ private slots:
     void waveformPeaksForSourceRangeSlicesToTheTrimmedWindow();
     void speedCurveSessionExposesTrimmedSourceWindow();
     void shapeStylePartialUpdateAndUndo();
+    void replaceAssetSourceRebindsClipsAndClampsTrim();
+    void replaceAssetSourceRefusesADifferentKind();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -1308,6 +1310,157 @@ void EditorStateTest::speedCurveSessionExposesTrimmedSourceWindow()
     QVERIFY(state.speedCurveSessionActive());
     QVERIFY(state.speedCurveMediaDuration() >= state.speedCurveSourceStart()
                                                   + state.speedCurveSourceDuration());
+}
+
+namespace {
+
+// Generates a silent test pattern of `seconds` at `path`. Returns false when ffmpeg failed.
+bool renderTestVideo(const QString &ffmpeg, const QString &path, int seconds)
+{
+    QProcess proc;
+    proc.start(ffmpeg,
+               {QStringLiteral("-y"), QStringLiteral("-f"), QStringLiteral("lavfi"),
+                QStringLiteral("-i"),
+                QStringLiteral("testsrc=d=%1:s=320x240:r=25").arg(seconds),
+                QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"), path});
+    return proc.waitForFinished(60000) && proc.exitCode() == 0;
+}
+
+// Imports one file into the bin and blocks until its probe has landed.
+bool importAndAwait(AssetLibrary &library, const QString &path)
+{
+    QSignalSpy probed(&library, &AssetLibrary::assetMetadataChanged);
+    const int before = library.count();
+    library.importUrls({QUrl::fromLocalFile(path)});
+    if (library.count() != before + 1)
+        return false;
+    return probed.wait(60000);
+}
+
+} // namespace
+
+// The whole point of the feature: a project set up once — music, outro, CTA — is re-pointed at
+// the next video by swapping the file under its bin row, and every clip using it stays put.
+void EditorStateTest::replaceAssetSourceRebindsClipsAndClampsTrim()
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString original = dir.filePath(QStringLiteral("week1.mp4"));
+    const QString replacement = dir.filePath(QStringLiteral("week2.mp4"));
+    QVERIFY(renderTestVideo(ffmpeg, original, 10));
+    QVERIFY(renderTestVideo(ffmpeg, replacement, 4));
+
+    AssetLibrary library;
+    AppController state(&library);
+    QVERIFY(importAndAwait(library, original));
+
+    state.addClipFromAsset(0);
+    const int trackIndex = state.selectedTrack();
+    const int clipIndex = state.selectedClip();
+    QVERIFY(trackIndex >= 0 && clipIndex >= 0);
+
+    drift::Project &project = *state.project();
+    // Trim to a window that only the 10s original can satisfy, and drop an effect on it so the
+    // work that must survive the swap is represented.
+    {
+        drift::Clip &clip = project.tracks()[trackIndex].clips[clipIndex];
+        clip.timelineStart = drift::secondsToUs(2.0);
+        clip.srcIn = drift::secondsToUs(1.0);
+        clip.srcOut = drift::secondsToUs(9.0);
+        clip.timelineDuration = drift::secondsToUs(8.0);
+        clip.effects.append(drift::Effect{.name = QStringLiteral("gblur")});
+        clip.faceTrackPath = QStringLiteral("/tmp/stale.landmarks");
+        clip.faceTrackSrcOffsetUs = drift::secondsToUs(1.0);
+    }
+    const QString assetId = library.assetIdAt(0);
+    const drift::Clip beforeSwap = project.tracks().at(trackIndex).clips.at(clipIndex);
+
+    QSignalSpy finished(&state, &AppController::assetReplaceFinished);
+    QVERIFY(state.replaceAssetSource(0, QUrl::fromLocalFile(replacement)));
+    QVERIFY2(finished.wait(60000), "replace did not finish");
+    QCOMPARE(finished.count(), 1);
+    QVERIFY2(finished.at(0).at(0).toBool(), qPrintable(finished.at(0).at(1).toString()));
+    // The 9s out-point cannot survive a 4s file, so exactly this one clip is reported adjusted.
+    QCOMPARE(finished.at(0).at(2).toInt(), 1);
+
+    // The bin row is the same row, still the same id, now pointing somewhere else.
+    QCOMPARE(library.count(), 1);
+    QCOMPARE(library.assetIdAt(0), assetId);
+    QCOMPARE(project.asset(assetId)->path, QFileInfo(replacement).absoluteFilePath());
+
+    const drift::Clip &after = project.tracks().at(trackIndex).clips.at(clipIndex);
+    QCOMPARE(after.id, beforeSwap.id);
+    QCOMPARE(after.assetId, assetId);
+    QCOMPARE(after.path, QFileInfo(replacement).absoluteFilePath());
+    // Position on the timeline and the editing work on the clip both carry over untouched.
+    QCOMPARE(after.timelineStart, beforeSwap.timelineStart);
+    QCOMPARE(after.effects.size(), 1);
+    // Landmarks were baked against the old pixels; keeping them would warp to a face the new
+    // footage never had.
+    QVERIFY(after.faceTrackPath.isEmpty());
+    QCOMPARE(after.faceTrackSrcOffsetUs, drift::TimeUs(0));
+    // The source window is pulled inside the shorter file, and the timeline duration follows so
+    // the clip never addresses frames past the end of its media.
+    const drift::TimeUs mediaDuration = project.asset(assetId)->durationUs;
+    QVERIFY(mediaDuration > 0);
+    QVERIFY(after.srcOut <= mediaDuration);
+    QCOMPARE(after.srcIn, beforeSwap.srcIn);
+    QVERIFY(after.timelineDuration < beforeSwap.timelineDuration);
+
+    // One undo puts the asset and every clip bound to it back on the old file together.
+    state.undo();
+    QCOMPARE(project.asset(assetId)->path, QFileInfo(original).absoluteFilePath());
+    const drift::Clip &undone = project.tracks().at(trackIndex).clips.at(clipIndex);
+    QCOMPARE(undone.path, beforeSwap.path);
+    QCOMPARE(undone.srcOut, beforeSwap.srcOut);
+    QCOMPARE(undone.timelineDuration, beforeSwap.timelineDuration);
+    QCOMPARE(undone.faceTrackPath, beforeSwap.faceTrackPath);
+}
+
+// A clip's type is fixed at creation and decides which track it may sit on, so audio cannot slot
+// into a video row. The refusal has to leave the project exactly as it was.
+void EditorStateTest::replaceAssetSourceRefusesADifferentKind()
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString video = dir.filePath(QStringLiteral("clip.mp4"));
+    QVERIFY(renderTestVideo(ffmpeg, video, 4));
+
+    const QString audio = dir.filePath(QStringLiteral("tone.wav"));
+    QProcess proc;
+    proc.start(ffmpeg, {QStringLiteral("-y"), QStringLiteral("-f"), QStringLiteral("lavfi"),
+                        QStringLiteral("-i"), QStringLiteral("sine=f=440:d=4:r=48000"),
+                        QStringLiteral("-c:a"), QStringLiteral("pcm_s16le"), audio});
+    QVERIFY(proc.waitForFinished(60000) && proc.exitCode() == 0);
+
+    AssetLibrary library;
+    AppController state(&library);
+    QVERIFY(importAndAwait(library, video));
+
+    state.addClipFromAsset(0);
+    drift::Project &project = *state.project();
+    const QString assetId = library.assetIdAt(0);
+    const QString originalPath = project.asset(assetId)->path;
+
+    QSignalSpy undoStack(&state, &AppController::undoStackChanged);
+    QSignalSpy finished(&state, &AppController::assetReplaceFinished);
+    QVERIFY(state.replaceAssetSource(0, QUrl::fromLocalFile(audio)));
+    QVERIFY2(finished.wait(60000), "replace did not finish");
+    QVERIFY(!finished.at(0).at(0).toBool());
+    QVERIFY(!finished.at(0).at(1).toString().isEmpty());
+
+    QCOMPARE(project.asset(assetId)->path, originalPath);
+    QCOMPARE(project.tracks().at(state.selectedTrack()).clips.at(0).path, originalPath);
+    // A refused swap must not leave an empty step on the stack for the user to undo.
+    QCOMPARE(undoStack.count(), 0);
 }
 
 QTEST_MAIN(EditorStateTest)

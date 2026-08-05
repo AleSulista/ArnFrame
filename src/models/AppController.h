@@ -70,6 +70,10 @@ class AppController : public QObject
     Q_PROPERTY(bool exportInProgress READ exportInProgress NOTIFY exportInProgressChanged)
     Q_PROPERTY(double exportProgress READ exportProgress NOTIFY exportProgressChanged)
     Q_PROPERTY(bool subtitleGenerating READ subtitleGenerating NOTIFY subtitleGeneratingChanged)
+    // Id of the asset whose replacement is being probed, empty when idle. Only that one bin row
+    // goes busy: the rest of the panel stays usable, and the wait belongs to the row the user
+    // right-clicked.
+    Q_PROPERTY(QString replacingAssetId READ replacingAssetId NOTIFY replacingAssetIdChanged)
     Q_PROPERTY(double subtitleGenProgress READ subtitleGenProgress NOTIFY subtitleGenProgressChanged)
     Q_PROPERTY(QString subtitleGenStatus READ subtitleGenStatus NOTIFY subtitleGenStatusChanged)
     Q_PROPERTY(bool segmenting READ segmenting NOTIFY segmentingChanged)
@@ -166,6 +170,7 @@ public:
     bool exportInProgress() const { return m_exportInProgress; }
     double exportProgress() const;
     bool subtitleGenerating() const { return m_subtitleGenerating; }
+    QString replacingAssetId() const { return m_replacingAssetId; }
     double subtitleGenProgress() const { return m_subtitleGenProgress; }
     QString subtitleGenStatus() const { return m_subtitleGenStatus; }
     bool segmenting() const { return m_segmenting; }
@@ -235,6 +240,10 @@ public:
     Q_INVOKABLE void addClipFromAssetOnNewTrackAt(int assetIndex, int insertIndex, double atSeconds);
     Q_INVOKABLE int clipCountForAsset(int assetIndex) const;
     Q_INVOKABLE bool removeAsset(int assetIndex);
+    // Points an existing bin row at a different file, keeping every clip that uses it where it
+    // is — its position, trim, effects and transitions all survive. Asynchronous: true only means
+    // the probe started, and the outcome arrives as assetReplaceFinished.
+    Q_INVOKABLE bool replaceAssetSource(int assetIndex, const QUrl &url);
     Q_INVOKABLE bool trackAcceptsAsset(int trackIndex, int assetIndex) const;
     Q_INVOKABLE QString trackTypeForAsset(int assetIndex) const;
     Q_INVOKABLE void addTextClip(const QString &text, double atSeconds);
@@ -686,6 +695,11 @@ signals:
     void recentProjectsChanged();
     void projectLayoutChosenChanged();
     void transformBlocked(const QString &reason);
+    // Outcome of replaceAssetSource. `message` is a ready-to-show reason on failure and the new
+    // media's name on success. `adjustedClips` counts clips whose source range no longer fitted
+    // the replacement and was pulled back to it.
+    void assetReplaceFinished(bool ok, const QString &message, int adjustedClips);
+    void replacingAssetIdChanged();
     // File actions from the shortcut layer — QML owns dialogs and unsaved prompts.
     void newProjectRequested();
     void openRequested();
@@ -694,6 +708,11 @@ signals:
 protected:
     void pushProjectEdit(const drift::Project &before, const QString &text);
     void finishEdit(const QString &message);
+    // Applies a finished replace probe as one undoable transaction, or reports why it cannot be.
+    void finalizeAssetReplace(const QString &assetId, const drift::MediaAsset &filled, bool ok);
+    // Moves every clip bound to `assetId` onto the replacement media. Returns how many had a
+    // source range that no longer fitted and had to be pulled back to it.
+    int rebindClipsToAsset(const QString &assetId, const drift::MediaAsset &asset);
     // Keeps the keyframe strip's index-addressed hidden series in sync after an effect is removed.
     void dropKeyframeGraphPropertiesForEffect(int removedIndex);
     // Same idea after a reorder: fx.N.* indices move with the effect.
@@ -798,6 +817,7 @@ protected:
     double m_exportProgress = 0.0;
     QAtomicInt m_exportCancel = 0;
     bool m_subtitleGenerating = false;
+    QString m_replacingAssetId;
     double m_subtitleGenProgress = 0.0;
     QString m_subtitleGenStatus;
     QAtomicInt m_subtitleGenCancel = 0;

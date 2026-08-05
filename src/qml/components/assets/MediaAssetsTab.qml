@@ -22,6 +22,8 @@ Item {
     // Emitted from the card/row context menu. The parent owns the in-use
     // check and the confirmation.
     signal removeRequested(int assetIndex)
+    // Emitted from the card/row context menu. The parent owns the file picker.
+    signal replaceRequested(int assetIndex)
     // Emitted when the empty-state action asks to import media.
     signal importRequested()
 
@@ -157,6 +159,42 @@ Item {
                             iconColor: Theme.mutedForeground
                         }
 
+                        // Reading the replacement off disk is the one wait in the swap with
+                        // nothing on screen to show for it. Scrims this card only, so the rest of
+                        // the bin stays usable.
+                        Rectangle {
+                            id: gridBusy
+                            // Above the duration badge, which is a later sibling.
+                            z: 1
+                            anchors.fill: parent
+                            radius: parent.radius
+                            color: Theme.scrimStrong
+                            readonly property bool busy:
+                                EditorState.replacingAssetId.length > 0
+                                && EditorState.replacingAssetId === AssetLibrary.assetIdAt(assetIndex)
+                            visible: opacity > 0
+                            opacity: busy ? 1 : 0
+
+                            Behavior on opacity {
+                                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                            }
+
+                            // Swallows taps and drags while the swap is in flight, so the card
+                            // cannot be added to the timeline against media that is changing.
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: gridBusy.busy
+                                acceptedButtons: Qt.AllButtons
+                            }
+
+                            CircularProgress {
+                                anchors.centerIn: parent
+                                indeterminate: true
+                                size: Theme.spacing3xl
+                                progressColor: Theme.onMedia
+                            }
+                        }
+
                         Rectangle {
                             visible: duration.length > 0
                             anchors.right: parent.right
@@ -216,6 +254,11 @@ Item {
                             id: cardMenu
 
                             ThemedMenuItem {
+                                text: qsTr("Replace media…")
+                                icon.name: Theme.icons.refresh
+                                onTriggered: root.replaceRequested(assetIndex)
+                            }
+                            ThemedMenuItem {
                                 text: qsTr("Remove from project")
                                 icon.name: Theme.icons.trash
                                 onTriggered: root.removeRequested(assetIndex)
@@ -264,6 +307,9 @@ Item {
                     required property string thumbnailPath
 
                     property int assetIndex: index
+                    readonly property bool replaceBusy:
+                        EditorState.replacingAssetId.length > 0
+                        && EditorState.replacingAssetId === AssetLibrary.assetIdAt(assetIndex)
 
                     Row {
                         id: listRowContent
@@ -305,6 +351,27 @@ Item {
                                 iconSize: Theme.iconSizeBase
                                 iconColor: Theme.mutedForeground
                             }
+
+                            // Same busy treatment as the grid card, scaled to the row thumbnail.
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: parent.radius
+                                color: Theme.scrimStrong
+                                visible: opacity > 0
+                                opacity: replaceBusy ? 1 : 0
+
+                                Behavior on opacity {
+                                    NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                }
+
+                                CircularProgress {
+                                    anchors.centerIn: parent
+                                    indeterminate: true
+                                    size: Theme.iconSizeBase
+                                    strokeWidth: 2
+                                    progressColor: Theme.onMedia
+                                }
+                            }
                         }
 
                         Column {
@@ -342,6 +409,9 @@ Item {
                         id: rowMouse
                         anchors.fill: parent
                         hoverEnabled: true
+                        // Adding to the timeline mid-swap would bind a clip to media that is
+                        // about to change under it; the right-click menu goes with it.
+                        enabled: !replaceBusy
                         cursorShape: Qt.PointingHandCursor
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         onClicked: (mouse) => {
@@ -355,6 +425,11 @@ Item {
                     ThemedContextMenu {
                         id: rowMenu
 
+                        ThemedMenuItem {
+                            text: qsTr("Replace media…")
+                            icon.name: Theme.icons.refresh
+                            onTriggered: root.replaceRequested(assetIndex)
+                        }
                         ThemedMenuItem {
                             text: qsTr("Remove from project")
                             icon.name: Theme.icons.trash

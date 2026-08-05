@@ -158,6 +158,11 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     connect(&m_waveformBlocks, &WaveformBlockCache::rangeReady, this,
             &AppController::waveformRangeReady);
 
+    if (m_assetLibrary) {
+        connect(m_assetLibrary, &AssetLibrary::assetSourceProbed, this,
+                &AppController::finalizeAssetReplace);
+    }
+
     m_undoStack.setUndoLimit(kMaxUndoSteps);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, &AppController::undoStackChanged);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, [this] {
@@ -1428,6 +1433,133 @@ bool AppController::removeAsset(int assetIndex)
     setDraggingAssetIndex(-1);
     pushProjectEdit(before, QStringLiteral("Media removed"));
     return true;
+}
+
+bool AppController::replaceAssetSource(int assetIndex, const QUrl &url)
+{
+    if (!m_assetLibrary)
+        return false;
+
+    const QString assetId = m_assetLibrary->assetIdAt(assetIndex);
+    if (assetId.isEmpty())
+        return false;
+
+    const QString path = url.isLocalFile() ? url.toLocalFile() : url.toString();
+    const QFileInfo fileInfo(path);
+    if (path.isEmpty() || !fileInfo.isFile()) {
+        emit assetReplaceFinished(false, tr("That file could not be read."), 0);
+        return false;
+    }
+
+    // Two bin rows sharing a path would break import de-duplication, which resolves a path to
+    // whichever row holds it first.
+    const QString absolutePath = fileInfo.absoluteFilePath();
+    const int existing = m_assetLibrary->indexOfPath(absolutePath);
+    if (existing >= 0 && existing != assetIndex) {
+        emit assetReplaceFinished(false, tr("That file is already in this project."), 0);
+        return false;
+    }
+
+    if (!m_assetLibrary->startReplaceProbe(assetIndex, absolutePath)) {
+        emit assetReplaceFinished(false, tr("That file could not be read."), 0);
+        return false;
+    }
+
+    // Reading a file off a slow disk is the one part of this the user waits on with nothing to
+    // show for it, so the row it belongs to goes busy until the probe lands.
+    m_replacingAssetId = assetId;
+    emit replacingAssetIdChanged();
+    return true;
+}
+
+void AppController::finalizeAssetReplace(const QString &assetId, const drift::MediaAsset &filled,
+                                         bool ok)
+{
+    // The probe has landed, so the row stops being busy whatever the outcome below turns out to
+    // be — including the refusals, which never touch the project at all.
+    if (m_replacingAssetId == assetId) {
+        m_replacingAssetId.clear();
+        emit replacingAssetIdChanged();
+    }
+
+    const drift::MediaAsset *current = m_project.asset(assetId);
+    if (!current) {
+        // The row was removed while the probe ran.
+        emit assetReplaceFinished(false, tr("That media is no longer in this project."), 0);
+        return;
+    }
+
+    if (!ok) {
+        emit assetReplaceFinished(false, tr("That file could not be read."), 0);
+        return;
+    }
+
+    // A clip's type is fixed when it is created and decides which track it may sit on, so media
+    // of another kind would leave e.g. a video clip on a video track with nothing to draw.
+    if (filled.kind != current->kind) {
+        emit assetReplaceFinished(false,
+                                  tr("“%1” is %2, but this slot holds %3.")
+                                      .arg(filled.name, drift::mediaKindToString(filled.kind),
+                                           drift::mediaKindToString(current->kind)),
+                                  0);
+        return;
+    }
+
+    const QString newName = filled.name;
+    const drift::Project before = m_project;
+    if (!m_assetLibrary->applyProbedSource(assetId, filled)) {
+        emit assetReplaceFinished(false, tr("That media is no longer in this project."), 0);
+        return;
+    }
+
+    const int adjusted = rebindClipsToAsset(assetId, filled);
+    pushProjectEdit(before, QStringLiteral("Media replaced"));
+    finishEdit(QStringLiteral("Media replaced"));
+    emit assetReplaceFinished(true, newName, adjusted);
+}
+
+int AppController::rebindClipsToAsset(const QString &assetId, const drift::MediaAsset &asset)
+{
+    int adjusted = 0;
+    for (drift::Track &track : m_project.tracks()) {
+        for (drift::Clip &clip : track.clips) {
+            if (clip.assetId != assetId)
+                continue;
+
+            // Rewriting the clip's own copy of the path is what actually moves the pixels. It
+            // also keys the reverse-proxy and audio-block caches, so both fall out of scope on
+            // their own rather than needing to be invalidated here.
+            clip.path = asset.path;
+            clip.thumbnailPath = asset.thumbnailPath;
+            clip.filmstripPath = asset.filmstripPath;
+            // Landmarks are baked against the old pixels. Left in place they would keep the face
+            // warps tracking a face the new footage never had, and render without erroring.
+            clip.faceTrackPath.clear();
+            clip.faceTrackSrcOffsetUs = 0;
+
+            // Stills have no source range to fit.
+            if (asset.durationUs <= 0 || clip.srcOut <= asset.durationUs)
+                continue;
+
+            // The framed window starts past the end of the new file, so there is nothing about
+            // it worth preserving; rebase to the head and keep as much of the span as fits.
+            if (clip.srcIn >= asset.durationUs)
+                clip.srcIn = 0;
+
+            if (clip.hasSpeedCurve()) {
+                // Curved clips derive their timeline duration from the source range, so the
+                // range is clamped first and the ramp re-timed against what is left.
+                clip.srcOut = asset.durationUs;
+                clip.syncDurationFromSpeedCurve();
+            } else {
+                // Pulls timelineDuration along with the shortened range, so the clip never
+                // addresses frames past the end of its media.
+                clip.syncSrcOutFromSpeed(asset.durationUs);
+            }
+            ++adjusted;
+        }
+    }
+    return adjusted;
 }
 
 int AppController::assetIndexForClip(const drift::Clip &clip) const

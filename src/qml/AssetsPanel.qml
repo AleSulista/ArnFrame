@@ -90,6 +90,33 @@ PanelFrame {
         onRejected: root.pendingRemovalIndex = -1
     }
 
+    // Points a bin row at a different file while every clip using it stays put, so a project set
+    // up once — music, outro, CTA — can be re-pointed at the next video instead of rebuilt.
+    function requestReplaceAsset(assetIndex) {
+        var url = FileDialogs.openFile(qsTr("Replace Media"), [
+            qsTr("Media files (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.mp3 *.wav *.aac *.flac *.ogg *.m4a *.png *.jpg *.jpeg *.gif *.webp *.bmp)")
+        ])
+        if (!url || url.toString() === "")
+            return
+        EditorState.replaceAssetSource(assetIndex, url)
+    }
+
+    Connections {
+        target: EditorState
+
+        // The probe runs off-thread, so the outcome comes back here rather than from the call.
+        function onAssetReplaceFinished(ok, message, adjustedClips) {
+            if (!ok) {
+                Toasts.warning(message)
+            } else if (adjustedClips > 0) {
+                Toasts.warning(qsTr("Replaced with “%1”. %n clip(s) were shortened to fit the new file.",
+                                    "", adjustedClips).arg(message))
+            } else {
+                Toasts.success(qsTr("Replaced with “%1”.").arg(message))
+            }
+        }
+    }
+
     function importMedia() {
         var urls = FileDialogs.openFiles(qsTr("Import Media"), [
             qsTr("Media files (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.mp3 *.wav *.aac *.flac *.ogg *.m4a *.png *.jpg *.jpeg *.gif *.webp *.bmp)")
@@ -653,6 +680,7 @@ PanelFrame {
                 assetVisibleFn: function(kind) { return root.assetVisible(kind) }
                 onAddRequested: (assetIndex) => root.addAssetToTimeline(assetIndex)
                 onRemoveRequested: (assetIndex) => root.requestRemoveAsset(assetIndex)
+                onReplaceRequested: (assetIndex) => root.requestReplaceAsset(assetIndex)
                 onImportRequested: root.importMedia()
             }
         }

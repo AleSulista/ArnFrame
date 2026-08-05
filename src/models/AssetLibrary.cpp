@@ -15,6 +15,7 @@
 #include <QtConcurrent>
 
 #include <algorithm>
+#include <optional>
 
 namespace {
 
@@ -130,6 +131,43 @@ drift::MediaAsset buildProbedAsset(const QString &absolutePath, const QString &n
     return asset;
 }
 
+drift::MediaAsset buildImageAsset(const QString &absolutePath, const QString &name)
+{
+    const QString kindString = drift::mediaKindToString(drift::MediaKind::Image);
+    const QString thumb = MediaThumbnail::generate(absolutePath, kindString);
+    QImageReader reader(absolutePath);
+    reader.setAutoTransform(true);
+    QSize size = reader.size();
+    if (reader.transformation() & QImageIOHandler::TransformationRotate90)
+        size.transpose();
+
+    drift::MediaAsset asset;
+    asset.name = name;
+    asset.path = absolutePath;
+    asset.kind = drift::MediaKind::Image;
+    asset.width = size.width();
+    asset.height = size.height();
+    asset.thumbnailPath = thumb;
+    asset.filmstripPath = thumb;
+    asset.hasAudio = false;
+    asset.hasAudioKnown = true;
+    return asset;
+}
+
+// Reads everything the bin needs about a file. Blocking, so it only ever runs on a worker
+// thread — shared by the import path and the replace path.
+std::optional<drift::MediaAsset> probeAsset(const QString &absolutePath, bool imageOnly)
+{
+    const QString name = QFileInfo(absolutePath).fileName();
+    if (imageOnly)
+        return buildImageAsset(absolutePath, name);
+
+    const MediaInfo info = MediaProbe::probe(absolutePath);
+    if (!info.ok)
+        return std::nullopt;
+    return buildProbedAsset(absolutePath, name, info);
+}
+
 } // namespace
 
 AssetLibrary::AssetLibrary(QObject *parent)
@@ -141,26 +179,59 @@ AssetLibrary::AssetLibrary(QObject *parent)
     connect(this, &QAbstractItemModel::rowsRemoved, this, &AssetLibrary::countChanged);
     connect(this, &QAbstractItemModel::modelReset, this, &AssetLibrary::countChanged);
 
-    connect(this, &QAbstractItemModel::rowsInserted, this, &AssetLibrary::snapshotOrder);
-    connect(this, &QAbstractItemModel::rowsRemoved, this, &AssetLibrary::snapshotOrder);
-    connect(this, &QAbstractItemModel::modelReset, this, &AssetLibrary::snapshotOrder);
+    connect(this, &QAbstractItemModel::rowsInserted, this, &AssetLibrary::snapshotAssets);
+    connect(this, &QAbstractItemModel::rowsRemoved, this, &AssetLibrary::snapshotAssets);
+    connect(this, &QAbstractItemModel::modelReset, this, &AssetLibrary::snapshotAssets);
 }
 
-void AssetLibrary::snapshotOrder()
+QList<QString> AssetLibrary::currentPaths() const
+{
+    if (!m_project)
+        return {};
+
+    QList<QString> paths;
+    paths.reserve(m_project->assetOrder().size());
+    for (const QString &id : m_project->assetOrder()) {
+        const drift::MediaAsset *asset = m_project->asset(id);
+        paths.append(asset ? asset->path : QString{});
+    }
+    return paths;
+}
+
+void AssetLibrary::snapshotAssets()
 {
     m_syncedOrder = m_project ? m_project->assetOrder() : QList<QString>{};
+    m_syncedPaths = currentPaths();
 }
 
 void AssetLibrary::syncToProject()
 {
+    if (!m_project)
+        return;
+
     // Undo/redo assigns the whole project behind this model's back. Resetting
     // unconditionally would rebuild every card on every unrelated timeline
     // undo, so only an actual order change is worth the churn.
-    if (!m_project || m_syncedOrder == m_project->assetOrder())
+    if (m_syncedOrder != m_project->assetOrder()) {
+        beginResetModel();
+        endResetModel();
+        return;
+    }
+
+    // An undone source replace leaves the order untouched — same row, same id, different file —
+    // so the paths have to be compared too or the card keeps showing the media it no longer
+    // points at. Only the rows that actually moved are re-read.
+    const QList<QString> paths = currentPaths();
+    if (paths == m_syncedPaths)
         return;
 
-    beginResetModel();
-    endResetModel();
+    for (int i = 0; i < paths.size(); ++i) {
+        if (i < m_syncedPaths.size() && m_syncedPaths.at(i) == paths.at(i))
+            continue;
+        emitAssetRowChanged(i, {}); // empty roles: every role may have moved with the file
+        emit assetMetadataChanged(m_project->assetIdAt(i));
+    }
+    m_syncedPaths = paths;
 }
 
 void AssetLibrary::setProject(drift::Project *project)
@@ -315,19 +386,22 @@ void AssetLibrary::startThumbJob(const QString &assetId)
 
         QMetaObject::invokeMethod(
             this,
-            [this, assetId, thumb, strip]() { applyThumbResult(assetId, thumb, strip); },
+            [this, assetId, path, thumb, strip]() { applyThumbResult(assetId, path, thumb, strip); },
             Qt::QueuedConnection);
     });
 }
 
-void AssetLibrary::applyThumbResult(const QString &assetId, const QString &thumb, const QString &strip)
+void AssetLibrary::applyThumbResult(const QString &assetId, const QString &sourcePath,
+                                    const QString &thumb, const QString &strip)
 {
     m_thumbPending.remove(assetId);
     if (!m_project)
         return;
 
     drift::MediaAsset *asset = m_project->asset(assetId);
-    if (!asset)
+    // The source was replaced while this job ran, so these frames are of a file the row no
+    // longer points at.
+    if (!asset || asset->path != sourcePath)
         return;
 
     bool changed = false;
@@ -365,43 +439,74 @@ void AssetLibrary::startImportJob(const QString &assetId, const QString &absolut
         return;
 
     m_importPending.insert(assetId);
-    const QString name = QFileInfo(absolutePath).fileName();
 
-    (void)QtConcurrent::run([this, assetId, absolutePath, name, imageOnly]() {
-        drift::MediaAsset filled;
-        bool ok = false;
-
-        if (imageOnly) {
-            const QString kind = drift::mediaKindToString(drift::MediaKind::Image);
-            const QString thumb = MediaThumbnail::generate(absolutePath, kind);
-            QImageReader reader(absolutePath);
-            reader.setAutoTransform(true);
-            QSize size = reader.size();
-            if (reader.transformation() & QImageIOHandler::TransformationRotate90)
-                size.transpose();
-            filled.name = name;
-            filled.path = absolutePath;
-            filled.kind = drift::MediaKind::Image;
-            filled.width = size.width();
-            filled.height = size.height();
-            filled.thumbnailPath = thumb;
-            filled.filmstripPath = thumb;
-            filled.hasAudio = false;
-            filled.hasAudioKnown = true;
-            ok = true;
-        } else {
-            const MediaInfo info = MediaProbe::probe(absolutePath);
-            if (info.ok) {
-                filled = buildProbedAsset(absolutePath, name, info);
-                ok = true;
-            }
-        }
+    (void)QtConcurrent::run([this, assetId, absolutePath, imageOnly]() {
+        const std::optional<drift::MediaAsset> probed = probeAsset(absolutePath, imageOnly);
+        const drift::MediaAsset filled = probed.value_or(drift::MediaAsset{});
+        const bool ok = probed.has_value();
 
         QMetaObject::invokeMethod(
             this,
             [this, assetId, filled, ok]() { applyImportResult(assetId, filled, ok); },
             Qt::QueuedConnection);
     });
+}
+
+bool AssetLibrary::startReplaceProbe(int index, const QString &absolutePath)
+{
+    const drift::MediaAsset *asset = assetAtIndex(index);
+    if (!asset || absolutePath.isEmpty())
+        return false;
+
+    const QString assetId = asset->id;
+    if (m_importPending.contains(assetId))
+        return false;
+
+    m_importPending.insert(assetId);
+    const bool imageOnly = isImagePath(absolutePath);
+
+    (void)QtConcurrent::run([this, assetId, absolutePath, imageOnly]() {
+        const std::optional<drift::MediaAsset> probed = probeAsset(absolutePath, imageOnly);
+        const drift::MediaAsset filled = probed.value_or(drift::MediaAsset{});
+        const bool ok = probed.has_value();
+
+        QMetaObject::invokeMethod(
+            this,
+            [this, assetId, filled, ok]() {
+                m_importPending.remove(assetId);
+                emit assetSourceProbed(assetId, filled, ok);
+            },
+            Qt::QueuedConnection);
+    });
+    return true;
+}
+
+bool AssetLibrary::applyProbedSource(const QString &assetId, const drift::MediaAsset &filled)
+{
+    if (!m_project)
+        return false;
+
+    const int index = indexOfId(assetId);
+    drift::MediaAsset *asset = index < 0 ? nullptr : m_project->asset(assetId);
+    if (!asset)
+        return false;
+
+    const QString id = asset->id;
+    *asset = filled;
+    asset->id = id;
+
+    // Jobs still in flight were started against the old file. They drop themselves on landing
+    // because the path they probed no longer matches; clearing the pending flags is what lets
+    // the replacement start its own.
+    m_thumbPending.remove(assetId);
+    m_audioProbePending.remove(assetId);
+
+    snapshotAssets();
+    emitAssetRowChanged(index,
+                        {NameRole, KindRole, DurationRole, DurationSecondsRole, PathRole,
+                         ThumbnailPathRole, FilmstripPathRole});
+    emit assetMetadataChanged(assetId);
+    return true;
 }
 
 void AssetLibrary::applyImportResult(const QString &assetId, const drift::MediaAsset &filled, bool ok)
@@ -533,21 +638,23 @@ void AssetLibrary::ensureAudioPresence(const QString &assetId)
         }
         QMetaObject::invokeMethod(
             this,
-            [this, assetId, hasAudio, sampleRate, channels]() {
-                applyAudioPresence(assetId, hasAudio, sampleRate, channels);
+            [this, assetId, path, hasAudio, sampleRate, channels]() {
+                applyAudioPresence(assetId, path, hasAudio, sampleRate, channels);
             },
             Qt::QueuedConnection);
     });
 }
 
-void AssetLibrary::applyAudioPresence(const QString &assetId, bool hasAudio, int sampleRate, int channels)
+void AssetLibrary::applyAudioPresence(const QString &assetId, const QString &sourcePath,
+                                      bool hasAudio, int sampleRate, int channels)
 {
     m_audioProbePending.remove(assetId);
     if (!m_project)
         return;
 
     drift::MediaAsset *asset = m_project->asset(assetId);
-    if (!asset)
+    // Answered for a file the row no longer points at; the replacement brought its own.
+    if (!asset || asset->path != sourcePath)
         return;
 
     asset->hasAudio = hasAudio;

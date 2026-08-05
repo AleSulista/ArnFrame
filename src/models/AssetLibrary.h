@@ -54,9 +54,18 @@ public:
     Q_INVOKABLE void ensureAllMedia();
     Q_INVOKABLE void sortByName();
     Q_INVOKABLE void sortByKind();
+    int indexOfPath(const QString &path) const;
     // Drops the row from the project's asset table. Callers own the undo
     // snapshot and the in-use check; this only touches the bin.
     bool removeAssetAt(int index);
+    // Probes `absolutePath` off-thread and reports it back through assetSourceProbed without
+    // touching the project, so the caller can apply the swap, the clip fixups and the undo
+    // snapshot as one transaction. Returns false when nothing was started.
+    bool startReplaceProbe(int index, const QString &absolutePath);
+    // Writes a probed source over the asset at `assetId`, keeping the id. Keeping it is the
+    // whole point: clips address their media through it, so they stay bound across the swap.
+    // Callers own the undo snapshot and the clip fixups.
+    bool applyProbedSource(const QString &assetId, const drift::MediaAsset &filled);
     // Re-reads the project after undo/redo has swapped it wholesale.
     void syncToProject();
 
@@ -71,26 +80,35 @@ signals:
     void countChanged();
     // Fired when probe/thumb/audio metadata lands so unlink affordances can refresh.
     void assetMetadataChanged(const QString &assetId);
+    // Result of startReplaceProbe. Nothing has been applied yet; the caller decides whether the
+    // probed media is an acceptable stand-in and calls applyProbedSource if so.
+    void assetSourceProbed(const QString &assetId, const drift::MediaAsset &filled, bool ok);
 
 private:
     void importFiles(const QStringList &paths);
     bool containsPath(const QString &path) const;
-    int indexOfPath(const QString &path) const;
     void refreshMediaAt(int index);
     void startImportJob(const QString &assetId, const QString &absolutePath, bool imageOnly);
     void startThumbJob(const QString &assetId);
     void applyImportResult(const QString &assetId, const drift::MediaAsset &filled, bool ok);
-    void applyThumbResult(const QString &assetId, const QString &thumb, const QString &strip);
-    void applyAudioPresence(const QString &assetId, bool hasAudio, int sampleRate, int channels);
+    // `sourcePath` is the file the job actually read. It is compared against the asset's current
+    // path on landing so a result for media that has since been replaced is dropped.
+    void applyThumbResult(const QString &assetId, const QString &sourcePath, const QString &thumb,
+                          const QString &strip);
+    void applyAudioPresence(const QString &assetId, const QString &sourcePath, bool hasAudio,
+                            int sampleRate, int channels);
     void emitAssetRowChanged(int index, const QList<int> &roles);
-    void snapshotOrder();
+    void snapshotAssets();
+    QList<QString> currentPaths() const;
     const drift::MediaAsset *assetAtIndex(int index) const;
     drift::MediaAsset *assetAtIndex(int index);
 
     drift::Project *m_project = nullptr;
-    // Asset order as of the last row change this model itself made, so
-    // syncToProject() can tell an undone asset edit from every other undo.
+    // Asset order and per-row source paths as of the last change this model itself made, so
+    // syncToProject() can tell an undone asset edit from every other undo. A replaced source
+    // leaves the order alone and only moves a path, which is why both are tracked.
     QList<QString> m_syncedOrder;
+    QList<QString> m_syncedPaths;
     QSet<QString> m_importPending;
     QSet<QString> m_thumbPending;
     QSet<QString> m_audioProbePending;
