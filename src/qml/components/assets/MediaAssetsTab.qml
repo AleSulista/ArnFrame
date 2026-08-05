@@ -16,6 +16,7 @@ Item {
     property bool importing: false
     // Kind visibility filter supplied by the parent (depends on the active tab).
     property var assetVisibleFn: function(kind) { return true }
+    readonly property string query: search.text.trim().toLowerCase()
 
     // Emitted when a card/row is clicked or tapped to add its asset.
     signal addRequested(int assetIndex)
@@ -26,6 +27,29 @@ Item {
     signal replaceRequested(int assetIndex)
     // Emitted when the empty-state action asks to import media.
     signal importRequested()
+
+    function assetMatches(name, kind) {
+        if (!root.assetVisibleFn(kind))
+            return false
+        if (root.query.length === 0)
+            return true
+        return name.toLowerCase().indexOf(root.query) >= 0
+    }
+
+    // How many bin rows pass kind + search — drives the "no matches" empty state.
+    readonly property int matchCount: {
+        const q = root.query
+        let n = 0
+        for (let i = 0; i < AssetLibrary.count; ++i) {
+            const asset = AssetLibrary.assetAt(i)
+            if (!root.assetVisibleFn(asset.kind))
+                continue
+            if (q.length > 0 && asset.name.toLowerCase().indexOf(q) < 0)
+                continue
+            ++n
+        }
+        return n
+    }
 
     // First-run screen for a project with no media. This area used to
     // render as a blank rectangle, with no hint that the panel accepts
@@ -42,11 +66,35 @@ Item {
         onActionTriggered: root.importRequested()
     }
 
+    ThemedTextField {
+        id: search
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: Theme.pagePadding
+        visible: AssetLibrary.count > 0
+        placeholderText: qsTr("Search media")
+        font.family: Theme.fontFamily
+    }
+
+    EmptyState {
+        anchors.centerIn: parent
+        width: parent.width
+        visible: AssetLibrary.count > 0 && root.matchCount === 0
+        compact: true
+        glyph: Theme.icons.search
+        title: qsTr("No media match “%1”").arg(search.text.trim())
+        hint: qsTr("Try a different name.")
+    }
+
     Flickable {
         id: flick
-        visible: AssetLibrary.count > 0
-        width: parent.width
-        height: parent.height
+        visible: AssetLibrary.count > 0 && root.matchCount > 0
+        anchors.top: search.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.topMargin: Theme.spacingMd
         contentHeight: root.gridMode ? grid.height + Theme.spacing3xl
                                      : listColumn.height + Theme.spacing3xl
         clip: true
@@ -65,9 +113,9 @@ Item {
             Repeater {
                 model: AssetLibrary
                 delegate: Column {
-                    width: Theme.assetCardWidth
+                    width: visible ? Theme.assetCardWidth : 0
                     spacing: 4
-                    visible: root.assetVisibleFn(kind)
+                    visible: root.assetMatches(name, kind)
 
                     required property int index
                     required property string name
@@ -291,10 +339,10 @@ Item {
                 delegate: Rectangle {
                     id: listRow
                     width: listColumn.width
-                    height: 48
+                    height: visible ? 48 : 0
                     radius: Theme.radiusSm
                     color: rowMouse.containsMouse ? Theme.popoverHover : Theme.panelAccent
-                    visible: root.assetVisibleFn(kind)
+                    visible: root.assetMatches(name, kind)
 
                     Behavior on color {
                         ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }

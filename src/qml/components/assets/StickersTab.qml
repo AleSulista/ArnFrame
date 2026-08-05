@@ -16,6 +16,20 @@ Item {
     readonly property bool hasStickers: allStickers.length > 0
     property int pageIndex: 0
     readonly property string currentPageId: pages[pageIndex] ? pages[pageIndex].id : ""
+    readonly property string query: search.text.trim().toLowerCase()
+
+    // Search spans every category — once you have a name, the chips are in the way.
+    readonly property var currentStickers: {
+        const q = root.query
+        if (q.length > 0) {
+            return root.allStickers.filter(function(s) {
+                const label = (s.label || "").toLowerCase()
+                const id = (s.id || "").toLowerCase()
+                return label.indexOf(q) >= 0 || id.indexOf(q) >= 0
+            })
+        }
+        return root.allStickers.filter(function(s) { return s.category === root.currentPageId })
+    }
 
     Connections {
         target: Addons
@@ -28,13 +42,28 @@ Item {
         }
     }
 
-    Flow {
-        id: stickerPageBar
+    ThemedTextField {
+        id: search
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.margins: 12
+        visible: root.hasStickers
+        placeholderText: qsTr("Search stickers")
+        font.family: Theme.fontFamily
+    }
+
+    Flow {
+        id: stickerPageBar
+        anchors.top: search.visible ? search.bottom : parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.topMargin: search.visible ? Theme.spacingMd : 12
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
         spacing: 6
+        visible: root.hasStickers && root.query.length === 0
+        height: visible ? implicitHeight : 0
 
         Repeater {
             model: root.pages
@@ -50,7 +79,8 @@ Item {
     }
 
     Flickable {
-        anchors.top: stickerPageBar.bottom
+        anchors.top: stickerPageBar.visible ? stickerPageBar.bottom
+                                            : (search.visible ? search.bottom : parent.top)
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
@@ -78,30 +108,29 @@ Item {
                 onActionTriggered: root.Window.window.openAddonManager("stickers")
             }
 
-            // A category page with no matching stickers used to render
-            // as a silently blank grid.
-            readonly property var currentStickers:
-                root.allStickers.filter(function(s) { return s.category === root.currentPageId })
-
             EmptyState {
-                visible: root.hasStickers
-                         && stickerPageContent.currentStickers.length === 0
+                visible: root.hasStickers && root.currentStickers.length === 0
                 width: parent.width
                 compact: true
                 glyph: Theme.icons.smile
-                title: qsTr("Nothing in this category")
-                hint: qsTr("Pick another category above.")
+                title: root.query.length > 0
+                       ? qsTr("No stickers match “%1”").arg(search.text.trim())
+                       : qsTr("Nothing in this category")
+                hint: root.query.length > 0
+                      ? qsTr("Try a different name.")
+                      : qsTr("Pick another category above.")
             }
 
-            // Sticker grid for the selected category page.
+            // Sticker grid for the selected category page (or search results).
             Grid {
                 width: parent.width
+                visible: root.currentStickers.length > 0
                 columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
                 columnSpacing: Theme.assetCardGap
                 rowSpacing: Theme.assetCardGap
 
                 Repeater {
-                    model: stickerPageContent.currentStickers
+                    model: root.currentStickers
                     delegate: Column {
                         required property var modelData
                         width: Theme.assetCardWidth

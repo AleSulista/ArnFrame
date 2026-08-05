@@ -8,7 +8,24 @@ Column {
     spacing: 0
 
     readonly property var categories: EditorState.effectTemplateCategories()
+    readonly property var catalog: EditorState.effectTemplateCatalog()
     property string activeCategory: categories.length > 0 ? categories[0].id : ""
+    readonly property string query: search.text.trim().toLowerCase()
+
+    // Search spans every category — once you have a name, the chips are in the way.
+    readonly property var visibleTemplates: {
+        const q = root.query
+        if (q.length > 0) {
+            return root.catalog.filter(function(preset) {
+                const label = (preset.label || "").toLowerCase()
+                const id = (preset.id || "").toLowerCase()
+                return label.indexOf(q) >= 0 || id.indexOf(q) >= 0
+            })
+        }
+        return root.catalog.filter(function(preset) {
+            return preset.category === root.activeCategory
+        })
+    }
 
     function applyTemplate(templateId) {
         if (EditorState.selectedClip < 0)
@@ -33,10 +50,21 @@ Column {
         font.pixelSize: Theme.fontSizeXs
     }
 
+    ThemedTextField {
+        id: search
+        width: parent.width - 24
+        x: 12
+        placeholderText: qsTr("Search templates")
+        font.family: Theme.fontFamily
+    }
+
+    Item { width: 1; height: Theme.spacingMd }
+
     Flickable {
         id: categoryFlick
         width: parent.width
-        height: 34
+        height: root.query.length > 0 ? 0 : 34
+        visible: root.query.length === 0
         contentWidth: categoryRow.width + 24
         clip: true
 
@@ -61,27 +89,43 @@ Column {
 
     Flickable {
         width: parent.width
-        height: Math.max(0, root.height - browserTip.height - categoryFlick.height)
-        contentHeight: presetGrid.height + 24
+        height: Math.max(0, root.height - browserTip.height - search.height - Theme.spacingMd
+                         - (root.query.length > 0 ? 0 : categoryFlick.height))
+        contentHeight: Math.max(emptySearchHint.height, presetGrid.height) + 24
         clip: true
         ScrollBar.vertical: AppScrollBar { }
+
+        Text {
+            id: emptySearchHint
+            x: 12
+            y: 12
+            width: parent.width - 24
+            visible: root.visibleTemplates.length === 0
+            text: root.query.length > 0
+                  ? qsTr("No templates match “%1”.").arg(search.text.trim())
+                  : qsTr("Nothing in this category.")
+            color: Theme.mutedForeground
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSm
+            wrapMode: Text.WordWrap
+        }
 
         Grid {
             id: presetGrid
             x: 12
             y: 12
             width: parent.width - 24
+            visible: root.visibleTemplates.length > 0
             columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
             columnSpacing: Theme.assetCardGap
             rowSpacing: Theme.assetCardGap
 
             Repeater {
-                model: EditorState.effectTemplateCatalog()
+                model: root.visibleTemplates
                 delegate: Column {
                     id: templateCard
                     required property var modelData
-                    visible: templateCard.modelData.category === root.activeCategory
-                    width: visible ? Theme.assetCardWidth : 0
+                    width: Theme.assetCardWidth
                     spacing: 4
 
                     readonly property var effectThumbs: templateCard.modelData.effectThumbnails || []

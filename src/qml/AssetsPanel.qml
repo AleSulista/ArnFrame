@@ -455,7 +455,24 @@ PanelFrame {
                 height: parent.height - Theme.panelHeaderHeight
 
                 readonly property var categories: EditorState.transitionCategories()
+                readonly property var catalog: EditorState.transitionKinds()
                 property string activeCategory: categories.length > 0 ? categories[0].id : ""
+                readonly property string query: transitionSearch.text.trim().toLowerCase()
+
+                // Search spans every category — once you have a name, the chips are in the way.
+                readonly property var visibleTransitions: {
+                    const q = transitionsBrowser.query
+                    if (q.length > 0) {
+                        return transitionsBrowser.catalog.filter(function(item) {
+                            const label = (item.label || "").toLowerCase()
+                            const kind = (item.kind || "").toLowerCase()
+                            return label.indexOf(q) >= 0 || kind.indexOf(q) >= 0
+                        })
+                    }
+                    return transitionsBrowser.catalog.filter(function(item) {
+                        return item.category === transitionsBrowser.activeCategory
+                    })
+                }
 
                 Column {
                     anchors.fill: parent
@@ -480,10 +497,21 @@ PanelFrame {
                         font.pixelSize: Theme.fontSizeXs
                     }
 
+                    ThemedTextField {
+                        id: transitionSearch
+                        width: parent.width - Theme.pagePadding * 2
+                        x: Theme.pagePadding
+                        placeholderText: qsTr("Search transitions")
+                        font.family: Theme.fontFamily
+                    }
+
+                    Item { width: 1; height: Theme.spacingMd }
+
                     Flickable {
                         id: transitionCategoryFlick
                         width: parent.width
-                        height: 34
+                        height: transitionsBrowser.query.length > 0 ? 0 : 34
+                        visible: transitionsBrowser.query.length === 0
                         contentWidth: transitionCategoryRow.width + Theme.spacing3xl
                         clip: true
 
@@ -508,7 +536,8 @@ PanelFrame {
 
                     Item {
                         width: parent.width
-                        height: Math.max(0, parent.height - transitionTip.height - transitionCategoryFlick.height)
+                        height: Math.max(0, parent.height - transitionTip.height - transitionSearch.height
+                                         - Theme.spacingMd - transitionCategoryFlick.height)
 
                         // A category whose filter matches nothing used to leave a
                         // blank scroll area with no explanation.
@@ -523,9 +552,25 @@ PanelFrame {
                             onActionTriggered: root.Window.window.openAddonManager()
                         }
 
+                        EmptyState {
+                            anchors.centerIn: parent
+                            width: Math.min(parent.width - Theme.spacing3xl, 260)
+                            visible: transitionsBrowser.categories.length > 0
+                                     && transitionsBrowser.visibleTransitions.length === 0
+                            compact: true
+                            glyph: Theme.icons.search
+                            title: transitionsBrowser.query.length > 0
+                                   ? qsTr("No transitions match “%1”").arg(transitionSearch.text.trim())
+                                   : qsTr("Nothing in this category")
+                            hint: transitionsBrowser.query.length > 0
+                                  ? qsTr("Try a different name.")
+                                  : qsTr("Pick another category above.")
+                        }
+
                     Flickable {
                         anchors.fill: parent
                         visible: transitionsBrowser.categories.length > 0
+                                 && transitionsBrowser.visibleTransitions.length > 0
                         contentHeight: transitionGrid.height + Theme.spacing3xl
                         clip: true
                         ScrollBar.vertical: AppScrollBar { }
@@ -540,12 +585,11 @@ PanelFrame {
                             rowSpacing: Theme.assetCardGap
 
                             Repeater {
-                                model: EditorState.transitionKinds()
+                                model: transitionsBrowser.visibleTransitions
                                 delegate: Column {
                                     id: transitionCard
                                     required property var modelData
-                                    visible: transitionCard.modelData.category === transitionsBrowser.activeCategory
-                                    width: visible ? Theme.assetCardWidth : 0
+                                    width: Theme.assetCardWidth
                                     spacing: 4
                                     opacity: transitionDrag.active ? 0.85 : 1
 

@@ -13,14 +13,42 @@ Item {
     property int pageIndex: 0
     readonly property string currentCategoryId:
         categories[pageIndex] ? categories[pageIndex].id : ""
+    readonly property string query: search.text.trim().toLowerCase()
 
-    Flow {
-        id: shapePageBar
+    // Search spans every category — once you have a name, the chips are in the way.
+    readonly property var currentShapes: {
+        const q = root.query
+        if (q.length > 0) {
+            return root.allShapes.filter(function(s) {
+                const label = (s.label || "").toLowerCase()
+                const id = (s.id || "").toLowerCase()
+                return label.indexOf(q) >= 0 || id.indexOf(q) >= 0
+            })
+        }
+        return root.allShapes.filter(function(s) { return s.category === root.currentCategoryId })
+    }
+
+    ThemedTextField {
+        id: search
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.margins: 12
+        placeholderText: qsTr("Search shapes")
+        font.family: Theme.fontFamily
+    }
+
+    Flow {
+        id: shapePageBar
+        anchors.top: search.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.topMargin: Theme.spacingMd
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
         spacing: 6
+        visible: root.query.length === 0
+        height: visible ? implicitHeight : 0
 
         Repeater {
             model: root.categories
@@ -36,26 +64,40 @@ Item {
     }
 
     Flickable {
-        anchors.top: shapePageBar.bottom
+        anchors.top: shapePageBar.visible ? shapePageBar.bottom : search.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.topMargin: 12
         anchors.leftMargin: 12
         anchors.rightMargin: 12
-        contentHeight: shapeGrid.height + 24
+        contentHeight: Math.max(emptySearchHint.height, shapeGrid.height) + 24
         clip: true
         ScrollBar.vertical: AppScrollBar { }
+
+        Text {
+            id: emptySearchHint
+            width: parent.width - 12
+            visible: root.currentShapes.length === 0
+            text: root.query.length > 0
+                  ? qsTr("No shapes match “%1”.").arg(search.text.trim())
+                  : qsTr("Nothing in this category.")
+            color: Theme.mutedForeground
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSm
+            wrapMode: Text.WordWrap
+        }
 
         Grid {
             id: shapeGrid
             width: parent.width - 12
+            visible: root.currentShapes.length > 0
             columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
             columnSpacing: Theme.assetCardGap
             rowSpacing: Theme.assetCardGap
 
             Repeater {
-                model: root.allShapes.filter(function(s) { return s.category === root.currentCategoryId })
+                model: root.currentShapes
                 delegate: Column {
                     id: shapeCard
                     required property var modelData

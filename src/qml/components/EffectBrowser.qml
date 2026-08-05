@@ -9,7 +9,24 @@ Column {
     spacing: 0
 
     readonly property var categories: EditorState.effectCategories()
+    readonly property var catalog: EditorState.effectCatalog()
     property string activeCategory: categories.length > 0 ? categories[0].id : ""
+    readonly property string query: search.text.trim().toLowerCase()
+
+    // Search spans every category — once you have a name, the chips are in the way.
+    readonly property var visiblePresets: {
+        const q = root.query
+        if (q.length > 0) {
+            return root.catalog.filter(function(preset) {
+                const label = (preset.label || preset.displayName || "").toLowerCase()
+                const id = (preset.id || "").toLowerCase()
+                return label.indexOf(q) >= 0 || id.indexOf(q) >= 0
+            })
+        }
+        return root.catalog.filter(function(preset) {
+            return preset.category === root.activeCategory
+        })
+    }
 
     function applyPreset(effectId) {
         if (EditorState.selectedClip < 0)
@@ -34,10 +51,21 @@ Column {
         font.pixelSize: Theme.fontSizeXs
     }
 
+    ThemedTextField {
+        id: search
+        width: parent.width - 24
+        x: 12
+        placeholderText: qsTr("Search effects")
+        font.family: Theme.fontFamily
+    }
+
+    Item { width: 1; height: Theme.spacingMd }
+
     Flickable {
         id: categoryFlick
         width: parent.width
-        height: 34
+        height: root.query.length > 0 ? 0 : 34
+        visible: root.query.length === 0
         contentWidth: categoryRow.width + 24
         clip: true
 
@@ -62,27 +90,43 @@ Column {
 
     Flickable {
         width: parent.width
-        height: Math.max(0, root.height - browserTip.height - categoryFlick.height)
-        contentHeight: presetGrid.height + 24
+        height: Math.max(0, root.height - browserTip.height - search.height - Theme.spacingMd
+                         - (root.query.length > 0 ? 0 : categoryFlick.height))
+        contentHeight: Math.max(emptySearchHint.height, presetGrid.height) + 24
         clip: true
         ScrollBar.vertical: AppScrollBar { }
+
+        Text {
+            id: emptySearchHint
+            x: 12
+            y: 12
+            width: parent.width - 24
+            visible: root.visiblePresets.length === 0
+            text: root.query.length > 0
+                  ? qsTr("No effects match “%1”.").arg(search.text.trim())
+                  : qsTr("Nothing in this category.")
+            color: Theme.mutedForeground
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSm
+            wrapMode: Text.WordWrap
+        }
 
         Grid {
             id: presetGrid
             x: 12
             y: 12
             width: parent.width - 24
+            visible: root.visiblePresets.length > 0
             columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
             columnSpacing: Theme.assetCardGap
             rowSpacing: Theme.assetCardGap
 
             Repeater {
-                model: EditorState.effectCatalog()
+                model: root.visiblePresets
                 delegate: Column {
                     id: presetCard
                     required property var modelData
-                    visible: presetCard.modelData.category === root.activeCategory
-                    width: visible ? Theme.assetCardWidth : 0
+                    width: Theme.assetCardWidth
                     spacing: 4
                     opacity: presetDrag.active ? 0.85 : 1
 

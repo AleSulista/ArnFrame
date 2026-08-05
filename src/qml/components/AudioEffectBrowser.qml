@@ -12,6 +12,22 @@ Column {
     readonly property var categories: EditorState.audioEffectCategories()
     readonly property var catalog: EditorState.audioEffectCatalog()
     property string activeCategory: categories.length > 0 ? categories[0].id : ""
+    readonly property string query: search.text.trim().toLowerCase()
+
+    // Search spans every category — once you have a name, the chips are in the way.
+    readonly property var visiblePresets: {
+        const q = root.query
+        if (q.length > 0) {
+            return root.catalog.filter(function(preset) {
+                const label = (preset.label || "").toLowerCase()
+                const id = (preset.id || "").toLowerCase()
+                return label.indexOf(q) >= 0 || id.indexOf(q) >= 0
+            })
+        }
+        return root.catalog.filter(function(preset) {
+            return preset.category === root.activeCategory
+        })
+    }
 
     function applyPreset(effectId) {
         if (EditorState.selectedClip < 0)
@@ -50,9 +66,24 @@ Column {
         font.pixelSize: Theme.fontSizeXs
     }
 
+    ThemedTextField {
+        id: search
+        visible: root.catalog.length > 0
+        width: parent.width - 24
+        height: visible ? implicitHeight : 0
+        x: 12
+        placeholderText: qsTr("Search sounds")
+        font.family: Theme.fontFamily
+    }
+
+    Item {
+        width: 1
+        height: root.catalog.length > 0 ? Theme.spacingMd : 0
+    }
+
     Flickable {
         id: categoryFlick
-        visible: root.catalog.length > 0
+        visible: root.catalog.length > 0 && root.query.length === 0
         width: parent.width
         height: visible ? 34 : 0
         contentWidth: categoryRow.width + 24
@@ -80,27 +111,43 @@ Column {
     Flickable {
         visible: root.catalog.length > 0
         width: parent.width
-        height: visible ? Math.max(0, root.height - browserTip.height - categoryFlick.height) : 0
-        contentHeight: presetGrid.height + 24
+        height: visible ? Math.max(0, root.height - browserTip.height - search.height
+                                   - Theme.spacingMd - categoryFlick.height) : 0
+        contentHeight: Math.max(emptySearchHint.height, presetGrid.height) + 24
         clip: true
         ScrollBar.vertical: AppScrollBar { }
+
+        Text {
+            id: emptySearchHint
+            x: 12
+            y: 12
+            width: parent.width - 24
+            visible: root.visiblePresets.length === 0
+            text: root.query.length > 0
+                  ? qsTr("No sounds match “%1”.").arg(search.text.trim())
+                  : qsTr("Nothing in this category.")
+            color: Theme.mutedForeground
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSm
+            wrapMode: Text.WordWrap
+        }
 
         Grid {
             id: presetGrid
             x: 12
             y: 12
             width: parent.width - 24
+            visible: root.visiblePresets.length > 0
             columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
             columnSpacing: Theme.assetCardGap
             rowSpacing: Theme.assetCardGap
 
             Repeater {
-                model: root.catalog
+                model: root.visiblePresets
                 delegate: Column {
                     id: presetCard
                     required property var modelData
-                    visible: presetCard.modelData.category === root.activeCategory
-                    width: visible ? Theme.assetCardWidth : 0
+                    width: Theme.assetCardWidth
                     spacing: 4
                     opacity: presetDrag.active ? 0.85 : 1
 
@@ -131,7 +178,7 @@ Column {
                             // Soft-alpha AuraBlur PNGs fade out at the rim; zoom past that
                             // falloff so the card reads as a full-bleed colour field, not a
                             // vignette floating on the panel accent.
-                            anchors.fill:parent
+                            anchors.fill: parent
                             visible: presetCard.thumb.length > 0 && status === Image.Ready
                             source: presetCard.thumb.length > 0
                                     ? EditorState.imageUrl(presetCard.thumb) : ""
