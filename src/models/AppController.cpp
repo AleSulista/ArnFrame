@@ -20,6 +20,7 @@
 #include "engine/Exporter.h"
 #include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
+#include "engine/FrameCompositor.h"
 #include "engine/MediaThumbnail.h"
 #include "engine/AudioFileWriter.h"
 #include "engine/DeepFilterDenoiser.h"
@@ -8408,34 +8409,88 @@ void AppController::removeBookmarkNearPlayhead()
         removeBookmark(near);
 }
 
+namespace {
+
+// Freeze frames are project media, not cache: they live under the project's own media dir so a
+// save bundles them and a cache sweep can't delete the file a saved clip points at.
+QString newFreezeFramePath(const QString &projectId)
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (base.isEmpty())
+        return {};
+
+    const QString dir = QDir(base).filePath(QStringLiteral("projects/%1/media").arg(projectId));
+    if (!QDir().mkpath(dir))
+        return {};
+
+    return QDir(dir).filePath(QStringLiteral("freeze-%1.png")
+                                  .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+}
+
+} // namespace
+
 void AppController::freezeFrameAtPlayhead()
 {
-    const QVariantMap clip = activeVideoClipAtPlayhead();
-    if (clip.isEmpty() || clip.value(QStringLiteral("kind")).toString() != QStringLiteral("video")) {
+    if (!m_assetLibrary)
+        return;
+
+    if (activeVideoClipAtPlayhead().isEmpty()) {
         setLastMessage(QStringLiteral("No video at the current time"), QStringLiteral("warning"));
         return;
     }
 
-    const QString path = clip.value(QStringLiteral("path")).toString();
-    const double sourceTime = sourceTimeForClip(clip);
-    if (path.isEmpty()) {
+    const QString outPath = newFreezeFramePath(m_project.id());
+    if (outPath.isEmpty()) {
         setLastMessage(QStringLiteral("Couldn’t capture a still frame"), QStringLiteral("error"));
         return;
     }
 
+    // Compositing here drives the shared decoder pool, which playback is also driving with its
+    // own set of retained paths and its own read-ahead. Same reason export stops playback first.
+    setPlaying(false);
+
     setLastMessage(QStringLiteral("Capturing freeze frame…"));
     const drift::TimeUs playheadUs = m_playheadUs;
-    (void)QtConcurrent::run([this, path, sourceTime, playheadUs]() {
-        const QString thumb = MediaThumbnail::generateAtTime(path, sourceTime);
+    // The worker composites off the GUI thread while editing continues, so it gets a detached
+    // copy rather than a pointer into the live project.
+    const auto snapshot = std::make_shared<const drift::Project>(m_project.detachedCopy());
+
+    (void)QtConcurrent::run([this, snapshot, playheadUs, outPath]() {
+        FrameCompositor compositor;
+        compositor.setProject(snapshot.get());
+
+        // Full canvas scale: this is the finished frame — every track, effect, transition and
+        // overlay — not a preview of one clip's source.
+        const QImage frame = compositor.compositeAt(playheadUs);
+        const bool ok = !frame.isNull() && frame.save(outPath, "PNG");
+        const QString thumb =
+            ok ? MediaThumbnail::generate(outPath, drift::mediaKindToString(drift::MediaKind::Image))
+               : QString();
+        const QSize size = frame.size();
+
         QMetaObject::invokeMethod(
             this,
-            [this, thumb, playheadUs]() {
-                if (thumb.isEmpty()) {
-                    setLastMessage(QStringLiteral("Couldn’t capture a still frame"), QStringLiteral("error"));
+            [this, ok, outPath, thumb, size, playheadUs]() {
+                if (!ok) {
+                    setLastMessage(QStringLiteral("Couldn’t capture a still frame"),
+                                   QStringLiteral("error"));
                     return;
                 }
 
                 const drift::Project before = m_project;
+
+                drift::MediaAsset asset;
+                asset.name = QStringLiteral("Freeze frame");
+                asset.path = outPath;
+                asset.kind = drift::MediaKind::Image;
+                asset.width = size.width();
+                asset.height = size.height();
+                asset.thumbnailPath = thumb;
+                asset.filmstripPath = thumb;
+                asset.hasAudio = false;
+                asset.hasAudioKnown = true;
+                const QString assetId = m_assetLibrary->addGeneratedAsset(asset);
+
                 const int trackIndex = drift::ensureTrackForClipType(m_project, drift::ClipType::Image, false);
 
                 drift::Track &track = m_project.tracks()[trackIndex];
@@ -8445,15 +8500,18 @@ void AppController::freezeFrameAtPlayhead()
 
                 drift::Clip freezeClip;
                 freezeClip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+                freezeClip.assetId = assetId;
                 freezeClip.type = drift::ClipType::Image;
                 freezeClip.name = QStringLiteral("Freeze frame");
-                freezeClip.path = thumb;
+                freezeClip.path = outPath;
                 freezeClip.thumbnailPath = thumb;
                 freezeClip.filmstripPath = thumb;
                 freezeClip.timelineStart = start;
                 freezeClip.timelineDuration = drift::kImageClipDurationUs;
                 freezeClip.srcIn = 0;
                 freezeClip.srcOut = drift::kImageClipDurationUs;
+                fitClipLayoutToCanvas(freezeClip, size.width(), size.height(), m_project.width(),
+                                      m_project.height());
 
                 track.clips.append(freezeClip);
                 pushProjectEdit(before, QStringLiteral("Freeze frame added"));

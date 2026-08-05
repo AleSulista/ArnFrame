@@ -857,6 +857,22 @@ void AssetLibrary::importUrls(const QList<QUrl> &urls)
     importFiles(paths);
 }
 
+QString AssetLibrary::addGeneratedAsset(drift::MediaAsset asset)
+{
+    if (!m_project || asset.path.isEmpty())
+        return {};
+
+    if (asset.id.isEmpty())
+        asset.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    asset.path = QFileInfo(asset.path).absoluteFilePath();
+
+    const int row = m_project->assetOrder().size();
+    beginInsertRows({}, row, row);
+    const QString id = m_project->addAsset(asset);
+    endInsertRows();
+    return id;
+}
+
 void AssetLibrary::importFiles(const QStringList &paths)
 {
     if (!m_project)

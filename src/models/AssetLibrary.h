@@ -45,6 +45,9 @@ public:
     int count() const { return rowCount(); }
 
     Q_INVOKABLE void importUrls(const QList<QUrl> &urls);
+    // Registers media the app rendered itself (freeze frames and the like). The asset is already
+    // complete, so this skips the probe and thumbnail jobs the import path runs. Returns its id.
+    QString addGeneratedAsset(drift::MediaAsset asset);
     Q_INVOKABLE QVariantMap assetAt(int index) const;
     Q_INVOKABLE QString assetIdAt(int index) const;
     Q_INVOKABLE int indexOfId(const QString &id) const;
