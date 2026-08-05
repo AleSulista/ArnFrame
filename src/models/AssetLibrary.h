@@ -54,6 +54,8 @@ public:
     Q_INVOKABLE void ensureAllMedia();
     Q_INVOKABLE void sortByName();
     Q_INVOKABLE void sortByKind();
+    // Display name in the media bin. Does not rename the file on disk.
+    Q_INVOKABLE bool setAssetName(int index, const QString &name);
     int indexOfPath(const QString &path) const;
     // Drops the row from the project's asset table. Callers own the undo
     // snapshot and the in-use check; this only touches the bin.

@@ -25,6 +25,8 @@ Item {
     signal removeRequested(int assetIndex)
     // Emitted from the card/row context menu. The parent owns the file picker.
     signal replaceRequested(int assetIndex)
+    // Emitted from the card/row context menu. The parent owns the rename dialog.
+    signal renameRequested(int assetIndex)
     // Emitted when the empty-state action asks to import media.
     signal importRequested()
 
@@ -314,6 +316,11 @@ Item {
                             id: cardMenu
 
                             ThemedMenuItem {
+                                text: qsTr("Rename…")
+                                icon.name: Theme.icons.pencil
+                                onTriggered: root.renameRequested(assetIndex)
+                            }
+                            ThemedMenuItem {
                                 text: qsTr("Replace media…")
                                 icon.name: Theme.icons.refresh
                                 onTriggered: root.replaceRequested(assetIndex)
@@ -485,6 +492,11 @@ Item {
                     ThemedContextMenu {
                         id: rowMenu
 
+                        ThemedMenuItem {
+                            text: qsTr("Rename…")
+                            icon.name: Theme.icons.pencil
+                            onTriggered: root.renameRequested(assetIndex)
+                        }
                         ThemedMenuItem {
                             text: qsTr("Replace media…")
                             icon.name: Theme.icons.refresh

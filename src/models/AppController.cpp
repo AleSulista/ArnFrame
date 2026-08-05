@@ -1444,6 +1444,28 @@ bool AppController::removeAsset(int assetIndex)
     return true;
 }
 
+bool AppController::renameAsset(int assetIndex, const QString &name)
+{
+    if (!m_assetLibrary)
+        return false;
+
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty())
+        return false;
+
+    const QVariantMap current = m_assetLibrary->assetAt(assetIndex);
+    if (current.isEmpty() || current.value(QStringLiteral("name")).toString() == trimmed)
+        return false;
+
+    const drift::Project before = m_project.detachedCopy();
+    if (!m_assetLibrary->setAssetName(assetIndex, trimmed))
+        return false;
+
+    pushProjectEdit(before, QStringLiteral("Rename media"));
+    finishEdit(QStringLiteral("Media renamed"));
+    return true;
+}
+
 bool AppController::replaceAssetSource(int assetIndex, const QUrl &url)
 {
     if (!m_assetLibrary)
@@ -5420,6 +5442,31 @@ void AppController::setClipTextContent(int trackIndex, int clipIndex, const QStr
     clip.name = clip.textContent.left(32);
     pushProjectEdit(before, QStringLiteral("Text updated"));
     finishEdit(QStringLiteral("Text updated"));
+}
+
+void AppController::setClipName(int trackIndex, int clipIndex, const QString &name)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.name == trimmed)
+        return;
+
+    // Clip nests Qt-implicitly-shared maps (keyframes, effects). A plain Project
+    // copy can still alias those payloads across undo snapshots; detach first.
+    const drift::Project before = m_project.detachedCopy();
+    clip.name = trimmed;
+    pushProjectEdit(before, QStringLiteral("Rename clip"));
+    finishEdit(QStringLiteral("Clip renamed"));
 }
 
 void AppController::previewSetClipTextContent(int trackIndex, int clipIndex, const QString &text)

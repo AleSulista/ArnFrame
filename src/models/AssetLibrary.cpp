@@ -686,6 +686,22 @@ void AssetLibrary::sortByName()
     endResetModel();
 }
 
+bool AssetLibrary::setAssetName(int index, const QString &name)
+{
+    drift::MediaAsset *asset = assetAtIndex(index);
+    if (!asset)
+        return false;
+
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty() || asset->name == trimmed)
+        return false;
+
+    asset->name = trimmed;
+    emitAssetRowChanged(index, {NameRole});
+    snapshotAssets();
+    return true;
+}
+
 void AssetLibrary::sortByKind()
 {
     if (!m_project || m_project->assetOrder().size() < 2)

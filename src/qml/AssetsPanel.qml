@@ -90,6 +90,54 @@ PanelFrame {
         onRejected: root.pendingRemovalIndex = -1
     }
 
+    property int pendingRenameIndex: -1
+
+    function requestRenameAsset(assetIndex) {
+        const asset = AssetLibrary.assetAt(assetIndex)
+        if (!asset || Object.keys(asset).length === 0)
+            return
+        root.pendingRenameIndex = assetIndex
+        assetRenameField.text = asset.name || ""
+        assetRenameDialog.open()
+    }
+
+    ThemedDialog {
+        id: assetRenameDialog
+        title: qsTr("Rename media")
+        acceptText: qsTr("Rename")
+        preferredWidth: Theme.dialogWidthSm
+
+        contentItem: Column {
+            width: parent ? parent.width : Theme.dialogWidthSm
+            spacing: Theme.spacingMd
+
+            ThemedLabel {
+                width: parent.width
+                text: qsTr("Name")
+                size: "sm"
+            }
+            ThemedTextField {
+                id: assetRenameField
+                width: parent.width
+                placeholderText: qsTr("Media name")
+            }
+        }
+
+        onOpened: {
+            assetRenameField.forceActiveFocus()
+            assetRenameField.selectAll()
+        }
+        onAccepted: {
+            if (root.pendingRenameIndex < 0)
+                return
+            const label = assetRenameField.text.trim()
+            if (label.length > 0)
+                EditorState.renameAsset(root.pendingRenameIndex, label)
+            root.pendingRenameIndex = -1
+        }
+        onRejected: root.pendingRenameIndex = -1
+    }
+
     // Points a bin row at a different file while every clip using it stays put, so a project set
     // up once — music, outro, CTA — can be re-pointed at the next video instead of rebuilt.
     function requestReplaceAsset(assetIndex) {
@@ -767,6 +815,7 @@ PanelFrame {
                 onAddRequested: (assetIndex) => root.addAssetToTimeline(assetIndex)
                 onRemoveRequested: (assetIndex) => root.requestRemoveAsset(assetIndex)
                 onReplaceRequested: (assetIndex) => root.requestReplaceAsset(assetIndex)
+                onRenameRequested: (assetIndex) => root.requestRenameAsset(assetIndex)
                 onImportRequested: root.importMedia()
             }
         }

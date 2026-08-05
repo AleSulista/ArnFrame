@@ -33,6 +33,7 @@ private slots:
     void undoBookmarkAdd();
     void bookmarkNavigationAndToggle();
     void bookmarkSnapTarget();
+    void renameClipAndAsset();
     void moveTrackReordersAndRemapsSelection();
     void addTrackInsertsEmptyTrackByType();
     void projectPersistenceRoundTrip();
@@ -206,6 +207,37 @@ void EditorStateTest::bookmarkSnapTarget()
     state.addBookmark(2.0, QStringLiteral("Snap me"));
     // Within the 150ms snap window of the bookmark.
     QCOMPARE(state.snapTime(2.05), 2.0);
+}
+
+void EditorStateTest::renameClipAndAsset()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("Hello"), 0.0);
+    QCOMPARE(state.clipAt(0, 0).value(QStringLiteral("name")).toString(), QStringLiteral("Hello"));
+
+    state.setClipName(0, 0, QStringLiteral("Intro title"));
+    QCOMPARE(state.clipAt(0, 0).value(QStringLiteral("name")).toString(), QStringLiteral("Intro title"));
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    QCOMPARE(state.clipAt(0, 0).value(QStringLiteral("name")).toString(), QStringLiteral("Hello"));
+
+    // Asset rename is independent of clip names that were copied at add time.
+    // Seed a bin row through the project table the library is bound to.
+    drift::MediaAsset asset;
+    asset.id = QStringLiteral("asset-1");
+    asset.name = QStringLiteral("clip.mp4");
+    asset.path = QStringLiteral("/tmp/clip.mp4");
+    asset.kind = drift::MediaKind::Video;
+    state.project()->assets().insert(asset.id, asset);
+    state.project()->assetOrder().append(asset.id);
+    library.syncToProject();
+    QCOMPARE(library.count(), 1);
+
+    QVERIFY(state.renameAsset(0, QStringLiteral("A-roll")));
+    QCOMPARE(library.assetAt(0).value(QStringLiteral("name")).toString(), QStringLiteral("A-roll"));
+    // Existing timeline text clip is untouched.
+    QCOMPARE(state.clipAt(0, 0).value(QStringLiteral("name")).toString(), QStringLiteral("Hello"));
 }
 
 void EditorStateTest::moveTrackReordersAndRemapsSelection()

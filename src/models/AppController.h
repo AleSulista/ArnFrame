@@ -246,6 +246,8 @@ public:
     Q_INVOKABLE void addClipFromAssetOnNewTrackAt(int assetIndex, int insertIndex, double atSeconds);
     Q_INVOKABLE int clipCountForAsset(int assetIndex) const;
     Q_INVOKABLE bool removeAsset(int assetIndex);
+    // Bin label only — does not rename the file on disk or rewrite clip names.
+    Q_INVOKABLE bool renameAsset(int assetIndex, const QString &name);
     // Points an existing bin row at a different file, keeping every clip that uses it where it
     // is — its position, trim, effects and transitions all survive. Asynchronous: true only means
     // the probe started, and the outcome arrives as assetReplaceFinished.
@@ -405,6 +407,8 @@ public:
     Q_INVOKABLE void setClipStart(int trackIndex, int clipIndex, double start);
     Q_INVOKABLE void setClipDuration(int trackIndex, int clipIndex, double duration);
     Q_INVOKABLE void setClipTextContent(int trackIndex, int clipIndex, const QString &text);
+    // Display label on the timeline / inspector. Does not rename the source file.
+    Q_INVOKABLE void setClipName(int trackIndex, int clipIndex, const QString &name);
     // Live text edits (preview drag) keep the canvas and properties panel in sync
     // while typing; commitTextEdit trims and pushes undo.
     Q_INVOKABLE void previewSetClipTextContent(int trackIndex, int clipIndex, const QString &text);

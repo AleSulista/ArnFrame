@@ -548,6 +548,11 @@ Item {
                 icon.name: Theme.icons.copyPlus
                 onTriggered: EditorState.duplicateSelectedClip()
             }
+            ThemedMenuItem {
+                text: qsTr("Rename…")
+                icon.name: Theme.icons.pencil
+                onTriggered: clipItem.panel.requestRenameClip(clipItem.trackIndex, clipItem.clipIndex)
+            }
             ThemedMenuSeparator { }
             ThemedMenuItem {
                 text: qsTr("Delete")

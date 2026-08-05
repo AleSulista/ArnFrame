@@ -543,6 +543,23 @@ PanelFrame {
         return m.toString().padStart(2, "0") + ":" + s.toString().padStart(2, "0");
     }
 
+    property int renameClipTrack: -1
+    property int renameClipIndex: -1
+
+    function requestRenameClip(trackIndex, clipIndex) {
+        if (trackIndex < 0 || clipIndex < 0)
+            return
+        if (trackIndex >= root.tracks.length)
+            return
+        const clips = root.tracks[trackIndex].clips || []
+        if (clipIndex >= clips.length)
+            return
+        root.renameClipTrack = trackIndex
+        root.renameClipIndex = clipIndex
+        clipRenameField.text = clips[clipIndex].name || ""
+        clipRenameDialog.open()
+    }
+
     function ensurePlayheadVisible() {
         const playheadX = EditorState.playheadSeconds * pxPerSecond;
         const margin = 64;
@@ -1841,5 +1858,46 @@ PanelFrame {
             bookmarkRow.renameIndex = -1
         }
         onRejected: bookmarkRow.renameIndex = -1
+    }
+
+    ThemedDialog {
+        id: clipRenameDialog
+        title: qsTr("Rename clip")
+        acceptText: qsTr("Rename")
+        preferredWidth: Theme.dialogWidthSm
+
+        contentItem: Column {
+            width: parent ? parent.width : Theme.dialogWidthSm
+            spacing: Theme.spacingMd
+
+            ThemedLabel {
+                width: parent.width
+                text: qsTr("Name")
+                size: "sm"
+            }
+            ThemedTextField {
+                id: clipRenameField
+                width: parent.width
+                placeholderText: qsTr("Clip name")
+            }
+        }
+
+        onOpened: {
+            clipRenameField.forceActiveFocus()
+            clipRenameField.selectAll()
+        }
+        onAccepted: {
+            if (root.renameClipTrack < 0 || root.renameClipIndex < 0)
+                return
+            const label = clipRenameField.text.trim()
+            if (label.length > 0)
+                EditorState.setClipName(root.renameClipTrack, root.renameClipIndex, label)
+            root.renameClipTrack = -1
+            root.renameClipIndex = -1
+        }
+        onRejected: {
+            root.renameClipTrack = -1
+            root.renameClipIndex = -1
+        }
     }
 }
