@@ -193,12 +193,20 @@ PanelFrame {
             spacing: 0
 
             // Up/Down move between tabs once the rail has focus.
-            Column {
+            // Flickable so short panel heights can still reach lower icons.
+            Flickable {
                 id: propertiesTabRail
                 width: Theme.tabRailWidth
                 height: parent.height
-                topPadding: Theme.spacingSm
-                spacing: Theme.spacingXs
+                contentWidth: width
+                contentHeight: propertiesTabRailColumn.height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                interactive: contentHeight > height
+                ScrollBar.vertical: AppScrollBar {
+                    policy: propertiesTabRail.contentHeight > propertiesTabRail.height
+                            ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+                }
 
                 Accessible.role: Accessible.PageTabList
 
@@ -211,25 +219,32 @@ PanelFrame {
                     event.accepted = true
                 }
 
-                Repeater {
-                    model: tabsModel
-                    delegate: IconButton {
-                        required property int index
-                        required property var model
+                Column {
+                    id: propertiesTabRailColumn
+                    width: parent.width
+                    topPadding: Theme.spacingSm
+                    spacing: Theme.spacingXs
 
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        visible: (model.tabId !== "subtitles" || root.clipKind === "subtitle")
-                                 && (model.tabId !== "shape" || root.clipKind === "shape")
-                                 && (model.tabId !== "text" || root.hasTextStyle)
-                        glyph: root.tabIcons[model.icon]
-                        variant: "ghost"
-                        tooltip: model.label
-                        active: root.activeTab === index
-                        onClicked: root.activeTab = index
+                    Repeater {
+                        model: tabsModel
+                        delegate: IconButton {
+                            required property int index
+                            required property var model
 
-                        Accessible.role: Accessible.PageTab
-                        Accessible.name: model.label
-                        Accessible.checked: root.activeTab === index
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            visible: (model.tabId !== "subtitles" || root.clipKind === "subtitle")
+                                     && (model.tabId !== "shape" || root.clipKind === "shape")
+                                     && (model.tabId !== "text" || root.hasTextStyle)
+                            glyph: root.tabIcons[model.icon]
+                            variant: "ghost"
+                            tooltip: model.label
+                            active: root.activeTab === index
+                            onClicked: root.activeTab = index
+
+                            Accessible.role: Accessible.PageTab
+                            Accessible.name: model.label
+                            Accessible.checked: root.activeTab === index
+                        }
                     }
                 }
             }

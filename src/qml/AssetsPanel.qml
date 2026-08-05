@@ -211,12 +211,20 @@ PanelFrame {
         spacing: 0
 
         // Vertical tab rail. Up/Down move between tabs once it has focus.
-        Column {
+        // Flickable so short panel heights can still reach lower icons.
+        Flickable {
             id: tabRail
             width: Theme.tabRailWidth
             height: parent.height
-            topPadding: Theme.spacingSm
-            spacing: Theme.spacingXs
+            contentWidth: width
+            contentHeight: tabRailColumn.height
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
+            ScrollBar.vertical: AppScrollBar {
+                policy: tabRail.contentHeight > tabRail.height
+                        ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+            }
 
             Accessible.role: Accessible.PageTabList
 
@@ -229,22 +237,29 @@ PanelFrame {
                 event.accepted = true
             }
 
-            Repeater {
-                model: tabsModel
-                delegate: IconButton {
-                    required property int index
-                    required property var model
+            Column {
+                id: tabRailColumn
+                width: parent.width
+                topPadding: Theme.spacingSm
+                spacing: Theme.spacingXs
 
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    glyph: root.tabIcons[model.icon]
-                    variant: "ghost"
-                    tooltip: model.label
-                    active: root.activeTab === index
-                    onClicked: root.activeTab = index
+                Repeater {
+                    model: tabsModel
+                    delegate: IconButton {
+                        required property int index
+                        required property var model
 
-                    Accessible.role: Accessible.PageTab
-                    Accessible.name: model.label
-                    Accessible.checked: root.activeTab === index
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        glyph: root.tabIcons[model.icon]
+                        variant: "ghost"
+                        tooltip: model.label
+                        active: root.activeTab === index
+                        onClicked: root.activeTab = index
+
+                        Accessible.role: Accessible.PageTab
+                        Accessible.name: model.label
+                        Accessible.checked: root.activeTab === index
+                    }
                 }
             }
         }
