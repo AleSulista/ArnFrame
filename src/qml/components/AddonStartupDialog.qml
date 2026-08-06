@@ -2,9 +2,9 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Drift
 
-// Startup nudge: install the essential video / transitions / audio packs when they are not yet
-// recorded as addons, and offer updates for anything already installed. Both sections honour a
-// "don't remind me" preference so a later dismiss stays quiet across launches.
+// Essential packs + update nudge. Never opens by itself — the Extras icon in the header pulses
+// while there is something to show, and the user opens this from there (same pattern as the
+// app-update badge). Both sections honour a "don't remind me" preference.
 ThemedDialog {
     id: root
 
@@ -13,11 +13,14 @@ ThemedDialog {
     property var transfers: ({})
     property bool dontRemindEssential: false
     property bool dontRemindUpdates: false
-    // Session latch so catalog churn after a dismiss does not reopen the dialog.
-    property bool promptedThisSession: false
+    // After "Later", the header opens the full Extras manager instead of this dialog
+    // again — the shockwave still pulses until the underlying need is cleared.
+    property bool attentionAcknowledged: false
 
     readonly property bool showEssential: essentialAddons.length > 0
     readonly property bool showUpdates: updateAddons.length > 0
+    // Drives the header shockwave; true while either section has something to offer.
+    readonly property bool needsAttention: showEssential || showUpdates
     readonly property var actionIds: {
         var ids = []
         var i
@@ -39,26 +42,35 @@ ThemedDialog {
     showFooter: false
     acceptOnReturn: false
 
-    // Returns true when the dialog was opened (or when there is nothing left to ask this session).
-    function considerOpen() {
-        if (promptedThisSession || visible)
-            return promptedThisSession
+    onNeedsAttentionChanged: {
+        if (!needsAttention)
+            attentionAcknowledged = false
+    }
+
+    // Rebuilds the lists that feed needsAttention. Safe to call on every catalog churn;
+    // does not open the dialog.
+    function refreshAttention() {
         if (Addons.refreshing)
-            return false
+            return
+        // Leave in-flight install rows alone while the dialog is already open.
+        if (visible && installing)
+            return
 
         essentialAddons = Addons.remindEssential ? Addons.missingEssentialAddons() : []
         updateAddons = Addons.remindUpdates ? Addons.updatableAddons() : []
+    }
+
+    // Opened from the header when needsAttention is true and the user has not yet
+    // waved this dialog away. Returns false so the caller can fall through to the
+    // full Extras manager.
+    function openForAttention() {
+        refreshAttention()
+        if (!needsAttention || attentionAcknowledged)
+            return false
         dontRemindEssential = false
         dontRemindUpdates = false
         transfers = ({})
-
-        if (!showEssential && !showUpdates) {
-            promptedThisSession = true
-            return true
-        }
-
         open()
-        promptedThisSession = true
         return true
     }
 
@@ -100,6 +112,7 @@ ThemedDialog {
 
     function dismiss() {
         persistReminders()
+        attentionAcknowledged = true
         close()
     }
 

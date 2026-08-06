@@ -330,14 +330,14 @@ Item {
             ThemedSwitch {
                 checked: Addons.remindEssential
                 text: qsTr("Remind about essential packs")
-                tooltip: qsTr("On startup, offer the video, transitions, and audio packs if they are not installed")
+                tooltip: qsTr("Pulse the Extras icon when the video, transitions, and audio packs are not installed")
                 onToggled: Addons.remindEssential = checked
             }
 
             ThemedSwitch {
                 checked: Addons.remindUpdates
                 text: qsTr("Remind about pack updates")
-                tooltip: qsTr("On startup, offer updates for packs you already have installed")
+                tooltip: qsTr("Pulse the Extras icon when updates are available for packs you already have installed")
                 onToggled: Addons.remindUpdates = checked
             }
         }

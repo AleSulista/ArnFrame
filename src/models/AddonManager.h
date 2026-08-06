@@ -22,11 +22,11 @@ class AddonManager : public QObject
     Q_PROPERTY(QVariantList catalog READ catalog NOTIFY catalogChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(bool refreshing READ refreshing NOTIFY refreshingChanged)
-    // Startup dialog: offer the core video / transitions / audio packs when they are not yet
-    // installed as addons (bundled copies still work; installing unlocks the update channel).
+    // Header attention nudge: offer the core video / transitions / audio packs when they are not
+    // yet installed as addons (bundled copies still work; installing unlocks the update channel).
     Q_PROPERTY(bool remindEssential READ remindEssential WRITE setRemindEssential
                    NOTIFY remindEssentialChanged)
-    // Startup dialog: mention installed packs that have a newer version on the store.
+    // Header attention nudge: mention installed packs that have a newer version on the store.
     Q_PROPERTY(bool remindUpdates READ remindUpdates WRITE setRemindUpdates
                    NOTIFY remindUpdatesChanged)
 

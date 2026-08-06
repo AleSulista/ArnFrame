@@ -68,10 +68,13 @@ ApplicationWindow {
 
     // "Decide later" closes the first-run chooser without settling on a canvas size.
     // Tracked separately from EditorState.projectLayoutChosen — which means "the canvas
-    // size is decided" and gates ProjectSetupDialog — so the chooser and the
-    // essential-packs nudge can move on while the first video/image clip still gets
-    // offered a setup step. Session-only, matching projectLayoutChosen itself.
+    // size is decided" and gates ProjectSetupDialog — so the chooser can move on while
+    // the first video/image clip still gets offered a setup step. Session-only,
+    // matching projectLayoutChosen itself.
     property bool layoutPromptDismissed: false
+
+    // Header Extras icon pulses while true; never auto-opens a dialog.
+    readonly property alias addonAttentionNeeded: addonStartupDialog.needsAttention
 
     function promptLayoutChooserIfNeeded() {
         if (EditorState.recoveryAvailable || EditorState.projectLayoutChosen)
@@ -83,17 +86,9 @@ ApplicationWindow {
         layoutChooserDialog.openChooser()
     }
 
-    // After recovery / first-run layout settle: offer essential packs and addon updates once.
-    function promptAddonStartupIfNeeded() {
-        if (recoveryDialog.visible || layoutChooserDialog.visible || missingAddonsDialog.visible)
-            return
-        if (EditorState.recoveryAvailable)
-            return
-        // Either the layout was decided, or the user waved the chooser away — both
-        // mean the first-run layout step is behind us and the nudge may follow.
-        if (!EditorState.projectLayoutChosen && !window.layoutPromptDismissed)
-            return
-        addonStartupDialog.considerOpen()
+    // Quiet catalog refresh for the header attention indicator.
+    function refreshAddonAttention() {
+        addonStartupDialog.refreshAttention()
     }
 
     // Settings / header: reopen platform layout picker anytime.
@@ -107,18 +102,14 @@ ApplicationWindow {
 
     LayoutChooserDialog {
         id: layoutChooserDialog
-        // rejected() fires before closed(), so the flag is already set by the time the
-        // nudge below checks it.
+        // rejected() fires before closed(), so the flag is already set by the time
+        // callers check it.
         onFirstRunDismissed: window.layoutPromptDismissed = true
-        onClosed: Qt.callLater(window.promptAddonStartupIfNeeded)
     }
 
     RecoveryDialog {
         id: recoveryDialog
-        onClosed: {
-            Qt.callLater(window.promptLayoutChooserIfNeeded)
-            Qt.callLater(window.promptAddonStartupIfNeeded)
-        }
+        onClosed: Qt.callLater(window.promptLayoutChooserIfNeeded)
     }
 
     SubtitleProgressDialog {
@@ -185,6 +176,14 @@ ApplicationWindow {
             addonManagerDialog.openForKind(kind)
     }
 
+    // Header Extras button: open the essential/update nudge when the icon is pulsing,
+    // otherwise the full manager — same idea as the update badge vs silent check.
+    function openExtras() {
+        if (addonStartupDialog.openForAttention())
+            return
+        openAddonManager()
+    }
+
     // Opened from the header badge, which only exists while there is something to show.
     function openUpdateDialog() {
         updateDialog.open()
@@ -209,7 +208,6 @@ ApplicationWindow {
                 stop()
                 attempts = 0
                 Qt.callLater(window.promptLayoutChooserIfNeeded)
-                Qt.callLater(window.promptAddonStartupIfNeeded)
                 return
             }
             promptRecoveryIfNeeded()
@@ -222,12 +220,7 @@ ApplicationWindow {
         id: layoutChooserOpenTimer
         interval: 120
         repeat: false
-        onTriggered: {
-            window.promptLayoutChooserIfNeeded()
-            // Returning users already have a layout; the chooser no-ops and we still
-            // need a chance to offer essential packs / updates once the UI is up.
-            window.promptAddonStartupIfNeeded()
-        }
+        onTriggered: window.promptLayoutChooserIfNeeded()
     }
 
     Component.onCompleted: {
@@ -249,7 +242,6 @@ ApplicationWindow {
                 recoveryOpenTimer.start()
             } else {
                 Qt.callLater(window.promptLayoutChooserIfNeeded)
-                Qt.callLater(window.promptAddonStartupIfNeeded)
             }
         }
 
@@ -260,8 +252,6 @@ ApplicationWindow {
                 // "Decide later" last time round.
                 window.layoutPromptDismissed = false
                 layoutChooserOpenTimer.restart()
-            } else {
-                Qt.callLater(window.promptAddonStartupIfNeeded)
             }
         }
 
@@ -332,15 +322,21 @@ ApplicationWindow {
         target: Addons
         function onRefreshingChanged() {
             if (!Addons.refreshing)
-                Qt.callLater(window.promptAddonStartupIfNeeded)
+                Qt.callLater(window.refreshAddonAttention)
         }
         function onCatalogChanged() {
-            Qt.callLater(window.promptAddonStartupIfNeeded)
+            Qt.callLater(window.refreshAddonAttention)
+        }
+        function onRemindEssentialChanged() {
+            Qt.callLater(window.refreshAddonAttention)
+        }
+        function onRemindUpdatesChanged() {
+            Qt.callLater(window.refreshAddonAttention)
         }
 
         // A download or signature failure only reached the addon manager dialog's
         // status line, so a pack that failed to install while that dialog was closed
-        // — the normal case for the startup prompt — failed completely silently.
+        // — the normal case for the attention nudge — failed completely silently.
         function onTransferFailed(id, reason) {
             if (reason === "Cancelled")
                 return
