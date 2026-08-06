@@ -173,7 +173,7 @@ PanelFrame {
     }
 
     // Selects a tab by id. Used by cross-panel jumps such as the properties
-    // panel's "Browse effects" / "Browse sounds" empty-state actions.
+    // panel's "Browse effects" / "Browse audio effects" empty-state actions.
     function showTab(tabId) {
         for (var i = 0; i < tabsModel.count; ++i) {
             if (tabsModel.get(i).tabId === tabId) {
@@ -190,38 +190,44 @@ PanelFrame {
 
     function assetVisible(kind) {
         const tabId = tabsModel.get(activeTab).tabId
-        if (tabId === "text" || tabId === "stickers" || tabId === "shapes" || tabId === "effects"
-                || tabId === "templates" || tabId === "adjustment" || tabId === "settings" || tabId === "sounds"
-                || tabId === "transitions" || tabId === "shortcuts")
+        if (tabId === "text" || tabId === "subtitles" || tabId === "stickers" || tabId === "shapes"
+                || tabId === "effects" || tabId === "templates" || tabId === "adjustment"
+                || tabId === "settings" || tabId === "sounds" || tabId === "transitions"
+                || tabId === "shortcuts")
             return false
         const kinds = kindsForTab(tabId)
         return kinds.length === 0 || kinds.indexOf(kind) >= 0
     }
 
+    // Rail order: project media → on-canvas graphics → processing → prefs.
+    // `separatorAfter` draws a hairline under the tab so groups read as sections.
+    // tabId "sounds" is kept for favorites persistence (settings key).
     ListModel {
         id: tabsModel
-        ListElement { tabId: "media"; icon: 0; label: "Media" }
-        ListElement { tabId: "sounds"; icon: 1; label: "Sounds" }
-        ListElement { tabId: "text"; icon: 2; label: "Text" }
-        ListElement { tabId: "stickers"; icon: 3; label: "Stickers" }
-        ListElement { tabId: "shapes"; icon: 4; label: "Shapes" }
-        ListElement { tabId: "effects"; icon: 5; label: "Effects" }
-        ListElement { tabId: "templates"; icon: 9; label: "Templates" }
-        ListElement { tabId: "transitions"; icon: 6; label: "Transitions" }
-        ListElement { tabId: "settings"; icon: 7; label: "Settings" }
-        ListElement { tabId: "shortcuts"; icon: 8; label: "Shortcuts" }
+        ListElement { tabId: "media"; icon: 0; label: "Media"; separatorAfter: true }
+        ListElement { tabId: "text"; icon: 1; label: "Text"; separatorAfter: false }
+        ListElement { tabId: "subtitles"; icon: 2; label: "Subtitles"; separatorAfter: false }
+        ListElement { tabId: "stickers"; icon: 3; label: "Stickers"; separatorAfter: false }
+        ListElement { tabId: "shapes"; icon: 4; label: "Shapes"; separatorAfter: true }
+        ListElement { tabId: "effects"; icon: 5; label: "Effects"; separatorAfter: false }
+        ListElement { tabId: "templates"; icon: 6; label: "Templates"; separatorAfter: false }
+        ListElement { tabId: "transitions"; icon: 7; label: "Transitions"; separatorAfter: false }
+        ListElement { tabId: "sounds"; icon: 8; label: "Audio FX"; separatorAfter: true }
+        ListElement { tabId: "settings"; icon: 9; label: "Settings"; separatorAfter: false }
+        ListElement { tabId: "shortcuts"; icon: 10; label: "Shortcuts"; separatorAfter: false }
     }
     property var tabIcons: [
         Theme.icons.film,
-        Theme.icons.headphones,
         Theme.icons.type,
+        Theme.icons.captions,
         Theme.icons.smile,
         Theme.icons.shapes,
         Theme.icons.wand,
-        Theme.icons.blend,
+        Theme.icons.layers,
+        Theme.icons.chevronsRight,
+        Theme.icons.audioLines,
         Theme.icons.settings,
-        Theme.icons.keyboard,
-        Theme.icons.layers
+        Theme.icons.keyboard
     ]
     property int activeTab: 0
     property bool sortByKind: false
@@ -343,20 +349,43 @@ PanelFrame {
 
                 Repeater {
                     model: tabsModel
-                    delegate: IconButton {
+                    delegate: Column {
                         required property int index
                         required property var model
 
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        glyph: root.tabIcons[model.icon]
-                        variant: "ghost"
-                        tooltip: model.label
-                        active: root.activeTab === index
-                        onClicked: root.activeTab = index
+                        width: parent.width
+                        spacing: 0
 
-                        Accessible.role: Accessible.PageTab
-                        Accessible.name: model.label
-                        Accessible.checked: root.activeTab === index
+                        IconButton {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            glyph: root.tabIcons[model.icon]
+                            variant: "ghost"
+                            tooltip: model.label
+                            active: root.activeTab === index
+                            onClicked: root.activeTab = index
+
+                            Accessible.role: Accessible.PageTab
+                            Accessible.name: model.label
+                            Accessible.checked: root.activeTab === index
+                        }
+
+                        // Group divider — sits in the rail gap so related tabs
+                        // cluster and prefs stay visually apart from content.
+                        Item {
+                            visible: model.separatorAfter
+                            width: parent.width
+                            height: visible ? Theme.spacingLg + Theme.borderWidth : 0
+
+                            Rectangle {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Theme.iconSizeSm
+                                height: Theme.borderWidth
+                                radius: height / 2
+                                color: Theme.panelBorder
+                                opacity: 0.85
+                            }
+                        }
                     }
                 }
             }
@@ -471,6 +500,13 @@ PanelFrame {
 
             TextAssetsTab {
                 visible: tabsModel.get(activeTab).tabId === "text"
+                width: parent.width
+                opacity: root.tabOpacity
+                height: parent.height - Theme.panelHeaderHeight
+            }
+
+            SubtitlesTab {
+                visible: tabsModel.get(activeTab).tabId === "subtitles"
                 width: parent.width
                 opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
@@ -627,7 +663,7 @@ PanelFrame {
                             anchors.centerIn: parent
                             width: Math.min(parent.width - Theme.spacing3xl, 260)
                             visible: transitionsBrowser.categories.length === 0
-                            glyph: Theme.icons.blend
+                            glyph: Theme.icons.chevronsRight
                             title: qsTr("No transitions available")
                             hint: qsTr("Install a transitions pack to add more.")
                             actionText: qsTr("Get extras")
@@ -791,7 +827,7 @@ PanelFrame {
                                             anchors.centerIn: parent
                                             visible: transitionCard.strip.length === 0
                                                      || transitionStrip.status === Image.Error
-                                            glyph: Theme.icons.blend
+                                            glyph: Theme.icons.chevronsRight
                                             iconSize: Theme.iconSizeXl
                                             iconColor: Theme.transitionOverlap
                                         }

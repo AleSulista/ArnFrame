@@ -517,6 +517,7 @@ qt_add_qml_module(drift
         src/qml/components/properties/TextInspector.qml
         src/qml/components/properties/TransformInspector.qml
         src/qml/components/properties/AudioInspector.qml
+        src/qml/components/properties/AudioEffectsInspector.qml
         src/qml/components/properties/SpeedFadeInspector.qml
         src/qml/components/properties/TransitionInspector.qml
         src/qml/components/properties/BlendingInspector.qml
@@ -524,6 +525,7 @@ qt_add_qml_module(drift
         src/qml/components/properties/MasksInspector.qml
         src/qml/components/properties/EffectsInspector.qml
         src/qml/components/assets/TextAssetsTab.qml
+        src/qml/components/assets/SubtitlesTab.qml
         src/qml/components/assets/StickersTab.qml
         src/qml/components/assets/ShapesTab.qml
         src/qml/components/assets/SoundsTab.qml

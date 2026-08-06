@@ -82,14 +82,14 @@ Item {
             onClicked: toolbar.panel.timelineTool = toolbar.panel.timelineTool === "split" ? "" : "split"
         }
         IconButton {
-            glyph: Theme.icons.chevronsLeft
+            glyph: Theme.icons.trimStart
             variant: "text"
             tooltip: qsTr("Trim start — click a clip to drop everything left of the cut")
             active: toolbar.panel.timelineTool === "trimStart"
             onClicked: toolbar.panel.timelineTool = toolbar.panel.timelineTool === "trimStart" ? "" : "trimStart"
         }
         IconButton {
-            glyph: Theme.icons.chevronsRight
+            glyph: Theme.icons.trimEnd
             variant: "text"
             tooltip: qsTr("Trim end — click a clip to drop everything right of the cut")
             active: toolbar.panel.timelineTool === "trimEnd"

@@ -213,7 +213,7 @@ Item {
         }
 
         // Integer models keep delegates alive across preview ticks that rebuild
-        // selectedClipEffects as a fresh QVariantList (same as AudioInspector).
+        // selectedClipEffects as a fresh QVariantList (same as AudioEffectsInspector).
         Repeater {
             model: root.selectedEffects.length
             delegate: Column {

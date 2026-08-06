@@ -39,7 +39,7 @@ Item {
             compact: true
             glyph: Theme.icons.mask
             title: qsTr("Not available")
-            hint: qsTr("Masks apply to visual clips.")
+            hint: qsTr("Cutouts apply to visual clips.")
         }
 
         // Segmentation produces a matte — a per-frame mask — so it belongs beside

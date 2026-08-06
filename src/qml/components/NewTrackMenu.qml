@@ -73,7 +73,7 @@ Popup {
         { type: "video", label: qsTr("Video"), icon: Theme.icons.film },
         { type: "audio", label: qsTr("Audio"), icon: Theme.icons.music },
         { type: "text", label: qsTr("Text"), icon: Theme.icons.type },
-        { type: "subtitle", label: qsTr("Subtitle"), icon: Theme.icons.messageSquare },
+        { type: "subtitle", label: qsTr("Subtitle"), icon: Theme.icons.captions },
         { type: "shape", label: qsTr("Shape"), icon: Theme.icons.shapes },
     ]
 

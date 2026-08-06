@@ -55,7 +55,7 @@ Column {
         width: parent.width
         height: visible ? root.height : 0
         visible: root.catalog.length === 0
-        glyph: Theme.icons.headphones
+        glyph: Theme.icons.audioLines
         title: qsTr("No audio effects")
         hint: qsTr("Install the Audio Effects pack from Extras to browse presets here.")
         actionText: qsTr("Install audio effects")
@@ -97,7 +97,7 @@ Column {
                 id: search
                 width: parent.width - 24
                 x: 12
-                placeholderText: qsTr("Search sounds")
+                placeholderText: qsTr("Search audio effects")
                 font.family: Theme.fontFamily
             }
 
@@ -130,7 +130,7 @@ Column {
                     width: parent.width - 24
                     visible: root.visiblePresets.length === 0
                     text: root.query.length > 0
-                          ? qsTr("No sounds match “%1”.").arg(search.text.trim())
+                          ? qsTr("No audio effects match “%1”.").arg(search.text.trim())
                           : (root.activeCategory === root.favoritesId
                              ? qsTr("No favorites yet. Star presets to save them here.")
                              : qsTr("Nothing in this category."))

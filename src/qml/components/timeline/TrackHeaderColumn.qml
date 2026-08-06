@@ -80,7 +80,7 @@ Item {
     function trackTypeIcon(type) {
         if (type === "audio") return Theme.icons.music;
         if (type === "text") return Theme.icons.type;
-        if (type === "subtitle") return Theme.icons.messageSquare;
+        if (type === "subtitle") return Theme.icons.captions;
         if (type === "shape") return Theme.icons.shapes;
         return Theme.icons.video;
     }

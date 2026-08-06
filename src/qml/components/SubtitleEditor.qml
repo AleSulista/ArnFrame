@@ -454,7 +454,7 @@ Item {
 
             IconGlyph {
                 anchors.horizontalCenter: parent.horizontalCenter
-                glyph: Theme.icons.messageSquare
+                glyph: Theme.icons.captions
                 iconSize: 24
                 iconColor: Theme.mutedForeground
             }
