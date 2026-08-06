@@ -2,25 +2,41 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Window
 import Drift
+import "assets"
 
-// Beat-synced multi-effect presets: category chips + card grid.
+// Beat-synced multi-effect presets: category rail + card grid.
 Column {
     id: root
     spacing: 0
 
+    readonly property string favoritesId: "__favorites__"
     readonly property var categories: EditorState.effectTemplateCategories()
     readonly property var catalog: EditorState.effectTemplateCatalog()
     property string activeCategory: categories.length > 0 ? categories[0].id : ""
     readonly property string query: search.text.trim().toLowerCase()
+    property int favoritesTick: 0
 
-    // Search spans every category — once you have a name, the chips are in the way.
+    Connections {
+        target: EditorState
+        function onAssetFavoritesChanged() {
+            root.favoritesTick++
+        }
+    }
+
+    // Search spans every category — once you have a name, the sectors are in the way.
     readonly property var visibleTemplates: {
+        void root.favoritesTick
         const q = root.query
         if (q.length > 0) {
             return root.catalog.filter(function(preset) {
                 const label = (preset.label || "").toLowerCase()
                 const id = (preset.id || "").toLowerCase()
                 return label.indexOf(q) >= 0 || id.indexOf(q) >= 0
+            })
+        }
+        if (root.activeCategory === root.favoritesId) {
+            return root.catalog.filter(function(preset) {
+                return EditorState.isAssetFavorite("templates", preset.id)
             })
         }
         return root.catalog.filter(function(preset) {
@@ -47,79 +63,66 @@ Column {
         onActionTriggered: root.Window.window.openAddonManager()
     }
 
-    Text {
-        id: browserTip
+    AssetCategoryPane {
+        id: categoryPane
         visible: root.catalog.length > 0
-        height: visible ? implicitHeight : 0
-        width: parent.width - 24
-        leftPadding: 12
-        rightPadding: 12
-        topPadding: 8
-        bottomPadding: 4
-        wrapMode: Text.WordWrap
-        horizontalAlignment: Text.AlignHCenter
-        text: EditorState.selectedClip >= 0
-              ? qsTr("Click a template to apply music-synced effects to the selection")
-              : qsTr("Select a clip, then click a template to apply")
-        color: Theme.mutedForeground
-        font.family: Theme.fontFamily
-        font.pixelSize: Theme.fontSizeXs
-    }
-
-    ThemedTextField {
-        id: search
-        visible: root.catalog.length > 0
-        height: visible ? implicitHeight : 0
-        width: parent.width - 24
-        x: 12
-        placeholderText: qsTr("Search templates")
-        font.family: Theme.fontFamily
-    }
-
-    Item {
-        width: 1
-        height: root.catalog.length > 0 ? Theme.spacingMd : 0
-    }
-
-    Flickable {
-        id: categoryFlick
-        // Two independent reasons to hide the chips: there is nothing installed to
-        // categorise, or a search is active and spans every category anyway.
-        visible: root.catalog.length > 0 && root.query.length === 0
         width: parent.width
-        height: visible ? 34 : 0
-        contentWidth: categoryRow.width + 24
-        clip: true
+        height: parent.height
+        categories: root.categories
+        activeCategory: root.activeCategory
+        searching: root.query.length > 0
+        onCategoryActivated: (categoryId) => root.activeCategory = categoryId
 
-        Row {
-            id: categoryRow
-            x: 12
-            height: parent.height
-            spacing: 6
+        Column {
+            anchors.fill: parent
+            spacing: 0
 
-            Repeater {
-                model: root.categories
-                delegate: ThemedChip {
-                    required property var modelData
-                    text: modelData.label
-                    variant: "secondary"
-                    selected: modelData.id === root.activeCategory
-                    onClicked: root.activeCategory = modelData.id
-                }
+            Text {
+                id: browserTip
+                width: parent.width - 24
+                leftPadding: 12
+                rightPadding: 12
+                topPadding: 8
+                bottomPadding: 4
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+                text: EditorState.selectedClip >= 0
+                      ? qsTr("Click a template to apply music-synced effects to the selection")
+                      : qsTr("Select a clip, then click a template to apply")
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
             }
-        }
-    }
 
-    Flickable {
-        visible: root.catalog.length > 0
-        width: parent.width
-        height: visible
-                ? Math.max(0, root.height - browserTip.height - search.height - Theme.spacingMd
-                              - (root.query.length > 0 ? 0 : categoryFlick.height))
-                : 0
-        contentHeight: Math.max(emptySearchHint.height, presetGrid.height) + 24
-        clip: true
-        ScrollBar.vertical: AppScrollBar { }
+            ThemedTextField {
+                id: search
+                width: parent.width - 24
+                x: 12
+                placeholderText: qsTr("Search templates")
+                font.family: Theme.fontFamily
+            }
+
+            Item {
+                width: 1
+                height: Theme.spacingMd
+            }
+
+            AssetCategoryChips {
+                id: categoryChips
+                width: parent.width
+                categories: root.categories
+                activeCategory: root.activeCategory
+                searching: root.query.length > 0
+                onCategoryActivated: (categoryId) => root.activeCategory = categoryId
+            }
+
+            Flickable {
+                width: parent.width
+                height: Math.max(0, parent.height - browserTip.height - search.height - Theme.spacingMd
+                                 - categoryChips.height)
+                contentHeight: Math.max(emptySearchHint.height, presetGrid.height) + 24
+                clip: true
+                ScrollBar.vertical: AppScrollBar { }
 
         Text {
             id: emptySearchHint
@@ -129,7 +132,9 @@ Column {
             visible: root.visibleTemplates.length === 0
             text: root.query.length > 0
                   ? qsTr("No templates match “%1”.").arg(search.text.trim())
-                  : qsTr("Nothing in this category.")
+                  : (root.activeCategory === root.favoritesId
+                     ? qsTr("No favorites yet. Star templates to save them here.")
+                     : qsTr("Nothing in this category."))
             color: Theme.mutedForeground
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSm
@@ -322,6 +327,14 @@ Column {
                             enabled: EditorState.selectedClip >= 0
                             onClicked: root.applyTemplate(templateCard.modelData.id)
                         }
+
+                        AssetFavoriteButton {
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 3
+                            tabId: "templates"
+                            itemId: templateCard.modelData.id
+                        }
                     }
 
                     Text {
@@ -337,6 +350,8 @@ Column {
                         wrapMode: Text.WordWrap
                     }
                 }
+            }
+        }
             }
         }
     }

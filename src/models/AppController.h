@@ -571,6 +571,9 @@ public:
     // empty string, so without this there was no route back from having cleared one.
     Q_INVOKABLE void resetShortcuts();
     Q_INVOKABLE void triggerAction(const QString &actionId);
+    // Per-tab favorites in the assets panel (effects, sounds, shapes, stickers, transitions, templates).
+    Q_INVOKABLE bool isAssetFavorite(const QString &tabId, const QString &itemId) const;
+    Q_INVOKABLE void toggleAssetFavorite(const QString &tabId, const QString &itemId);
     Q_INVOKABLE void togglePlayback();
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
@@ -714,6 +717,7 @@ signals:
     void beatAnalysisChanged();
     void guidesChanged();
     void shortcutsChanged();
+    void assetFavoritesChanged();
     void canvasCropModeChanged();
     void backgroundChanged();
     void dirtyChanged();
@@ -747,6 +751,8 @@ protected:
     // Publishes a finished beat analysis into m_beatAnalysis / m_beatSnapTargets.
     void applyBeatAnalysis(const AudioBeatAnalysis &analysis, double startSeconds, double durSeconds,
                            const QByteArray &fingerprint);
+    void loadAssetFavorites();
+    void saveAssetFavorites(const QString &tabId);
     void applyEffectTemplateInternal(int trackIndex, int clipIndex, const EffectTemplateEntry &entry,
                                    const QString &mattePath = {},
                                    drift::TimeUs matteSrcOffsetUs = 0);
@@ -917,6 +923,7 @@ protected:
     bool m_canvasCropMode = false;
     QString m_guideType = QStringLiteral("thirds");
     QHash<QString, QString> m_shortcuts;
+    QHash<QString, QSet<QString>> m_assetFavorites;
     int m_draggingAssetIndex = -1;
     QString m_lastMessage;
     QString m_lastMessageSeverity = QStringLiteral("info");

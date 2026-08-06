@@ -238,6 +238,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     // Off by default: with it on, nudging a clip while the playhead sits anywhere writes a
     // keyframe, and an animation appears where the user only meant to reposition something.
     m_autoKeyEnabled = settings.value(QStringLiteral("editor/autoKeyEnabled"), false).toBool();
+    loadAssetFavorites();
 
     // Periodically snapshot unsaved work to a recovery file so a crash doesn't
     // lose progress. The file is removed only when the user saves, loads another
@@ -8677,6 +8678,52 @@ void AppController::resetShortcuts()
         settings.setValue(it.key(), it.value());
     settings.endGroup();
     emit shortcutsChanged();
+}
+
+void AppController::loadAssetFavorites()
+{
+    m_assetFavorites.clear();
+    QSettings settings;
+    settings.beginGroup(QStringLiteral("assetFavorites"));
+    const QStringList keys = settings.allKeys();
+    for (const QString &tabId : keys) {
+        const QStringList ids = settings.value(tabId).toStringList();
+        if (!ids.isEmpty())
+            m_assetFavorites.insert(tabId, QSet<QString>(ids.cbegin(), ids.cend()));
+    }
+    settings.endGroup();
+}
+
+void AppController::saveAssetFavorites(const QString &tabId)
+{
+    QSettings settings;
+    settings.beginGroup(QStringLiteral("assetFavorites"));
+    const QSet<QString> ids = m_assetFavorites.value(tabId);
+    if (ids.isEmpty())
+        settings.remove(tabId);
+    else
+        settings.setValue(tabId, QStringList(ids.cbegin(), ids.cend()));
+    settings.endGroup();
+}
+
+bool AppController::isAssetFavorite(const QString &tabId, const QString &itemId) const
+{
+    return m_assetFavorites.value(tabId).contains(itemId);
+}
+
+void AppController::toggleAssetFavorite(const QString &tabId, const QString &itemId)
+{
+    if (tabId.isEmpty() || itemId.isEmpty())
+        return;
+    QSet<QString> &ids = m_assetFavorites[tabId];
+    if (ids.contains(itemId))
+        ids.remove(itemId);
+    else
+        ids.insert(itemId);
+    if (ids.isEmpty())
+        m_assetFavorites.remove(tabId);
+    saveAssetFavorites(tabId);
+    emit assetFavoritesChanged();
 }
 
 void AppController::triggerAction(const QString &actionId)

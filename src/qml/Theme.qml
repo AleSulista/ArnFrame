@@ -245,8 +245,23 @@ QtObject {
     // --- Layout: assets panel -----------------------------------------------
     readonly property real panelHeaderHeight: 44
     readonly property real tabRailWidth: 40
+    // Left rail inside categorized asset tabs: star + sector column.
+    readonly property real assetCategoryRailWidth: 36
     readonly property real assetCardWidth: 112
     readonly property real assetCardGap: 16
+
+    // Tint for category sector buttons in asset tab rails.
+    readonly property var categoryColors: [
+        "#f59e0b", "#ef4444", "#8b5cf6", "#3b82f6", "#10b981",
+        "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#6366f1"
+    ]
+
+    function categoryColor(index) {
+        const colors = categoryColors
+        if (!colors || colors.length === 0)
+            return primary
+        return colors[Math.abs(index) % colors.length]
+    }
 
     // --- Layout: preview panel -----------------------------------------------
     readonly property real previewToolbarPaddingTop: 20
@@ -305,6 +320,7 @@ QtObject {
         trash: "trash-2",
         snowflake: "snowflake",
         bookmark: "bookmark",
+        star: "star",
         layers: "layers",
         magnet: "magnet",
         linkTwo: "link-2",

@@ -3,23 +3,29 @@ import QtQuick.Controls.Basic
 import QtQuick.Window
 import Drift
 import ".."
+import "."
 
-// Stickers tab: category page chips over a grid of the built-in sticker set.
+// Stickers tab: category bar over a grid of the built-in sticker set.
 Item {
     id: root
 
-    // Stickers come from an addon, so these are refreshed on install rather than
-    // being fixed at load: a fresh install has no packs and no pages at all.
+    readonly property string favoritesId: "__favorites__"
     property var categories: EditorState.builtinStickerCategories()
     property var allStickers: EditorState.builtinStickers()
-    readonly property var pages: categories
     readonly property bool hasStickers: allStickers.length > 0
-    property int pageIndex: 0
-    readonly property string currentPageId: pages[pageIndex] ? pages[pageIndex].id : ""
+    property string activeCategory: categories.length > 0 ? categories[0].id : ""
     readonly property string query: search.text.trim().toLowerCase()
+    property int favoritesTick: 0
 
-    // Search spans every category — once you have a name, the chips are in the way.
+    Connections {
+        target: EditorState
+        function onAssetFavoritesChanged() {
+            root.favoritesTick++
+        }
+    }
+
     readonly property var currentStickers: {
+        void root.favoritesTick
         const q = root.query
         if (q.length > 0) {
             return root.allStickers.filter(function(s) {
@@ -28,7 +34,12 @@ Item {
                 return label.indexOf(q) >= 0 || id.indexOf(q) >= 0
             })
         }
-        return root.allStickers.filter(function(s) { return s.category === root.currentPageId })
+        if (root.activeCategory === root.favoritesId) {
+            return root.allStickers.filter(function(s) {
+                return EditorState.isAssetFavorite("stickers", s.id)
+            })
+        }
+        return root.allStickers.filter(function(s) { return s.category === root.activeCategory })
     }
 
     Connections {
@@ -38,165 +49,174 @@ Item {
                 return
             root.categories = EditorState.builtinStickerCategories()
             root.allStickers = EditorState.builtinStickers()
-            root.pageIndex = 0
+            root.activeCategory = root.categories.length > 0 ? root.categories[0].id : ""
         }
     }
 
-    ThemedTextField {
-        id: search
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.margins: 12
-        visible: root.hasStickers
-        placeholderText: qsTr("Search stickers")
-        font.family: Theme.fontFamily
-    }
-
-    Flow {
-        id: stickerPageBar
-        anchors.top: search.visible ? search.bottom : parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.topMargin: search.visible ? Theme.spacingMd : 12
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
-        spacing: 6
-        visible: root.hasStickers && root.query.length === 0
-        height: visible ? implicitHeight : 0
-
-        Repeater {
-            model: root.pages
-            delegate: ThemedChip {
-                required property var modelData
-                required property int index
-                text: modelData.label
-                variant: "secondary"
-                selected: root.pageIndex === index
-                onClicked: root.pageIndex = index
-            }
-        }
-    }
-
-    Flickable {
-        anchors.top: stickerPageBar.visible ? stickerPageBar.bottom
-                                            : (search.visible ? search.bottom : parent.top)
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.topMargin: 12
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
-        contentHeight: stickerPageContent.height + 24
-        clip: true
-        ScrollBar.vertical: AppScrollBar { }
+    AssetCategoryPane {
+        anchors.fill: parent
+        categories: root.hasStickers ? root.categories : []
+        activeCategory: root.activeCategory
+        searching: root.query.length > 0
+        onCategoryActivated: (categoryId) => root.activeCategory = categoryId
 
         Column {
-            id: stickerPageContent
-            width: parent.width - 12
-            spacing: 16
+            anchors.fill: parent
+            spacing: 0
 
-            EmptyState {
-                visible: !root.hasStickers
-                width: parent.width
-                compact: true
-                glyph: Theme.icons.smile
-                title: qsTr("No sticker packs installed")
-                hint: qsTr("Install the emoji pack to add stickers.")
-                actionText: qsTr("Get extras")
-                actionVariant: "primary"
-                onActionTriggered: root.Window.window.openAddonManager("stickers")
+            ThemedTextField {
+                id: search
+                width: parent.width - 24
+                x: 12
+                topPadding: 12
+                visible: root.hasStickers
+                placeholderText: qsTr("Search stickers")
+                font.family: Theme.fontFamily
             }
 
-            EmptyState {
-                visible: root.hasStickers && root.currentStickers.length === 0
-                width: parent.width
-                compact: true
-                glyph: Theme.icons.smile
-                title: root.query.length > 0
-                       ? qsTr("No stickers match “%1”").arg(search.text.trim())
-                       : qsTr("Nothing in this category")
-                hint: root.query.length > 0
-                      ? qsTr("Try a different name.")
-                      : qsTr("Pick another category above.")
+            Item {
+                width: 1
+                height: root.hasStickers ? Theme.spacingMd : 12
             }
 
-            // Sticker grid for the selected category page (or search results).
-            Grid {
+            AssetCategoryChips {
+                id: categoryChips
                 width: parent.width
-                visible: root.currentStickers.length > 0
-                columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
-                columnSpacing: Theme.assetCardGap
-                rowSpacing: Theme.assetCardGap
+                visible: root.hasStickers
+                categories: root.categories
+                activeCategory: root.activeCategory
+                searching: root.query.length > 0
+                onCategoryActivated: (categoryId) => root.activeCategory = categoryId
+            }
 
-                Repeater {
-                    model: root.currentStickers
-                    delegate: Column {
-                        required property var modelData
-                        width: Theme.assetCardWidth
-                        spacing: Theme.spacingSm
+            Flickable {
+                width: parent.width
+                height: parent.height - search.height - categoryChips.height
+                             - (root.hasStickers ? Theme.spacingMd : 12)
+                contentHeight: stickerPageContent.height + 24
+                clip: true
+                ScrollBar.vertical: AppScrollBar { }
 
-                        Rectangle {
-                            width: Theme.assetCardWidth
-                            height: Theme.assetCardWidth
-                            radius: Theme.radiusSm
-                            color: stickerMouse.containsMouse ? Theme.popoverHover : Theme.panelAccent
-                            clip: true
+                Column {
+                    id: stickerPageContent
+                    x: 12
+                    width: parent.width - 24
+                    spacing: 16
 
-                            Behavior on color {
-                                ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                            }
+                    EmptyState {
+                        visible: !root.hasStickers
+                        width: parent.width
+                        compact: true
+                        glyph: Theme.icons.smile
+                        title: qsTr("No sticker packs installed")
+                        hint: qsTr("Install the emoji pack to add stickers.")
+                        actionText: qsTr("Get extras")
+                        actionVariant: "primary"
+                        onActionTriggered: root.Window.window.openAddonManager("stickers")
+                    }
 
-                            SkeletonBox {
-                                anchors.fill: parent
-                                anchors.margins: Theme.pagePadding
-                                visible: stickerImage.status === Image.Loading
-                            }
+                    EmptyState {
+                        visible: root.hasStickers && root.currentStickers.length === 0
+                        width: parent.width
+                        compact: true
+                        glyph: Theme.icons.smile
+                        title: root.query.length > 0
+                               ? qsTr("No stickers match “%1”").arg(search.text.trim())
+                               : (root.activeCategory === root.favoritesId
+                                  ? qsTr("No favorites yet")
+                                  : qsTr("Nothing in this category"))
+                        hint: root.query.length > 0
+                              ? qsTr("Try a different name.")
+                              : (root.activeCategory === root.favoritesId
+                                 ? qsTr("Star stickers to save them here.")
+                                 : qsTr("Pick another category."))
+                    }
 
-                            Image {
-                                id: stickerImage
-                                anchors.fill: parent
-                                anchors.margins: Theme.pagePadding
-                                source: EditorState.imageUrl(modelData.path)
-                                fillMode: Image.PreserveAspectFit
-                                asynchronous: true
-                                opacity: status === Image.Ready ? 1 : 0
+                    Grid {
+                        width: parent.width
+                        visible: root.currentStickers.length > 0
+                        columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
+                        columnSpacing: Theme.assetCardGap
+                        rowSpacing: Theme.assetCardGap
 
-                                Behavior on opacity {
-                                    NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
+                        Repeater {
+                            model: root.currentStickers
+                            delegate: Column {
+                                required property var modelData
+                                width: Theme.assetCardWidth
+                                spacing: Theme.spacingSm
+
+                                Rectangle {
+                                    width: Theme.assetCardWidth
+                                    height: Theme.assetCardWidth
+                                    radius: Theme.radiusSm
+                                    color: stickerMouse.containsMouse ? Theme.popoverHover : Theme.panelAccent
+                                    clip: true
+
+                                    Behavior on color {
+                                        ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                    }
+
+                                    SkeletonBox {
+                                        anchors.fill: parent
+                                        anchors.margins: Theme.pagePadding
+                                        visible: stickerImage.status === Image.Loading
+                                    }
+
+                                    Image {
+                                        id: stickerImage
+                                        anchors.fill: parent
+                                        anchors.margins: Theme.pagePadding
+                                        source: EditorState.imageUrl(modelData.path)
+                                        fillMode: Image.PreserveAspectFit
+                                        asynchronous: true
+                                        opacity: status === Image.Ready ? 1 : 0
+
+                                        Behavior on opacity {
+                                            NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
+                                        }
+                                    }
+
+                                    IconGlyph {
+                                        anchors.centerIn: parent
+                                        visible: stickerImage.status === Image.Error
+                                        glyph: Theme.icons.error
+                                        iconSize: Theme.iconSizeLg
+                                        iconColor: Theme.mutedForeground
+                                    }
+
+                                    ThemedToolTip {
+                                        text: modelData.label
+                                        visible: stickerMouse.containsMouse
+                                    }
+
+                                    MouseArea {
+                                        id: stickerMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: EditorState.addStickerClip(modelData.id, -1)
+                                    }
+
+                                    AssetFavoriteButton {
+                                        anchors.right: parent.right
+                                        anchors.top: parent.top
+                                        anchors.margins: 3
+                                        tabId: "stickers"
+                                        itemId: modelData.id
+                                    }
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: modelData.label
+                                    color: Theme.mutedForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeCard
+                                    horizontalAlignment: Text.AlignHCenter
+                                    elide: Text.ElideRight
                                 }
                             }
-
-                            IconGlyph {
-                                anchors.centerIn: parent
-                                visible: stickerImage.status === Image.Error
-                                glyph: Theme.icons.error
-                                iconSize: Theme.iconSizeLg
-                                iconColor: Theme.mutedForeground
-                            }
-
-                            ThemedToolTip {
-                                text: modelData.label
-                                visible: stickerMouse.containsMouse
-                            }
-
-                            MouseArea {
-                                id: stickerMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: EditorState.addStickerClip(modelData.id, -1)
-                            }
-                        }
-
-                        Text {
-                            width: parent.width
-                            text: modelData.label
-                            color: Theme.mutedForeground
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeCard
-                            horizontalAlignment: Text.AlignHCenter
-                            elide: Text.ElideRight
                         }
                     }
                 }

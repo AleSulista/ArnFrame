@@ -2,21 +2,29 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Drift
 import ".."
+import "."
 
 // Shapes tab. Shapes used to be a page inside the Stickers tab, where they came
 // and went with the sticker addon and had no room for categories of their own.
 Item {
     id: root
 
+    readonly property string favoritesId: "__favorites__"
     readonly property var categories: EditorState.builtinShapeCategories()
     readonly property var allShapes: EditorState.builtinShapes()
-    property int pageIndex: 0
-    readonly property string currentCategoryId:
-        categories[pageIndex] ? categories[pageIndex].id : ""
+    property string activeCategory: categories.length > 0 ? categories[0].id : ""
     readonly property string query: search.text.trim().toLowerCase()
+    property int favoritesTick: 0
 
-    // Search spans every category — once you have a name, the chips are in the way.
+    Connections {
+        target: EditorState
+        function onAssetFavoritesChanged() {
+            root.favoritesTick++
+        }
+    }
+
     readonly property var currentShapes: {
+        void root.favoritesTick
         const q = root.query
         if (q.length > 0) {
             return root.allShapes.filter(function(s) {
@@ -25,146 +33,158 @@ Item {
                 return label.indexOf(q) >= 0 || id.indexOf(q) >= 0
             })
         }
-        return root.allShapes.filter(function(s) { return s.category === root.currentCategoryId })
+        if (root.activeCategory === root.favoritesId) {
+            return root.allShapes.filter(function(s) {
+                return EditorState.isAssetFavorite("shapes", s.id)
+            })
+        }
+        return root.allShapes.filter(function(s) { return s.category === root.activeCategory })
     }
 
-    ThemedTextField {
-        id: search
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.margins: 12
-        placeholderText: qsTr("Search shapes")
-        font.family: Theme.fontFamily
-    }
+    AssetCategoryPane {
+        anchors.fill: parent
+        categories: root.categories
+        activeCategory: root.activeCategory
+        searching: root.query.length > 0
+        onCategoryActivated: (categoryId) => root.activeCategory = categoryId
 
-    Flow {
-        id: shapePageBar
-        anchors.top: search.bottom
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.topMargin: Theme.spacingMd
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
-        spacing: 6
-        visible: root.query.length === 0
-        height: visible ? implicitHeight : 0
+        Column {
+            anchors.fill: parent
+            spacing: 0
 
-        Repeater {
-            model: root.categories
-            delegate: ThemedChip {
-                required property var modelData
-                required property int index
-                text: modelData.label
-                variant: "secondary"
-                selected: root.pageIndex === index
-                onClicked: root.pageIndex = index
+            ThemedTextField {
+                id: search
+                width: parent.width - 24
+                x: 12
+                topPadding: 12
+                placeholderText: qsTr("Search shapes")
+                font.family: Theme.fontFamily
             }
-        }
-    }
 
-    Flickable {
-        anchors.top: shapePageBar.visible ? shapePageBar.bottom : search.bottom
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.topMargin: 12
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
-        contentHeight: Math.max(emptySearchHint.height, shapeGrid.height) + 24
-        clip: true
-        ScrollBar.vertical: AppScrollBar { }
+            Item {
+                width: 1
+                height: Theme.spacingMd
+            }
 
-        Text {
-            id: emptySearchHint
-            width: parent.width - 12
-            visible: root.currentShapes.length === 0
-            text: root.query.length > 0
-                  ? qsTr("No shapes match “%1”.").arg(search.text.trim())
-                  : qsTr("Nothing in this category.")
-            color: Theme.mutedForeground
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSm
-            wrapMode: Text.WordWrap
-        }
+            AssetCategoryChips {
+                id: categoryChips
+                width: parent.width
+                categories: root.categories
+                activeCategory: root.activeCategory
+                searching: root.query.length > 0
+                onCategoryActivated: (categoryId) => root.activeCategory = categoryId
+            }
 
-        Grid {
-            id: shapeGrid
-            width: parent.width - 12
-            visible: root.currentShapes.length > 0
-            columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
-            columnSpacing: Theme.assetCardGap
-            rowSpacing: Theme.assetCardGap
+            Flickable {
+                width: parent.width
+                height: Math.max(0, parent.height - search.height - Theme.spacingMd - categoryChips.height)
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                contentHeight: Math.max(emptySearchHint.height, shapeGrid.height) + 24
+                clip: true
+                ScrollBar.vertical: AppScrollBar { }
 
-            Repeater {
-                model: root.currentShapes
-                delegate: Column {
-                    id: shapeCard
-                    required property var modelData
-                    width: Theme.assetCardWidth
-                    spacing: Theme.spacingSm
+                Text {
+                    id: emptySearchHint
+                    width: parent.width - 12
+                    visible: root.currentShapes.length === 0
+                    text: root.query.length > 0
+                          ? qsTr("No shapes match “%1”.").arg(search.text.trim())
+                          : (root.activeCategory === root.favoritesId
+                             ? qsTr("No favorites yet. Star shapes to save them here.")
+                             : qsTr("Nothing in this category."))
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSm
+                    wrapMode: Text.WordWrap
+                }
 
-                    // Lift on grab — matches the media and effect cards.
-                    opacity: shapeDrag.active ? 0.85 : 1
-                    scale: shapeDrag.active ? 1.04 : 1.0
+                Grid {
+                    id: shapeGrid
+                    width: parent.width - 12
+                    visible: root.currentShapes.length > 0
+                    columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
+                    columnSpacing: Theme.assetCardGap
+                    rowSpacing: Theme.assetCardGap
 
-                    Behavior on opacity {
-                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                    }
-                    Behavior on scale {
-                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                    }
+                    Repeater {
+                        model: root.currentShapes
+                        delegate: Column {
+                            id: shapeCard
+                            required property var modelData
+                            width: Theme.assetCardWidth
+                            spacing: Theme.spacingSm
 
-                    Drag.active: shapeDrag.active
-                    Drag.dragType: Drag.Automatic
-                    Drag.supportedActions: Qt.CopyAction
-                    Drag.keys: ["application/x-drift-shape"]
-                    Drag.mimeData: { "application/x-drift-shape": shapeCard.modelData.id }
+                            opacity: shapeDrag.active ? 0.85 : 1
+                            scale: shapeDrag.active ? 1.04 : 1.0
 
-                    Rectangle {
-                        width: Theme.assetCardWidth
-                        height: Theme.assetCardWidth
-                        radius: Theme.radiusSm
-                        color: shapeHover.hovered ? Theme.popoverHover : Theme.panelAccent
+                            Behavior on opacity {
+                                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                            }
+                            Behavior on scale {
+                                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                            }
 
-                        Behavior on color {
-                            ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                            Drag.active: shapeDrag.active
+                            Drag.dragType: Drag.Automatic
+                            Drag.supportedActions: Qt.CopyAction
+                            Drag.keys: ["application/x-drift-shape"]
+                            Drag.mimeData: { "application/x-drift-shape": shapeCard.modelData.id }
+
+                            Rectangle {
+                                width: Theme.assetCardWidth
+                                height: Theme.assetCardWidth
+                                radius: Theme.radiusSm
+                                color: shapeHover.hovered ? Theme.popoverHover : Theme.panelAccent
+
+                                Behavior on color {
+                                    ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                                }
+
+                                ShapePreview {
+                                    anchors.fill: parent
+                                    anchors.margins: Theme.pagePadding
+                                    shapeKind: shapeCard.modelData.id
+                                }
+
+                                HoverHandler {
+                                    id: shapeHover
+                                    cursorShape: Qt.PointingHandCursor
+                                }
+
+                                ThemedToolTip {
+                                    text: qsTr("%1 — click to add, or drag to the timeline").arg(shapeCard.modelData.label)
+                                    visible: shapeHover.hovered
+                                }
+
+                                TapHandler {
+                                    onTapped: EditorState.addShapeClip(shapeCard.modelData.id, -1)
+                                }
+                                DragHandler {
+                                    id: shapeDrag
+                                    target: null
+                                    acceptedButtons: Qt.LeftButton
+                                }
+
+                                AssetFavoriteButton {
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: 3
+                                    tabId: "shapes"
+                                    itemId: shapeCard.modelData.id
+                                }
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: modelData.label
+                                color: Theme.mutedForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeCard
+                                horizontalAlignment: Text.AlignHCenter
+                                elide: Text.ElideRight
+                            }
                         }
-
-                        ShapePreview {
-                            anchors.fill: parent
-                            anchors.margins: Theme.pagePadding
-                            shapeKind: shapeCard.modelData.id
-                        }
-
-                        HoverHandler {
-                            id: shapeHover
-                            cursorShape: Qt.PointingHandCursor
-                        }
-
-                        ThemedToolTip {
-                            text: qsTr("%1 — click to add, or drag to the timeline").arg(shapeCard.modelData.label)
-                            visible: shapeHover.hovered
-                        }
-
-                        TapHandler {
-                            onTapped: EditorState.addShapeClip(shapeCard.modelData.id, -1)
-                        }
-                        DragHandler {
-                            id: shapeDrag
-                            target: null
-                            acceptedButtons: Qt.LeftButton
-                        }
-                    }
-
-                    Text {
-                        width: parent.width
-                        text: modelData.label
-                        color: Theme.mutedForeground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeCard
-                        horizontalAlignment: Text.AlignHCenter
-                        elide: Text.ElideRight
                     }
                 }
             }

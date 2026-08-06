@@ -530,6 +530,9 @@ qt_add_qml_module(drift
         src/qml/components/assets/SettingsTab.qml
         src/qml/components/assets/ShortcutsTab.qml
         src/qml/components/assets/MediaAssetsTab.qml
+        src/qml/components/assets/AssetCategoryPane.qml
+        src/qml/components/assets/AssetCategoryChips.qml
+        src/qml/components/assets/AssetFavoriteButton.qml
         src/qml/TimelinePanel.qml
         src/qml/components/timeline/TimelineToolbar.qml
         src/qml/components/timeline/TrackHeaderColumn.qml

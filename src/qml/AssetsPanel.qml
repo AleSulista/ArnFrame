@@ -536,11 +536,21 @@ PanelFrame {
 
                 readonly property var categories: EditorState.transitionCategories()
                 readonly property var catalog: EditorState.transitionKinds()
+                readonly property string favoritesId: "__favorites__"
                 property string activeCategory: categories.length > 0 ? categories[0].id : ""
                 readonly property string query: transitionSearch.text.trim().toLowerCase()
+                property int favoritesTick: 0
 
-                // Search spans every category — once you have a name, the chips are in the way.
+                Connections {
+                    target: EditorState
+                    function onAssetFavoritesChanged() {
+                        transitionsBrowser.favoritesTick++
+                    }
+                }
+
+                // Search spans every category — once you have a name, the sectors are in the way.
                 readonly property var visibleTransitions: {
+                    void transitionsBrowser.favoritesTick
                     const q = transitionsBrowser.query
                     if (q.length > 0) {
                         return transitionsBrowser.catalog.filter(function(item) {
@@ -549,75 +559,67 @@ PanelFrame {
                             return label.indexOf(q) >= 0 || kind.indexOf(q) >= 0
                         })
                     }
+                    if (transitionsBrowser.activeCategory === transitionsBrowser.favoritesId) {
+                        return transitionsBrowser.catalog.filter(function(item) {
+                            return EditorState.isAssetFavorite("transitions", item.kind)
+                        })
+                    }
                     return transitionsBrowser.catalog.filter(function(item) {
                         return item.category === transitionsBrowser.activeCategory
                     })
                 }
 
-                Column {
+                AssetCategoryPane {
                     anchors.fill: parent
-                    spacing: 0
+                    categories: transitionsBrowser.categories
+                    activeCategory: transitionsBrowser.activeCategory
+                    searching: transitionsBrowser.query.length > 0
+                    onCategoryActivated: (categoryId) => transitionsBrowser.activeCategory = categoryId
 
-                    Text {
-                        id: transitionTip
-                        width: parent.width
-                        leftPadding: Theme.pagePadding
-                        rightPadding: Theme.pagePadding
-                        topPadding: Theme.spacingLg
-                        bottomPadding: Theme.spacingSm
-                        wrapMode: Text.WordWrap
-                        horizontalAlignment: Text.AlignHCenter
-                        // Capped so a wrapping tip cannot grow until it swallows
-                        // the grid below it at narrow panel widths.
-                        maximumLineCount: 3
-                        elide: Text.ElideRight
-                        text: qsTr("Drag onto where two clips overlap. They fade into each other by default.")
-                        color: Theme.mutedForeground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeXs
-                    }
+                    Column {
+                        anchors.fill: parent
+                        spacing: 0
 
-                    ThemedTextField {
-                        id: transitionSearch
-                        width: parent.width - Theme.pagePadding * 2
-                        x: Theme.pagePadding
-                        placeholderText: qsTr("Search transitions")
-                        font.family: Theme.fontFamily
-                    }
-
-                    Item { width: 1; height: Theme.spacingMd }
-
-                    Flickable {
-                        id: transitionCategoryFlick
-                        width: parent.width
-                        height: transitionsBrowser.query.length > 0 ? 0 : 34
-                        visible: transitionsBrowser.query.length === 0
-                        contentWidth: transitionCategoryRow.width + Theme.spacing3xl
-                        clip: true
-
-                        Row {
-                            id: transitionCategoryRow
-                            x: Theme.pagePadding
-                            height: parent.height
-                            spacing: Theme.spacingMd
-
-                            Repeater {
-                                model: transitionsBrowser.categories
-                                delegate: ThemedChip {
-                                    required property var modelData
-                                    text: modelData.label
-                                    variant: "secondary"
-                                    selected: modelData.id === transitionsBrowser.activeCategory
-                                    onClicked: transitionsBrowser.activeCategory = modelData.id
-                                }
-                            }
+                        Text {
+                            id: transitionTip
+                            width: parent.width
+                            leftPadding: Theme.pagePadding
+                            rightPadding: Theme.pagePadding
+                            topPadding: Theme.spacingLg
+                            bottomPadding: Theme.spacingSm
+                            wrapMode: Text.WordWrap
+                            horizontalAlignment: Text.AlignHCenter
+                            maximumLineCount: 3
+                            elide: Text.ElideRight
+                            text: qsTr("Drag onto where two clips overlap. They fade into each other by default.")
+                            color: Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
                         }
-                    }
 
-                    Item {
-                        width: parent.width
-                        height: Math.max(0, parent.height - transitionTip.height - transitionSearch.height
-                                         - Theme.spacingMd - transitionCategoryFlick.height)
+                        ThemedTextField {
+                            id: transitionSearch
+                            width: parent.width - Theme.pagePadding * 2
+                            x: Theme.pagePadding
+                            placeholderText: qsTr("Search transitions")
+                            font.family: Theme.fontFamily
+                        }
+
+                        Item { width: 1; height: Theme.spacingMd }
+
+                        AssetCategoryChips {
+                            id: transitionCategoryChips
+                            width: parent.width
+                            categories: transitionsBrowser.categories
+                            activeCategory: transitionsBrowser.activeCategory
+                            searching: transitionsBrowser.query.length > 0
+                            onCategoryActivated: (categoryId) => transitionsBrowser.activeCategory = categoryId
+                        }
+
+                        Item {
+                            width: parent.width
+                            height: Math.max(0, parent.height - transitionTip.height - transitionSearch.height
+                                             - Theme.spacingMd - transitionCategoryChips.height)
 
                         // A category whose filter matches nothing used to leave a
                         // blank scroll area with no explanation.
@@ -641,10 +643,14 @@ PanelFrame {
                             glyph: Theme.icons.search
                             title: transitionsBrowser.query.length > 0
                                    ? qsTr("No transitions match “%1”").arg(transitionSearch.text.trim())
-                                   : qsTr("Nothing in this category")
+                                   : (transitionsBrowser.activeCategory === transitionsBrowser.favoritesId
+                                      ? qsTr("No favorites yet")
+                                      : qsTr("Nothing in this category"))
                             hint: transitionsBrowser.query.length > 0
                                   ? qsTr("Try a different name.")
-                                  : qsTr("Pick another category above.")
+                                  : (transitionsBrowser.activeCategory === transitionsBrowser.favoritesId
+                                     ? qsTr("Star transitions to save them here.")
+                                     : qsTr("Pick another category."))
                         }
 
                     Flickable {
@@ -751,6 +757,14 @@ PanelFrame {
                                             acceptedButtons: Qt.LeftButton
                                         }
 
+                                        AssetFavoriteButton {
+                                            anchors.right: parent.right
+                                            anchors.top: parent.top
+                                            anchors.margins: 3
+                                            tabId: "transitions"
+                                            itemId: transitionCard.modelData.kind
+                                        }
+
                                         SkeletonBox {
                                             anchors.fill: parent
                                             visible: transitionCard.strip.length > 0
@@ -799,6 +813,7 @@ PanelFrame {
                             }
                         }
                     }
+                        }
                     }
                 }
             }
