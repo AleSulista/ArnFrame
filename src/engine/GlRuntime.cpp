@@ -1,5 +1,7 @@
 #include "GlRuntime.h"
 
+#include "GlModelRenderer.h"
+
 #include <QColor>
 #include <QCoreApplication>
 #include <QMutexLocker>
@@ -56,9 +58,12 @@ constexpr float kQuad[] = {
      1.f,  1.f, 1.f, 1.f,
 };
 
-uint64_t targetPoolKey(int width, int height)
+uint64_t targetPoolKey(int width, int height, bool wantDepth)
 {
-    return (uint64_t(uint32_t(width)) << 32) | uint32_t(height);
+    // w/h fit in 31 bits; the low bit tags depth so colour-only and depth targets never share.
+    return (uint64_t(uint32_t(width) & 0x7fffffffu) << 33)
+           | (uint64_t(uint32_t(height) & 0x7fffffffu) << 1)
+           | (wantDepth ? 1u : 0u);
 }
 
 GlRuntime *g_runtime = nullptr;
@@ -268,6 +273,7 @@ void GlRuntime::shutdown()
             programs.clear();
             copyProgram.reset();
             if (auto *gl = context->extraFunctions()) {
+                destroyGlModels(*this, gl);
                 for (const auto &entry : staticTextures) {
                     GLuint tex = entry.second;
                     gl->glDeleteTextures(1, &tex);
@@ -301,13 +307,14 @@ void GlRuntime::shutdown()
 }
 
 
-GlTarget GlRuntime::acquireTarget(int width, int height)
+GlTarget GlRuntime::acquireTarget(int width, int height, bool wantDepth)
 {
     GlTarget target;
     target.width = qMax(1, width);
     target.height = qMax(1, height);
+    target.hasDepth = wantDepth;
 
-    const uint64_t key = targetPoolKey(target.width, target.height);
+    const uint64_t key = targetPoolKey(target.width, target.height, wantDepth);
     const auto it = m_targetPool.find(key);
     if (it != m_targetPool.end()) {
         target.fbo = std::move(it->second);
@@ -317,7 +324,8 @@ GlTarget GlRuntime::acquireTarget(int width, int height)
     }
 
     QOpenGLFramebufferObjectFormat fmt;
-    fmt.setAttachment(QOpenGLFramebufferObject::NoAttachment);
+    fmt.setAttachment(wantDepth ? QOpenGLFramebufferObject::Depth
+                                : QOpenGLFramebufferObject::NoAttachment);
     target.fbo = std::make_unique<QOpenGLFramebufferObject>(target.width, target.height, fmt);
     return target;
 }
@@ -329,7 +337,7 @@ void GlRuntime::releaseTarget(GlTarget &&target)
     if (m_pooledTargets >= kMaxPooledTargets)
         return; // let it drop
 
-    const uint64_t key = targetPoolKey(target.width, target.height);
+    const uint64_t key = targetPoolKey(target.width, target.height, target.hasDepth);
     m_targetPool.emplace(key, std::move(target.fbo));
     ++m_pooledTargets;
 }
@@ -426,6 +434,12 @@ void GlRuntime::markPresentReady(GlTarget &presentTarget)
 QOpenGLShaderProgram *GlRuntime::builtinProgram(const QString &id, const char *vertexSource,
                                                 const char *fragmentSource)
 {
+    return builtinProgram(id, vertexSource, fragmentSource, nullptr);
+}
+
+QOpenGLShaderProgram *GlRuntime::builtinProgram(const QString &id, const char *vertexSource,
+                                                const char *fragmentSource, const char *geom)
+{
     CompiledEffect &cached = programs[id];
     if (cached.ok)
         return cached.passes[0].program.get();
@@ -436,6 +450,7 @@ QOpenGLShaderProgram *GlRuntime::builtinProgram(const QString &id, const char *v
     CompiledPass pass;
     pass.program = std::make_unique<QOpenGLShaderProgram>();
     if (!pass.program->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexSource)
+        || (geom && !pass.program->addShaderFromSourceCode(QOpenGLShader::Geometry, geom))
         || !pass.program->addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentSource)
         || !pass.program->link()) {
         qWarning("GlRuntime: builtin program '%s' failed: %s", qPrintable(id),
@@ -728,6 +743,12 @@ void setPackageUniforms(QOpenGLShaderProgram *program, const QMap<QString, QVari
             }
         } else if (value.typeId() == QMetaType::QString) {
             const QString s = value.toString();
+            // File-path params must not fall through to s.toFloat(). A path currently binds as
+            // 0.0, which is harmless today but bites the moment a gpu package grows a file param.
+            if (s.contains(QLatin1Char('/')) || s.endsWith(QLatin1String(".glb"))
+                || s.endsWith(QLatin1String(".gltf"))) {
+                continue;
+            }
             if (s.startsWith(QLatin1Char('#'))) {
                 const QColor c(s);
                 program->setUniformValue(loc,

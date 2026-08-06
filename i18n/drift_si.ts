@@ -4,7 +4,7 @@
 <context>
     <name>AddonManager</name>
     <message>
-        <location filename="../src/models/AddonManager.cpp" line="+273"/>
+        <location filename="../src/models/AddonManager.cpp" line="+274"/>
         <source>Automatic (recommended)</source>
         <translation>ස්වයංක්‍රීය (නිර්දේශිත)</translation>
     </message>
@@ -426,7 +426,7 @@
 <context>
     <name>AppController</name>
     <message>
-        <location filename="../src/models/AppController.cpp" line="+1554"/>
+        <location filename="../src/models/AppController.cpp" line="+1579"/>
         <source>Media removed</source>
         <translation>මාධ්‍ය ඉවත් කරන ලදී</translation>
     </message>
@@ -471,12 +471,12 @@
     </message>
     <message>
         <location line="+133"/>
-        <location line="+8765"/>
+        <location line="+8817"/>
         <source>New project</source>
         <translation>නව ව්‍යාපෘතිය</translation>
     </message>
     <message>
-        <location line="-8764"/>
+        <location line="-8816"/>
         <source>Open project</source>
         <translation>ව්‍යාපෘතිය විවෘත කරන්න</translation>
     </message>
@@ -589,18 +589,18 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+7216"/>
+        <location line="+7253"/>
         <source>Mark work area in</source>
         <translation>වැඩ කලාපයේ ආරම්භය සලකුණු කරන්න (In)</translation>
     </message>
     <message>
-        <location line="-7215"/>
-        <location line="+7229"/>
+        <location line="-7252"/>
+        <location line="+7266"/>
         <source>Mark work area out</source>
         <translation>වැඩ කලාපයේ අවසානය සලකුණු කරන්න (Out)</translation>
     </message>
     <message>
-        <location line="-7228"/>
+        <location line="-7265"/>
         <source>Go to work area in</source>
         <translation>වැඩ කලාපයේ ආරම්භයට යන්න</translation>
     </message>
@@ -611,12 +611,12 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+7252"/>
+        <location line="+7289"/>
         <source>Clear work area</source>
         <translation>වැඩ කලාපය හිස් කරන්න</translation>
     </message>
     <message>
-        <location line="-7251"/>
+        <location line="-7288"/>
         <source>Loop work area playback</source>
         <translation>වැඩ කලාපය ලූපයක් සේ ධාවනය කරන්න</translation>
     </message>
@@ -1124,12 +1124,12 @@
         </translation>
     </message>
     <message>
-        <location line="-3151"/>
+        <location line="-3175"/>
         <source>No audio output devices were found, so playback will be silent.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3242"/>
+        <location line="+3266"/>
         <source>Creating captions…</source>
         <translation>උපසිරැසි නිර්මාණය කරමින්…</translation>
     </message>
@@ -1736,7 +1736,7 @@
         <translation>ප්‍රයෝගය යාවත්කාලීන විය</translation>
     </message>
     <message>
-        <location line="+69"/>
+        <location line="+106"/>
         <source>Add audio effect</source>
         <translation>ශ්‍රව්‍ය ප්‍රයෝගයක් එක් කරන්න</translation>
     </message>
@@ -1937,12 +1937,12 @@
         </translation>
     </message>
     <message>
-        <location line="+1575"/>
+        <location line="+1627"/>
         <source>Exporting…</source>
         <translation>නිර්යාත කරමින්…</translation>
     </message>
     <message>
-        <location line="-1543"/>
+        <location line="-1595"/>
         <source>Nudge selection</source>
         <translation>තේරීම මඳක් චලනය කරන්න</translation>
     </message>
@@ -1954,12 +1954,12 @@
     <message>
         <location line="+858"/>
         <location line="+30"/>
-        <location line="+632"/>
+        <location line="+684"/>
         <source>That save location isn’t valid</source>
         <translation>එම සුරැකීමේ ස්ථානය වලංගු නැත</translation>
     </message>
     <message>
-        <location line="-658"/>
+        <location line="-710"/>
         <source>Already saving</source>
         <translation>දැනටමත් සුරකිමින් පවතී</translation>
     </message>
@@ -1989,7 +1989,7 @@
         <translation>ව්‍යාපෘති මාධ්‍ය දිගහරිමින්…</translation>
     </message>
     <message>
-        <location line="+255"/>
+        <location line="+270"/>
         <source>No recovery file found</source>
         <translation>ප්‍රතිසාධන ගොනුවක් හමු නොවීය</translation>
     </message>
@@ -2004,7 +2004,7 @@
         <translation>නව සැසියක් ආරම්භ කරන ලදී</translation>
     </message>
     <message>
-        <location line="+229"/>
+        <location line="+266"/>
         <source>Export already in progress</source>
         <translation>නිර්යාත කිරීම දැනටමත් සිදුවෙමින් පවතී</translation>
     </message>
@@ -2742,22 +2742,22 @@
         <translation>Drift ව්‍යාපෘතිය (*.drift)</translation>
     </message>
     <message>
-        <location line="+18"/>
+        <location line="+19"/>
         <source>Open Project</source>
         <translation>ව්‍යාපෘතිය විවෘත කරන්න</translation>
     </message>
     <message>
-        <location line="+25"/>
+        <location line="+26"/>
         <source>Save Project</source>
         <translation>ව්‍යාපෘතිය සුරකින්න</translation>
     </message>
     <message>
-        <location line="+11"/>
+        <location line="+12"/>
         <source>Save Shareable Copy</source>
         <translation>බෙදාගත හැකි පිටපතක් සුරකින්න</translation>
     </message>
     <message>
-        <location line="+111"/>
+        <location line="+112"/>
         <source>Projects</source>
         <translation>ව්‍යාපෘති</translation>
     </message>
@@ -2940,36 +2940,36 @@
     <name>EffectCatalog</name>
     <message>
         <location filename="../src/engine/EffectCatalog.cpp" line="+43"/>
-        <location line="+108"/>
+        <location line="+110"/>
         <source>Color</source>
         <translation>වර්ණ</translation>
     </message>
     <message>
-        <location line="-106"/>
-        <location line="+107"/>
+        <location line="-108"/>
+        <location line="+109"/>
         <source>Glitch &amp; Distortion</source>
         <translation>Glitch සහ විකෘති (Distortion)</translation>
     </message>
     <message>
-        <location line="-105"/>
-        <location line="+106"/>
+        <location line="-107"/>
+        <location line="+108"/>
         <source>Retro / Analog</source>
         <translation>රෙට්රෝ / ඇනලොග්</translation>
     </message>
     <message>
-        <location line="-104"/>
-        <location line="+105"/>
+        <location line="-106"/>
+        <location line="+107"/>
         <source>Dreamy &amp; Stylish</source>
         <translation>සිහිනමය සහ විලාසිතාමය</translation>
     </message>
     <message>
-        <location line="-103"/>
-        <location line="+104"/>
+        <location line="-105"/>
+        <location line="+106"/>
         <source>Impact</source>
         <translation>ඉම්පැක්ට්</translation>
     </message>
     <message>
-        <location line="-102"/>
+        <location line="-104"/>
         <source>Blurs &amp; Distortions</source>
         <translation>බොඳ කිරීම් සහ විකෘති</translation>
     </message>
@@ -2982,6 +2982,11 @@
         <location line="+2"/>
         <source>Beauty &amp; Makeup</source>
         <translation>රූපලාවන්‍ය සහ මේකප්</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Face Props</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+2"/>
@@ -3108,7 +3113,7 @@
 <context>
     <name>EffectsInspector</name>
     <message>
-        <location filename="../src/qml/components/properties/EffectsInspector.qml" line="+95"/>
+        <location filename="../src/qml/components/properties/EffectsInspector.qml" line="+115"/>
         <source>Face tracking</source>
         <translation>මුහුණු ලුහුබැඳීම</translation>
     </message>
@@ -3121,6 +3126,11 @@
         <location line="+15"/>
         <source>This clip was scanned before makeup was supported. Re-detect faces to enable the Beauty effects.</source>
         <translation>මේකප් සහය දැක්වීමට පෙර මෙම ක්ලිපය ස්කෑන් කර ඇත. රූපලාවන්‍ය ප්‍රයෝග සක්‍රීය කිරීමට මුහුණු නැවත හඳුනාගන්න.</translation>
+    </message>
+    <message>
+        <location line="+15"/>
+        <source>This clip was scanned before 3D face mesh was supported. Re-detect faces to enable the 3D Face Mesh effect.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+9"/>
@@ -3214,8 +3224,24 @@
     </message>
     <message>
         <location line="+34"/>
+        <location line="+38"/>
         <source>Choose %1</source>
         <translation>%1 තෝරන්න</translation>
+    </message>
+    <message>
+        <location line="-20"/>
+        <source>: (none)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+15"/>
+        <source>Choose file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+18"/>
+        <source>Clear</source>
+        <translation type="unfinished">හිස් කරන්න</translation>
     </message>
 </context>
 <context>
@@ -3577,7 +3603,7 @@
 <context>
     <name>FileDialogs</name>
     <message>
-        <location filename="../src/models/FileDialogs.cpp" line="+57"/>
+        <location filename="../src/models/FileDialogs.cpp" line="+83"/>
         <source>Untitled</source>
         <translation>නම් නොකළ</translation>
     </message>
@@ -4000,7 +4026,7 @@
 <context>
     <name>Main</name>
     <message>
-        <location filename="../src/qml/Main.qml" line="+305"/>
+        <location filename="../src/qml/Main.qml" line="+314"/>
         <source>Export finished.</source>
         <translation>නිර්යාත කිරීම අවසන් විය.</translation>
     </message>
@@ -4490,7 +4516,7 @@ Quality: තථ්‍ය කාලයට වඩා සෙමින්, ශබ්
     </message>
     <message>
         <location line="+5"/>
-        <location line="+351"/>
+        <location line="+355"/>
         <location line="+3"/>
         <location line="+32"/>
         <location line="+10"/>
@@ -4499,7 +4525,7 @@ Quality: තථ්‍ය කාලයට වඩා සෙමින්, ශබ්
         <translation>ව්‍යාපෘති ගොනුව අසම්පූර්ණව කපා දමා ඇත</translation>
     </message>
     <message>
-        <location line="-404"/>
+        <location line="-408"/>
         <source>project manifest is corrupt</source>
         <translation>ව්‍යාපෘති manifest දූෂිත වී ඇත</translation>
     </message>
@@ -4549,7 +4575,7 @@ Quality: තථ්‍ය කාලයට වඩා සෙමින්, ශබ්
         <translation>ව්‍යාපෘති ගොනුව අසම්පූර්ණයි හෝ අනවශ්‍ය අමතර දත්ත අඩංගු වේ</translation>
     </message>
     <message>
-        <location line="+81"/>
+        <location line="+85"/>
         <source>cannot compress %1</source>
         <translation>%1 සම්පීඩනය කළ නොහැක</translation>
     </message>

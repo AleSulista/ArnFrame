@@ -14,6 +14,7 @@
 #include <QMutexLocker>
 #include <QRandomGenerator>
 #include <QStandardPaths>
+#include <QVector3D>
 #include <QtEndian>
 
 #include <algorithm>
@@ -25,6 +26,9 @@ namespace {
 // v1 wrote each face as a bare array of 24 numbers. v2 writes an object so the contour loops and
 // the head pose can ride along, and readFace dispatches on the JSON shape rather than the file
 // version — a v1 file is simply one where every face is still an array.
+//
+// The mesh blob `"m"` is an optional v2 field, not a version bump: tracks baked before the 3D
+// face-mesh effect existed omit it, and a missing key is hasMesh = false rather than a hard error.
 constexpr int kFormatVersion = 2;
 constexpr int kFieldsPerFace = 24;
 constexpr int kPoseFields = 8;
@@ -82,6 +86,42 @@ bool decodeContour(const QString &base64, QList<QPointF> *out)
     return true;
 }
 
+// Same uint16 range as contours: the mesh lives in the same width-normalized space as pose origin,
+// including negative z and points that sit just outside the frame. 468 * 3 * 2 bytes packed, not
+// JSON numbers — spelling out 1404 floats would dwarf the rest of the sidecar.
+constexpr int kMeshBytes = kFaceMeshPoints * 3 * 2;
+
+QString encodeMesh(const QList<QVector3D> &mesh)
+{
+    QByteArray raw(kMeshBytes, Qt::Uninitialized);
+    auto *words = reinterpret_cast<uchar *>(raw.data());
+    for (int i = 0; i < kFaceMeshPoints; ++i) {
+        qToLittleEndian<quint16>(quantizeContour(double(mesh.at(i).x())), words + i * 6);
+        qToLittleEndian<quint16>(quantizeContour(double(mesh.at(i).y())), words + i * 6 + 2);
+        qToLittleEndian<quint16>(quantizeContour(double(mesh.at(i).z())), words + i * 6 + 4);
+    }
+    return QString::fromLatin1(raw.toBase64());
+}
+
+bool decodeMesh(const QString &base64, QList<QVector3D> *out)
+{
+    const QByteArray raw = QByteArray::fromBase64(base64.toLatin1());
+    // A short blob would decode into a valid-looking but truncated mesh, which the warp would
+    // treat as a face. Refuse it, same as contours.
+    if (raw.size() != kMeshBytes)
+        return false;
+
+    const auto *words = reinterpret_cast<const uchar *>(raw.constData());
+    out->clear();
+    out->reserve(kFaceMeshPoints);
+    for (int i = 0; i < kFaceMeshPoints; ++i) {
+        out->append(QVector3D(float(dequantizeContour(qFromLittleEndian<quint16>(words + i * 6))),
+                              float(dequantizeContour(qFromLittleEndian<quint16>(words + i * 6 + 2))),
+                              float(dequantizeContour(qFromLittleEndian<quint16>(words + i * 6 + 4)))));
+    }
+    return true;
+}
+
 // The 24 v1 fields, rounded to five decimals: that is a twentieth of a pixel across a 4K frame,
 // far below anything a warp can show, and it keeps the sidecar roughly a third of the size full
 // doubles would need.
@@ -128,6 +168,8 @@ void appendFace(QJsonArray *out, const FaceAnchors &a)
                                                round5(a.poseScale), round5(a.poseOx),
                                                round5(a.poseOy),    round5(a.poseOz)};
     }
+    if (a.hasMesh && a.mesh.size() == kFaceMeshPoints)
+        face[QStringLiteral("m")] = encodeMesh(a.mesh);
     out->append(face);
 }
 
@@ -189,12 +231,25 @@ bool readFace(const QJsonValue &value, FaceAnchors *a)
         a->poseOz = pose.at(7).toDouble();
         a->hasPose = true;
     }
+
+    // Absent `"m"` is the pre-mesh v2 shape, not an error — those tracks still drive warps and
+    // makeup. A present but wrong-sized blob is refused, same as contours.
+    if (face.contains(QStringLiteral("m"))) {
+        if (!decodeMesh(face.value(QStringLiteral("m")).toString(), &a->mesh))
+            return false;
+        a->hasMesh = true;
+    }
     return true;
 }
 
 QPointF lerp(const QPointF &a, const QPointF &b, double t)
 {
     return a + (b - a) * t;
+}
+
+QVector3D lerp(const QVector3D &a, const QVector3D &b, double t)
+{
+    return a + (b - a) * float(t);
 }
 
 // Angles live on a circle: a face crossing the +/-pi seam would otherwise spin most of the way
@@ -301,9 +356,9 @@ FaceAnchors FaceTrack::sample(TimeUs relativeUs, int faceIndex) const
     out.eyeRadius = a.eyeRadius + (b.eyeRadius - a.eyeRadius) * t;
     out.score = a.score + (b.score - a.score) * t;
 
-    // Contours and pose gate on both neighbours having them, the same rule `valid` follows: a
-    // clip re-scanned only partway, or one bracketing a v1-era frame, must not hand a shader half
-    // a mask.
+    // Contours, pose, and mesh gate on both neighbours having them, the same rule `valid`
+    // follows: a clip re-scanned only partway, or one bracketing a v1-era frame, must not hand
+    // a shader half a mask.
     if (a.hasContours && b.hasContours && a.contour.size() == b.contour.size()) {
         out.contour.reserve(a.contour.size());
         for (int i = 0; i < a.contour.size(); ++i)
@@ -314,6 +369,13 @@ FaceAnchors FaceTrack::sample(TimeUs relativeUs, int faceIndex) const
     }
     if (a.hasPose && b.hasPose)
         nlerpPose(a, b, t, &out);
+    if (a.hasMesh && b.hasMesh && a.mesh.size() == kFaceMeshPoints
+        && b.mesh.size() == kFaceMeshPoints) {
+        out.mesh.reserve(kFaceMeshPoints);
+        for (int i = 0; i < kFaceMeshPoints; ++i)
+            out.mesh.append(lerp(a.mesh.at(i), b.mesh.at(i), t));
+        out.hasMesh = true;
+    }
 
     return out;
 }
@@ -334,7 +396,7 @@ QList<FaceAnchors> FaceTrack::sampleAll(TimeUs relativeUs) const
 namespace {
 
 // One window's running totals. The old parallel-array form did not survive 128 contour points,
-// and the three groups need separate counters anyway: a frame can be valid without contours.
+// and the four groups need separate counters anyway: a frame can be valid without contours or mesh.
 struct SmoothAccumulator
 {
     QPointF leftEye, rightEye, noseTip, mouthCenter, mouthLeft, mouthRight, chin, forehead,
@@ -350,6 +412,9 @@ struct SmoothAccumulator
     double qx = 0.0, qy = 0.0, qz = 0.0, qw = 0.0;
     double poseScale = 0.0, poseOx = 0.0, poseOy = 0.0, poseOz = 0.0;
     int nPose = 0;
+
+    QList<QVector3D> mesh;
+    int nMesh = 0;
 
     void add(const FaceAnchors &a, const FaceAnchors &centre)
     {
@@ -395,6 +460,14 @@ struct SmoothAccumulator
             poseOz += a.poseOz;
             ++nPose;
         }
+
+        if (a.hasMesh && a.mesh.size() == kFaceMeshPoints) {
+            if (mesh.isEmpty())
+                mesh.resize(kFaceMeshPoints);
+            for (int i = 0; i < kFaceMeshPoints; ++i)
+                mesh[i] += a.mesh.at(i);
+            ++nMesh;
+        }
     }
 
     void writeTo(FaceAnchors *out) const
@@ -436,6 +509,12 @@ struct SmoothAccumulator
             out->poseOx = poseOx * invP;
             out->poseOy = poseOy * invP;
             out->poseOz = poseOz * invP;
+        }
+
+        if (nMesh >= 2 && out->hasMesh && out->mesh.size() == kFaceMeshPoints) {
+            const float invM = 1.0f / float(nMesh);
+            for (int i = 0; i < kFaceMeshPoints; ++i)
+                out->mesh[i] = mesh.at(i) * invM;
         }
     }
 };
@@ -560,6 +639,10 @@ void applyFaceUniforms(QMap<QString, QVariant> *parameters, const QList<FaceAnch
         parameters->insert(QStringLiteral("u_faceYaw"), std::asin(std::clamp(-fwd[0], -1.0, 1.0)));
         parameters->insert(QStringLiteral("u_facePitch"), std::asin(std::clamp(up[2], -1.0, 1.0)));
     }
+
+    // Flag only: 468 vertices are far too large for uniforms. The model3d path reads FaceAnchors
+    // directly from the sampled track.
+    parameters->insert(QStringLiteral("u_faceHasMesh"), face.hasMesh ? 1.0 : 0.0);
 }
 
 QString faceTrackCacheDir()
