@@ -286,83 +286,33 @@ void AppController::sweepExtractionDirs()
 }
 
 namespace {
+
+// Whether a baked sidecar carries the contour loops the makeup effects need. A track written
+// before contours existed still drives every warp effect, so it cannot simply be treated as
+// missing — but the beauty packages will pass straight through it, and saying so is what stops
+// that reading as a broken effect.
+//
+// loadFaceTrackCached is a hash lookup once the file has been parsed, so this is cheap enough for
+// the clip map; only the first valid frame is inspected, since a bake never mixes the two.
+bool faceTrackHasContours(const QString &path)
+{
+    if (path.isEmpty())
+        return false;
+    const auto track = drift::loadFaceTrackCached(path);
+    if (!track)
+        return false;
+    for (const drift::FaceTrackFrame &frame : track->frames) {
+        for (const drift::FaceAnchors &face : frame.faces) {
+            if (face.valid)
+                return face.hasContours;
+        }
+    }
+    return false;
+}
+
 QVariantMap transitionToMap(const drift::Track &track, const drift::Transition &t);
 QVariantMap maskToMap(const drift::Mask &m);
 drift::Mask maskFromMap(const QVariantMap &m);
-
-// Raw per-frame landmarks jitter by a pixel or two even on a still head, and a bulge anchored to a
-// jittering point visibly boils. A short symmetric average over neighbouring frames costs nothing
-// at bake time and is what makes the warps sit still.
-//
-// Only runs across frames where the slot is continuously valid, so smoothing never drags an anchor
-// across the gap where a face left and came back.
-void smoothFaceTrack(drift::FaceTrack *track)
-{
-    constexpr int kRadius = 2;
-    const int frameCount = track->frames.size();
-    if (frameCount < 3)
-        return;
-
-    int slotCount = 0;
-    for (const drift::FaceTrackFrame &f : track->frames)
-        slotCount = qMax(slotCount, int(f.faces.size()));
-
-    const drift::FaceTrack source = *track;
-    for (int slot = 0; slot < slotCount; ++slot) {
-        for (int i = 0; i < frameCount; ++i) {
-            if (slot >= track->frames[i].faces.size() || !track->frames[i].faces[slot].valid)
-                continue;
-
-            drift::FaceAnchors sum{};
-            QPointF *sums[] = {&sum.leftEye,  &sum.rightEye, &sum.noseTip,  &sum.mouthCenter,
-                               &sum.mouthLeft, &sum.mouthRight, &sum.chin,  &sum.forehead,
-                               &sum.faceCenter};
-            double angleX = 0.0;
-            double angleY = 0.0;
-            int n = 0;
-
-            for (int d = -kRadius; d <= kRadius; ++d) {
-                const int j = i + d;
-                if (j < 0 || j >= frameCount || slot >= source.frames[j].faces.size())
-                    continue;
-                const drift::FaceAnchors &a = source.frames[j].faces[slot];
-                if (!a.valid)
-                    continue;
-                const QPointF points[] = {a.leftEye,  a.rightEye,   a.noseTip,
-                                          a.mouthCenter, a.mouthLeft, a.mouthRight,
-                                          a.chin,     a.forehead,   a.faceCenter};
-                for (int k = 0; k < 9; ++k)
-                    *sums[k] += points[k];
-                sum.faceRx += a.faceRx;
-                sum.faceRy += a.faceRy;
-                sum.eyeRadius += a.eyeRadius;
-                // Averaged as a vector, so angles either side of the +/-pi seam do not cancel.
-                angleX += std::cos(a.angle);
-                angleY += std::sin(a.angle);
-                ++n;
-            }
-            if (n < 2)
-                continue;
-
-            drift::FaceAnchors &out = track->frames[i].faces[slot];
-            for (int k = 0; k < 9; ++k)
-                *sums[k] /= double(n);
-            out.leftEye = sum.leftEye;
-            out.rightEye = sum.rightEye;
-            out.noseTip = sum.noseTip;
-            out.mouthCenter = sum.mouthCenter;
-            out.mouthLeft = sum.mouthLeft;
-            out.mouthRight = sum.mouthRight;
-            out.chin = sum.chin;
-            out.forehead = sum.forehead;
-            out.faceCenter = sum.faceCenter;
-            out.faceRx = sum.faceRx / n;
-            out.faceRy = sum.faceRy / n;
-            out.eyeRadius = sum.eyeRadius / n;
-            out.angle = std::atan2(angleY, angleX);
-        }
-    }
-}
 
 int findTransitionPartnerIndex(const drift::Track &track, int fromIndex)
 {
@@ -729,7 +679,8 @@ QVariantMap transitionToMap(const drift::Track &track, const drift::Transition &
                 {QStringLiteral("min"), p.min},
                 {QStringLiteral("max"), p.max},
                 {QStringLiteral("default"), p.defaultValue},
-                {QStringLiteral("isBoolean"), p.isBoolean},
+                {QStringLiteral("isBoolean"), p.isBoolean()},
+                {QStringLiteral("type"), p.typeName()},
                 {QStringLiteral("value"), resolved.value(p.key, p.defaultValue)},
             });
         }
@@ -842,6 +793,17 @@ drift::KeyframeTrack<double> *keyframeTrackForProp(drift::Clip &clip, const QStr
         return nullptr;
 
     drift::Effect &effect = clip.effects[effectIndex];
+
+    // Colour params are not animatable: the track type is double all the way down. Refusing here
+    // as well as withholding the `prop` in effectToMap means a hand-edited project cannot conjure
+    // one either.
+    if (const EffectPresetEntry *def = effectDefForId(effect.catalogId)) {
+        for (const drift::EffectParamSpec &spec : def->meta.parameters) {
+            if (spec.key == paramKey && spec.isColor())
+                return nullptr;
+        }
+    }
+
     if (createIfMissing)
         return &effect.paramKeyframes[paramKey];
     const auto it = effect.paramKeyframes.find(paramKey);
@@ -984,22 +946,31 @@ QVariantMap effectToMap(const drift::Effect &effect, int effectIndex, drift::Tim
     if (def) {
         for (const drift::EffectParamSpec &paramDef : def->meta.parameters) {
             QVariant value = effect.parameters.value(paramDef.key);
-            if (!value.isValid()) {
-                value = paramDef.isBoolean ? QVariant(paramDef.defaultValue > 0.5)
-                                           : QVariant(paramDef.defaultValue);
-            }
+            if (!value.isValid())
+                value = paramDef.defaultVariant();
+
             // `value` stays the static value; the row falls back to it whenever the track is empty.
-            params.append(QVariantMap{
+            QVariantMap param{
                 {QStringLiteral("key"), paramDef.key},
-                {QStringLiteral("prop"), QStringLiteral("fx.%1.%2").arg(effectIndex).arg(paramDef.key)},
                 {QStringLiteral("label"), paramDef.label},
                 {QStringLiteral("min"), paramDef.min},
                 {QStringLiteral("max"), paramDef.max},
-                {QStringLiteral("isBoolean"), paramDef.isBoolean},
+                {QStringLiteral("isBoolean"), paramDef.isBoolean()},
+                {QStringLiteral("type"), paramDef.typeName()},
                 {QStringLiteral("value"), value},
-                {QStringLiteral("keyframes"),
-                 keyframeTrackToMap(effect.paramKeyframes.value(paramDef.key), timelineStart)},
-            });
+            };
+            // Colours carry no `prop`, which is what the keyframe strip addresses a parameter by.
+            // Withholding it makes an animated colour structurally unreachable rather than merely
+            // discouraged — the whole keyframe stack is typed double, and packing a shade into one
+            // would interpolate through desaturated mud.
+            if (!paramDef.isColor()) {
+                param.insert(QStringLiteral("prop"),
+                             QStringLiteral("fx.%1.%2").arg(effectIndex).arg(paramDef.key));
+                param.insert(QStringLiteral("keyframes"),
+                             keyframeTrackToMap(effect.paramKeyframes.value(paramDef.key),
+                                                timelineStart));
+            }
+            params.append(param);
         }
     }
     return {
@@ -1020,15 +991,15 @@ QVariantMap audioEffectToMap(const drift::Effect &effect)
         for (const drift::EffectParamSpec &paramDef : def->parameters) {
             QVariant value = effect.parameters.value(paramDef.key);
             if (!value.isValid()) {
-                value = paramDef.isBoolean ? QVariant(paramDef.defaultValue > 0.5)
-                                           : QVariant(paramDef.defaultValue);
+                value = paramDef.defaultVariant();
             }
             params.append(QVariantMap{
                 {QStringLiteral("key"), paramDef.key},
                 {QStringLiteral("label"), paramDef.label},
                 {QStringLiteral("min"), paramDef.min},
                 {QStringLiteral("max"), paramDef.max},
-                {QStringLiteral("isBoolean"), paramDef.isBoolean},
+                {QStringLiteral("isBoolean"), paramDef.isBoolean()},
+                {QStringLiteral("type"), paramDef.typeName()},
                 {QStringLiteral("value"), value},
             });
         }
@@ -1390,6 +1361,7 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("flipV"), clip.flipV},
         {QStringLiteral("mask"), maskToMap(clip.mask)},
         {QStringLiteral("hasFaceTrack"), !clip.faceTrackPath.isEmpty()},
+        {QStringLiteral("faceTrackHasContours"), faceTrackHasContours(clip.faceTrackPath)},
         {QStringLiteral("start"), drift::usToSeconds(clip.timelineStart)},
         {QStringLiteral("duration"), drift::usToSeconds(clip.timelineDuration)},
         {QStringLiteral("inPoint"), drift::usToSeconds(clip.srcIn)},
@@ -4144,7 +4116,7 @@ void AppController::detectFacesForClip(int trackIndex, int clipIndex)
             return;
         }
 
-        smoothFaceTrack(&faceTrack);
+        drift::smoothFaceTrack(&faceTrack);
 
         const QString trackPath = drift::newFaceTrackPath();
         QString error;
@@ -5275,7 +5247,7 @@ void AppController::previewSetEffectParam(int trackIndex, int clipIndex, int eff
     if (def) {
         for (const drift::EffectParamSpec &param : def->meta.parameters) {
             if (param.key == key) {
-                asBoolean = param.isBoolean;
+                asBoolean = param.isBoolean();
                 break;
             }
         }
@@ -6665,7 +6637,7 @@ QVariant coerceTransitionParam(const TransitionPresetEntry *def, const QString &
     if (def) {
         for (const drift::EffectParamSpec &param : def->meta.parameters) {
             if (param.key == key)
-                return param.isBoolean ? QVariant(value > 0.5) : QVariant(value);
+                return param.isBoolean() ? QVariant(value > 0.5) : QVariant(value);
         }
     }
     return value;
@@ -6753,7 +6725,8 @@ QVariantList AppController::transitionKinds() const
                 {QStringLiteral("min"), p.min},
                 {QStringLiteral("max"), p.max},
                 {QStringLiteral("default"), p.defaultValue},
-                {QStringLiteral("isBoolean"), p.isBoolean},
+                {QStringLiteral("isBoolean"), p.isBoolean()},
+                {QStringLiteral("type"), p.typeName()},
             });
         }
         result.append(QVariantMap{
@@ -7195,7 +7168,8 @@ QVariantList AppController::effectCatalog() const
                 {QStringLiteral("min"), p.min},
                 {QStringLiteral("max"), p.max},
                 {QStringLiteral("default"), p.defaultValue},
-                {QStringLiteral("isBoolean"), p.isBoolean},
+                {QStringLiteral("isBoolean"), p.isBoolean()},
+                {QStringLiteral("type"), p.typeName()},
             });
         }
         out.append(QVariantMap{
@@ -7242,12 +7216,8 @@ void AppController::addEffect(int trackIndex, int clipIndex, const QString &effe
     effect.catalogId = def->meta.id;
     for (auto it = def->fixedParams.constBegin(); it != def->fixedParams.constEnd(); ++it)
         effect.parameters.insert(it.key(), it.value());
-    for (const drift::EffectParamSpec &p : def->meta.parameters) {
-        if (p.isBoolean)
-            effect.parameters.insert(p.key, p.defaultValue > 0.5);
-        else
-            effect.parameters.insert(p.key, p.defaultValue);
-    }
+    for (const drift::EffectParamSpec &p : def->meta.parameters)
+        effect.parameters.insert(p.key, p.defaultVariant());
 
     const drift::Project before = m_project;
     track.clips[clipIndex].effects.append(effect);
@@ -7272,10 +7242,8 @@ drift::Effect effectFromCatalogEntry(const EffectPresetEntry &def,
         const auto overrideIt = overrides.constFind(p.key);
         if (overrideIt != overrides.constEnd())
             effect.parameters.insert(p.key, overrideIt.value());
-        else if (p.isBoolean)
-            effect.parameters.insert(p.key, p.defaultValue > 0.5);
         else
-            effect.parameters.insert(p.key, p.defaultValue);
+            effect.parameters.insert(p.key, p.defaultVariant());
     }
     return effect;
 }
@@ -7884,7 +7852,7 @@ void AppController::setEffectParam(int trackIndex, int clipIndex, int effectInde
     if (def) {
         for (const drift::EffectParamSpec &param : def->meta.parameters) {
             if (param.key == key) {
-                asBoolean = param.isBoolean;
+                asBoolean = param.isBoolean();
                 break;
             }
         }
@@ -7893,6 +7861,43 @@ void AppController::setEffectParam(int trackIndex, int clipIndex, int effectInde
         clip.effects[effectIndex].parameters.insert(key, value > 0.5);
     else
         clip.effects[effectIndex].parameters.insert(key, value);
+    pushProjectEdit(before, QStringLiteral("Edit effect"));
+    finishEdit(QStringLiteral("Effect updated"));
+}
+
+// Colour params take this path rather than widening setEffectParam, which every existing QML call
+// site passes a double to. There is no preview variant on purpose: a swatch commits once, so there
+// is no drag stream to coalesce the way a slider needs.
+void AppController::setEffectColorParam(int trackIndex, int clipIndex, int effectIndex,
+                                        const QString &key, const QString &value)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (effectIndex < 0 || effectIndex >= clip.effects.size())
+        return;
+
+    const EffectPresetEntry *def = effectDefForId(clip.effects[effectIndex].catalogId);
+    if (!def)
+        return;
+    const auto specIt = std::find_if(def->meta.parameters.cbegin(), def->meta.parameters.cend(),
+                                     [&](const drift::EffectParamSpec &p) { return p.key == key; });
+    if (specIt == def->meta.parameters.cend() || !specIt->isColor())
+        return;
+
+    // Normalized to the same six-digit form the catalog default carries, so what lands in the
+    // project matches what the parser would have produced.
+    const QColor color(value);
+    if (!color.isValid())
+        return;
+
+    const drift::Project before = m_project;
+    clip.effects[effectIndex].parameters.insert(key, color.name(QColor::HexRgb));
     pushProjectEdit(before, QStringLiteral("Edit effect"));
     finishEdit(QStringLiteral("Effect updated"));
 }
@@ -7909,7 +7914,8 @@ QVariantList AppController::audioEffectCatalog() const
                 {QStringLiteral("min"), p.min},
                 {QStringLiteral("max"), p.max},
                 {QStringLiteral("default"), p.defaultValue},
-                {QStringLiteral("isBoolean"), p.isBoolean},
+                {QStringLiteral("isBoolean"), p.isBoolean()},
+                {QStringLiteral("type"), p.typeName()},
             });
         }
         out.append(QVariantMap{

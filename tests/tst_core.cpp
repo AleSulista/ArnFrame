@@ -29,6 +29,7 @@ private slots:
     void keyframeNearestQuery();
     void projectSerializationRoundTrip();
     void projectMetadataRoundTrip();
+    void effectColorParamSurvivesRoundTrip();
     void clipTransformSerialization();
     void legacyFractionalTransformMigration();
     void volumeKeyframeSerialization();
@@ -364,6 +365,39 @@ void CoreTest::projectSerializationRoundTrip()
     QCOMPARE(loaded.tracks()[0].clips[0].timelineStart, clip.timelineStart);
     QCOMPARE(loaded.bookmarks().size(), 1);
     QCOMPARE(loaded.bookmarks()[0].label, QStringLiteral("Mark"));
+}
+
+// A colour parameter is stored as a "#rrggbb" string rather than a number, so it has to survive the
+// project file as one. Effect params round-trip through QVariant, and a silent coercion to double
+// here would reach the shader as black.
+void CoreTest::effectColorParamSurvivesRoundTrip()
+{
+    drift::Project project;
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-1");
+    clip.type = drift::ClipType::Video;
+    clip.timelineDuration = drift::secondsToUs(5.0);
+
+    drift::Effect effect;
+    effect.catalogId = QStringLiteral("face_lipstick");
+    effect.parameters.insert(QStringLiteral("shade"), QStringLiteral("#b03048"));
+    effect.parameters.insert(QStringLiteral("opacity"), 0.8);
+    effect.parameters.insert(QStringLiteral("coverInner"), true);
+    clip.effects.append(effect);
+    project.tracks()[0].clips.append(clip);
+
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(project.toJson(), &error);
+    QVERIFY(error.isEmpty());
+    QCOMPARE(loaded.tracks()[0].clips.size(), 1);
+    const drift::Effect &out = loaded.tracks()[0].clips[0].effects.at(0);
+
+    const QVariant shade = out.parameters.value(QStringLiteral("shade"));
+    QCOMPARE(shade.typeId(), QMetaType::QString);
+    QCOMPARE(shade.toString(), QStringLiteral("#b03048"));
+    QCOMPARE(out.parameters.value(QStringLiteral("opacity")).toDouble(), 0.8);
+    QCOMPARE(out.parameters.value(QStringLiteral("coverInner")).toBool(), true);
 }
 
 void CoreTest::clipTransformSerialization()

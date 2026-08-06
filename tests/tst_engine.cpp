@@ -36,6 +36,9 @@
 #include "engine/FrameCompositor.h"
 #include "engine/TextRaster.h"
 #include "engine/GpuEffectExecutor.h"
+#include "engine/GpuPackageParse.h"
+
+#include <QJsonDocument>
 #include "engine/MaskApplier.h"
 #include "engine/MatteWriter.h"
 #include "engine/ReverseProxyCache.h"
@@ -55,6 +58,12 @@ private slots:
     void reverseProxyLookupIsByContainmentAndSourceIdentity();
     void resolveVideoReadMirrorsTheClipOntoTheProxy();
     void faceTrackRoundTripsAndInterpolates();
+    void faceTrackV2CarriesContoursAndPose();
+    void faceTrackV1FileStillLoads();
+    void smoothFaceTrackHandlesMissingBlocks();
+    void applyFaceUniformsEmitsContourArrays();
+    void colorParametersParseAndResolve();
+    void beautyEffectsPassThroughWithoutContours();
     void emojiCatalogNeedsFontAddon();
     void emojiRasterisesGlyph();
     void effectProcessorPassthroughWithoutEffects();
@@ -168,7 +177,11 @@ void EngineTest::initTestCase()
 
     const QString effectsDir = QString::fromUtf8(DRIFT_TEST_EFFECTS_DIR);
     QVERIFY2(QDir(effectsDir).exists(), qPrintable(effectsDir));
-    reloadEffectCatalog({effectsDir});
+    QStringList effectRoots{effectsDir};
+    const QString addonEffectsDir = QString::fromUtf8(DRIFT_TEST_ADDON_EFFECTS_DIR);
+    if (QDir(addonEffectsDir).exists())
+        effectRoots.append(addonEffectsDir);
+    reloadEffectCatalog(effectRoots);
 
     const QString transitionsDir = QString::fromUtf8(DRIFT_TEST_TRANSITIONS_DIR);
     QVERIFY2(QDir(transitionsDir).exists(), qPrintable(transitionsDir));
@@ -295,6 +308,339 @@ void EngineTest::faceTrackRoundTripsAndInterpolates()
 
     // A slot that was never baked is simply absent.
     QVERIFY(!loaded.sample(0, 3).valid);
+}
+
+namespace {
+
+// Anchors with every field a v2 sidecar carries, so the round-trip tests actually exercise the
+// contour and pose blocks rather than defaults.
+drift::FaceAnchors makeFullAnchors(double shift)
+{
+    drift::FaceAnchors a;
+    a.valid = true;
+    a.faceCenter = QPointF(0.4 + shift, 0.5);
+    a.leftEye = QPointF(0.35 + shift, 0.45);
+    a.rightEye = QPointF(0.45 + shift, 0.45);
+    a.faceRx = 0.1;
+    a.faceRy = 0.12;
+    a.angle = 0.1;
+    a.eyeRadius = 0.02;
+    a.score = 0.9;
+
+    a.contour.reserve(drift::contour::kTotalPoints);
+    for (int i = 0; i < drift::contour::kTotalPoints; ++i)
+        a.contour.append(QPointF(0.3 + shift + i * 0.001, 0.4 + i * 0.002));
+    a.hasContours = true;
+    a.cheekLeft = QPointF(0.33 + shift, 0.52);
+    a.cheekRight = QPointF(0.47 + shift, 0.52);
+
+    a.hasPose = true;
+    a.poseQx = 0.0;
+    a.poseQy = 0.0;
+    a.poseQz = std::sin(0.15);
+    a.poseQw = std::cos(0.15);
+    a.poseScale = 0.08;
+    a.poseOx = 0.4 + shift;
+    a.poseOy = 0.45;
+    a.poseOz = 0.01;
+    return a;
+}
+
+} // namespace
+
+void EngineTest::faceTrackV2CarriesContoursAndPose()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("v2.json"));
+
+    drift::FaceTrack track;
+    track.fps = 30;
+    for (int i = 0; i < 2; ++i) {
+        drift::FaceTrackFrame frame;
+        frame.faces.append(makeFullAnchors(0.1 * i));
+        track.frames.append(frame);
+    }
+
+    QString error;
+    QVERIFY2(drift::writeFaceTrack(path, track, &error), qPrintable(error));
+    drift::FaceTrack loaded;
+    QVERIFY2(drift::readFaceTrack(path, &loaded, &error), qPrintable(error));
+
+    const drift::FaceAnchors &a = loaded.frames.at(0).faces.at(0);
+    QVERIFY(a.hasContours);
+    QCOMPARE(a.contour.size(), drift::contour::kTotalPoints);
+    // The contour block is quantized to uint16 over a range of 4.0, so a point is good to about
+    // 6e-5 — finer than the five-decimal rounding the plain fields already use.
+    for (int i = 0; i < drift::contour::kTotalPoints; ++i) {
+        QVERIFY(qAbs(a.contour.at(i).x() - (0.3 + i * 0.001)) < 1e-4);
+        QVERIFY(qAbs(a.contour.at(i).y() - (0.4 + i * 0.002)) < 1e-4);
+    }
+    QVERIFY(qAbs(a.cheekLeft.x() - 0.33) < 1e-4);
+    QVERIFY(a.hasPose);
+    QVERIFY(qAbs(a.poseQz - std::sin(0.15)) < 1e-6);
+    QVERIFY(qAbs(a.poseScale - 0.08) < 1e-6);
+
+    // Interpolating between the two frames keeps both blocks and renormalizes the quaternion.
+    const drift::FaceAnchors mid = loaded.sample(drift::kUsPerSecond / 60, 0);
+    QVERIFY(mid.valid);
+    QVERIFY(mid.hasContours);
+    QCOMPARE(mid.contour.size(), drift::contour::kTotalPoints);
+    QVERIFY(qAbs(mid.contour.at(0).x() - 0.35) < 1e-3);
+    QVERIFY(mid.hasPose);
+    const double norm = std::sqrt(mid.poseQx * mid.poseQx + mid.poseQy * mid.poseQy
+                                 + mid.poseQz * mid.poseQz + mid.poseQw * mid.poseQw);
+    QVERIFY(qAbs(norm - 1.0) < 1e-6);
+
+    // Sidecars are embedded in every project bundle, so their size is a real cost. A minute of
+    // single-face 30fps footage must stay near a megabyte; if this trips, something stopped being
+    // rounded or the contour blob stopped being packed.
+    drift::FaceTrack minute;
+    minute.fps = 30;
+    for (int i = 0; i < 1800; ++i) {
+        drift::FaceTrackFrame frame;
+        frame.faces.append(makeFullAnchors(0.0001 * i));
+        minute.frames.append(frame);
+    }
+    const QString bigPath = dir.filePath(QStringLiteral("minute.json"));
+    QVERIFY2(drift::writeFaceTrack(bigPath, minute, &error), qPrintable(error));
+    const qint64 bytes = QFileInfo(bigPath).size();
+    QVERIFY2(bytes < 2'400'000,
+             qPrintable(QStringLiteral("sidecar grew to %1 bytes per minute per face").arg(bytes)));
+}
+
+// The reason the format bump is not a hard break: an existing sidecar still drives every warp
+// effect, and only the makeup effects see that they have nothing to work with.
+void EngineTest::faceTrackV1FileStillLoads()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("v1.json"));
+
+    // Written by hand in the old format — a bare 24-number array per face — because the point is
+    // to prove the reader copes with files this build can no longer produce.
+    const QByteArray v1 =
+        "{\"version\":1,\"fps\":30,\"startSrcUs\":0,\"frames\":["
+        "[[1,0.2,0.4,0.3,0.4,0.25,0.45,0.25,0.5,0.22,0.5,0.28,0.5,0.25,0.6,0.25,0.3,0.25,0.5,"
+        "0.1,0.12,0.2,0.02,0.9]],"
+        "[[1,0.3,0.4,0.4,0.4,0.35,0.45,0.35,0.5,0.32,0.5,0.38,0.5,0.35,0.6,0.35,0.3,0.35,0.5,"
+        "0.1,0.12,0.2,0.02,0.9]]]}";
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write(v1);
+    f.close();
+
+    QString error;
+    drift::FaceTrack loaded;
+    QVERIFY2(drift::readFaceTrack(path, &loaded, &error), qPrintable(error));
+    QCOMPARE(loaded.frames.size(), 2);
+
+    const drift::FaceAnchors &a = loaded.frames.at(0).faces.at(0);
+    QVERIFY(a.valid);
+    QVERIFY(qAbs(a.faceCenter.x() - 0.25) < 1e-6);
+    QVERIFY(!a.hasContours);
+    QVERIFY(!a.hasPose);
+    QVERIFY(a.contour.isEmpty());
+
+    // Still interpolates, so the warp effects are unaffected.
+    const drift::FaceAnchors mid = loaded.sample(drift::kUsPerSecond / 60, 0);
+    QVERIFY(mid.valid);
+    QVERIFY(qAbs(mid.faceCenter.x() - 0.30) < 1e-4);
+    QVERIFY(!mid.hasContours);
+
+    // A version from the future is still refused, since we cannot guess what it holds.
+    QFile future(dir.filePath(QStringLiteral("future.json")));
+    QVERIFY(future.open(QIODevice::WriteOnly));
+    future.write("{\"version\":99,\"fps\":30,\"frames\":[]}");
+    future.close();
+    drift::FaceTrack unused;
+    QVERIFY(!drift::readFaceTrack(dir.filePath(QStringLiteral("future.json")), &unused, &error));
+}
+
+// Contours and pose must average only across frames that have them, or a partly re-scanned clip
+// produces a half-length mask.
+void EngineTest::smoothFaceTrackHandlesMissingBlocks()
+{
+    drift::FaceTrack track;
+    track.fps = 30;
+    for (int i = 0; i < 5; ++i) {
+        drift::FaceTrackFrame frame;
+        drift::FaceAnchors a = makeFullAnchors(0.0);
+        // Jitter the centre so smoothing has something to do.
+        a.faceCenter = QPointF(0.4 + (i % 2 ? 0.02 : -0.02), 0.5);
+        // The middle frame carries no contours and no pose, as a v1-era frame would.
+        if (i == 2) {
+            a.contour.clear();
+            a.hasContours = false;
+            a.hasPose = false;
+        }
+        frame.faces.append(a);
+        track.frames.append(frame);
+    }
+
+    drift::smoothFaceTrack(&track);
+
+    for (int i = 0; i < 5; ++i) {
+        const drift::FaceAnchors &a = track.frames.at(i).faces.at(0);
+        QVERIFY(a.valid);
+        if (i == 2) {
+            QVERIFY(!a.hasContours);
+            QVERIFY(a.contour.isEmpty());
+            QVERIFY(!a.hasPose);
+        } else {
+            QVERIFY(a.hasContours);
+            QCOMPARE(a.contour.size(), drift::contour::kTotalPoints);
+            QVERIFY(a.hasPose);
+            const double norm = std::sqrt(a.poseQx * a.poseQx + a.poseQy * a.poseQy
+                                         + a.poseQz * a.poseQz + a.poseQw * a.poseQw);
+            QVERIFY(qAbs(norm - 1.0) < 1e-6);
+        }
+    }
+
+    // The jitter is gone from the interior frames, which is what smoothing is for.
+    QVERIFY(qAbs(track.frames.at(2).faces.at(0).faceCenter.x() - 0.4) < 0.015);
+}
+
+// Contour loops travel as array uniforms rather than 256 named scalars; a v1 anchor must emit none
+// of them and must leave every pre-existing uniform exactly as it was.
+void EngineTest::applyFaceUniformsEmitsContourArrays()
+{
+    QMap<QString, QVariant> params;
+    params.insert(QStringLiteral("faceIndex"), 0);
+    drift::applyFaceUniforms(&params, {makeFullAnchors(0.0)});
+
+    QCOMPARE(params.value(QStringLiteral("u_faceValid")).toDouble(), 1.0);
+    QCOMPARE(params.value(QStringLiteral("u_faceHasContours")).toDouble(), 1.0);
+    // faceIndex selects a slot; it is not a uniform and must be consumed.
+    QVERIFY(!params.contains(QStringLiteral("faceIndex")));
+
+    const struct { const char *name; int count; } loops[] = {
+        {"u_faceOval", 36},      {"u_faceLipOuter", 20}, {"u_faceLipInner", 20},
+        {"u_faceEyeLeft", 16},   {"u_faceEyeRight", 16}, {"u_faceBrowLeft", 10},
+        {"u_faceBrowRight", 10},
+    };
+    for (const auto &loop : loops) {
+        const QVariant v = params.value(QLatin1String(loop.name));
+        QVERIFY2(v.canConvert<drift::GpuFloatArray>(), loop.name);
+        const auto array = v.value<drift::GpuFloatArray>();
+        QCOMPARE(array.tupleSize, 2);
+        QCOMPARE(array.values.size(), loop.count * 2);
+    }
+
+    QCOMPARE(params.value(QStringLiteral("u_facePoseValid")).toDouble(), 1.0);
+    // The pose reaches shaders as a basis, and a frontal-ish head must not come back mirrored.
+    QVERIFY(params.value(QStringLiteral("u_facePoseRightX")).toDouble() > 0.9);
+
+    // A v1 anchor: the warp uniforms are all still there, the contour arrays are all absent.
+    drift::FaceAnchors legacy;
+    legacy.valid = true;
+    legacy.faceCenter = QPointF(0.5, 0.5);
+    legacy.faceRx = 0.1;
+    QMap<QString, QVariant> legacyParams;
+    legacyParams.insert(QStringLiteral("faceIndex"), 0);
+    drift::applyFaceUniforms(&legacyParams, {legacy});
+
+    QCOMPARE(legacyParams.value(QStringLiteral("u_faceValid")).toDouble(), 1.0);
+    QCOMPARE(legacyParams.value(QStringLiteral("u_faceCenterX")).toDouble(), 0.5);
+    QCOMPARE(legacyParams.value(QStringLiteral("u_faceRx")).toDouble(), 0.1);
+    QCOMPARE(legacyParams.value(QStringLiteral("u_faceHasContours")).toDouble(), 0.0);
+    QCOMPARE(legacyParams.value(QStringLiteral("u_facePoseValid")).toDouble(), 0.0);
+    for (const auto &loop : loops)
+        QVERIFY2(!legacyParams.contains(QLatin1String(loop.name)), loop.name);
+}
+
+void EngineTest::colorParametersParseAndResolve()
+{
+    const auto parse = [](const QByteArray &json, QList<drift::EffectParamSpec> *out,
+                          QString *error) {
+        const QJsonArray params = QJsonDocument::fromJson(json).array();
+        return GpuPackageParse::parseParameters(params, out, /*gpuBackend=*/true, error);
+    };
+
+    QList<drift::EffectParamSpec> specs;
+    QString error;
+    QVERIFY2(parse(R"([{"identifier":"shade","type":"color","defaultValue":"#B03048"}])", &specs,
+                   &error),
+             qPrintable(error));
+    QCOMPARE(specs.size(), 1);
+    QVERIFY(specs.at(0).isColor());
+    QVERIFY(!specs.at(0).isBoolean());
+    // Normalized at parse time so the swatch, the project file and the uniform agree on one form.
+    QCOMPARE(specs.at(0).defaultColorHex, QStringLiteral("#b03048"));
+    QCOMPARE(specs.at(0).defaultVariant().toString(), QStringLiteral("#b03048"));
+    QCOMPARE(specs.at(0).typeName(), QStringLiteral("color"));
+
+    // Alpha is dropped rather than silently carried into a vec3.
+    specs.clear();
+    QVERIFY(parse(R"([{"identifier":"shade","type":"color","defaultValue":"#80b03048"}])", &specs,
+                  &error));
+    QCOMPARE(specs.at(0).defaultColorHex, QStringLiteral("#b03048"));
+
+    // A malformed default is a package error, not a silent black.
+    specs.clear();
+    QVERIFY(!parse(R"([{"identifier":"shade","type":"color","defaultValue":"crimson"}])", &specs,
+                   &error));
+    QVERIFY(error.contains(QStringLiteral("invalid colour")));
+    specs.clear();
+    QVERIFY(!parse(R"([{"identifier":"shade","type":"color","defaultValue":0.5}])", &specs, &error));
+
+    // A stale numeric value on a colour key — from a hand-edited project, or a package that changed
+    // a parameter's type — must not reach the shader, where it would bind as black.
+    const EffectPresetEntry *def = effectDefForId(QStringLiteral("face_lipstick"));
+    if (!def)
+        QSKIP("face_lipstick package not available (drift-addons staging missing)");
+    drift::Effect effect;
+    effect.catalogId = def->meta.id;
+    effect.parameters.insert(QStringLiteral("shade"), 0.7);
+    const QMap<QString, QVariant> resolved = resolvedEffectParameters(effect, *def);
+    QCOMPARE(resolved.value(QStringLiteral("shade")).typeId(), QMetaType::QString);
+    QCOMPARE(resolved.value(QStringLiteral("shade")).toString(), QStringLiteral("#b03048"));
+
+    // A legitimate override still wins.
+    effect.parameters.insert(QStringLiteral("shade"), QStringLiteral("#123456"));
+    QCOMPARE(resolvedEffectParameters(effect, *def).value(QStringLiteral("shade")).toString(),
+             QStringLiteral("#123456"));
+}
+
+// Every beauty package must pass the frame through untouched when the clip has no contours, or an
+// un-rescanned clip looks broken rather than merely un-scanned.
+void EngineTest::beautyEffectsPassThroughWithoutContours()
+{
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("GPU effect executor unavailable");
+
+    const QStringList ids = {QStringLiteral("face_lipstick"),   QStringLiteral("face_blush"),
+                             QStringLiteral("face_teeth_whiten"), QStringLiteral("face_eyeliner"),
+                             QStringLiteral("face_eyeshadow"),  QStringLiteral("face_brow_tint"),
+                             QStringLiteral("face_eye_color"),  QStringLiteral("face_beautify")};
+    if (!effectDefForId(ids.first()))
+        QSKIP("beauty packages not available (drift-addons staging missing)");
+
+    QImage source(64, 64, QImage::Format_RGBA8888);
+    source.fill(QColor(180, 140, 130));
+
+    // Valid, but from a v1 sidecar: no contours.
+    drift::FaceAnchors legacy;
+    legacy.valid = true;
+    legacy.faceCenter = QPointF(0.5, 0.5);
+    legacy.leftEye = QPointF(0.4, 0.4);
+    legacy.rightEye = QPointF(0.6, 0.4);
+    legacy.faceRx = 0.25;
+    legacy.faceRy = 0.3;
+    legacy.eyeRadius = 0.03;
+
+    for (const QString &id : ids) {
+        const EffectPresetEntry *def = effectDefForId(id);
+        QVERIFY2(def, qPrintable(id));
+        QVERIFY2(def->needsFace, qPrintable(id));
+
+        drift::Effect effect;
+        effect.catalogId = id;
+        const QImage out = EffectProcessor::applyEffects(source, {effect}, 0, {legacy});
+        QVERIFY2(!out.isNull(), qPrintable(id));
+        QCOMPARE(out.size(), source.size());
+        QVERIFY2(out == source, qPrintable(QStringLiteral("%1 altered a contour-less frame").arg(id)));
+    }
 }
 
 // or lands on the wrong frame — silent, and only visible in the composite.

@@ -59,6 +59,25 @@ Item {
                 const data = EditorState.selectedClipData
                 return data && data.hasFaceTrack === true
             }
+            // A track baked before contours existed still drives the warps, so it is not stale in
+            // general — only the Beauty effects have nothing to work with, and they pass through.
+            property bool trackHasContours: {
+                const data = EditorState.selectedClipData
+                return data && data.faceTrackHasContours === true
+            }
+            property bool usesBeautyEffect: {
+                root.clipDataRevision
+                const effects = EditorState.selectedClipEffects || []
+                for (let i = 0; i < effects.length; i++) {
+                    if ((effects[i].catalogId || "").indexOf("face_") === 0
+                            && beautyIds.indexOf(effects[i].catalogId) >= 0)
+                        return true
+                }
+                return false
+            }
+            readonly property var beautyIds: ["face_lipstick", "face_blush", "face_teeth_whiten",
+                                              "face_eyeliner", "face_eyeshadow", "face_brow_tint",
+                                              "face_eye_color", "face_beautify"]
 
             Connections {
                 target: Addons
@@ -86,6 +105,21 @@ Item {
                          && !EditorState.faceDetecting
                 text: qsTr("Scan this clip once, then the Funny Face effects will follow the face through it.")
                 color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+            }
+
+            // The Beauty effects need the lip and eyelid contours, which tracks baked by older
+            // builds do not carry. They pass the frame through untouched in that case, so without
+            // this the effect reads as broken rather than as needing one more scan.
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                visible: faceSection.faceReady && faceSection.hasTrack
+                         && !faceSection.trackHasContours && faceSection.usesBeautyEffect
+                         && !EditorState.faceDetecting
+                text: qsTr("This clip was scanned before makeup was supported. Re-detect faces to enable the Beauty effects.")
+                color: Theme.warning
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeXs
             }
@@ -280,7 +314,7 @@ Item {
                             // Booleans have nothing to interpolate, so they keep the
                             // plain switch and stay off the keyframe strip.
                             Row {
-                                visible: !!paramRow.paramData.isBoolean
+                                visible: paramRow.paramData.type === "bool"
                                 width: parent.width
                                 spacing: 8
                                 Text {
@@ -304,15 +338,40 @@ Item {
                             }
 
                             ThemedSwitch {
-                                visible: !!paramRow.paramData.isBoolean
+                                visible: paramRow.paramData.type === "bool"
                                 checked: !!paramRow.paramData.value
                                 onToggled: EditorState.setEffectParam(
                                                EditorState.selectedTrack, EditorState.selectedClip,
                                                effectCard.index, paramRow.paramData.key, checked ? 1 : 0)
                             }
 
+                            // A shade is picked, not dialled, so colours get the swatch and stay
+                            // off the keyframe strip — the track type is double all the way down.
+                            Row {
+                                visible: paramRow.paramData.type === "color"
+                                width: parent.width
+                                spacing: 8
+                                Text {
+                                    width: parent.width - 148
+                                    elide: Text.ElideRight
+                                    text: paramRow.paramData.label
+                                    color: Theme.mutedForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                ColorSwatchField {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    hex: paramRow.paramData.value || "#ffffff"
+                                    tooltip: qsTr("Choose %1").arg(paramRow.paramData.label)
+                                    onEdited: value => EditorState.setEffectColorParam(
+                                                  EditorState.selectedTrack, EditorState.selectedClip,
+                                                  effectCard.index, paramRow.paramData.key, value)
+                                }
+                            }
+
                             PropertyKeyframeRow {
-                                visible: !paramRow.paramData.isBoolean
+                                visible: paramRow.paramData.type === "float"
                                 width: parent.width
                                 // `def` is the param's static value, which the row falls
                                 // back to whenever the track holds no keys.

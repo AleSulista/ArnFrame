@@ -71,6 +71,7 @@ void rebuildCatalogLocked(const QStringList &packageRoots)
         {QStringLiteral("blurs"), QStringLiteral("Blurs & Distortions")},
         {QStringLiteral("blurs_distortions"), QStringLiteral("Blurs & Distortions")},
         {QStringLiteral("funny"), QStringLiteral("Funny Face")},
+        {QStringLiteral("beauty"), QStringLiteral("Beauty & Makeup")},
         {QStringLiteral("artistic"), QStringLiteral("Artistic")},
     };
 
@@ -162,14 +163,18 @@ QString effectCategoryLabel(const QString &categoryId)
 QMap<QString, QVariant> resolvedEffectParameters(const drift::Effect &effect, const EffectPresetEntry &def)
 {
     QMap<QString, QVariant> params = def.fixedParams;
-    for (const drift::EffectParamSpec &spec : def.meta.parameters) {
-        if (spec.isBoolean)
-            params.insert(spec.key, spec.defaultValue > 0.5);
-        else
-            params.insert(spec.key, spec.defaultValue);
-    }
+    for (const drift::EffectParamSpec &spec : def.meta.parameters)
+        params.insert(spec.key, spec.defaultVariant());
     for (auto it = effect.parameters.constBegin(); it != effect.parameters.end(); ++it)
         params.insert(it.key(), it.value());
+
+    // A colour key can carry a stale double: isKnownKeyframeProp accepts any well-formed fx.N.key
+    // without consulting the catalog, so a hand-edited project or a package that changed a
+    // parameter from float to colour would otherwise reach the shader as a number and bind black.
+    for (const drift::EffectParamSpec &spec : def.meta.parameters) {
+        if (spec.isColor() && params.value(spec.key).typeId() != QMetaType::QString)
+            params.insert(spec.key, spec.defaultColorHex);
+    }
 
     // Derived placeholders used by graph templates.
     if (params.contains(QStringLiteral("offset"))) {

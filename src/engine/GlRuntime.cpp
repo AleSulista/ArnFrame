@@ -706,6 +706,13 @@ void setPackageUniforms(QOpenGLShaderProgram *program, const QMap<QString, QVari
         const QVariant &value = it.value();
         if (value.typeId() == QMetaType::Bool) {
             program->setUniformValue(loc, value.toBool() ? 1.f : 0.f);
+        } else if (value.userType() == qMetaTypeId<drift::GpuFloatArray>()) {
+            const auto array = value.value<drift::GpuFloatArray>();
+            if (array.tupleSize > 0 && !array.values.isEmpty()) {
+                program->setUniformValueArray(loc, array.values.constData(),
+                                              array.values.size() / array.tupleSize,
+                                              array.tupleSize);
+            }
         } else if (value.typeId() == QMetaType::QString) {
             const QString s = value.toString();
             if (s.startsWith(QLatin1Char('#'))) {
