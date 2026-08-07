@@ -671,13 +671,13 @@ void EditorStateTest::effectBrowserCategoriesAndApply()
     AssetLibrary library;
     AppController state(&library);
 
-    // Four built in, plus one per category contributed by the bundled effect packages. Counting
-    // exactly would just be a tally of how many packages ship today.
+    // Built-in categories (color first), plus extras contributed by bundled effect packages.
+    // Counting exactly would just be a tally of how many packages ship today.
     const QVariantList categories = state.effectCategories();
     QVERIFY(categories.size() >= 5);
-    QCOMPARE(categories.first().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("glitch"));
+    QCOMPARE(categories.first().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("color"));
     QCOMPARE(categories.first().toMap().value(QStringLiteral("label")).toString(),
-             QStringLiteral("Glitch & Distortion"));
+             QStringLiteral("Color"));
 
     const QVariantList catalog = state.effectCatalog();
     QVERIFY(catalog.size() >= 16);

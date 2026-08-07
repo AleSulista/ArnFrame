@@ -1464,18 +1464,20 @@ void EngineTest::effectPresetCatalogIncludesStylizePresets()
     requirePreset("ripple_water", "Ripple / Water", "glitch", true);
     requirePreset("shockwave_pulse", "Shockwave / Pulse", "glitch", true);
     requirePreset("digital_glitch", "Digital Glitch", "glitch", true);
-    requirePreset("adjust.contrast", "Contrast", "impact", true);
+    requirePreset("adjust.contrast", "Contrast", "color", true);
 }
 
 void EngineTest::effectBrowserCategories()
 {
     const QList<QPair<QString, QString>> categories = effectCategories();
-    QVERIFY(categories.size() >= 4);
-    QCOMPARE(categories[0].first, QStringLiteral("glitch"));
-    QCOMPARE(categories[0].second, QStringLiteral("Glitch & Distortion"));
-    QCOMPARE(categories[1].first, QStringLiteral("retro"));
-    QCOMPARE(categories[2].first, QStringLiteral("dreamy"));
-    QCOMPARE(categories[3].first, QStringLiteral("impact"));
+    QVERIFY(categories.size() >= 5);
+    QCOMPARE(categories[0].first, QStringLiteral("color"));
+    QCOMPARE(categories[0].second, QStringLiteral("Color"));
+    QCOMPARE(categories[1].first, QStringLiteral("glitch"));
+    QCOMPARE(categories[1].second, QStringLiteral("Glitch & Distortion"));
+    QCOMPARE(categories[2].first, QStringLiteral("retro"));
+    QCOMPARE(categories[3].first, QStringLiteral("dreamy"));
+    QCOMPARE(categories[4].first, QStringLiteral("impact"));
 
     QSet<QString> knownCategories;
     for (const auto &category : categories)
