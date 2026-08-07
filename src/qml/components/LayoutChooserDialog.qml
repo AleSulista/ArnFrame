@@ -238,7 +238,7 @@ ThemedDialog {
         Flickable {
             id: categoryFlick
             width: parent.width
-            height: 34
+            height: Theme.controlHeight
             contentWidth: categoryRow.width
             clip: true
             boundsBehavior: Flickable.StopAtBounds
@@ -246,15 +246,21 @@ ThemedDialog {
             Row {
                 id: categoryRow
                 height: parent.height
-                spacing: 6
+                spacing: Theme.spacingMd
 
                 Repeater {
                     model: root.categories
                     delegate: AbstractButton {
                         id: catBtn
                         required property var modelData
-                        height: 32
-                        implicitWidth: catRow.implicitWidth + 16
+
+                        // Match ThemedChip / quality pills: Control padding owns the
+                        // inset so icon+label stay optically centered in the pill.
+                        height: Theme.controlHeight
+                        horizontalPadding: Theme.spacingXl
+                        verticalPadding: 0
+                        spacing: Theme.spacingMd
+                        implicitWidth: leftPadding + catContent.implicitWidth + rightPadding
                         checkable: false
                         hoverEnabled: true
                         focusPolicy: Qt.StrongFocus
@@ -278,29 +284,41 @@ ThemedDialog {
                                           : Theme.panelBorder
                         }
 
-                        contentItem: Row {
-                            id: catRow
-                            anchors.centerIn: parent
-                            spacing: 6
+                        contentItem: Item {
+                            id: catContent
+                            implicitWidth: catRow.implicitWidth
+                            implicitHeight: Math.max(catIcon.implicitHeight, catLabel.implicitHeight)
 
-                            IconGlyph {
-                                anchors.verticalCenter: parent.verticalCenter
-                                glyph: catBtn.modelData.icon
-                                iconSize: 14
-                                iconColor: catBtn.selected
+                            Row {
+                                id: catRow
+                                anchors.centerIn: parent
+                                spacing: catBtn.spacing
+
+                                IconGlyph {
+                                    id: catIcon
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    glyph: catBtn.modelData.icon
+                                    iconSize: Theme.fontSizeSm
+                                    iconColor: catBtn.selected
+                                               ? Theme.panelSecondaryForeground
+                                               : Theme.panelForeground
+                                }
+
+                                Text {
+                                    id: catLabel
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    // Match icon box height so verticalCenter lines up
+                                    // with the glyph, not the taller font metrics box.
+                                    height: catIcon.iconSize
+                                    verticalAlignment: Text.AlignVCenter
+                                    text: catBtn.modelData.label
+                                    color: catBtn.selected
                                            ? Theme.panelSecondaryForeground
                                            : Theme.panelForeground
-                            }
-
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: catBtn.modelData.label
-                                color: catBtn.selected
-                                       ? Theme.panelSecondaryForeground
-                                       : Theme.panelForeground
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeXs
-                                font.weight: catBtn.selected ? Font.Medium : Font.Normal
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    font.weight: catBtn.selected ? Font.Medium : Font.Normal
+                                }
                             }
                         }
 
@@ -368,12 +386,13 @@ ThemedDialog {
                         Row {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            spacing: 10
+                            spacing: Theme.spacingLg
 
                             IconGlyph {
+                                id: templateIcon
                                 anchors.verticalCenter: parent.verticalCenter
                                 glyph: row.modelData.icon
-                                iconSize: 18
+                                iconSize: 16
                                 iconColor: row.highlighted
                                            ? Theme.panelSecondaryForeground
                                            : Theme.panelForeground
