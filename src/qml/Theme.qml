@@ -140,6 +140,10 @@ QtObject {
     // thumbnail generation exists, use a fixed dark placeholder so the white filename
     // scrim stays legible in light mode too instead of following panelAccent.
     readonly property color clipVideoPlaceholder: "#2b2b2b"
+    // Style-pack thumbnails: most packs use white/light glyphs (and sit on video), so the
+    // card canvas stays dark in both themes — panelSecondaryBg washes them out in light mode.
+    readonly property color textStylePreviewBg: "#1c1c1c"
+    readonly property color textStylePreviewBorder: darkMode ? "#3a3a3a" : "#2a2a2a"
 
     // --- Colors: keyframe curves (fixed regardless of app theme) -------------
     // One hue per animatable property so overlaid curves, their key diamonds and
@@ -410,9 +414,10 @@ QtObject {
         alignLeft: "text-align-start",
         alignCenter: "text-align-center",
         alignRight: "text-align-end",
-        alignTop: "align-start-vertical",
-        alignMiddle: "align-center-vertical",
-        alignBottom: "align-end-vertical",
+        // Lucide names these *-horizontal, but they are the correct valign glyphs.
+        alignTop: "align-start-horizontal",
+        alignMiddle: "align-center-horizontal",
+        alignBottom: "align-end-horizontal",
 
         // Media
         captions: "captions",

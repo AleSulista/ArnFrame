@@ -197,6 +197,7 @@ QJsonObject textStyleToJson(const TextStyle &s)
         {QStringLiteral("wordWrap"), s.wordWrap},
         {QStringLiteral("lineHeight"), s.lineHeight},
         {QStringLiteral("letterSpacing"), s.letterSpacing},
+        {QStringLiteral("outlineEnabled"), s.outlineEnabled},
         {QStringLiteral("outlineWidth"), s.outlineWidth},
         {QStringLiteral("outlineColor"), s.outlineColor.name(QColor::HexArgb)},
         {QStringLiteral("shadowEnabled"), s.shadowEnabled},
@@ -256,6 +257,11 @@ TextStyle textStyleFromJson(const QJsonObject &o)
     s.letterSpacing = o.value(QStringLiteral("letterSpacing")).toDouble(s.letterSpacing);
     s.outlineWidth = o.value(QStringLiteral("outlineWidth")).toDouble(s.outlineWidth);
     s.outlineColor = QColor(o.value(QStringLiteral("outlineColor")).toString(s.outlineColor.name(QColor::HexArgb)));
+    // Projects written before outlineEnabled treated any positive width as on.
+    if (o.contains(QStringLiteral("outlineEnabled")))
+        s.outlineEnabled = o.value(QStringLiteral("outlineEnabled")).toBool(s.outlineEnabled);
+    else
+        s.outlineEnabled = s.outlineWidth > 0.0;
     s.shadowEnabled = o.value(QStringLiteral("shadowEnabled")).toBool(s.shadowEnabled);
     s.shadowOffsetX = o.value(QStringLiteral("shadowOffsetX")).toDouble(s.shadowOffsetX);
     s.shadowOffsetY = o.value(QStringLiteral("shadowOffsetY")).toDouble(s.shadowOffsetY);

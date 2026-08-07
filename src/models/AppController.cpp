@@ -539,6 +539,7 @@ QVariantMap textStyleToMap(const drift::TextStyle &s)
         {QStringLiteral("wordWrap"), s.wordWrap},
         {QStringLiteral("lineHeight"), s.lineHeight},
         {QStringLiteral("letterSpacing"), s.letterSpacing},
+        {QStringLiteral("outlineEnabled"), s.outlineEnabled},
         {QStringLiteral("outlineWidth"), s.outlineWidth},
         {QStringLiteral("outlineColor"), s.outlineColor.name(QColor::HexArgb)},
         {QStringLiteral("shadowEnabled"), s.shadowEnabled},
@@ -2817,7 +2818,7 @@ void AppController::moveClipToTrack(int trackIndex, int clipIndex, int newTrackI
     finishEdit(QStringLiteral("Clip moved"));
 }
 
-void AppController::addTextClip(const QString &text, double atSeconds)
+void AppController::addTextClip(const QString &text, double atSeconds, const QString &presetId)
 {
     const QString trimmed = text.trimmed();
     // Adding with no text is the "drop it in, then type on the preview" path:
@@ -2845,6 +2846,12 @@ void AppController::addTextClip(const QString &text, double atSeconds)
     clip.timelineDuration = drift::kTextClipDurationUs;
     clip.srcIn = 0;
     clip.srcOut = drift::kTextClipDurationUs;
+    if (!presetId.isEmpty()) {
+        if (const drift::TextStyle *preset = drift::textStyleForPresetId(presetId)) {
+            clip.textStyle = *preset;
+            clip.textStyle.packId = presetId;
+        }
+    }
     applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
 
     track.clips.append(clip);
@@ -5702,6 +5709,8 @@ void AppController::setTextStyle(int trackIndex, int clipIndex, const QVariantMa
         s.lineHeight = qBound(0.5, m.value(QStringLiteral("lineHeight")).toDouble(), 4.0);
     if (m.contains(QStringLiteral("letterSpacing")))
         s.letterSpacing = m.value(QStringLiteral("letterSpacing")).toDouble();
+    if (m.contains(QStringLiteral("outlineEnabled")))
+        s.outlineEnabled = m.value(QStringLiteral("outlineEnabled")).toBool();
     if (m.contains(QStringLiteral("outlineWidth")))
         s.outlineWidth = qMax(0.0, m.value(QStringLiteral("outlineWidth")).toDouble());
     if (m.contains(QStringLiteral("outlineColor")))

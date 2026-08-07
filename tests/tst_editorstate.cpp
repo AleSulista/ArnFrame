@@ -27,6 +27,7 @@ private slots:
     void addTextClip();
     void addTextClipEmptyUsesPlaceholder();
     void addTextClipWithTextDoesNotRequestEdit();
+    void addTextClipWithPresetAppliesStyle();
     void undoRedoClipAdd();
     void undoTrackMute();
     void packagedProjectCarriesDerivedArtifacts();
@@ -119,6 +120,21 @@ void EditorStateTest::addTextClipWithTextDoesNotRequestEdit()
                  .value(QStringLiteral("textContent"))
                  .toString(),
              QStringLiteral("Hello"));
+}
+
+void EditorStateTest::addTextClipWithPresetAppliesStyle()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    QSignalSpy spy(&state, &AppController::inlineTextEditRequested);
+
+    state.addTextClip(QString(), 0.0, QStringLiteral("neon"));
+
+    QCOMPARE(spy.count(), 1);
+    const QVariantMap clip = state.clipAt(state.selectedTrack(), state.selectedClip());
+    const QVariantMap style = clip.value(QStringLiteral("textStyle")).toMap();
+    QCOMPARE(style.value(QStringLiteral("packId")).toString(), QStringLiteral("neon"));
+    QCOMPARE(style.value(QStringLiteral("fontFamily")).toString(), QStringLiteral("Bebas Neue"));
 }
 
 void EditorStateTest::undoRedoClipAdd()

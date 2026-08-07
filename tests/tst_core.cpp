@@ -769,6 +769,7 @@ void CoreTest::textStyleAndBlendModeSerialization()
     clip.textStyle.wordWrap = false;
     clip.textStyle.lineHeight = 1.6;
     clip.textStyle.letterSpacing = 3.5;
+    clip.textStyle.outlineEnabled = true;
     clip.textStyle.outlineWidth = 2.5;
     clip.textStyle.outlineColor = QColor(255, 0, 0);
     clip.textStyle.shadowEnabled = true;
@@ -824,6 +825,7 @@ void CoreTest::textStyleAndBlendModeSerialization()
     QCOMPARE(s.wordWrap, false);
     QCOMPARE(s.lineHeight, 1.6);
     QCOMPARE(s.letterSpacing, 3.5);
+    QCOMPARE(s.outlineEnabled, true);
     QCOMPARE(s.outlineWidth, 2.5);
     QCOMPARE(s.outlineColor, QColor(255, 0, 0));
     QCOMPARE(s.shadowEnabled, true);
@@ -904,6 +906,34 @@ void CoreTest::legacyBoldMigratesToFontWeight()
     QCOMPARE(weightForLegacy({{QStringLiteral("pixelSize"), 40}}), 700);
     // A new-format style wins over any stale bold flag.
     QCOMPARE(weightForLegacy({{QStringLiteral("bold"), false}, {QStringLiteral("fontWeight"), 900}}), 900);
+
+    // Pre-outlineEnabled projects treated any positive width as on.
+    {
+        QJsonObject clip{
+            {QStringLiteral("id"), QStringLiteral("c1")},
+            {QStringLiteral("type"), QStringLiteral("text")},
+            {QStringLiteral("textContent"), QStringLiteral("Hi")},
+            {QStringLiteral("timelineStart"), 0},
+            {QStringLiteral("timelineDuration"), 1000000},
+            {QStringLiteral("textStyle"), QJsonObject{{QStringLiteral("outlineWidth"), 3.0}}},
+        };
+        QJsonObject track{
+            {QStringLiteral("type"), QStringLiteral("text")},
+            {QStringLiteral("clips"), QJsonArray{clip}},
+        };
+        QJsonObject project{
+            {QStringLiteral("version"), 2},
+            {QStringLiteral("width"), 1920},
+            {QStringLiteral("height"), 1080},
+            {QStringLiteral("fps"), 30},
+            {QStringLiteral("tracks"), QJsonArray{track}},
+        };
+        QString err;
+        const drift::Project loaded = drift::Project::fromJson(project, &err);
+        QVERIFY(err.isEmpty());
+        QCOMPARE(loaded.tracks().at(0).clips.at(0).textStyle.outlineEnabled, true);
+        QCOMPARE(loaded.tracks().at(0).clips.at(0).textStyle.outlineWidth, 3.0);
+    }
 }
 
 void CoreTest::textPresetsAreWellFormed()
@@ -915,12 +945,14 @@ void CoreTest::textPresetsAreWellFormed()
     for (const drift::TextPreset &preset : presets) {
         QVERIFY(!preset.id.isEmpty());
         QVERIFY(!preset.label.isEmpty());
+        QVERIFY(!preset.sampleText.isEmpty());
         QVERIFY(!ids.contains(preset.id));
         ids.insert(preset.id);
         QVERIFY(preset.style.pixelSize > 0);
         QVERIFY(!preset.style.fontFamily.isEmpty());
         QVERIFY(preset.style.fontWeight >= 100 && preset.style.fontWeight <= 900);
         QCOMPARE(drift::textStyleForPresetId(preset.id)->fontFamily, preset.style.fontFamily);
+        QCOMPARE(drift::textPresetForId(preset.id)->label, preset.label);
 
         // A pack's accent has to be usable: a stride that advances, a size that renders, and an
         // override that actually changes something when a rule picks words out.

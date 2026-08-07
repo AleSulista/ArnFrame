@@ -2872,6 +2872,7 @@ void EngineTest::textDecorationsAreNotCropped()
     QVERIFY(!plain.image.isNull());
 
     clip.textStyle.outlineWidth = 12.0;
+    clip.textStyle.outlineEnabled = true;
     clip.textStyle.shadowEnabled = true;
     clip.textStyle.shadowBlur = 10.0;
     clip.textStyle.shadowOffsetY = 8.0;

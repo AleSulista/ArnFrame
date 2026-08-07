@@ -3,9 +3,12 @@ import QtQuick.Controls.Basic
 import Drift
 import ".."
 
-// Text tab: add on-canvas text clips. Timed captions live under Subtitles.
+// Text tab: click a style pack to drop a styled text clip on the timeline
+// (placeholder copy + inline edit). Timed captions live under Subtitles.
 Item {
     id: root
+
+    readonly property var presets: EditorState.textPresets()
 
     Flickable {
         anchors.fill: parent
@@ -18,35 +21,71 @@ Item {
             id: textColumn
             x: Theme.pagePadding
             width: parent.width - Theme.pagePadding * 2
-            spacing: Theme.spacingLg
+            spacing: Theme.spacingMd
             topPadding: Theme.pagePadding
 
-            readonly property real contentWidth: width
-
-            ThemedTextField {
-                id: textClipInput
-                width: textColumn.contentWidth
-                placeholderText: qsTr("Enter text (optional)")
-                font.family: Theme.fontFamily
-            }
-
-            ThemedButton {
-                text: qsTr("Add to timeline")
-                variant: "primary"
-                glyph: Theme.icons.type
-                onClicked: {
-                    EditorState.addTextClip(textClipInput.text, -1)
-                    textClipInput.clear()
-                }
-            }
-
             Text {
-                width: textColumn.contentWidth
+                width: parent.width
                 wrapMode: Text.WordWrap
-                text: qsTr("Leave it empty and just add — the clip lands on the preview ready to type. You can always double-click text on the preview to edit it.")
+                text: qsTr("Click a style to add text at the playhead. Double-click it on the preview to edit.")
                 color: Theme.mutedForeground
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeXs
+            }
+
+            Grid {
+                id: packGrid
+                width: parent.width
+                columns: Math.max(1, Math.floor((width + Theme.assetCardGap)
+                                                / (Theme.assetCardWidth + Theme.assetCardGap)))
+                columnSpacing: Theme.assetCardGap
+                rowSpacing: Theme.assetCardGap
+
+                Repeater {
+                    model: root.presets
+                    delegate: Column {
+                        id: packCard
+                        required property var modelData
+                        width: Theme.assetCardWidth
+                        spacing: Theme.spacingSm
+
+                        scale: packPress.pressed ? 0.97 : (packHover.hovered ? 1.02 : 1.0)
+                        Behavior on scale {
+                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
+
+                        TextStylePackThumb {
+                            width: parent.width
+                            height: Math.round(width * 0.55)
+                            presetId: packCard.modelData.id
+                            hovered: packHover.hovered
+
+                            HoverHandler {
+                                id: packHover
+                            }
+
+                            TapHandler {
+                                id: packPress
+                                gesturePolicy: TapHandler.ReleaseWithinBounds
+                                onTapped: EditorState.addTextClip("", -1, packCard.modelData.id)
+                            }
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: packCard.modelData.label
+                            elide: Text.ElideRight
+                            horizontalAlignment: Text.AlignHCenter
+                            color: packHover.hovered ? Theme.panelForeground : Theme.mutedForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+
+                            Behavior on color {
+                                ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

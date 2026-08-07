@@ -560,6 +560,9 @@ qt_add_qml_module(drift
         src/qml/components/SubtitleEditor.qml
         src/qml/components/ThemedComboBox.qml
         src/qml/components/FontPicker.qml
+        src/qml/components/CollapsibleSection.qml
+        src/qml/components/TextStylePackThumb.qml
+        src/qml/components/TextStylePackPicker.qml
         src/qml/components/EmojiPicker.qml
         src/qml/components/ThemedButton.qml
         src/qml/components/ThemedChip.qml

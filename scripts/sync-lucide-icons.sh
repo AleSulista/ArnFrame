@@ -36,7 +36,8 @@ icons=(
   rotate-ccw search chevron-right chevron-left check pencil clock lock lock-open
   # Text alignment controls (properties panel)
   text-align-start text-align-center text-align-end
-  align-start-vertical align-center-vertical align-end-vertical
+  # Lucide names these *-horizontal; they are used for vertical text alignment.
+  align-start-horizontal align-center-horizontal align-end-horizontal
   # Timeline / media
   captions list-video move-horizontal mouse-pointer audio-lines video
   smartphone monitor square ratio

@@ -27,6 +27,27 @@ Item {
     // should open its editor as soon as its box exists.
     property string pendingEditKey: ""
 
+    // True when two overlay models describe the same boxes. Text/name
+    // updates still reach delegates via liveStyle/liveText, so rebuilding
+    // for every keystroke is unnecessary — and recreating a selected
+    // handle with focus:true steals focus from the properties panel.
+    function clipsOverlayEqual(a, b) {
+        if (!a || !b || a.length !== b.length)
+            return false
+        for (let i = 0; i < a.length; ++i) {
+            const x = a[i]
+            const y = b[i]
+            if (x.track !== y.track || x.clip !== y.clip || x.kind !== y.kind
+                    || x.x !== y.x || x.y !== y.y
+                    || x.width !== y.width || x.height !== y.height
+                    || x.rotation !== y.rotation
+                    || x.canvasWidth !== y.canvasWidth
+                    || x.canvasHeight !== y.canvasHeight)
+                return false
+        }
+        return true
+    }
+
     function refreshOverlay() {
         if (interacting)
             return
@@ -34,7 +55,13 @@ Item {
         // is wasted work and stalls the UI on long timelines.
         if (EditorState.playing)
             return
-        overlayClips = EditorState.previewClipsAtPlayhead()
+        const next = EditorState.previewClipsAtPlayhead()
+        if (clipsOverlayEqual(overlayClips, next))
+            return
+        overlayClips = next
+        // Set model imperatively. Binding `model: overlayClips` re-enters when
+        // tracksChanged fires during delegate setup (binding loop on model).
+        clipRepeater.model = next
     }
 
     function endInteraction() {
@@ -90,7 +117,7 @@ Item {
     }
 
     Repeater {
-        model: root.overlayClips
+        id: clipRepeater
 
         delegate: Item {
             id: handle
@@ -232,10 +259,10 @@ Item {
                 root.snapGuideY = gy >= 0 ? gy * handle.sy : -1
             }
 
-            // Arrow keys move the selected clip; Shift makes
-            // the step coarse. Transform used to be
-            // drag-only, with no keyboard path at all.
-            focus: handle.selected && !handle.editing
+            // Arrow keys move the selected clip; Shift makes the step coarse.
+            // Do not bind `focus` to selection — recreating this delegate after a
+            // tracksChanged refresh would steal focus from property-panel fields.
+            // Focus is taken explicitly when the user clicks or drags the box.
             Keys.onPressed: function(event) {
                 if (!handle.selected || handle.editing)
                     return
@@ -386,7 +413,10 @@ Item {
 
             TapHandler {
                 enabled: !handle.editing
-                onTapped: EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
+                onTapped: {
+                    EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
+                    handle.forceActiveFocus()
+                }
                 onDoubleTapped: if (handle.isText) handle.enterEdit()
             }
 
@@ -406,6 +436,7 @@ Item {
                         handle.liveX = handle.dragStartX
                         handle.liveY = handle.dragStartY
                         EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
+                        handle.forceActiveFocus()
                         EditorState.beginPreviewDrag()
                     } else {
                         handle.liveX = -1e12
@@ -647,6 +678,7 @@ Item {
                             handle.resizing = true
                             root.interacting = true
                             EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
+                            handle.forceActiveFocus()
                             EditorState.beginPreviewDrag()
                         }
 
@@ -734,6 +766,7 @@ Item {
                             root.interacting = true
                             handle.liveRotation = handle.modelData.rotation
                             EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
+                            handle.forceActiveFocus()
                             EditorState.beginPreviewDrag()
                         } else {
                             handle.liveRotation = 1e9

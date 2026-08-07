@@ -254,7 +254,9 @@ public:
     Q_INVOKABLE bool replaceAssetSource(int assetIndex, const QUrl &url);
     Q_INVOKABLE bool trackAcceptsAsset(int trackIndex, int assetIndex) const;
     Q_INVOKABLE QString trackTypeForAsset(int assetIndex) const;
-    Q_INVOKABLE void addTextClip(const QString &text, double atSeconds);
+    // presetId applies a built-in style pack on create; empty keeps the default text style.
+    Q_INVOKABLE void addTextClip(const QString &text, double atSeconds,
+                                 const QString &presetId = QString());
     Q_INVOKABLE void addSubtitleClip(double atSeconds);
     // Import a SubRip (.srt) file as a new subtitle clip at the playhead (or atSeconds).
     Q_INVOKABLE bool importSubtitleFile(const QUrl &url, double atSeconds = -1.0);
