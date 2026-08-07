@@ -347,7 +347,8 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: toolbar.panel.zoom = 1.0
+                onClicked: toolbar.panel.zoom = Math.max(toolbar.panel.minZoom,
+                                                         Math.min(toolbar.panel.maxZoom, 1.0))
             }
         }
         IconButton {
@@ -355,6 +356,12 @@ Item {
             variant: "text"
             tooltip: qsTr("Zoom in")
             onClicked: toolbar.panel.zoom = Math.min(toolbar.panel.maxZoom, toolbar.panel.zoom * 1.5)
+        }
+        IconButton {
+            glyph: Theme.icons.zoomFit
+            variant: "text"
+            tooltip: qsTr("Fit timeline in view")
+            onClicked: toolbar.panel.fitZoom()
         }
     }
 }

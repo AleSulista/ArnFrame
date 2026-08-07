@@ -282,6 +282,10 @@ QtObject {
     readonly property real newTrackHitSlop: 24
     readonly property real trackLabelsWidth: 130
     readonly property real pixelsPerSecondBase: 50
+    // Empty runway after the last clip: fixed in pixels at every zoom (not a
+    // fixed number of seconds). Sized as a fraction of the timeline viewport.
+    readonly property real timelineEndPadFraction: 0.25
+    readonly property real timelineEndPadMinPx: 120
     readonly property real playheadLineWidth: 2
     // Top scrubber head — sized to sit in the seek strip and stay easy to grab.
     readonly property real playheadHandleSize: 16
@@ -298,7 +302,6 @@ QtObject {
     // Matches drift::kMinClipDurationUs (0.1s). Effective min duration is the
     // larger of this and clipMinWidth / pxPerSecond at the current zoom.
     readonly property real clipMinDurationSeconds: 0.1
-    readonly property real timelineZoomMin: 0.05
 
     // --- Layout: window --------------------------------------------------------
     // Floor for ApplicationWindow. Below this the split minimums cannot all be
@@ -328,6 +331,7 @@ QtObject {
         foldHorizontal: "fold-horizontal",
         zoomOut: "zoom-out",
         zoomIn: "zoom-in",
+        zoomFit: "chevrons-left-right-ellipsis",
         gauge: "gauge",
         play: "play",
         pause: "pause",

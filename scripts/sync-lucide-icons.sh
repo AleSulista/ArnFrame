@@ -25,6 +25,8 @@ icons=(
   maximize folder headphones type smile wand-sparkles sliders-horizontal settings upload plus
   volume-2 volume-off eye eye-off film music image shapes chevron-down chevron-up chevrons-right x
   message-square moon sun grid-3x3 list arrow-down-a-z grip-vertical
+  # Fit timeline in view (manual zoom calibration)
+  chevrons-left-right-ellipsis
   save arrow-right-to-line arrow-left-to-line tags blend square-dashed puzzle info
   # Project bundle: package/properties entries in the project menu
   package file-text

@@ -42,12 +42,34 @@ PanelFrame {
             cursor += trackHeight(i) + Theme.trackGap
         return cursor
     }
-    readonly property real minZoom: 0.05
+    // Trailing empty runway after the last clip — constant pixel length at any
+    // zoom (viewport-relative), not a fixed number of seconds.
+    readonly property real timelineEndPadPx: Math.max(
+        Theme.timelineEndPadMinPx, flick.width * Theme.timelineEndPadFraction)
+
+    // Fixed floor for wheel/slider zoom-out. Not tied to project duration —
+    // use fitZoom() when you want the timeline fitted to the viewport.
+    // Low enough for multi-hour projects without live recalibration.
+    readonly property real minZoom: 0.0001
     readonly property real maxZoom: 40.0
     readonly property real pxPerSecond: Theme.pixelsPerSecondBase * zoom
     // Exposed for clip filmstrip viewport culling (Flickable ids are local).
     readonly property real timelineViewX: flick.contentX
     readonly property real timelineViewW: flick.width
+
+    // Fit the whole project (plus end pad) into the timeline viewport.
+    function fitZoom() {
+        if (!(EditorState.durationSeconds > 0)) {
+            zoom = 1.0
+            flick.contentX = 0
+            return
+        }
+        const viewportW = Math.max(flick.width, 1)
+        const usable = Math.max(viewportW - timelineEndPadPx, 1)
+        const fit = usable / (EditorState.durationSeconds * Theme.pixelsPerSecondBase)
+        zoom = Math.max(minZoom, Math.min(maxZoom, fit))
+        flick.contentX = 0
+    }
 
     // Ruler tick interval (seconds): the smallest "nice" step whose labels still
     // have room to breathe at the current zoom, so timestamps never squash.
@@ -55,7 +77,8 @@ PanelFrame {
         const minLabelPx = 66
         const needed = minLabelPx / pxPerSecond
         const steps = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30,
-                       60, 120, 300, 600, 900, 1800, 3600]
+                       60, 120, 300, 600, 900, 1800, 3600,
+                       7200, 10800, 14400, 21600, 43200]
         for (var i = 0; i < steps.length; i++)
             if (steps[i] >= needed)
                 return steps[i]
@@ -704,7 +727,8 @@ PanelFrame {
                 readonly property real headerHeight: Theme.timelineRulerHeight
                                                      + Theme.timelineBookmarkRowHeight
 
-                contentWidth: Math.max(width, (EditorState.durationSeconds + 5) * root.pxPerSecond)
+                contentWidth: Math.max(width,
+                    EditorState.durationSeconds * root.pxPerSecond + root.timelineEndPadPx)
                 // Was `height`, so once the tracks were taller than the panel the
                 // lower ones were silently truncated and could not be reached at
                 // all. totalTracksHeight() was already computed but never used.
