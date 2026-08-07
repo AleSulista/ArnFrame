@@ -4,7 +4,7 @@ import QtQuick.Window
 import Drift
 import "assets"
 
-// Browsable effect preset picker: category rail + card grid.
+// Browsable effect preset picker: category chips + card grid.
 // Drag a card onto a timeline clip, or click / tap + to apply to the selection.
 Column {
     id: root
@@ -67,66 +67,58 @@ Column {
         onActionTriggered: root.Window.window.openAddonManager()
     }
 
-    AssetCategoryPane {
-        id: categoryPane
+    Column {
         visible: root.catalog.length > 0
         width: parent.width
         height: parent.height
-        categories: root.categories
-        activeCategory: root.activeCategory
-        searching: root.query.length > 0
-        onCategoryActivated: (categoryId) => root.activeCategory = categoryId
+        spacing: 0
 
-        Column {
-            anchors.fill: parent
-            spacing: 0
+        Text {
+            id: browserTip
+            width: parent.width - 24
+            leftPadding: 12
+            rightPadding: 12
+            topPadding: 8
+            bottomPadding: 4
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
+            text: EditorState.selectedClip >= 0
+                  ? qsTr("Drag a preset onto a clip, or click to apply to the selection")
+                  : qsTr("Drag a preset onto a clip in the timeline")
+            color: Theme.mutedForeground
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeXs
+        }
 
-            Text {
-                id: browserTip
-                width: parent.width - 24
-                leftPadding: 12
-                rightPadding: 12
-                topPadding: 8
-                bottomPadding: 4
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-                text: EditorState.selectedClip >= 0
-                      ? qsTr("Drag a preset onto a clip, or click to apply to the selection")
-                      : qsTr("Drag a preset onto a clip in the timeline")
-                color: Theme.mutedForeground
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeXs
-            }
+        ThemedTextField {
+            id: search
+            width: parent.width - 24
+            x: 12
+            placeholderText: qsTr("Search effects")
+            font.family: Theme.fontFamily
+        }
 
-            ThemedTextField {
-                id: search
-                width: parent.width - 24
-                x: 12
-                placeholderText: qsTr("Search effects")
-                font.family: Theme.fontFamily
-            }
+        Item {
+            width: 1
+            height: Theme.spacingMd
+        }
 
-            Item {
-                width: 1
-                height: Theme.spacingMd
-            }
+        AssetCategoryChips {
+            id: categoryChips
+            width: parent.width
+            categories: root.categories
+            activeCategory: root.activeCategory
+            searching: root.query.length > 0
+            onCategoryActivated: (categoryId) => root.activeCategory = categoryId
+        }
 
-            AssetCategoryChips {
-                id: categoryChips
-                width: parent.width
-                categories: root.categories
-                activeCategory: root.activeCategory
-                searching: root.query.length > 0
-                onCategoryActivated: (categoryId) => root.activeCategory = categoryId
-            }
-
-            Flickable {
-                width: parent.width
-                height: Math.max(0, parent.height - browserTip.height - search.height - Theme.spacingMd
-                                 - categoryChips.height)
-                contentHeight: Math.max(emptySearchHint.height, presetGrid.height) + 24
-                clip: true
-                ScrollBar.vertical: AppScrollBar { }
+        Flickable {
+            width: parent.width
+            height: Math.max(0, parent.height - browserTip.height - search.height - Theme.spacingMd
+                             - categoryChips.height)
+            contentHeight: Math.max(emptySearchHint.height, presetGrid.height) + 24
+            clip: true
+            ScrollBar.vertical: AppScrollBar { }
 
                 Text {
                     id: emptySearchHint
@@ -294,5 +286,4 @@ Column {
                 }
             }
         }
-    }
 }

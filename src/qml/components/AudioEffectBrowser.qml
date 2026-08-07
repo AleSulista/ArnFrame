@@ -4,7 +4,7 @@ import QtQuick.Window
 import Drift
 import "assets"
 
-// Browsable audio-effect preset picker: category rail + card grid.
+// Browsable audio-effect preset picker: category chips + card grid.
 // Drag a card onto a timeline clip, or click / tap + to apply to the selection.
 Column {
     id: root
@@ -62,213 +62,205 @@ Column {
         onActionTriggered: root.Window.window.openAddonManager("audio-effects")
     }
 
-    AssetCategoryPane {
-        id: categoryPane
+    Column {
         visible: root.catalog.length > 0
         width: parent.width
         height: parent.height
-        categories: root.categories
-        activeCategory: root.activeCategory
-        searching: root.query.length > 0
-        onCategoryActivated: (categoryId) => root.activeCategory = categoryId
+        spacing: 0
 
-        Column {
-            anchors.fill: parent
-            spacing: 0
+        Text {
+            id: browserTip
+            width: parent.width - 24
+            leftPadding: 12
+            rightPadding: 12
+            topPadding: 8
+            bottomPadding: 4
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
+            text: EditorState.selectedClip >= 0
+                  ? qsTr("Drag a preset onto a clip, or click to apply to the selection")
+                  : qsTr("Drag a preset onto a clip in the timeline")
+            color: Theme.mutedForeground
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeXs
+        }
+
+        ThemedTextField {
+            id: search
+            width: parent.width - 24
+            x: 12
+            placeholderText: qsTr("Search audio effects")
+            font.family: Theme.fontFamily
+        }
+
+        Item {
+            width: 1
+            height: Theme.spacingMd
+        }
+
+        AssetCategoryChips {
+            id: categoryChips
+            width: parent.width
+            categories: root.categories
+            activeCategory: root.activeCategory
+            searching: root.query.length > 0
+            onCategoryActivated: (categoryId) => root.activeCategory = categoryId
+        }
+
+        Flickable {
+            width: parent.width
+            height: Math.max(0, parent.height - browserTip.height - search.height - Theme.spacingMd
+                             - categoryChips.height)
+            contentHeight: Math.max(emptySearchHint.height, presetGrid.height) + 24
+            clip: true
+            ScrollBar.vertical: AppScrollBar { }
 
             Text {
-                id: browserTip
+                id: emptySearchHint
+                x: 12
+                y: 12
                 width: parent.width - 24
-                leftPadding: 12
-                rightPadding: 12
-                topPadding: 8
-                bottomPadding: 4
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-                text: EditorState.selectedClip >= 0
-                      ? qsTr("Drag a preset onto a clip, or click to apply to the selection")
-                      : qsTr("Drag a preset onto a clip in the timeline")
+                visible: root.visiblePresets.length === 0
+                text: root.query.length > 0
+                      ? qsTr("No audio effects match “%1”.").arg(search.text.trim())
+                      : (root.activeCategory === root.favoritesId
+                         ? qsTr("No favorites yet. Star presets to save them here.")
+                         : qsTr("Nothing in this category."))
                 color: Theme.mutedForeground
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeXs
+                font.pixelSize: Theme.fontSizeSm
+                wrapMode: Text.WordWrap
             }
 
-            ThemedTextField {
-                id: search
-                width: parent.width - 24
+            Grid {
+                id: presetGrid
                 x: 12
-                placeholderText: qsTr("Search audio effects")
-                font.family: Theme.fontFamily
-            }
+                y: 12
+                width: parent.width - 24
+                visible: root.visiblePresets.length > 0
+                columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
+                columnSpacing: Theme.assetCardGap
+                rowSpacing: Theme.assetCardGap
 
-            Item {
-                width: 1
-                height: Theme.spacingMd
-            }
+                Repeater {
+                    model: root.visiblePresets
+                    delegate: Column {
+                        id: presetCard
+                        required property var modelData
+                        width: Theme.assetCardWidth
+                        spacing: 4
+                        opacity: presetDrag.active ? 0.85 : 1
+                        scale: presetDrag.active ? 1.04 : 1.0
 
-            AssetCategoryChips {
-                id: categoryChips
-                width: parent.width
-                categories: root.categories
-                activeCategory: root.activeCategory
-                searching: root.query.length > 0
-                onCategoryActivated: (categoryId) => root.activeCategory = categoryId
-            }
+                        Behavior on opacity {
+                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
+                        Behavior on scale {
+                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
 
-            Flickable {
-                width: parent.width
-                height: Math.max(0, parent.height - browserTip.height - search.height - Theme.spacingMd
-                                 - categoryChips.height)
-                contentHeight: Math.max(emptySearchHint.height, presetGrid.height) + 24
-                clip: true
-                ScrollBar.vertical: AppScrollBar { }
+                        readonly property string thumb: presetCard.modelData.thumbnailPath || ""
+                        readonly property string iconGlyph: presetCard.modelData.icon || "audio-lines"
 
-                Text {
-                    id: emptySearchHint
-                    x: 12
-                    y: 12
-                    width: parent.width - 24
-                    visible: root.visiblePresets.length === 0
-                    text: root.query.length > 0
-                          ? qsTr("No audio effects match “%1”.").arg(search.text.trim())
-                          : (root.activeCategory === root.favoritesId
-                             ? qsTr("No favorites yet. Star presets to save them here.")
-                             : qsTr("Nothing in this category."))
-                    color: Theme.mutedForeground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSm
-                    wrapMode: Text.WordWrap
-                }
+                        Drag.active: presetDrag.active
+                        Drag.dragType: Drag.Automatic
+                        Drag.supportedActions: Qt.CopyAction
+                        Drag.keys: ["application/x-drift-audio-effect"]
+                        Drag.mimeData: ({ "application/x-drift-audio-effect": presetCard.modelData.id })
+                        Drag.hotSpot.x: width / 2
+                        Drag.hotSpot.y: Theme.assetCardWidth / 2
 
-                Grid {
-                    id: presetGrid
-                    x: 12
-                    y: 12
-                    width: parent.width - 24
-                    visible: root.visiblePresets.length > 0
-                    columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
-                    columnSpacing: Theme.assetCardGap
-                    rowSpacing: Theme.assetCardGap
-
-                    Repeater {
-                        model: root.visiblePresets
-                        delegate: Column {
-                            id: presetCard
-                            required property var modelData
+                        Rectangle {
                             width: Theme.assetCardWidth
-                            spacing: 4
-                            opacity: presetDrag.active ? 0.85 : 1
-                            scale: presetDrag.active ? 1.04 : 1.0
+                            height: Theme.assetCardWidth
+                            radius: Theme.radiusSm
+                            color: cardHover.hovered ? Theme.panelAccent : Theme.panelBackground
+                            border.width: presetDrag.active ? 1 : 0
+                            border.color: Theme.primary
+                            clip: true
+                            scale: cardHover.hovered ? 1.03 : 1.0
 
-                            Behavior on opacity {
-                                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                            Behavior on color {
+                                ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
                             }
                             Behavior on scale {
                                 NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
                             }
-
-                            readonly property string thumb: presetCard.modelData.thumbnailPath || ""
-                            readonly property string iconGlyph: presetCard.modelData.icon || "audio-lines"
-
-                            Drag.active: presetDrag.active
-                            Drag.dragType: Drag.Automatic
-                            Drag.supportedActions: Qt.CopyAction
-                            Drag.keys: ["application/x-drift-audio-effect"]
-                            Drag.mimeData: ({ "application/x-drift-audio-effect": presetCard.modelData.id })
-                            Drag.hotSpot.x: width / 2
-                            Drag.hotSpot.y: Theme.assetCardWidth / 2
-
-                            Rectangle {
-                                width: Theme.assetCardWidth
-                                height: Theme.assetCardWidth
-                                radius: Theme.radiusSm
-                                color: cardHover.hovered ? Theme.panelAccent : Theme.panelBackground
-                                border.width: presetDrag.active ? 1 : 0
-                                border.color: Theme.primary
-                                clip: true
-                                scale: cardHover.hovered ? 1.03 : 1.0
-
-                                Behavior on color {
-                                    ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                                }
-                                Behavior on scale {
-                                    NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                                }
-                                Behavior on border.width {
-                                    NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                                }
-
-                                HoverHandler { id: cardHover }
-
-                                Image {
-                                    id: presetThumb
-                                    anchors.fill: parent
-                                    visible: presetCard.thumb.length > 0 && status === Image.Ready
-                                    source: presetCard.thumb.length > 0
-                                            ? EditorState.imageUrl(presetCard.thumb) : ""
-                                    fillMode: Image.PreserveAspectCrop
-                                    asynchronous: true
-                                    smooth: true
-                                }
-
-                                IconGlyph {
-                                    anchors.centerIn: parent
-                                    visible: presetCard.thumb.length === 0
-                                             || presetThumb.status === Image.Error
-                                    glyph: presetCard.iconGlyph
-                                    iconSize: 28
-                                    iconColor: Theme.mutedForeground
-                                }
-
-                                TapHandler {
-                                    enabled: !presetDrag.active
-                                    onTapped: root.applyPreset(presetCard.modelData.id)
-                                }
-
-                                DragHandler {
-                                    id: presetDrag
-                                    target: null
-                                    acceptedButtons: Qt.LeftButton
-                                }
-
-                                AssetFavoriteButton {
-                                    anchors.left: parent.left
-                                    anchors.top: parent.top
-                                    anchors.margins: 3
-                                    tabId: "sounds"
-                                    itemId: presetCard.modelData.id
-                                }
-
-                                IconButton {
-                                    anchors.right: parent.right
-                                    anchors.top: parent.top
-                                    anchors.margins: 3
-                                    glyph: Theme.icons.plus
-                                    variant: "ghost"
-                                    buttonSize: 18
-                                    iconSize: 12
-                                    tooltip: qsTr("Apply to selected clip")
-                                    enabled: EditorState.selectedClip >= 0
-                                    onClicked: root.applyPreset(presetCard.modelData.id)
-                                }
+                            Behavior on border.width {
+                                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
                             }
 
-                            Text {
-                                width: parent.width
-                                text: presetCard.modelData.label
-                                color: Theme.panelForeground
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeCard
-                                font.weight: Font.Medium
-                                horizontalAlignment: Text.AlignHCenter
-                                elide: Text.ElideRight
-                                maximumLineCount: 2
-                                wrapMode: Text.WordWrap
+                            HoverHandler { id: cardHover }
+
+                            Image {
+                                id: presetThumb
+                                anchors.fill: parent
+                                visible: presetCard.thumb.length > 0 && status === Image.Ready
+                                source: presetCard.thumb.length > 0
+                                        ? EditorState.imageUrl(presetCard.thumb) : ""
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                smooth: true
                             }
+
+                            IconGlyph {
+                                anchors.centerIn: parent
+                                visible: presetCard.thumb.length === 0
+                                         || presetThumb.status === Image.Error
+                                glyph: presetCard.iconGlyph
+                                iconSize: 28
+                                iconColor: Theme.mutedForeground
+                            }
+
+                            TapHandler {
+                                enabled: !presetDrag.active
+                                onTapped: root.applyPreset(presetCard.modelData.id)
+                            }
+
+                            DragHandler {
+                                id: presetDrag
+                                target: null
+                                acceptedButtons: Qt.LeftButton
+                            }
+
+                            AssetFavoriteButton {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.margins: 3
+                                tabId: "sounds"
+                                itemId: presetCard.modelData.id
+                            }
+
+                            IconButton {
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 3
+                                glyph: Theme.icons.plus
+                                variant: "ghost"
+                                buttonSize: 18
+                                iconSize: 12
+                                tooltip: qsTr("Apply to selected clip")
+                                enabled: EditorState.selectedClip >= 0
+                                onClicked: root.applyPreset(presetCard.modelData.id)
+                            }
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: presetCard.modelData.label
+                            color: Theme.panelForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeCard
+                            font.weight: Font.Medium
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
+                            maximumLineCount: 2
+                            wrapMode: Text.WordWrap
                         }
                     }
                 }
             }
         }
+        
     }
 }

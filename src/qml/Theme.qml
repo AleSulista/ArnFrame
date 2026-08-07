@@ -245,12 +245,10 @@ QtObject {
     // --- Layout: assets panel -----------------------------------------------
     readonly property real panelHeaderHeight: 44
     readonly property real tabRailWidth: 40
-    // Left rail inside categorized asset tabs: star + sector column.
-    readonly property real assetCategoryRailWidth: 36
     readonly property real assetCardWidth: 112
     readonly property real assetCardGap: 16
 
-    // Tint for category sector buttons in asset tab rails.
+    // Tint for category chips in asset browser tabs.
     readonly property var categoryColors: [
         "#f59e0b", "#ef4444", "#8b5cf6", "#3b82f6", "#10b981",
         "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#6366f1"
