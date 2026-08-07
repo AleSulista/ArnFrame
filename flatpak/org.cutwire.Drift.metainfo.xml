@@ -86,6 +86,29 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.0" date="2026-08-07">
+      <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.2.0</url>
+      <description>
+        <p>A feature release with new editing tools, timeline and asset-browser improvements,
+        UI polish, performance work, and a batch of bug fixes.</p>
+        <ul>
+          <li>Aspect-locked clip resize in the preview (hold Shift to stretch freely)</li>
+          <li>Type exact values into property sliders; drag from the slider head works reliably</li>
+          <li>Delete, rename, search, favorites, and category browsing in the asset panel</li>
+          <li>Replace media in place while keeping timeline clips, effects, and layout</li>
+          <li>Disable and reorder effects on a clip; beauty and makeup face effects</li>
+          <li>Audio tempo follows clip speed; reverse video builds a reverse proxy with progress</li>
+          <li>Freeze frame captures the full composited image; clearer timeline bookmarks</li>
+          <li>Fit timeline in view, wider zoom for long projects, and scrolling on smaller screens</li>
+          <li>Redesigned text properties panel and style packs in the Text assets tab</li>
+          <li>Prompt to install essential addons on startup; less intrusive update notifications</li>
+          <li>Reliable media drag-and-drop onto the timeline on Mutter / GNOME</li>
+          <li>Fixed file-picker extensions on Flatpak, subtitle cue waveforms, and the project
+          setup dialog</li>
+          <li>Faster filmstrip thumbnails and lighter subtitle voice waveform mixing</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.2" date="2026-08-01">
       <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.1.2</url>
       <description>
