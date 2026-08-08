@@ -340,6 +340,21 @@ Item {
                 tooltip: qsTr("Pulse the Extras icon when updates are available for packs you already have installed")
                 onToggled: Addons.remindUpdates = checked
             }
+
+            Text {
+                text: qsTr("Startup")
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+                topPadding: Theme.spacingMd
+            }
+
+            ThemedSwitch {
+                checked: EditorState.reopenLastProject
+                text: qsTr("Reopen last project on startup")
+                tooltip: qsTr("Automatically restore the last open project. Unsaved work is kept in a side snapshot and never overwrites your save file.")
+                onToggled: EditorState.reopenLastProject = checked
+            }
         }
     }
 

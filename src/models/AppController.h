@@ -47,6 +47,8 @@ class AppController : public QObject
     Q_PROPERTY(bool snapEnabled READ snapEnabled WRITE setSnapEnabled NOTIFY snapEnabledChanged)
     Q_PROPERTY(bool rippleEnabled READ rippleEnabled WRITE setRippleEnabled NOTIFY rippleEnabledChanged)
     Q_PROPERTY(bool autoKeyEnabled READ autoKeyEnabled WRITE setAutoKeyEnabled NOTIFY autoKeyEnabledChanged)
+    // Opt-in: on launch, restore the last open project (saved .drift or unsaved recovery snapshot).
+    Q_PROPERTY(bool reopenLastProject READ reopenLastProject WRITE setReopenLastProject NOTIFY reopenLastProjectChanged)
     // The keyframe strip draws every animated property of the selected clip. This is the subset
     // the user has folded away: a view filter only — hiding a curve never changes what renders.
     Q_PROPERTY(QStringList keyframeGraphHiddenProperties READ keyframeGraphHiddenProperties
@@ -167,6 +169,7 @@ public:
     bool snapEnabled() const { return m_snapEnabled; }
     bool rippleEnabled() const { return m_rippleEnabled; }
     bool autoKeyEnabled() const { return m_autoKeyEnabled; }
+    bool reopenLastProject() const { return m_reopenLastProject; }
     QStringList keyframeGraphHiddenProperties() const { return m_keyframeGraphHiddenProperties; }
     bool subtitleEditing() const { return m_subtitleEditing; }
     int selectedSubtitleCue() const { return m_selectedSubtitleCue; }
@@ -226,6 +229,7 @@ public:
     void setSnapEnabled(bool enabled);
     void setRippleEnabled(bool enabled);
     void setAutoKeyEnabled(bool enabled);
+    void setReopenLastProject(bool enabled);
     // Strip chip click — folds `prop`'s curve away, or brings it back. Purely a view filter: the
     // chip stays put either way, and the animation keeps playing while it is hidden.
     Q_INVOKABLE void toggleKeyframeGraphPropertyVisible(const QString &prop);
@@ -619,11 +623,16 @@ public:
     Q_INVOKABLE void newProject();
     Q_INVOKABLE void openRecentProject(const QString &path);
     Q_INVOKABLE void clearRecentProjects();
+    // Removes one path from the recents list without deleting the file on disk.
+    Q_INVOKABLE void removeRecentProject(const QString &path);
     Q_INVOKABLE void restoreAutosave();
     Q_INVOKABLE void discardAutosave();
     // Clears dirty + recovery without mutating the timeline. Used when the user
     // chooses Don't Save before quitting so the next launch does not offer restore.
     Q_INVOKABLE void discardUnsavedChanges();
+    // When reopenLastProject is on: restore recovery silently, else load lastSessionPath.
+    // Returns true if a restore/load was started (caller should skip RecoveryDialog).
+    Q_INVOKABLE bool restoreLastSessionIfEnabled();
     Q_INVOKABLE QVariantList exportPresets() const; // legacy scale ids/labels
     Q_INVOKABLE QVariantList exportScaleOptions() const;
     Q_INVOKABLE QVariantList exportVideoCodecs() const;
@@ -656,6 +665,7 @@ signals:
     void snapEnabledChanged();
     void rippleEnabledChanged();
     void autoKeyEnabledChanged();
+    void reopenLastProjectChanged();
     void keyframeGraphVisibilityChanged();
     void subtitleEditingChanged();
     void selectedSubtitleCueChanged();
@@ -850,6 +860,7 @@ protected:
     bool m_snapEnabled = true;
     bool m_rippleEnabled = false;
     bool m_autoKeyEnabled = false;
+    bool m_reopenLastProject = false;
     QStringList m_keyframeGraphHiddenProperties;
     bool m_subtitleEditing = false;
     int m_selectedSubtitleCue = -1;

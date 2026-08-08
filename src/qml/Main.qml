@@ -21,7 +21,9 @@ ApplicationWindow {
     property bool forceClose: false
 
     onClosing: function (close) {
-        if (window.forceClose || !EditorState.hasUnsavedChanges)
+        // Opt-in reopen: skip Save/Don't Save — dirty work is snapshotted to the
+        // recovery file on aboutToQuit without overwriting the user's .drift.
+        if (window.forceClose || EditorState.reopenLastProject || !EditorState.hasUnsavedChanges)
             return
         close.accepted = false
         editorHeader.confirmIfDirty(function () {
@@ -192,6 +194,9 @@ ApplicationWindow {
     function promptRecoveryIfNeeded() {
         if (!EditorState.recoveryAvailable || recoveryDialog.visible)
             return
+        // Opt-in reopen handles recovery (and last .drift) without asking.
+        if (EditorState.reopenLastProject)
+            return
         recoveryDialog.open()
     }
 
@@ -224,6 +229,9 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        // Opt-in: restore unsaved recovery or the last clean project silently.
+        if (EditorState.restoreLastSessionIfEnabled())
+            return
         if (EditorState.recoveryAvailable)
             recoveryOpenTimer.start()
         else
@@ -231,13 +239,15 @@ ApplicationWindow {
     }
 
     onVisibilityChanged: {
-        if (visible && EditorState.recoveryAvailable)
+        if (visible && EditorState.recoveryAvailable && !EditorState.reopenLastProject)
             recoveryOpenTimer.start()
     }
 
     Connections {
         target: EditorState
         function onRecoveryChanged() {
+            if (EditorState.reopenLastProject)
+                return
             if (EditorState.recoveryAvailable) {
                 recoveryOpenTimer.start()
             } else {

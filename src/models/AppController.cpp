@@ -238,6 +238,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     // Off by default: with it on, nudging a clip while the playhead sits anywhere writes a
     // keyframe, and an animation appears where the user only meant to reposition something.
     m_autoKeyEnabled = settings.value(QStringLiteral("editor/autoKeyEnabled"), false).toBool();
+    m_reopenLastProject = settings.value(QStringLiteral("editor/reopenLastProject"), false).toBool();
     loadAssetFavorites();
 
     // Periodically snapshot unsaved work to a recovery file so a crash doesn't
@@ -252,6 +253,8 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     });
     m_autosaveTimer->start();
     connect(qApp, &QCoreApplication::aboutToQuit, this, [this] {
+        // Remember the open project so opt-in reopen can load a clean .drift next launch.
+        QSettings().setValue(QStringLiteral("lastSessionPath"), m_currentProjectPath);
         if (m_dirty)
             writeRecoveryFile();
     });
@@ -1747,6 +1750,16 @@ void AppController::setAutoKeyEnabled(bool enabled)
     QSettings settings;
     settings.setValue(QStringLiteral("editor/autoKeyEnabled"), m_autoKeyEnabled);
     emit autoKeyEnabledChanged();
+}
+
+void AppController::setReopenLastProject(bool enabled)
+{
+    if (m_reopenLastProject == enabled)
+        return;
+    m_reopenLastProject = enabled;
+    QSettings settings;
+    settings.setValue(QStringLiteral("editor/reopenLastProject"), m_reopenLastProject);
+    emit reopenLastProjectChanged();
 }
 
 void AppController::toggleKeyframeGraphPropertyVisible(const QString &prop)
@@ -9672,6 +9685,18 @@ void AppController::clearRecentProjects()
     emit recentProjectsChanged();
 }
 
+void AppController::removeRecentProject(const QString &path)
+{
+    if (path.isEmpty())
+        return;
+    QSettings settings;
+    QStringList paths = settings.value(QStringLiteral("recentProjects")).toStringList();
+    if (paths.removeAll(path) == 0)
+        return;
+    settings.setValue(QStringLiteral("recentProjects"), paths);
+    emit recentProjectsChanged();
+}
+
 void AppController::setDirty(bool dirty)
 {
     if (m_dirty == dirty)
@@ -9685,6 +9710,8 @@ void AppController::setCurrentProjectPath(const QString &path)
     if (m_currentProjectPath == path)
         return;
     m_currentProjectPath = path;
+    // Cleared by newProject(); set after load/save/package so next launch can reopen.
+    QSettings().setValue(QStringLiteral("lastSessionPath"), path);
     emit currentProjectPathChanged();
 }
 
@@ -9786,6 +9813,25 @@ void AppController::discardAutosave()
     // Fresh timeline and clear the autosave snapshot from the previous session.
     newProject();
     setLastMessage(QStringLiteral("Started new session"));
+}
+
+bool AppController::restoreLastSessionIfEnabled()
+{
+    if (!m_reopenLastProject)
+        return false;
+
+    // Unsaved (or crashed) session takes priority over the last clean .drift path.
+    if (m_recoveryAvailable) {
+        restoreAutosave();
+        return true;
+    }
+
+    const QString path = QSettings().value(QStringLiteral("lastSessionPath")).toString();
+    if (path.isEmpty() || !QFileInfo::exists(path))
+        return false;
+
+    loadProject(QUrl::fromLocalFile(path));
+    return true;
 }
 
 void AppController::discardUnsavedChanges()
