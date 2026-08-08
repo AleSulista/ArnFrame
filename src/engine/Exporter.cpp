@@ -16,6 +16,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/dict.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libswscale/swscale.h>
@@ -337,6 +338,30 @@ void applyVideoPreset(AVCodecContext *vctx, const VideoCodecDef &def, const Expo
     av_opt_set(vctx->priv_data, "preset", preset.constData(), 0);
 }
 
+// libav muxer name for an audio-only container id (may differ from the file extension).
+QByteArray audioOnlyMuxerName(const QString &container)
+{
+    if (container == QLatin1String("m4a"))
+        return QByteArrayLiteral("ipod");
+    return container.toUtf8();
+}
+
+void applyExportMetadata(AVFormatContext *fmt, const ExportSettings &settings)
+{
+    if (!fmt || !settings.audioOnly)
+        return;
+    auto setIf = [fmt](const char *key, const QString &value) {
+        if (value.isEmpty())
+            return;
+        const QByteArray utf8 = value.toUtf8();
+        av_dict_set(&fmt->metadata, key, utf8.constData(), 0);
+    };
+    setIf("title", settings.metadataTitle);
+    setIf("artist", settings.metadataArtist);
+    setIf("album", settings.metadataAlbum);
+    setIf("comment", settings.metadataComment);
+}
+
 bool runAudioOnlyExport(const drift::Project &project, const ExportSettings &settings, const QString &outputPath,
                         QString *errorOut, const Exporter::ProgressFn &onProgress)
 {
@@ -379,7 +404,8 @@ bool runAudioOnlyExport(const drift::Project &project, const ExportSettings &set
     avformat_alloc_output_context2(&fmt, nullptr, nullptr, outUtf8.constData());
     if (!fmt) {
         const QString container = Exporter::preferredAudioOnlyContainer(settings.audioCodecId);
-        avformat_alloc_output_context2(&fmt, nullptr, container.toUtf8().constData(), outUtf8.constData());
+        const QByteArray muxer = audioOnlyMuxerName(container);
+        avformat_alloc_output_context2(&fmt, nullptr, muxer.constData(), outUtf8.constData());
     }
     if (!fmt) {
         error = QStringLiteral("Could not determine output format");
@@ -425,6 +451,8 @@ bool runAudioOnlyExport(const drift::Project &project, const ExportSettings &set
                 goto cleanup;
             }
         }
+
+        applyExportMetadata(fmt, settings);
 
         if (avformat_write_header(fmt, nullptr) < 0) {
             error = QStringLiteral("Could not write the file header");
@@ -627,32 +655,32 @@ QString Exporter::preferredContainer(const QString &videoCodecId, const QString 
 
 QString Exporter::preferredAudioOnlyContainer(const QString &audioCodecId)
 {
+    if (audioCodecId == QLatin1String("aac"))
+        return QStringLiteral("m4a");
     if (audioCodecId == QLatin1String("mp3"))
         return QStringLiteral("mp3");
-    if (audioCodecId == QLatin1String("flac"))
-        return QStringLiteral("flac");
-    if (audioCodecId == QLatin1String("aac"))
-        return QStringLiteral("adts");
     if (audioCodecId == QLatin1String("opus"))
-        return QStringLiteral("ogg");
+        return QStringLiteral("opus");
     if (audioCodecId == QLatin1String("ac3"))
         return QStringLiteral("ac3");
-    return QStringLiteral("mp3");
+    if (audioCodecId == QLatin1String("flac"))
+        return QStringLiteral("flac");
+    return QStringLiteral("m4a");
 }
 
 QStringList Exporter::saveFilters(const QString &container, bool audioOnly)
 {
     if (audioOnly) {
+        if (container == QLatin1String("m4a"))
+            return {QStringLiteral("AAC audio (*.m4a)")};
         if (container == QLatin1String("mp3"))
             return {QStringLiteral("MP3 audio (*.mp3)")};
-        if (container == QLatin1String("flac"))
-            return {QStringLiteral("FLAC audio (*.flac)")};
-        if (container == QLatin1String("adts"))
-            return {QStringLiteral("AAC audio (*.aac)")};
-        if (container == QLatin1String("ogg"))
+        if (container == QLatin1String("opus"))
             return {QStringLiteral("Opus audio (*.opus)")};
         if (container == QLatin1String("ac3"))
             return {QStringLiteral("AC3 audio (*.ac3)")};
+        if (container == QLatin1String("flac"))
+            return {QStringLiteral("FLAC audio (*.flac)")};
         return {QStringLiteral("Audio files (*.*)")};
     }
     if (container == QLatin1String("webm"))
@@ -665,17 +693,17 @@ QStringList Exporter::saveFilters(const QString &container, bool audioOnly)
 QString Exporter::defaultSuffix(const QString &container, bool audioOnly)
 {
     if (audioOnly) {
+        if (container == QLatin1String("m4a"))
+            return QStringLiteral("m4a");
         if (container == QLatin1String("mp3"))
             return QStringLiteral("mp3");
-        if (container == QLatin1String("flac"))
-            return QStringLiteral("flac");
-        if (container == QLatin1String("adts"))
-            return QStringLiteral("aac");
-        if (container == QLatin1String("ogg"))
+        if (container == QLatin1String("opus"))
             return QStringLiteral("opus");
         if (container == QLatin1String("ac3"))
             return QStringLiteral("ac3");
-        return QStringLiteral("mp3");
+        if (container == QLatin1String("flac"))
+            return QStringLiteral("flac");
+        return QStringLiteral("m4a");
     }
     if (container == QLatin1String("webm"))
         return QStringLiteral("webm");
@@ -781,6 +809,14 @@ ExportSettings Exporter::settingsFromMap(const QVariantMap &map)
         s.audioBitrateKbps = map.value(QStringLiteral("audioBitrateKbps")).toInt();
     if (map.contains(QStringLiteral("audioOnly")))
         s.audioOnly = map.value(QStringLiteral("audioOnly")).toBool();
+    if (map.contains(QStringLiteral("metadataTitle")))
+        s.metadataTitle = map.value(QStringLiteral("metadataTitle")).toString();
+    if (map.contains(QStringLiteral("metadataArtist")))
+        s.metadataArtist = map.value(QStringLiteral("metadataArtist")).toString();
+    if (map.contains(QStringLiteral("metadataAlbum")))
+        s.metadataAlbum = map.value(QStringLiteral("metadataAlbum")).toString();
+    if (map.contains(QStringLiteral("metadataComment")))
+        s.metadataComment = map.value(QStringLiteral("metadataComment")).toString();
     return s;
 }
 

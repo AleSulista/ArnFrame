@@ -34,6 +34,10 @@ struct ExportSettings
     QString audioCodecId = QStringLiteral("aac");
     int audioBitrateKbps = 192;
     bool audioOnly = false;
+    QString metadataTitle;
+    QString metadataArtist;
+    QString metadataAlbum;
+    QString metadataComment;
 };
 
 // WYSIWYG exporter: encodes frames straight from FrameCompositor and audio from
@@ -55,7 +59,7 @@ public:
 
     // Preferred container extension for a video+audio pair (mp4 / webm / mkv).
     static QString preferredContainer(const QString &videoCodecId, const QString &audioCodecId);
-    // Standalone audio muxer (mp3 / flac / adts / ogg / ac3).
+    // Standalone audio muxer (m4a / mp3 / opus / ac3 / flac).
     static QString preferredAudioOnlyContainer(const QString &audioCodecId);
     static QStringList saveFilters(const QString &container, bool audioOnly = false);
     static QString defaultSuffix(const QString &container, bool audioOnly = false);
