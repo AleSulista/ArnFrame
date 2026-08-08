@@ -380,6 +380,8 @@ void EditorStateTest::projectPersistenceRoundTrip()
     state.addTextClip(QStringLiteral("Persist"), 0.0);
     state.setTrackMuted(0, true);
     state.addBookmark(2.0, QStringLiteral("Mark"));
+    state.setProjectDarkMode(false);
+    state.setMediaGridMode(false);
     QCOMPARE(state.tracks().size(), 2); // text + default video
 
     QTemporaryFile tempFile;
@@ -395,6 +397,8 @@ void EditorStateTest::projectPersistenceRoundTrip()
              QStringLiteral("text"));
     QVERIFY(state.trackMuted(0));
     QCOMPARE(state.bookmarks().size(), 1);
+    QCOMPARE(state.projectDarkMode(), false);
+    QCOMPARE(state.mediaGridMode(), false);
 }
 
 void EditorStateTest::textStyleBlendModeKeyframesAndEffects()

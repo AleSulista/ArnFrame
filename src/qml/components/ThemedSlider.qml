@@ -80,7 +80,7 @@ Slider {
         width: root.availableWidth
         height: Theme.spacingSm
         radius: height / 2
-        color: Theme.panelMuted
+        color: Theme.sliderTrack
 
         Rectangle {
             width: root.visualPosition * parent.width
@@ -106,7 +106,7 @@ Slider {
         height: Theme.iconSizeMd
         radius: width / 2
         color: root.pressed ? Theme.panelSecondaryForeground
-                            : (root.hovered ? Qt.lighter(Theme.primary, 1.15) : Theme.primary)
+                            : (root.hovered ? Qt.lighter(Theme.primary, 1.25) : Qt.lighter(Theme.primary, 1.15))
         border.width: Theme.borderWidthFocus
         border.color: root.visualFocus ? Theme.focusRing : Theme.primaryForeground
         // Grows slightly on hover so the grab target is legible.

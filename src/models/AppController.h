@@ -46,6 +46,9 @@ class AppController : public QObject
     Q_PROPERTY(bool playing READ playing WRITE setPlaying NOTIFY playingChanged)
     Q_PROPERTY(bool snapEnabled READ snapEnabled WRITE setSnapEnabled NOTIFY snapEnabledChanged)
     Q_PROPERTY(bool rippleEnabled READ rippleEnabled WRITE setRippleEnabled NOTIFY rippleEnabledChanged)
+  // Per-project UI prefs (serialized with the .drift file, not global QSettings).
+    Q_PROPERTY(bool projectDarkMode READ projectDarkMode WRITE setProjectDarkMode NOTIFY projectDarkModeChanged)
+    Q_PROPERTY(bool mediaGridMode READ mediaGridMode WRITE setMediaGridMode NOTIFY mediaGridModeChanged)
     Q_PROPERTY(bool autoKeyEnabled READ autoKeyEnabled WRITE setAutoKeyEnabled NOTIFY autoKeyEnabledChanged)
     // Opt-in: on launch, restore the last open project (saved .drift or unsaved recovery snapshot).
     Q_PROPERTY(bool reopenLastProject READ reopenLastProject WRITE setReopenLastProject NOTIFY reopenLastProjectChanged)
@@ -173,6 +176,8 @@ public:
     bool playing() const { return m_playing; }
     bool snapEnabled() const { return m_snapEnabled; }
     bool rippleEnabled() const { return m_rippleEnabled; }
+    bool projectDarkMode() const { return m_projectDarkMode; }
+    bool mediaGridMode() const { return m_mediaGridMode; }
     bool autoKeyEnabled() const { return m_autoKeyEnabled; }
     bool reopenLastProject() const { return m_reopenLastProject; }
     QStringList keyframeGraphHiddenProperties() const { return m_keyframeGraphHiddenProperties; }
@@ -233,6 +238,8 @@ public:
     void setPlaying(bool playing);
     void setSnapEnabled(bool enabled);
     void setRippleEnabled(bool enabled);
+    void setProjectDarkMode(bool enabled);
+    void setMediaGridMode(bool enabled);
     void setAutoKeyEnabled(bool enabled);
     void setReopenLastProject(bool enabled);
     // Strip chip click — folds `prop`'s curve away, or brings it back. Purely a view filter: the
@@ -682,6 +689,8 @@ signals:
     void playingChanged();
     void snapEnabledChanged();
     void rippleEnabledChanged();
+    void projectDarkModeChanged();
+    void mediaGridModeChanged();
     void autoKeyEnabledChanged();
     void reopenLastProjectChanged();
     void keyframeGraphVisibilityChanged();
@@ -880,6 +889,8 @@ protected:
     bool m_playing = false;
     bool m_snapEnabled = true;
     bool m_rippleEnabled = false;
+    bool m_projectDarkMode = true;
+    bool m_mediaGridMode = true;
     bool m_autoKeyEnabled = false;
     bool m_reopenLastProject = false;
     QStringList m_keyframeGraphHiddenProperties;

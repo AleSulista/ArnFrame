@@ -78,6 +78,14 @@ ApplicationWindow {
     // Header Extras icon pulses while true; never auto-opens a dialog.
     readonly property alias addonAttentionNeeded: addonStartupDialog.needsAttention
 
+    // Project file stores dark mode; apply when a project loads or the user toggles.
+    Connections {
+        target: EditorState
+        function onProjectDarkModeChanged() {
+            Theme.setDarkMode(EditorState.projectDarkMode)
+        }
+    }
+
     function promptLayoutChooserIfNeeded() {
         if (EditorState.recoveryAvailable || EditorState.projectLayoutChosen)
             return

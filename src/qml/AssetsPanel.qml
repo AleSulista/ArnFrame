@@ -401,7 +401,7 @@ PanelFrame {
             id: assetsContent
             width: parent.width - Theme.tabRailWidth - Theme.borderWidth
             height: parent.height
-            property bool gridMode: true
+            property bool gridMode: EditorState.mediaGridMode
 
             Rectangle {
                 width: parent.width
@@ -455,14 +455,14 @@ PanelFrame {
                         variant: "ghost"
                         tooltip: qsTr("Grid view")
                         active: assetsContent.gridMode
-                        onClicked: assetsContent.gridMode = true
+                        onClicked: EditorState.setMediaGridMode(true)
                     }
                     IconButton {
                         glyph: Theme.icons.list
                         variant: "ghost"
                         tooltip: qsTr("List view")
                         active: !assetsContent.gridMode
-                        onClicked: assetsContent.gridMode = false
+                        onClicked: EditorState.setMediaGridMode(false)
                     }
                     IconButton {
                         glyph: root.sortByKind ? Theme.icons.sortByKind : Theme.icons.sortByName

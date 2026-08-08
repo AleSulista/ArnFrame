@@ -26,6 +26,11 @@ QtObject {
         _userOverride = true;
     }
 
+    function setDarkMode(enabled) {
+        _userDarkMode = enabled;
+        _userOverride = true;
+    }
+
     // --- Color palettes: app shell vs. panel surfaces, light and dark ------------
     readonly property var _dark: ({
         appBackground: "#0d0d0d",
@@ -81,6 +86,13 @@ QtObject {
     readonly property color panelAccent: _palette.panelAccent
     readonly property color panelAccentForeground: _palette.panelAccentForeground
     readonly property color panelMuted: _palette.panelMuted
+    // Slider groove — lighter than panelMuted in dark mode so the track reads at rest.
+    readonly property color sliderTrack: darkMode ? "#505050" : panelMuted
+    // Scrollbar track + handle (timeline horizontal bar, panel flickables).
+    readonly property color scrollbarTrack: darkMode ? "#2a2a2a" : panelBorder
+    readonly property color scrollbarHandle: darkMode ? "#6a6a6a" : panelMuted
+    readonly property color scrollbarHandleHover: darkMode ? "#888888" : mutedForeground
+    readonly property color scrollbarHandlePressed: darkMode ? "#b8b8b8" : foreground
     readonly property color panelSecondaryBg: _palette.panelSecondaryBg
     readonly property color panelSecondaryBorder: _palette.panelSecondaryBorder
     readonly property color panelSecondaryForeground: _palette.panelSecondaryForeground

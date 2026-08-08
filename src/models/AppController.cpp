@@ -1770,6 +1770,22 @@ void AppController::setRippleEnabled(bool enabled)
     emit rippleEnabledChanged();
 }
 
+void AppController::setProjectDarkMode(bool enabled)
+{
+    if (m_projectDarkMode == enabled)
+        return;
+    m_projectDarkMode = enabled;
+    emit projectDarkModeChanged();
+}
+
+void AppController::setMediaGridMode(bool enabled)
+{
+    if (m_mediaGridMode == enabled)
+        return;
+    m_mediaGridMode = enabled;
+    emit mediaGridModeChanged();
+}
+
 void AppController::setAutoKeyEnabled(bool enabled)
 {
     if (m_autoKeyEnabled == enabled)
@@ -9626,6 +9642,8 @@ QByteArray AppController::serializeProjectJson() const
     root.insert(QStringLiteral("playheadUs"), static_cast<double>(m_playheadUs));
     root.insert(QStringLiteral("snapEnabled"), m_snapEnabled);
     root.insert(QStringLiteral("rippleEnabled"), m_rippleEnabled);
+    root.insert(QStringLiteral("projectDarkMode"), m_projectDarkMode);
+    root.insert(QStringLiteral("mediaGridMode"), m_mediaGridMode);
     return QJsonDocument(root).toJson(QJsonDocument::Indented);
 }
 
@@ -9683,6 +9701,15 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
     setPlaying(false);
     m_snapEnabled = root.value(QStringLiteral("snapEnabled")).toBool(true);
     m_rippleEnabled = root.value(QStringLiteral("rippleEnabled")).toBool(false);
+
+    if (root.contains(QStringLiteral("projectDarkMode"))) {
+        m_projectDarkMode = root.value(QStringLiteral("projectDarkMode")).toBool(true);
+        emit projectDarkModeChanged();
+    }
+    if (root.contains(QStringLiteral("mediaGridMode"))) {
+        m_mediaGridMode = root.value(QStringLiteral("mediaGridMode")).toBool(true);
+        emit mediaGridModeChanged();
+    }
 
     if (root.contains(QStringLiteral("playheadUs"))) {
         setPlayheadUs(static_cast<drift::TimeUs>(root.value(QStringLiteral("playheadUs")).toDouble()));
@@ -9982,6 +10009,7 @@ void AppController::newProject()
     clearSelection();
     setPlayheadUs(0);
     setCurrentProjectPath(QString());
+    setMediaGridMode(true);
     setDirty(false);
     deleteRecoveryFile();
     // Always notify — even when already false — so the layout chooser reopens
