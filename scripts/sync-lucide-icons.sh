@@ -38,6 +38,8 @@ icons=(
   text-align-start text-align-center text-align-end
   # Lucide names these *-horizontal; they are used for vertical text alignment.
   align-start-horizontal align-center-horizontal align-end-horizontal
+  # Timeline trim tools — vertical marks read as “keep from here”.
+  align-start-vertical align-end-vertical
   # Timeline / media
   captions list-video move-horizontal mouse-pointer audio-lines video
   smartphone monitor square ratio
