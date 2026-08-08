@@ -28,7 +28,7 @@ struct ExportSettings
     int targetHeight = 0; // 0 = keep project height
     QString videoCodecId = QStringLiteral("h264");
     QString rateControl = QStringLiteral("crf"); // "crf" | "bitrate"
-    int crf = 23;
+    int crf = 18;
     int videoBitrateKbps = 12000;
     QString videoPreset = QStringLiteral("medium");
     QString audioCodecId = QStringLiteral("aac");

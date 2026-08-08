@@ -16,7 +16,7 @@ ThemedDialog {
     property int videoBitrateKbps: 12000
     property string videoCodecId: "h264"
     property string rateControl: "crf"
-    property int crf: 23
+    property int crf: 18
     property string videoPreset: "medium"
     property string audioCodecId: "aac"
     property int audioBitrateKbps: 192
@@ -124,7 +124,7 @@ ThemedDialog {
         videoCodecId = firstAvailableId(videoCodecs, defaults.videoCodecId || "h264")
         audioCodecId = firstAvailableId(audioCodecs, defaults.audioCodecId || "aac")
         rateControl = defaults.rateControl || "crf"
-        crf = defaults.crf || 23
+        crf = defaults.crf || 18
         videoBitrateKbps = defaults.videoBitrateKbps || 12000
         videoPreset = defaults.videoPreset || "medium"
         audioBitrateKbps = defaults.audioBitrateKbps || 192

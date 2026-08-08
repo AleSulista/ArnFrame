@@ -71,10 +71,10 @@ const VideoCodecDef kVideoCodecs[] = {
     {"av1_svt", "AV1 (SVT)", kLibSvtAv1, AV_PIX_FMT_YUV420P, RateMode::Crf, true, kSvtPresets, "6", 35, "mp4"},
     {"av1_svt_10", "AV1 10-bit (SVT)", kLibSvtAv1, AV_PIX_FMT_YUV420P10LE, RateMode::Crf, true, kSvtPresets, "6", 35,
      "mkv"},
-    {"ffv1", "FFV1", kFfv1, AV_PIX_FMT_YUV420P, RateMode::Lossless, false, nullptr, nullptr, 0, "mkv"},
-    {"h264", "H.264 (x264)", kLibx264, AV_PIX_FMT_YUV420P, RateMode::Crf, true, kX264Presets, "medium", 23, "mp4"},
+    {"ffv1", "FFV1", kFfv1, AV_PIX_FMT_YUV444P, RateMode::Lossless, false, nullptr, nullptr, 0, "mkv"},
+    {"h264", "H.264 (x264)", kLibx264, AV_PIX_FMT_YUV420P, RateMode::Crf, true, kX264Presets, "medium", 18, "mp4"},
     {"h264_10", "H.264 10-bit (x264)", kLibx264, AV_PIX_FMT_YUV420P10LE, RateMode::Crf, true, kX264Presets, "medium",
-     23, "mkv"},
+     18, "mkv"},
     {"h265", "H.265 (x265)", kLibx265, AV_PIX_FMT_YUV420P, RateMode::Crf, true, kX264Presets, "medium", 28, "mp4"},
     {"h265_10", "H.265 10-bit (x265)", kLibx265, AV_PIX_FMT_YUV420P10LE, RateMode::Crf, true, kX264Presets, "medium",
      28, "mkv"},
@@ -344,6 +344,40 @@ QByteArray audioOnlyMuxerName(const QString &container)
     if (container == QLatin1String("m4a"))
         return QByteArrayLiteral("ipod");
     return container.toUtf8();
+}
+
+// Drift's SDR pipeline is BT.709 limited-range end-to-end (GPU NV12 decode + export).
+void applySdrBt709Tags(AVCodecContext *vctx)
+{
+    if (!vctx)
+        return;
+    vctx->color_range = AVCOL_RANGE_MPEG;
+    vctx->colorspace = AVCOL_SPC_BT709;
+    vctx->color_primaries = AVCOL_PRI_BT709;
+    vctx->color_trc = AVCOL_TRC_BT709;
+}
+
+void applySdrBt709Tags(AVFrame *frame)
+{
+    if (!frame)
+        return;
+    frame->color_range = AVCOL_RANGE_MPEG;
+    frame->colorspace = AVCOL_SPC_BT709;
+    frame->color_primaries = AVCOL_PRI_BT709;
+    frame->color_trc = AVCOL_TRC_BT709;
+}
+
+// RGB (full) → YUV (limited) with BT.709 coefficients. Without this, swscale
+// defaults to BT.601 and players that assume BT.709 for HD shift the hues.
+bool configureExportSws(SwsContext *sws)
+{
+    if (!sws)
+        return false;
+    const int *coeff = sws_getCoefficients(SWS_CS_ITU709);
+    // brightness=0, contrast=1<<16, saturation=1<<16 are identity.
+    return sws_setColorspaceDetails(sws, coeff, 1 /* src full-range RGB */, coeff,
+                                    0 /* dst limited-range YUV */, 0, 1 << 16, 1 << 16)
+           >= 0;
 }
 
 void applyExportMetadata(AVFormatContext *fmt, const ExportSettings &settings)
@@ -766,7 +800,7 @@ ExportSettings Exporter::defaultSettings()
         const QVariantMap m = videoCodecById(id);
         if (m.value(QStringLiteral("available")).toBool()) {
             s.videoCodecId = id;
-            s.crf = m.value(QStringLiteral("defaultCrf"), 23).toInt();
+            s.crf = m.value(QStringLiteral("defaultCrf"), 18).toInt();
             s.videoPreset = m.value(QStringLiteral("defaultPreset")).toString();
             if (s.videoPreset.isEmpty())
                 s.videoPreset = QStringLiteral("medium");
@@ -923,6 +957,7 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
         vctx->framerate = AVRational{fps, 1};
         vctx->gop_size = fps * 2;
         vctx->max_b_frames = 2;
+        applySdrBt709Tags(vctx);
         if (fmt->oformat->flags & AVFMT_GLOBALHEADER)
             vctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
@@ -971,10 +1006,16 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
         }
         headerWritten = true;
 
-        sws = sws_getContext(projW, projH, AV_PIX_FMT_RGBA, outW, outH, outPixFmt, SWS_BILINEAR, nullptr,
+        // Lanczos when down/upscaling; bicubic is enough for a pure format convert.
+        const int swsFlags = (projW != outW || projH != outH) ? SWS_LANCZOS : SWS_BICUBIC;
+        sws = sws_getContext(projW, projH, AV_PIX_FMT_RGBA, outW, outH, outPixFmt, swsFlags, nullptr,
                              nullptr, nullptr);
         if (!sws) {
             error = QStringLiteral("Could not create the scaler");
+            goto cleanup;
+        }
+        if (!configureExportSws(sws)) {
+            error = QStringLiteral("Could not configure export colour conversion");
             goto cleanup;
         }
 
@@ -1069,6 +1110,7 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
                 const int srcStride[4] = {static_cast<int>(img.bytesPerLine()), 0, 0, 0};
                 sws_scale(sws, srcData, srcStride, 0, projH, vframe->data, vframe->linesize);
             }
+            applySdrBt709Tags(vframe);
             vframe->pts = i;
             if (!encodeWriteFrame(fmt, vctx, vstream, vframe, pkt, &error))
                 goto cleanup;

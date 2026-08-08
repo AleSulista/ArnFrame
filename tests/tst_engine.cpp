@@ -47,6 +47,11 @@
 #include "engine/TransitionCatalog.h"
 #include "core/Transition.h"
 
+extern "C" {
+#include <libavformat/avformat.h>
+#include <libavutil/pixfmt.h>
+}
+
 class EngineTest : public QObject
 {
     Q_OBJECT
@@ -140,6 +145,8 @@ private slots:
     void maskApplierEllipseMasksCorners();
     void exporterProducesPlayableFileWithBackground();
     void exporterProducesAudioOnlyMp3();
+    void exporterTagsSdrBt709ColorMetadata();
+    void exporterDefaultCrfIsNearLosslessForH264();
     void mixerHasNoBlockBoundaryDropout();
     void mixerSurvivesConcurrentClipAudioReset();
     void retimedClipAudioIsNotSilent();
@@ -3350,6 +3357,77 @@ void EngineTest::exporterProducesAudioOnlyMp3()
     QVERIFY(reader.open(out));
     QVERIFY(reader.hasAudio());
     QVERIFY(!reader.hasVideo());
+}
+
+void EngineTest::exporterTagsSdrBt709ColorMetadata()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    drift::Project project;
+    project.setResolution(160, 90);
+    project.setFps(25);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("shape");
+    clip.type = drift::ClipType::Shape;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(0.5);
+    clip.shapeStyle.kind = drift::ShapeKind::Rectangle;
+    clip.shapeStyle.fill = Qt::green;
+    project.tracks()[0].clips.append(clip);
+
+    ExportSettings settings = Exporter::defaultSettings();
+    settings.targetHeight = 0;
+    settings.videoCodecId = QStringLiteral("h264");
+    settings.audioCodecId = QStringLiteral("aac");
+    settings.rateControl = QStringLiteral("crf");
+    settings.crf = 18;
+
+    if (!Exporter::videoCodecById(settings.videoCodecId).value(QStringLiteral("available")).toBool())
+        QSKIP("H.264 encoder not available in this FFmpeg build");
+    if (!Exporter::audioCodecById(settings.audioCodecId).value(QStringLiteral("available")).toBool())
+        QSKIP("AAC encoder not available in this FFmpeg build");
+
+    const QString out = dir.filePath(QStringLiteral("color.mp4"));
+    QString error;
+    const bool ok = Exporter::run(project, settings, out, &error);
+    if (!ok && error.contains(QStringLiteral("encoder")))
+        QSKIP("Selected encoder not available in this FFmpeg build");
+    QVERIFY2(ok, qPrintable(error));
+
+    AVFormatContext *fmt = nullptr;
+    QVERIFY(avformat_open_input(&fmt, out.toUtf8().constData(), nullptr, nullptr) == 0);
+    QVERIFY(avformat_find_stream_info(fmt, nullptr) >= 0);
+
+    const AVStream *vstream = nullptr;
+    for (unsigned i = 0; i < fmt->nb_streams; ++i) {
+        if (fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            vstream = fmt->streams[i];
+            break;
+        }
+    }
+    QVERIFY(vstream);
+    QCOMPARE(vstream->codecpar->color_range, AVCOL_RANGE_MPEG);
+    QCOMPARE(vstream->codecpar->color_primaries, AVCOL_PRI_BT709);
+    QCOMPARE(vstream->codecpar->color_trc, AVCOL_TRC_BT709);
+    QCOMPARE(vstream->codecpar->color_space, AVCOL_SPC_BT709);
+
+    avformat_close_input(&fmt);
+}
+
+void EngineTest::exporterDefaultCrfIsNearLosslessForH264()
+{
+    const QVariantMap h264 = Exporter::videoCodecById(QStringLiteral("h264"));
+    if (!h264.value(QStringLiteral("available")).toBool())
+        QSKIP("H.264 encoder not available in this FFmpeg build");
+    QCOMPARE(h264.value(QStringLiteral("defaultCrf")).toInt(), 18);
+
+    const ExportSettings defaults = Exporter::defaultSettings();
+    if (defaults.videoCodecId == QLatin1String("h264"))
+        QCOMPARE(defaults.crf, 18);
 }
 
 // The audio-effects addon content must parse into a usable catalog: known ids resolve, categories

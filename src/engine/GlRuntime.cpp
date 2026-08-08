@@ -25,7 +25,8 @@ void main() {
 }
 )";
 
-// BT.709 limited-range NV12 → straight RGBA (opaque).
+// BT.709 limited-range (TV) NV12 → straight RGBA (opaque).
+// Expand Y from 16–235 and Cb/Cr from 16–240 before the BT.709 matrix.
 constexpr const char *kNv12FragShader = R"(#version 330 core
 in vec2 v_texCoord;
 out vec4 fragColor;
@@ -33,10 +34,13 @@ uniform sampler2D u_y;
 uniform sampler2D u_uv;
 void main() {
     float y = texture(u_y, v_texCoord).r;
-    vec2 uv = texture(u_uv, v_texCoord).rg - vec2(0.5);
-    float r = y + 1.5748 * uv.y;
-    float g = y - 0.1873 * uv.x - 0.4681 * uv.y;
-    float b = y + 1.8556 * uv.x;
+    vec2 uv = texture(u_uv, v_texCoord).rg;
+    float Y = (y - 16.0 / 255.0) * (255.0 / 219.0);
+    float Cb = (uv.x - 128.0 / 255.0) * (255.0 / 224.0);
+    float Cr = (uv.y - 128.0 / 255.0) * (255.0 / 224.0);
+    float r = Y + 1.5748 * Cr;
+    float g = Y - 0.1873 * Cb - 0.4681 * Cr;
+    float b = Y + 1.8556 * Cb;
     fragColor = vec4(clamp(vec3(r, g, b), 0.0, 1.0), 1.0);
 }
 )";
