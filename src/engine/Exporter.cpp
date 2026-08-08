@@ -337,6 +337,211 @@ void applyVideoPreset(AVCodecContext *vctx, const VideoCodecDef &def, const Expo
     av_opt_set(vctx->priv_data, "preset", preset.constData(), 0);
 }
 
+bool runAudioOnlyExport(const drift::Project &project, const ExportSettings &settings, const QString &outputPath,
+                        QString *errorOut, const Exporter::ProgressFn &onProgress)
+{
+    const AudioCodecDef *adef = findAudioDef(settings.audioCodecId);
+    if (!adef) {
+        if (errorOut)
+            *errorOut = QStringLiteral("Unknown audio codec selection");
+        return false;
+    }
+
+    const AVCodec *acodec = findEncoder(adef->encoderNames);
+    if (!acodec) {
+        if (errorOut)
+            *errorOut = QStringLiteral("Selected audio encoder is not available");
+        return false;
+    }
+
+    const int sampleRate = project.sampleRate() > 0 ? project.sampleRate() : 48000;
+    const drift::TimeUs durationUs = project.durationUs();
+    if (durationUs <= 0) {
+        if (errorOut)
+            *errorOut = QStringLiteral("Timeline is empty");
+        return false;
+    }
+
+    const int64_t totalAudioSamples =
+        qMax<int64_t>(0, std::llround(static_cast<double>(durationUs) * sampleRate / 1e6));
+
+    AVFormatContext *fmt = nullptr;
+    AVCodecContext *actx = nullptr;
+    AVStream *astream = nullptr;
+    AVFrame *aframe = nullptr;
+    AVPacket *pkt = nullptr;
+    bool ok = false;
+    bool cancelled = false;
+    bool headerWritten = false;
+    QString error;
+
+    const QByteArray outUtf8 = outputPath.toUtf8();
+    avformat_alloc_output_context2(&fmt, nullptr, nullptr, outUtf8.constData());
+    if (!fmt) {
+        const QString container = Exporter::preferredAudioOnlyContainer(settings.audioCodecId);
+        avformat_alloc_output_context2(&fmt, nullptr, container.toUtf8().constData(), outUtf8.constData());
+    }
+    if (!fmt) {
+        error = QStringLiteral("Could not determine output format");
+        goto cleanup;
+    }
+
+    {
+        astream = avformat_new_stream(fmt, nullptr);
+        if (!astream) {
+            error = QStringLiteral("Could not create output stream");
+            goto cleanup;
+        }
+
+        actx = avcodec_alloc_context3(acodec);
+        if (!actx) {
+            error = QStringLiteral("Could not allocate audio encoder");
+            goto cleanup;
+        }
+
+        const AVSampleFormat audioFmt = pickSampleFmt(acodec);
+        actx->sample_fmt = audioFmt;
+        actx->sample_rate = sampleRate;
+        av_channel_layout_default(&actx->ch_layout, 2);
+        if (!adef->lossless)
+            actx->bit_rate = static_cast<int64_t>(qMax(32, settings.audioBitrateKbps)) * 1000;
+        actx->time_base = AVRational{1, sampleRate};
+        if (fmt->oformat->flags & AVFMT_GLOBALHEADER)
+            actx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+        if (avcodec_open2(actx, acodec, nullptr) < 0) {
+            error = QStringLiteral("Could not open the audio encoder");
+            goto cleanup;
+        }
+
+        avcodec_parameters_from_context(astream->codecpar, actx);
+        astream->time_base = actx->time_base;
+
+        const int frameSize = actx->frame_size > 0 ? actx->frame_size : 1024;
+
+        if (!(fmt->oformat->flags & AVFMT_NOFILE)) {
+            if (avio_open(&fmt->pb, outUtf8.constData(), AVIO_FLAG_WRITE) < 0) {
+                error = QStringLiteral("Could not open the output file");
+                goto cleanup;
+            }
+        }
+
+        if (avformat_write_header(fmt, nullptr) < 0) {
+            error = QStringLiteral("Could not write the file header");
+            goto cleanup;
+        }
+        headerWritten = true;
+
+        pkt = av_packet_alloc();
+        aframe = av_frame_alloc();
+        if (!pkt || !aframe) {
+            error = QStringLiteral("Out of memory");
+            goto cleanup;
+        }
+
+        aframe->format = audioFmt;
+        aframe->sample_rate = sampleRate;
+        av_channel_layout_copy(&aframe->ch_layout, &actx->ch_layout);
+        aframe->nb_samples = frameSize;
+        if (av_frame_get_buffer(aframe, 0) < 0) {
+            error = QStringLiteral("Could not allocate the audio frame");
+            goto cleanup;
+        }
+
+        AudioMixer mixer;
+        mixer.setProject(&project);
+
+        std::vector<float> audioBuffer;
+        int64_t audioSamplesGenerated = 0;
+        int64_t audioPts = 0;
+
+        auto flushAudioFrames = [&](bool drainAll) -> bool {
+            while (static_cast<int64_t>(audioBuffer.size()) >= static_cast<int64_t>(frameSize) * 2) {
+                if (av_frame_make_writable(aframe) < 0) {
+                    error = QStringLiteral("Audio frame not writable");
+                    return false;
+                }
+                aframe->nb_samples = frameSize;
+                fillAudioFrame(aframe, audioFmt, audioBuffer.data(), frameSize);
+                aframe->pts = audioPts;
+                audioPts += frameSize;
+                if (!encodeWriteFrame(fmt, actx, astream, aframe, pkt, &error))
+                    return false;
+                audioBuffer.erase(audioBuffer.begin(), audioBuffer.begin() + frameSize * 2);
+            }
+            if (drainAll && !audioBuffer.empty()) {
+                const int remaining = static_cast<int>(audioBuffer.size() / 2);
+                if (av_frame_make_writable(aframe) < 0) {
+                    error = QStringLiteral("Audio frame not writable");
+                    return false;
+                }
+                aframe->nb_samples = remaining;
+                fillAudioFrame(aframe, audioFmt, audioBuffer.data(), remaining);
+                aframe->pts = audioPts;
+                audioPts += remaining;
+                if (!encodeWriteFrame(fmt, actx, astream, aframe, pkt, &error))
+                    return false;
+                audioBuffer.clear();
+            }
+            return true;
+        };
+
+        while (audioSamplesGenerated < totalAudioSamples) {
+            if (onProgress && totalAudioSamples > 0
+                && !onProgress(static_cast<double>(audioSamplesGenerated) / totalAudioSamples)) {
+                cancelled = true;
+                break;
+            }
+
+            const int64_t chunkSamples = qMin<int64_t>(frameSize * 8, totalAudioSamples - audioSamplesGenerated);
+            const size_t base = audioBuffer.size();
+            audioBuffer.resize(base + static_cast<size_t>(chunkSamples) * 2);
+            const drift::TimeUs audioStartUs = static_cast<drift::TimeUs>(
+                (audioSamplesGenerated * drift::kUsPerSecond) / sampleRate);
+            mixer.mix(audioStartUs, static_cast<int>(chunkSamples), sampleRate, audioBuffer.data() + base);
+            audioSamplesGenerated += chunkSamples;
+            if (!flushAudioFrames(false))
+                goto cleanup;
+        }
+
+        if (!cancelled) {
+            if (!flushAudioFrames(true))
+                goto cleanup;
+            if (!encodeWriteFrame(fmt, actx, astream, nullptr, pkt, &error))
+                goto cleanup;
+            if (av_write_trailer(fmt) < 0) {
+                error = QStringLiteral("Could not finalize the file");
+                goto cleanup;
+            }
+            ok = true;
+        }
+    }
+
+cleanup:
+    if (aframe)
+        av_frame_free(&aframe);
+    if (pkt)
+        av_packet_free(&pkt);
+    if (actx)
+        avcodec_free_context(&actx);
+    if (fmt) {
+        if (headerWritten && !ok && fmt->pb)
+            av_write_trailer(fmt);
+        if (fmt->pb && !(fmt->oformat->flags & AVFMT_NOFILE))
+            avio_closep(&fmt->pb);
+        avformat_free_context(fmt);
+    }
+
+    if (!ok && QFile::exists(outputPath))
+        QFile::remove(outputPath);
+
+    if (!ok && errorOut) {
+        *errorOut = cancelled ? QStringLiteral("Export cancelled")
+                              : (error.isEmpty() ? QStringLiteral("Export failed") : error);
+    }
+    return ok;
+}
+
 } // namespace
 
 const QList<ExportScalePreset> &Exporter::scalePresets()
@@ -420,8 +625,36 @@ QString Exporter::preferredContainer(const QString &videoCodecId, const QString 
     return QStringLiteral("mkv");
 }
 
-QStringList Exporter::saveFilters(const QString &container)
+QString Exporter::preferredAudioOnlyContainer(const QString &audioCodecId)
 {
+    if (audioCodecId == QLatin1String("mp3"))
+        return QStringLiteral("mp3");
+    if (audioCodecId == QLatin1String("flac"))
+        return QStringLiteral("flac");
+    if (audioCodecId == QLatin1String("aac"))
+        return QStringLiteral("adts");
+    if (audioCodecId == QLatin1String("opus"))
+        return QStringLiteral("ogg");
+    if (audioCodecId == QLatin1String("ac3"))
+        return QStringLiteral("ac3");
+    return QStringLiteral("mp3");
+}
+
+QStringList Exporter::saveFilters(const QString &container, bool audioOnly)
+{
+    if (audioOnly) {
+        if (container == QLatin1String("mp3"))
+            return {QStringLiteral("MP3 audio (*.mp3)")};
+        if (container == QLatin1String("flac"))
+            return {QStringLiteral("FLAC audio (*.flac)")};
+        if (container == QLatin1String("adts"))
+            return {QStringLiteral("AAC audio (*.aac)")};
+        if (container == QLatin1String("ogg"))
+            return {QStringLiteral("Opus audio (*.opus)")};
+        if (container == QLatin1String("ac3"))
+            return {QStringLiteral("AC3 audio (*.ac3)")};
+        return {QStringLiteral("Audio files (*.*)")};
+    }
     if (container == QLatin1String("webm"))
         return {QStringLiteral("WebM video (*.webm)")};
     if (container == QLatin1String("mkv"))
@@ -429,8 +662,21 @@ QStringList Exporter::saveFilters(const QString &container)
     return {QStringLiteral("MP4 video (*.mp4)"), QStringLiteral("Matroska video (*.mkv)")};
 }
 
-QString Exporter::defaultSuffix(const QString &container)
+QString Exporter::defaultSuffix(const QString &container, bool audioOnly)
 {
+    if (audioOnly) {
+        if (container == QLatin1String("mp3"))
+            return QStringLiteral("mp3");
+        if (container == QLatin1String("flac"))
+            return QStringLiteral("flac");
+        if (container == QLatin1String("adts"))
+            return QStringLiteral("aac");
+        if (container == QLatin1String("ogg"))
+            return QStringLiteral("opus");
+        if (container == QLatin1String("ac3"))
+            return QStringLiteral("ac3");
+        return QStringLiteral("mp3");
+    }
     if (container == QLatin1String("webm"))
         return QStringLiteral("webm");
     if (container == QLatin1String("mkv"))
@@ -533,12 +779,17 @@ ExportSettings Exporter::settingsFromMap(const QVariantMap &map)
         s.audioCodecId = map.value(QStringLiteral("audioCodecId")).toString();
     if (map.contains(QStringLiteral("audioBitrateKbps")))
         s.audioBitrateKbps = map.value(QStringLiteral("audioBitrateKbps")).toInt();
+    if (map.contains(QStringLiteral("audioOnly")))
+        s.audioOnly = map.value(QStringLiteral("audioOnly")).toBool();
     return s;
 }
 
 bool Exporter::run(const drift::Project &project, const ExportSettings &settings, const QString &outputPath,
                    QString *errorOut, const ProgressFn &onProgress)
 {
+    if (settings.audioOnly)
+        return runAudioOnlyExport(project, settings, outputPath, errorOut, onProgress);
+
     const int projW = project.width();
     const int projH = project.height();
     if (projW <= 0 || projH <= 0) {

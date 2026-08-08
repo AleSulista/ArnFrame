@@ -139,6 +139,7 @@ private slots:
     void clipBodyAnimationFadeRampsOpacity();
     void maskApplierEllipseMasksCorners();
     void exporterProducesPlayableFileWithBackground();
+    void exporterProducesAudioOnlyMp3();
     void mixerHasNoBlockBoundaryDropout();
     void mixerSurvivesConcurrentClipAudioReset();
     void retimedClipAudioIsNotSilent();
@@ -3307,6 +3308,48 @@ void EngineTest::exporterProducesPlayableFileWithBackground()
     const QRgb corner = frame.pixel(6, 6);
     QVERIFY(qBlue(corner) > 150);
     QVERIFY(qBlue(corner) > qRed(corner));
+}
+
+void EngineTest::exporterProducesAudioOnlyMp3()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    drift::Project project;
+    project.setResolution(160, 90);
+    project.setFps(25);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("shape");
+    clip.type = drift::ClipType::Shape;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(1.0);
+    clip.shapeStyle.kind = drift::ShapeKind::Rectangle;
+    clip.shapeStyle.fill = Qt::red;
+    project.tracks()[0].clips.append(clip);
+
+    ExportSettings settings = Exporter::defaultSettings();
+    settings.audioOnly = true;
+    settings.audioCodecId = QStringLiteral("mp3");
+    settings.audioBitrateKbps = 192;
+
+    if (!Exporter::audioCodecById(settings.audioCodecId).value(QStringLiteral("available")).toBool())
+        QSKIP("MP3 encoder not available in this FFmpeg build");
+
+    const QString out = dir.filePath(QStringLiteral("out.mp3"));
+    QString error;
+    const bool ok = Exporter::run(project, settings, out, &error);
+    if (!ok && error.contains(QStringLiteral("encoder")))
+        QSKIP("MP3 encoder not available in this FFmpeg build");
+    QVERIFY2(ok, qPrintable(error));
+    QVERIFY(QFileInfo(out).size() > 0);
+
+    ClipReader reader;
+    QVERIFY(reader.open(out));
+    QVERIFY(reader.hasAudio());
+    QVERIFY(!reader.hasVideo());
 }
 
 // The audio-effects addon content must parse into a usable catalog: known ids resolve, categories

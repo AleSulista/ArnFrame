@@ -10239,7 +10239,13 @@ QVariantMap AppController::exportDefaultSettings() const
         {QStringLiteral("videoPreset"), s.videoPreset},
         {QStringLiteral("audioCodecId"), s.audioCodecId},
         {QStringLiteral("audioBitrateKbps"), s.audioBitrateKbps},
+        {QStringLiteral("audioOnly"), s.audioOnly},
     };
+}
+
+QString AppController::exportPreferredAudioOnlyContainer(const QString &audioCodecId) const
+{
+    return Exporter::preferredAudioOnlyContainer(audioCodecId);
 }
 
 QString AppController::exportPreferredContainer(const QString &videoCodecId,
@@ -10248,14 +10254,14 @@ QString AppController::exportPreferredContainer(const QString &videoCodecId,
     return Exporter::preferredContainer(videoCodecId, audioCodecId);
 }
 
-QStringList AppController::exportSaveFilters(const QString &container) const
+QStringList AppController::exportSaveFilters(const QString &container, bool audioOnly) const
 {
-    return Exporter::saveFilters(container);
+    return Exporter::saveFilters(container, audioOnly);
 }
 
-QString AppController::exportDefaultSuffix(const QString &container) const
+QString AppController::exportDefaultSuffix(const QString &container, bool audioOnly) const
 {
-    return Exporter::defaultSuffix(container);
+    return Exporter::defaultSuffix(container, audioOnly);
 }
 
 double AppController::exportProgress() const

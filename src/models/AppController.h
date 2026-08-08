@@ -657,8 +657,9 @@ public:
     Q_INVOKABLE QVariantMap exportDefaultSettings() const;
     Q_INVOKABLE QString exportPreferredContainer(const QString &videoCodecId,
                                                 const QString &audioCodecId) const;
-    Q_INVOKABLE QStringList exportSaveFilters(const QString &container) const;
-    Q_INVOKABLE QString exportDefaultSuffix(const QString &container) const;
+    Q_INVOKABLE QString exportPreferredAudioOnlyContainer(const QString &audioCodecId) const;
+    Q_INVOKABLE QStringList exportSaveFilters(const QString &container, bool audioOnly = false) const;
+    Q_INVOKABLE QString exportDefaultSuffix(const QString &container, bool audioOnly = false) const;
     Q_INVOKABLE void exportProject(const QUrl &outputUrl);
     Q_INVOKABLE void exportWithPreset(const QUrl &outputUrl, const QString &presetId);
     Q_INVOKABLE void exportWithSettings(const QUrl &outputUrl, const QVariantMap &settings);

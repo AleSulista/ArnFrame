@@ -6,7 +6,7 @@ import Drift
 ThemedDialog {
     id: root
 
-    title: qsTr("Export video")
+    title: root.audioOnly ? qsTr("Export audio") : qsTr("Export video")
     acceptText: qsTr("Export")
     preferredWidth: Theme.dialogWidthLg
 
@@ -19,6 +19,7 @@ ThemedDialog {
     property string videoPreset: "medium"
     property string audioCodecId: "aac"
     property int audioBitrateKbps: 192
+    property bool audioOnly: false
     property bool advancedOpen: false
 
     property var videoCodecs: []
@@ -92,6 +93,7 @@ ThemedDialog {
         videoBitrateKbps = defaults.videoBitrateKbps || 12000
         videoPreset = defaults.videoPreset || "medium"
         audioBitrateKbps = defaults.audioBitrateKbps || 192
+        audioOnly = false
         advancedOpen = false
 
         if (scaleOptions.length > 0) {
@@ -131,16 +133,19 @@ ThemedDialog {
             "videoBitrateKbps": videoBitrateKbps,
             "videoPreset": videoPreset,
             "audioCodecId": audioCodecId,
-            "audioBitrateKbps": audioBitrateKbps
+            "audioBitrateKbps": audioBitrateKbps,
+            "audioOnly": audioOnly
         }
     }
 
     onAccepted: {
-        var container = EditorState.exportPreferredContainer(videoCodecId, audioCodecId)
-        var filters = EditorState.exportSaveFilters(container)
-        var suffix = EditorState.exportDefaultSuffix(container)
-        var url = FileDialogs.saveFile(qsTr("Export Video"), filters,
-                                       EditorState.projectName, suffix)
+        var container = root.audioOnly
+                ? EditorState.exportPreferredAudioOnlyContainer(audioCodecId)
+                : EditorState.exportPreferredContainer(videoCodecId, audioCodecId)
+        var filters = EditorState.exportSaveFilters(container, root.audioOnly)
+        var suffix = EditorState.exportDefaultSuffix(container, root.audioOnly)
+        var url = FileDialogs.saveFile(root.audioOnly ? qsTr("Export Audio") : qsTr("Export Video"),
+                                       filters, EditorState.projectName, suffix)
         if (url != "") {
             EditorState.exportWithSettings(url, buildSettings())
             Toasts.info(qsTr("Export started…"))
@@ -174,16 +179,35 @@ ThemedDialog {
             ThemedLabel {
                 width: parent.width
                 size: "sm"
-                text: qsTr("Saves what you see in the preview. Pick a size — the picture shape stays the same.")
+                text: root.audioOnly
+                      ? qsTr("Exports the mixed timeline audio. Handy for podcasts and voice-overs.")
+                      : qsTr("Saves what you see in the preview. Pick a size — the picture shape stays the same.")
+            }
+
+            ThemedSwitch {
+                width: parent.width
+                checked: root.audioOnly
+                text: qsTr("Audio only")
+                tooltip: qsTr("Export just the soundtrack — for example as MP3")
+                onToggled: {
+                    root.audioOnly = checked
+                    if (checked) {
+                        root.audioCodecId = root.firstAvailableId(root.audioCodecs, "mp3")
+                        root.refreshCodecMeta()
+                        root.syncComboIndices()
+                    }
+                }
             }
 
             ThemedLabel {
+                visible: !root.audioOnly
                 text: qsTr("Downscale")
             }
 
             Flow {
                 width: parent.width
                 spacing: Theme.spacingMd
+                visible: !root.audioOnly
 
                 Repeater {
                     model: root.scaleOptions
@@ -207,6 +231,7 @@ ThemedDialog {
             Item {
                 width: parent.width
                 height: advancedHeader.implicitHeight
+                visible: !root.audioOnly
 
                 Row {
                     id: advancedHeader
@@ -246,7 +271,7 @@ ThemedDialog {
             Column {
                 width: parent.width
                 spacing: Theme.spacingXl
-                visible: root.advancedOpen
+                visible: root.advancedOpen || root.audioOnly
                 height: visible ? implicitHeight : 0
                 clip: true
 
@@ -254,6 +279,7 @@ ThemedDialog {
                 Column {
                     width: parent.width
                     spacing: Theme.spacingSm
+                    visible: !root.audioOnly
 
                     ThemedLabel {
                         text: qsTr("Video encoder")
@@ -284,7 +310,7 @@ ThemedDialog {
                 Column {
                     width: parent.width
                     spacing: Theme.spacingMd
-                    visible: !root.videoLossless
+                    visible: !root.audioOnly && !root.videoLossless
 
                     Row {
                         spacing: Theme.spacingMd
@@ -377,7 +403,7 @@ ThemedDialog {
                 Column {
                     width: parent.width
                     spacing: Theme.spacingSm
-                    visible: root.videoSupportsPreset && root.videoPresetList.length > 0
+                    visible: !root.audioOnly && root.videoSupportsPreset && root.videoPresetList.length > 0
 
                     ThemedLabel {
                         text: qsTr("Preset")
