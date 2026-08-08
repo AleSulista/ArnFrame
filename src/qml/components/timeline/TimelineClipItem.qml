@@ -46,8 +46,41 @@ Item {
     }
     property bool effectDropTarget: panel.effectDropTrackIndex === trackIndex
                                     && panel.effectDropClipIndex === clipIndex
-    readonly property bool timelineFadeHandles: trackType !== "text"
-                                                && trackType !== "subtitle"
+    // Subtitles keep cue-owned timing; text clips use the same edge fades as video.
+    readonly property bool timelineFadeHandles: trackType !== "subtitle"
+
+    // Gain along a fade ramp (progress 0..1). Mirrors Clip::shapeFade / FadeShape.
+    function fadeGainAt(progress) {
+        const t = Math.max(0, Math.min(1, progress))
+        const curve = clipItem.clipData.fadeCurve || "smooth"
+        if (curve === "linear")
+            return t
+        if (curve === "equalPower")
+            return Math.sin(t * Math.PI * 0.5)
+        if (curve === "custom") {
+            const pts = clipItem.clipData.fadeShape || []
+            if (pts.length < 2)
+                return t
+            if (t <= pts[0].t)
+                return pts[0].g
+            if (t >= pts[pts.length - 1].t)
+                return pts[pts.length - 1].g
+            for (let i = 0; i + 1 < pts.length; ++i) {
+                const a = pts[i]
+                const b = pts[i + 1]
+                if (t < a.t || t > b.t)
+                    continue
+                const span = b.t - a.t
+                if (Math.abs(span) < 1e-9)
+                    return b.g
+                const u = (t - a.t) / span
+                return a.g + (b.g - a.g) * u
+            }
+            return pts[pts.length - 1].g
+        }
+        // smooth (smoothstep)
+        return t * t * (3.0 - 2.0 * t)
+    }
 
     // Premiere-style trim pointer (vertical bar + arrow), sized to this clip.
     readonly property int trimCursorSide: leftTrimMouse.containsMouse ? -1
@@ -183,23 +216,42 @@ Item {
                                         (clipItem.clipData.fadeIn || 0) * panel.pxPerSecond))
             height: parent.height
             visible: width > 0.5
+            // Curve / custom shape changes must redraw even when width is unchanged.
+            property string curveKey: (clipItem.clipData.fadeCurve || "smooth")
+                                      + "|" + JSON.stringify(clipItem.clipData.fadeShape || [])
             onWidthChanged: requestPaint()
             onHeightChanged: requestPaint()
+            onCurveKeyChanged: requestPaint()
             onPaint: {
                 var ctx = getContext("2d")
                 ctx.reset()
+                if (width < 0.5 || height < 0.5)
+                    return
                 ctx.fillStyle = "rgba(0,0,0,0.38)"
                 ctx.strokeStyle = "rgba(255,255,255,0.9)"
                 ctx.lineWidth = 1.5
+                const steps = Math.max(8, Math.min(64, Math.ceil(width / 2)))
                 ctx.beginPath()
                 ctx.moveTo(0, 0)
                 ctx.lineTo(width, 0)
-                ctx.lineTo(0, height)
+                for (let i = steps; i >= 0; --i) {
+                    const t = i / steps
+                    const g = clipItem.fadeGainAt(t)
+                    ctx.lineTo(t * width, height * (1.0 - g))
+                }
                 ctx.closePath()
                 ctx.fill()
                 ctx.beginPath()
-                ctx.moveTo(0, height)
-                ctx.lineTo(width, 0)
+                for (let i = 0; i <= steps; ++i) {
+                    const t = i / steps
+                    const g = clipItem.fadeGainAt(t)
+                    const x = t * width
+                    const y = height * (1.0 - g)
+                    if (i === 0)
+                        ctx.moveTo(x, y)
+                    else
+                        ctx.lineTo(x, y)
+                }
                 ctx.stroke()
             }
         }
@@ -213,24 +265,43 @@ Item {
             height: parent.height
             x: parent.width - width
             visible: width > 0.5
+            property string curveKey: (clipItem.clipData.fadeCurve || "smooth")
+                                      + "|" + JSON.stringify(clipItem.clipData.fadeShape || [])
             onWidthChanged: requestPaint()
             onHeightChanged: requestPaint()
             onXChanged: requestPaint()
+            onCurveKeyChanged: requestPaint()
             onPaint: {
                 var ctx = getContext("2d")
                 ctx.reset()
+                if (width < 0.5 || height < 0.5)
+                    return
                 ctx.fillStyle = "rgba(0,0,0,0.38)"
                 ctx.strokeStyle = "rgba(255,255,255,0.9)"
                 ctx.lineWidth = 1.5
+                const steps = Math.max(8, Math.min(64, Math.ceil(width / 2)))
+                // Fade-out: progress from full (left of wedge) to silent (right edge).
                 ctx.beginPath()
-                ctx.moveTo(width, 0)
-                ctx.lineTo(0, 0)
-                ctx.lineTo(width, height)
+                ctx.moveTo(0, 0)
+                ctx.lineTo(width, 0)
+                for (let i = steps; i >= 0; --i) {
+                    const t = i / steps
+                    const g = clipItem.fadeGainAt(1.0 - t)
+                    ctx.lineTo(t * width, height * (1.0 - g))
+                }
                 ctx.closePath()
                 ctx.fill()
                 ctx.beginPath()
-                ctx.moveTo(width, height)
-                ctx.lineTo(0, 0)
+                for (let i = 0; i <= steps; ++i) {
+                    const t = i / steps
+                    const g = clipItem.fadeGainAt(1.0 - t)
+                    const x = t * width
+                    const y = height * (1.0 - g)
+                    if (i === 0)
+                        ctx.moveTo(x, y)
+                    else
+                        ctx.lineTo(x, y)
+                }
                 ctx.stroke()
             }
         }

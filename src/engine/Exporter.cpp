@@ -221,18 +221,25 @@ bool encodeWriteFrame(AVFormatContext *fmt, AVCodecContext *codec, AVStream *str
 
 AVSampleFormat pickSampleFmt(const AVCodec *codec)
 {
-    if (!codec || !codec->sample_fmts)
+    const void *configs = nullptr;
+    if (!codec
+        || avcodec_get_supported_config(nullptr, codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, &configs,
+                                        nullptr)
+            < 0
+        || !configs)
         return AV_SAMPLE_FMT_FLTP;
+
+    const auto *fmts = static_cast<const AVSampleFormat *>(configs);
     // Prefer planar float, then planar s16, then first listed.
-    for (const AVSampleFormat *p = codec->sample_fmts; *p != AV_SAMPLE_FMT_NONE; ++p) {
+    for (const AVSampleFormat *p = fmts; *p != AV_SAMPLE_FMT_NONE; ++p) {
         if (*p == AV_SAMPLE_FMT_FLTP)
             return *p;
     }
-    for (const AVSampleFormat *p = codec->sample_fmts; *p != AV_SAMPLE_FMT_NONE; ++p) {
+    for (const AVSampleFormat *p = fmts; *p != AV_SAMPLE_FMT_NONE; ++p) {
         if (*p == AV_SAMPLE_FMT_S16P)
             return *p;
     }
-    return codec->sample_fmts[0];
+    return fmts[0];
 }
 
 void fillAudioFrame(AVFrame *frame, AVSampleFormat fmt, const float *interleaved, int samples)

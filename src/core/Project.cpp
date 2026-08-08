@@ -511,6 +511,9 @@ QJsonObject clipToJson(const Clip &clip)
         {QStringLiteral("fadeInUs"), static_cast<double>(clip.fadeInUs)},
         {QStringLiteral("fadeOutUs"), static_cast<double>(clip.fadeOutUs)},
         {QStringLiteral("fadeCurve"), fadeCurveToString(clip.fadeCurve)},
+        {QStringLiteral("fadeShape"), clip.fadeShape.toJson()},
+        {QStringLiteral("animIn"), clipAnimationToJson(clip.animIn)},
+        {QStringLiteral("animOut"), clipAnimationToJson(clip.animOut)},
         {QStringLiteral("timelineStartUs"), static_cast<double>(clip.timelineStart)},
         {QStringLiteral("timelineDurationUs"), static_cast<double>(clip.timelineDuration)},
         {QStringLiteral("srcInUs"), static_cast<double>(clip.srcIn)},
@@ -591,6 +594,9 @@ Clip clipFromJsonV2(const QJsonObject &object, int canvasW = 1920, int canvasH =
     clip.fadeInUs = static_cast<TimeUs>(object.value(QStringLiteral("fadeInUs")).toDouble());
     clip.fadeOutUs = static_cast<TimeUs>(object.value(QStringLiteral("fadeOutUs")).toDouble());
     clip.fadeCurve = fadeCurveFromString(object.value(QStringLiteral("fadeCurve")).toString());
+    clip.fadeShape = FadeShape::fromJson(object.value(QStringLiteral("fadeShape")).toArray());
+    clip.animIn = clipAnimationFromJson(object.value(QStringLiteral("animIn")).toObject());
+    clip.animOut = clipAnimationFromJson(object.value(QStringLiteral("animOut")).toObject());
     clip.timelineStart = static_cast<TimeUs>(object.value(QStringLiteral("timelineStartUs")).toDouble());
     clip.timelineDuration = static_cast<TimeUs>(object.value(QStringLiteral("timelineDurationUs")).toDouble());
     clip.srcIn = static_cast<TimeUs>(object.value(QStringLiteral("srcInUs")).toDouble());

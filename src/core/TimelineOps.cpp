@@ -294,6 +294,7 @@ void syncLinkedTiming(Clip &dst, const Clip &src)
     dst.fadeInUs = src.fadeInUs;
     dst.fadeOutUs = src.fadeOutUs;
     dst.fadeCurve = src.fadeCurve;
+    dst.fadeShape = src.fadeShape;
 }
 
 QString assignSplitLinkIds(Clip &head, Clip &tail)

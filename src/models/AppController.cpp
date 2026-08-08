@@ -340,10 +340,16 @@ int findTransitionPartnerIndex(const drift::Track &track, int fromIndex)
     return best;
 }
 
+bool trackAllowsTransitions(drift::TrackType type)
+{
+    return type == drift::TrackType::Video || type == drift::TrackType::Shape
+           || type == drift::TrackType::Text;
+}
+
 void syncOverlapTransitions(drift::Project &project)
 {
     for (drift::Track &track : project.tracks()) {
-        if (track.type != drift::TrackType::Video && track.type != drift::TrackType::Shape)
+        if (!trackAllowsTransitions(track.type))
             continue;
 
         QList<int> order;
@@ -1196,6 +1202,7 @@ drift::Clip makeAudioCompanionFromVideo(const drift::Clip &videoClip, const QStr
     audio.fadeInUs = videoClip.fadeInUs;
     audio.fadeOutUs = videoClip.fadeOutUs;
     audio.fadeCurve = videoClip.fadeCurve;
+    audio.fadeShape = videoClip.fadeShape;
     audio.volume = videoClip.volume;
     return audio;
 }
@@ -1343,6 +1350,14 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
     for (const drift::Effect &effect : clip.audioEffects)
         audioEffects.append(audioEffectToMap(effect));
 
+    QVariantList fadeShape;
+    for (const QPointF &pt : clip.fadeShape.points()) {
+        fadeShape.append(QVariantMap{
+            {QStringLiteral("t"), pt.x()},
+            {QStringLiteral("g"), pt.y()},
+        });
+    }
+
     // Full source length backs the filmstrip's timestamp mapping (the strip is sampled across
     // the whole source, so tiles need the total to place srcIn/srcOut within it).
     const drift::MediaAsset *sourceAsset = m_project.asset(clip.assetId);
@@ -1379,6 +1394,19 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("fadeIn"), drift::usToSeconds(clip.fadeInUs)},
         {QStringLiteral("fadeOut"), drift::usToSeconds(clip.fadeOutUs)},
         {QStringLiteral("fadeCurve"), drift::fadeCurveToString(clip.fadeCurve)},
+        {QStringLiteral("fadeShape"), fadeShape},
+        {QStringLiteral("animIn"), QVariantMap{
+             {QStringLiteral("kind"), drift::clipAnimKindToString(clip.animIn.kind)},
+             {QStringLiteral("duration"), drift::usToSeconds(clip.animIn.durationUs)},
+             {QStringLiteral("ease"), drift::clipAnimEaseToString(clip.animIn.ease)},
+             {QStringLiteral("curve"), drift::fadeCurveToString(clip.animIn.curve)},
+         }},
+        {QStringLiteral("animOut"), QVariantMap{
+             {QStringLiteral("kind"), drift::clipAnimKindToString(clip.animOut.kind)},
+             {QStringLiteral("duration"), drift::usToSeconds(clip.animOut.durationUs)},
+             {QStringLiteral("ease"), drift::clipAnimEaseToString(clip.animOut.ease)},
+             {QStringLiteral("curve"), drift::fadeCurveToString(clip.animOut.curve)},
+         }},
         {QStringLiteral("effects"), effects},
         {QStringLiteral("audioEffects"), audioEffects},
         {QStringLiteral("keyframes"), keyframesToMap(clip)},
@@ -3547,6 +3575,193 @@ void AppController::clearClipSpeedCurve(int trackIndex, int clipIndex)
     finishEdit(QStringLiteral("Speed curve removed"));
 }
 
+void AppController::beginFadeCurveSession(int trackIndex, int clipIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    if (m_fadeCurveActive)
+        endFadeCurveSession();
+
+    drift::Clip &clip = m_project.tracks()[trackIndex].clips[clipIndex];
+    m_fadeCurveTrack = trackIndex;
+    m_fadeCurveClipIndex = clipIndex;
+    m_fadeCurveClipId = clip.id;
+    m_fadeCurveClipName = clip.name;
+    m_fadeCurveBefore = clip.fadeCurve;
+    m_fadeShapeBefore = clip.fadeShape;
+    m_fadeCurveApplied = false;
+
+    if (clip.fadeCurve == drift::FadeCurve::Custom && !clip.fadeShape.isEmpty())
+        m_fadeShape = clip.fadeShape;
+    else if (clip.fadeCurve == drift::FadeCurve::Linear)
+        m_fadeShape = drift::FadeShape::linearPreset();
+    else if (clip.fadeCurve == drift::FadeCurve::EqualPower)
+        m_fadeShape = drift::FadeShape::equalPowerPreset();
+    else
+        m_fadeShape = drift::FadeShape::smoothPreset();
+
+    clip.fadeCurve = drift::FadeCurve::Custom;
+    clip.fadeShape = m_fadeShape;
+    syncLinkedPartnersFrom(m_project, clip);
+    m_fadeCurveActive = true;
+    emit fadeCurveSessionChanged();
+    emit fadeCurveChanged();
+    emitPreviewFrame();
+}
+
+void AppController::endFadeCurveSession()
+{
+    if (!m_fadeCurveActive)
+        return;
+
+    if (!m_fadeCurveApplied
+        && m_fadeCurveTrack >= 0 && m_fadeCurveTrack < m_project.tracks().size()) {
+        drift::Track &track = m_project.tracks()[m_fadeCurveTrack];
+        if (m_fadeCurveClipIndex >= 0 && m_fadeCurveClipIndex < track.clips.size()
+            && track.clips.at(m_fadeCurveClipIndex).id == m_fadeCurveClipId) {
+            drift::Clip &clip = track.clips[m_fadeCurveClipIndex];
+            clip.fadeCurve = m_fadeCurveBefore;
+            clip.fadeShape = m_fadeShapeBefore;
+            syncLinkedPartnersFrom(m_project, clip);
+            emitPreviewFrame();
+        }
+    }
+
+    m_fadeCurveActive = false;
+    m_fadeCurveTrack = -1;
+    m_fadeCurveClipIndex = -1;
+    m_fadeCurveClipId.clear();
+    m_fadeCurveClipName.clear();
+    m_fadeShape.clear();
+    m_fadeShapeBefore.clear();
+    m_fadeCurveApplied = false;
+    emit fadeCurveSessionChanged();
+    emit fadeCurveChanged();
+}
+
+QVariantList AppController::fadeCurvePoints() const
+{
+    QVariantList out;
+    for (const QPointF &pt : m_fadeShape.points()) {
+        out.append(QVariantMap{
+            {QStringLiteral("t"), pt.x()},
+            {QStringLiteral("g"), pt.y()},
+        });
+    }
+    return out;
+}
+
+void AppController::setFadeCurvePoints(const QVariantList &points)
+{
+    if (!m_fadeCurveActive)
+        return;
+    if (m_fadeCurveTrack < 0 || m_fadeCurveTrack >= m_project.tracks().size())
+        return;
+    drift::Track &track = m_project.tracks()[m_fadeCurveTrack];
+    if (m_fadeCurveClipIndex < 0 || m_fadeCurveClipIndex >= track.clips.size())
+        return;
+    drift::Clip &clip = track.clips[m_fadeCurveClipIndex];
+    if (clip.id != m_fadeCurveClipId)
+        return;
+
+    QList<QPointF> parsed;
+    parsed.reserve(points.size());
+    for (const QVariant &entry : points) {
+        const QVariantMap map = entry.toMap();
+        parsed.append(QPointF(map.value(QStringLiteral("t")).toDouble(),
+                              map.value(QStringLiteral("g")).toDouble()));
+    }
+    m_fadeShape.setPoints(parsed);
+    clip.fadeCurve = drift::FadeCurve::Custom;
+    clip.fadeShape = m_fadeShape;
+    if (clip.animIn.kind == drift::ClipAnimKind::Fade || clip.animIn.curve == drift::FadeCurve::Custom) {
+        clip.animIn.curve = drift::FadeCurve::Custom;
+        clip.animIn.shape = m_fadeShape;
+    }
+    if (clip.animOut.kind == drift::ClipAnimKind::Fade || clip.animOut.curve == drift::FadeCurve::Custom) {
+        clip.animOut.curve = drift::FadeCurve::Custom;
+        clip.animOut.shape = m_fadeShape;
+    }
+    syncLinkedPartnersFrom(m_project, clip);
+    emit fadeCurveChanged();
+    emitPreviewFrame();
+}
+
+void AppController::resetFadeCurvePreset(const QString &preset)
+{
+    if (!m_fadeCurveActive)
+        return;
+    if (preset == QLatin1String("linear"))
+        m_fadeShape = drift::FadeShape::linearPreset();
+    else if (preset == QLatin1String("equalPower") || preset == QLatin1String("natural"))
+        m_fadeShape = drift::FadeShape::equalPowerPreset();
+    else
+        m_fadeShape = drift::FadeShape::smoothPreset();
+
+    QVariantList points;
+    for (const QPointF &pt : m_fadeShape.points()) {
+        points.append(QVariantMap{
+            {QStringLiteral("t"), pt.x()},
+            {QStringLiteral("g"), pt.y()},
+        });
+    }
+    setFadeCurvePoints(points);
+}
+
+void AppController::applyFadeCurve()
+{
+    if (!m_fadeCurveActive)
+        return;
+    if (m_fadeCurveTrack < 0 || m_fadeCurveTrack >= m_project.tracks().size())
+        return;
+    drift::Track &track = m_project.tracks()[m_fadeCurveTrack];
+    if (m_fadeCurveClipIndex < 0 || m_fadeCurveClipIndex >= track.clips.size())
+        return;
+    drift::Clip &clip = track.clips[m_fadeCurveClipIndex];
+    if (clip.id != m_fadeCurveClipId) {
+        setLastMessage(QStringLiteral("That clip moved — open Custom fade again"), QStringLiteral("warning"));
+        return;
+    }
+
+    // Rebuild the "before" snapshot: restore prior fade fields on a copy of the current project.
+    drift::Project before = m_project;
+    if (m_fadeCurveTrack < before.tracks().size()
+        && m_fadeCurveClipIndex < before.tracks().at(m_fadeCurveTrack).clips.size()) {
+        drift::Clip &beforeClip = before.tracks()[m_fadeCurveTrack].clips[m_fadeCurveClipIndex];
+        beforeClip.fadeCurve = m_fadeCurveBefore;
+        beforeClip.fadeShape = m_fadeShapeBefore;
+        syncLinkedPartnersFrom(before, beforeClip);
+    }
+
+    clip.fadeCurve = drift::FadeCurve::Custom;
+    clip.fadeShape = m_fadeShape;
+    if (clip.animIn.kind == drift::ClipAnimKind::Fade) {
+        clip.animIn.curve = drift::FadeCurve::Custom;
+        clip.animIn.shape = m_fadeShape;
+        clip.animIn.ease = drift::clipAnimCurveToEase(drift::FadeCurve::Custom);
+    }
+    if (clip.animOut.kind == drift::ClipAnimKind::Fade) {
+        clip.animOut.curve = drift::FadeCurve::Custom;
+        clip.animOut.shape = m_fadeShape;
+        clip.animOut.ease = drift::clipAnimCurveToEase(drift::FadeCurve::Custom);
+    }
+    // Motion Custom styles also share this curve editor session.
+    if (clip.animIn.curve == drift::FadeCurve::Custom)
+        clip.animIn.shape = m_fadeShape;
+    if (clip.animOut.curve == drift::FadeCurve::Custom)
+        clip.animOut.shape = m_fadeShape;
+    syncLinkedPartnersFrom(m_project, clip);
+    pushProjectEdit(before, QStringLiteral("Custom fade applied"));
+    m_fadeCurveApplied = true;
+    finishEdit(QStringLiteral("Custom fade applied"));
+    emit fadeCurveApplied();
+    endFadeCurveSession();
+}
+
 void AppController::endSegmentationSession()
 {
     if (m_segForTemplate)
@@ -5321,6 +5536,25 @@ void AppController::previewSetClipFade(int trackIndex, int clipIndex, double fad
     fout = qMin(fout, clip.timelineDuration - fin);
     clip.fadeInUs = fin;
     clip.fadeOutUs = fout;
+    if (clip.type != drift::ClipType::Audio && clip.type != drift::ClipType::Subtitle) {
+        if (fin > 0) {
+            clip.animIn.kind = drift::ClipAnimKind::Fade;
+            clip.animIn.durationUs = fin;
+            clip.animIn.curve = clip.fadeCurve;
+            clip.animIn.shape = clip.fadeShape;
+        } else if (clip.animIn.kind == drift::ClipAnimKind::Fade) {
+            clip.animIn.kind = drift::ClipAnimKind::None;
+        }
+        if (fout > 0) {
+            clip.animOut.kind = drift::ClipAnimKind::Fade;
+            clip.animOut.durationUs = fout;
+            clip.animOut.curve = clip.fadeCurve;
+            clip.animOut.shape = clip.fadeShape;
+        } else if (clip.animOut.kind == drift::ClipAnimKind::Fade) {
+            clip.animOut.kind = drift::ClipAnimKind::None;
+        }
+    }
+    syncLinkedPartnersFrom(m_project, clip);
     emitPreviewFrame();
 }
 
@@ -6404,6 +6638,30 @@ void AppController::setClipFade(int trackIndex, int clipIndex, double fadeInSeco
         clip.fadeCurve = drift::FadeCurve::EqualPower;
     clip.fadeInUs = fin;
     clip.fadeOutUs = fout;
+
+    // Timeline fade handles are the CapCut Fade In/Out animation for visual clips.
+    if (clip.type != drift::ClipType::Audio && clip.type != drift::ClipType::Subtitle) {
+        if (fin > 0) {
+            clip.animIn.kind = drift::ClipAnimKind::Fade;
+            clip.animIn.durationUs = fin;
+            clip.animIn.curve = clip.fadeCurve;
+            clip.animIn.shape = clip.fadeShape;
+            clip.animIn.ease = drift::clipAnimCurveToEase(clip.fadeCurve);
+        } else if (clip.animIn.kind == drift::ClipAnimKind::Fade) {
+            clip.animIn.kind = drift::ClipAnimKind::None;
+        }
+        if (fout > 0) {
+            clip.animOut.kind = drift::ClipAnimKind::Fade;
+            clip.animOut.durationUs = fout;
+            clip.animOut.curve = clip.fadeCurve;
+            clip.animOut.shape = clip.fadeShape;
+            clip.animOut.ease = drift::clipAnimCurveToEase(clip.fadeCurve);
+        } else if (clip.animOut.kind == drift::ClipAnimKind::Fade) {
+            clip.animOut.kind = drift::ClipAnimKind::None;
+        }
+    }
+
+    syncLinkedPartnersFrom(m_project, clip);
     pushProjectEdit(before, QStringLiteral("Fade updated"));
     finishEdit(QStringLiteral("Fade updated"));
 }
@@ -6419,13 +6677,105 @@ void AppController::setClipFadeCurve(int trackIndex, int clipIndex, const QStrin
 
     drift::Clip &clip = track.clips[clipIndex];
     const drift::FadeCurve newCurve = drift::fadeCurveFromString(curve);
-    if (clip.fadeCurve == newCurve)
+    if (clip.fadeCurve == newCurve
+        && (newCurve != drift::FadeCurve::Custom || !clip.fadeShape.isEmpty()))
         return;
 
     const drift::Project before = m_project;
     clip.fadeCurve = newCurve;
+    if (newCurve == drift::FadeCurve::Custom && clip.fadeShape.isEmpty())
+        clip.fadeShape = drift::FadeShape::smoothPreset();
+    // Keep CapCut Fade animations on the same style as the timeline curve editor.
+    if (clip.animIn.kind == drift::ClipAnimKind::Fade) {
+        clip.animIn.curve = newCurve;
+        clip.animIn.shape = clip.fadeShape;
+        clip.animIn.ease = drift::clipAnimCurveToEase(newCurve);
+    }
+    if (clip.animOut.kind == drift::ClipAnimKind::Fade) {
+        clip.animOut.curve = newCurve;
+        clip.animOut.shape = clip.fadeShape;
+        clip.animOut.ease = drift::clipAnimCurveToEase(newCurve);
+    }
+    syncLinkedPartnersFrom(m_project, clip);
     pushProjectEdit(before, QStringLiteral("Fade curve changed"));
     finishEdit(QStringLiteral("Fade curve updated"));
+}
+
+void AppController::setClipAnimation(int trackIndex, int clipIndex, const QString &which,
+                                     const QVariantMap &patch)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Clip &clip = track.clips.at(clipIndex);
+    if (clip.type == drift::ClipType::Audio || clip.type == drift::ClipType::Subtitle)
+        return;
+    if (patch.isEmpty())
+        return;
+
+    const bool isIn = which == QLatin1String("animIn");
+    const bool isOut = which == QLatin1String("animOut");
+    if (!isIn && !isOut)
+        return;
+
+    drift::ClipAnimation next = isIn ? clip.animIn : clip.animOut;
+    if (patch.contains(QStringLiteral("kind")))
+        next.kind = drift::clipAnimKindFromString(patch.value(QStringLiteral("kind")).toString());
+    if (patch.contains(QStringLiteral("duration")))
+        next.durationUs =
+            drift::secondsToUs(qBound(0.0, patch.value(QStringLiteral("duration")).toDouble(), 10.0));
+    if (patch.contains(QStringLiteral("curve"))) {
+        next.curve = drift::fadeCurveFromString(patch.value(QStringLiteral("curve")).toString());
+        next.ease = drift::clipAnimCurveToEase(next.curve);
+        if (next.curve == drift::FadeCurve::Custom && next.shape.isEmpty())
+            next.shape = clip.fadeShape.isEmpty() ? drift::FadeShape::smoothPreset() : clip.fadeShape;
+    } else if (patch.contains(QStringLiteral("ease"))) {
+        next.ease = drift::clipAnimEaseFromString(patch.value(QStringLiteral("ease")).toString());
+        next.curve = drift::clipAnimEaseToCurve(next.ease);
+    }
+
+    if (next.kind != drift::ClipAnimKind::None && next.durationUs <= 0)
+        next.durationUs = 500000;
+    next.durationUs = qMin(next.durationUs, clip.timelineDuration);
+
+    const drift::ClipAnimation &current = isIn ? clip.animIn : clip.animOut;
+    if (next.kind == current.kind && next.durationUs == current.durationUs
+        && next.curve == current.curve && next.ease == current.ease)
+        return;
+
+    const drift::Project before = m_project;
+    drift::Clip &mutableClip = m_project.tracks()[trackIndex].clips[clipIndex];
+    if (isIn)
+        mutableClip.animIn = next;
+    else
+        mutableClip.animOut = next;
+
+    // CapCut: Fade kind owns the timeline edge fade on that side; motion clears it.
+    if (isIn) {
+        if (next.kind == drift::ClipAnimKind::Fade) {
+            mutableClip.fadeInUs = next.durationUs;
+            mutableClip.fadeCurve = next.curve;
+            if (next.curve == drift::FadeCurve::Custom)
+                mutableClip.fadeShape = next.shape;
+        } else {
+            mutableClip.fadeInUs = 0;
+        }
+    } else {
+        if (next.kind == drift::ClipAnimKind::Fade) {
+            mutableClip.fadeOutUs = next.durationUs;
+            mutableClip.fadeCurve = next.curve;
+            if (next.curve == drift::FadeCurve::Custom)
+                mutableClip.fadeShape = next.shape;
+        } else {
+            mutableClip.fadeOutUs = 0;
+        }
+    }
+
+    pushProjectEdit(before, QStringLiteral("Clip animation changed"));
+    finishEdit(QStringLiteral("Clip animation updated"));
 }
 
 void AppController::setShapeStyle(int trackIndex, int clipIndex, const QVariantMap &m)
@@ -6512,7 +6862,7 @@ void AppController::addTransition(int trackIndex, int clipIndex, const QString &
         return;
 
     drift::Track &track = m_project.tracks()[trackIndex];
-    if (track.type != drift::TrackType::Video && track.type != drift::TrackType::Shape)
+    if (!trackAllowsTransitions(track.type))
         return;
 
     const int partnerIndex = findTransitionPartnerIndex(track, clipIndex);

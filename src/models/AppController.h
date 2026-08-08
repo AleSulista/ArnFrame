@@ -110,6 +110,11 @@ class AppController : public QObject
     Q_PROPERTY(QString speedCurveClipName READ speedCurveClipName NOTIFY speedCurveSessionChanged)
     Q_PROPERTY(QString speedCurveClipPath READ speedCurveClipPath NOTIFY speedCurveSessionChanged)
     Q_PROPERTY(QString speedCurveFilmstripPath READ speedCurveFilmstripPath NOTIFY speedCurveSessionChanged)
+    // Custom fade-shape session for FadeCurveWindow. Candidate is auditioned on the live clip
+    // until applyFadeCurve commits it (or endFadeCurveSession restores the prior shape).
+    Q_PROPERTY(bool fadeCurveSessionActive READ fadeCurveSessionActive NOTIFY fadeCurveSessionChanged)
+    Q_PROPERTY(QVariantList fadeCurvePoints READ fadeCurvePoints NOTIFY fadeCurveChanged)
+    Q_PROPERTY(QString fadeCurveClipName READ fadeCurveClipName NOTIFY fadeCurveSessionChanged)
     Q_PROPERTY(bool faceDetecting READ faceDetecting NOTIFY faceDetectingChanged)
     Q_PROPERTY(double faceDetectProgress READ faceDetectProgress NOTIFY faceDetectProgressChanged)
     Q_PROPERTY(QString faceDetectStatus READ faceDetectStatus NOTIFY faceDetectStatusChanged)
@@ -315,6 +320,15 @@ public:
     Q_INVOKABLE void seekSpeedCurvePreviewAtSource(double position);
     Q_INVOKABLE void applySpeedCurve();
     Q_INVOKABLE void clearClipSpeedCurve(int trackIndex, int clipIndex);
+
+    Q_INVOKABLE void beginFadeCurveSession(int trackIndex, int clipIndex);
+    Q_INVOKABLE void endFadeCurveSession();
+    bool fadeCurveSessionActive() const { return m_fadeCurveActive; }
+    QVariantList fadeCurvePoints() const;
+    Q_INVOKABLE void setFadeCurvePoints(const QVariantList &points);
+    QString fadeCurveClipName() const { return m_fadeCurveClipName; }
+    Q_INVOKABLE void applyFadeCurve();
+    Q_INVOKABLE void resetFadeCurvePreset(const QString &preset);
     Q_INVOKABLE void setSegmentationFrame(double seconds);
     Q_INVOKABLE void addSegmentationPoint(double x, double y, bool include);
     Q_INVOKABLE void removeSegmentationPoint(int index);
@@ -460,6 +474,9 @@ public:
     Q_INVOKABLE void setShapeStyle(int trackIndex, int clipIndex, const QVariantMap &style);
     Q_INVOKABLE void setClipFade(int trackIndex, int clipIndex, double fadeInSeconds, double fadeOutSeconds);
     Q_INVOKABLE void setClipFadeCurve(int trackIndex, int clipIndex, const QString &curve);
+    // which: "animIn" | "animOut". Partial patch: kind / duration / curve (or legacy ease).
+    Q_INVOKABLE void setClipAnimation(int trackIndex, int clipIndex, const QString &which,
+                                      const QVariantMap &patch);
     Q_INVOKABLE void addTransition(int trackIndex, int clipIndex, const QString &kind, double durationSeconds);
     Q_INVOKABLE void removeTransition(int trackIndex, const QString &transitionId);
     Q_INVOKABLE void setTransitionDuration(int trackIndex, const QString &transitionId, double durationSeconds);
@@ -699,6 +716,9 @@ signals:
     void speedCurvePositionChanged();
     void speedCurvePlayingChanged();
     void speedCurveApplied();
+    void fadeCurveSessionChanged();
+    void fadeCurveChanged();
+    void fadeCurveApplied();
     void faceDetectingChanged();
     void faceDetectProgressChanged();
     void faceDetectStatusChanged();
@@ -884,6 +904,16 @@ protected:
     int m_speedCurveClipIndex = -1;
     int m_speedCurveRevision = 0;
     bool m_speedCurveActive = false;
+
+    bool m_fadeCurveActive = false;
+    int m_fadeCurveTrack = -1;
+    int m_fadeCurveClipIndex = -1;
+    QString m_fadeCurveClipId;
+    QString m_fadeCurveClipName;
+    drift::FadeShape m_fadeShape;
+    drift::FadeCurve m_fadeCurveBefore = drift::FadeCurve::Smooth;
+    drift::FadeShape m_fadeShapeBefore;
+    bool m_fadeCurveApplied = false;
 
     bool m_reverseRendering = false;
     double m_reverseProgress = 0.0;

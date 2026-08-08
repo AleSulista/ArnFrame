@@ -261,7 +261,7 @@ PanelFrame {
         if (trackIndex < 0 || trackIndex >= tracks.length)
             return -1
         const track = tracks[trackIndex]
-        if (track.type !== "video" && track.type !== "shape")
+        if (track.type !== "video" && track.type !== "shape" && track.type !== "text")
             return -1
         const seconds = xPixels / pxPerSecond
         const clips = track.clips
@@ -1312,7 +1312,9 @@ PanelFrame {
                                                 return leftEnd
                                             return leftEnd + 0.25
                                         }
-                                        property bool showRegion: (trackType === "video" || trackType === "shape")
+                                        property bool showRegion: (trackType === "video"
+                                                                   || trackType === "shape"
+                                                                   || trackType === "text")
                                                                   && clipsLinked
                                                                   && regionEnd > regionStart
 

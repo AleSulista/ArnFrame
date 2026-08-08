@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 
+#include "core/ClipAnimation.h"
 #include "core/Keyframe.h"
 #include "core/Project.h"
 #include "core/ShapePath.h"
@@ -76,6 +77,7 @@ private slots:
     void physicalOverlapTransitionWindow();
     void backgroundSerialization();
     void fadeSerializationAndMultiplier();
+    void clipAnimationSerializationAndSample();
     void rebaseClipLayoutFreezesImplicitSize();
     void rebaseClipLayoutShiftsKeyframedPosition();
 };
@@ -2074,11 +2076,94 @@ void CoreTest::fadeSerializationAndMultiplier()
     QVERIFY(qAbs(c.fadeMultiplier(c.timelineStart + drift::secondsToUs(1.5)) - 1.0) < 1e-6);
     QVERIFY(qAbs(c.fadeMultiplier(c.timelineEnd() - drift::secondsToUs(1.0)) - 0.5) < 1e-6);
 
+    // Presets must diverge early in the fade so Smooth / Natural are audible and visible.
+    // (Smoothstep equals Linear at t=0.5, so sample at quarter-fade.)
+    drift::Clip smooth = c;
+    smooth.fadeCurve = drift::FadeCurve::Smooth;
+    drift::Clip natural = c;
+    natural.fadeCurve = drift::FadeCurve::EqualPower;
+    const drift::TimeUs earlyIn = c.timelineStart + drift::secondsToUs(0.25);
+    const double linearEarly = c.fadeMultiplier(earlyIn);
+    const double smoothEarly = smooth.fadeMultiplier(earlyIn);
+    const double naturalEarly = natural.fadeMultiplier(earlyIn);
+    QVERIFY(smoothEarly < linearEarly - 0.05);
+    QVERIFY(naturalEarly > linearEarly + 0.05);
+
+    // Custom shape round-trips and drives the multiplier.
+    drift::Clip custom = c;
+    custom.fadeCurve = drift::FadeCurve::Custom;
+    custom.fadeShape.setPoints({QPointF(0.0, 0.0), QPointF(0.5, 0.25), QPointF(1.0, 1.0)});
+    project.tracks()[0].clips[0] = custom;
+    const drift::Project customLoaded = drift::Project::fromJson(project.toJson(), &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    const drift::Clip &cc = customLoaded.tracks()[0].clips[0];
+    QCOMPARE(cc.fadeCurve, drift::FadeCurve::Custom);
+    QVERIFY(!cc.fadeShape.isEmpty());
+    const drift::TimeUs midIn = c.timelineStart + drift::secondsToUs(0.5);
+    QVERIFY(qAbs(cc.fadeMultiplier(midIn) - 0.25) < 1e-6);
+
     // A clip with no fades is always fully present.
     drift::Clip plain;
     plain.timelineStart = 0;
     plain.timelineDuration = drift::secondsToUs(2.0);
     QCOMPARE(plain.fadeMultiplier(drift::secondsToUs(1.0)), 1.0);
+}
+
+void CoreTest::clipAnimationSerializationAndSample()
+{
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("anim-clip");
+    clip.type = drift::ClipType::Shape;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(2.0);
+    clip.animIn = {drift::ClipAnimKind::Fade, drift::secondsToUs(1.0), drift::ClipAnimEase::Linear,
+                   drift::FadeCurve::Linear};
+    clip.animOut = {drift::ClipAnimKind::ZoomIn, drift::secondsToUs(0.5), drift::ClipAnimEase::EaseOut,
+                    drift::FadeCurve::EqualPower};
+    project.tracks()[0].clips.append(clip);
+
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(project.toJson(), &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    const drift::Clip &c = loaded.tracks()[0].clips[0];
+    QCOMPARE(c.animIn.kind, drift::ClipAnimKind::Fade);
+    QCOMPARE(c.animIn.durationUs, drift::secondsToUs(1.0));
+    QCOMPARE(c.animIn.curve, drift::FadeCurve::Linear);
+    QCOMPARE(c.animOut.kind, drift::ClipAnimKind::ZoomIn);
+    QCOMPARE(c.animOut.curve, drift::FadeCurve::EqualPower);
+
+    // Fade kind owns opacity via fadeMultiplier (not body-anim sample).
+    QVERIFY(qAbs(c.fadeMultiplier(drift::secondsToUs(0.5)) - 0.5) < 1e-6);
+    const drift::ClipAnimSample midIn =
+        drift::evaluateClipAnimation(c.timelineStart, c.timelineDuration, c.animIn, {},
+                                     drift::secondsToUs(0.5), 100.0, 100.0);
+    QVERIFY(qAbs(midIn.opacity - 1.0) < 1e-6);
+
+    drift::Clip zoom;
+    zoom.timelineStart = 0;
+    zoom.timelineDuration = drift::secondsToUs(2.0);
+    zoom.animIn = {drift::ClipAnimKind::ZoomIn, drift::secondsToUs(1.0), drift::ClipAnimEase::Linear,
+                   drift::FadeCurve::Linear};
+    const drift::ClipAnimSample zoomMid =
+        drift::evaluateClipAnimation(zoom.timelineStart, zoom.timelineDuration, zoom.animIn, {},
+                                     drift::secondsToUs(0.5), 100.0, 100.0);
+    QVERIFY(qAbs(zoomMid.scale - 0.8) < 1e-6); // 0.6 + 0.4 * 0.5
+    QVERIFY(zoomMid.scale < 1.0);
+
+    // Smooth style bends motion progress vs linear at quarter-time.
+    drift::Clip smoothZoom = zoom;
+    smoothZoom.animIn.curve = drift::FadeCurve::Smooth;
+    const drift::ClipAnimSample smoothMid =
+        drift::evaluateClipAnimation(smoothZoom.timelineStart, smoothZoom.timelineDuration,
+                                     smoothZoom.animIn, {}, drift::secondsToUs(0.25), 100.0, 100.0);
+    const drift::ClipAnimSample linearQuarter =
+        drift::evaluateClipAnimation(zoom.timelineStart, zoom.timelineDuration, zoom.animIn, {},
+                                     drift::secondsToUs(0.25), 100.0, 100.0);
+    QVERIFY(smoothMid.scale < linearQuarter.scale - 0.01);
 }
 
 // A canvas resize must not move or rescale anything: clips that relied on the

@@ -136,6 +136,7 @@ private slots:
     void heavyWeightsRenderSolidGlyphs();
     void textClipCarriesGpuEffects();
     void textAnimationFadesAndSlides();
+    void clipBodyAnimationFadeRampsOpacity();
     void maskApplierEllipseMasksCorners();
     void exporterProducesPlayableFileWithBackground();
     void mixerHasNoBlockBoundaryDropout();
@@ -3168,6 +3169,33 @@ void EngineTest::textAnimationFadesAndSlides()
     const double startY = litCentroidY(compositor.compositeAt(drift::secondsToUs(0.1)));
     const double endY = litCentroidY(compositor.compositeAt(drift::secondsToUs(2.0)));
     QVERIFY2(startY > endY + 1.0, "slide-up entrance did not travel upward");
+}
+
+void EngineTest::clipBodyAnimationFadeRampsOpacity()
+{
+    drift::Project project;
+    project.setResolution(128, 128);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("body");
+    clip.type = drift::ClipType::Shape;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(2.0);
+    clip.shapeStyle.kind = drift::ShapeKind::Rectangle;
+    clip.shapeStyle.fill = Qt::white;
+    clip.animIn = {drift::ClipAnimKind::Fade, drift::secondsToUs(1.0), drift::ClipAnimEase::Linear,
+                   drift::FadeCurve::Linear};
+    project.tracks()[0].clips.append(clip);
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+
+    const double early = meanLuminance(compositor.compositeAt(drift::secondsToUs(0.05)));
+    const double mid = meanLuminance(compositor.compositeAt(drift::secondsToUs(0.5)));
+    const double settled = meanLuminance(compositor.compositeAt(drift::secondsToUs(1.5)));
+    QVERIFY2(early < mid && mid < settled, "clip body fade-in did not ramp up");
 }
 
 void EngineTest::maskApplierEllipseMasksCorners()

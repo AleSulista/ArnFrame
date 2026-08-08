@@ -12,6 +12,7 @@
 #include "TextRaster.h"
 #include "TransitionCatalog.h"
 #include "core/Clip.h"
+#include "core/ClipAnimation.h"
 #include "core/ShapePath.h"
 #include "core/SubtitleCue.h"
 #include "core/Time.h"
@@ -555,6 +556,30 @@ int karaokeWordIndex(const drift::Clip &clip, const drift::SubtitleCue &cue, dri
     return drift::activeWordIndexAt(cue.text, cue.startUs, cue.endUs, localUs);
 }
 
+// CapCut-style body intro/outro: opacity/offset/scale/rotation on top of fades and text anims.
+void applyClipBodyAnimation(const drift::Clip &clip, drift::TimeUs timelineUs, double layoutW,
+                            double layoutH, QRectF *destRect, double *opacity, double *rotation)
+{
+    if (!destRect || !opacity || !rotation)
+        return;
+    if (clip.type == drift::ClipType::Audio || clip.type == drift::ClipType::Subtitle)
+        return;
+    if (clip.animIn.kind == drift::ClipAnimKind::None && clip.animOut.kind == drift::ClipAnimKind::None)
+        return;
+
+    const drift::ClipAnimSample body =
+        drift::evaluateClipAnimation(clip.timelineStart, clip.timelineDuration, clip.animIn,
+                                     clip.animOut, timelineUs, layoutW, layoutH);
+    *opacity *= body.opacity;
+    destRect->translate(body.dx, body.dy);
+    if (!qFuzzyCompare(body.scale, 1.0)) {
+        const QPointF centre = destRect->center();
+        destRect->setSize(destRect->size() * body.scale);
+        destRect->moveCenter(centre);
+    }
+    *rotation += body.rotationDeg;
+}
+
 GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int projectWidth,
                        int projectHeight, double renderScale, int canvasWidth, int canvasHeight,
                        int projectFps, int maxTimeEchoHistoryFrames)
@@ -649,6 +674,8 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
 
     if (!layer.hasPixels())
         return layer;
+
+    applyClipBodyAnimation(clip, timelineUs, w, h, &destRect, &opacity, &rotation);
 
     layer.mask = clip.mask;
     if (clip.mask.shape == drift::MaskShape::Matte && !clip.mask.mattePath.isEmpty()) {
@@ -746,10 +773,15 @@ QList<GpuItem> buildTextSpanItems(const drift::Clip &clip, drift::TimeUs timelin
                 continue; // a span that has not entered (or has fully exited) draws nothing
         }
 
+        double spanRotation = rotation;
+        applyClipBodyAnimation(clip, timelineUs, w, h, &destRect, &opacity, &spanRotation);
+        if (opacity <= 0.001)
+            continue;
+
         // Clip masks are layer-relative, so applying one here would stamp the whole shape onto every
         // span. Kinetic text + mask is rare; spans are left unmasked rather than mask each glyph.
         layer.rect = destRect;
-        layer.rotation = rotation;
+        layer.rotation = spanRotation;
         layer.flipH = clip.flipH;
         layer.flipV = clip.flipV;
         layer.opacity = opacity;

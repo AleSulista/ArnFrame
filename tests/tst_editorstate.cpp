@@ -44,11 +44,15 @@ private slots:
     void effectBrowserCategoriesAndApply();
     void multiSelectClipboardGuidesAndShortcuts();
     void addTransitionBetweenAdjacentClips();
+    void addTransitionBetweenAdjacentTextClips();
+    void clipAnimationUndoRestoresKind();
     void setTransitionKindAndDurationPersist();
     void replaceTransitionOnDrop();
     void overlapAutoAppliesCrossfade();
     void separateAudioFromCombinedClip();
     void linkedAudioUnlinkAndMove();
+    void linkedFadeCurveSyncsPartner();
+    void customFadeCurveSessionApplyAndCancel();
     void keyframeGraphPropertySelection();
     void keyframesCanBeDisabledPerProperty();
     void effectParamKeyframes();
@@ -900,6 +904,66 @@ void EditorStateTest::separateAudioFromCombinedClip()
     QVERIFY(!state.canSeparateAudioSelection());
 }
 
+void EditorStateTest::linkedFadeCurveSyncsPartner()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendLinkedVideoAudioPair(*state.project());
+
+    state.setClipFade(0, 0, 0.8, 0.4);
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).fadeInUs, drift::secondsToUs(0.8));
+    QCOMPARE(state.project()->tracks().at(1).clips.at(0).fadeInUs, drift::secondsToUs(0.8));
+    QCOMPARE(state.project()->tracks().at(1).clips.at(0).fadeOutUs, drift::secondsToUs(0.4));
+
+    state.setClipFadeCurve(0, 0, QStringLiteral("equalPower"));
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).fadeCurve, drift::FadeCurve::EqualPower);
+    QCOMPARE(state.project()->tracks().at(1).clips.at(0).fadeCurve, drift::FadeCurve::EqualPower);
+
+    state.beginPreviewDrag(QStringLiteral("Adjust fade"));
+    state.previewSetClipFade(0, 0, 1.0, 0.5);
+    QCOMPARE(state.project()->tracks().at(1).clips.at(0).fadeInUs, drift::secondsToUs(1.0));
+    QCOMPARE(state.project()->tracks().at(1).clips.at(0).fadeOutUs, drift::secondsToUs(0.5));
+    state.commitPreviewDrag();
+}
+
+void EditorStateTest::customFadeCurveSessionApplyAndCancel()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendLinkedVideoAudioPair(*state.project());
+    state.setClipFade(0, 0, 1.0, 0.0);
+    state.setClipFadeCurve(0, 0, QStringLiteral("linear"));
+
+    state.beginFadeCurveSession(0, 0);
+    QVERIFY(state.fadeCurveSessionActive());
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).fadeCurve, drift::FadeCurve::Custom);
+
+    state.setFadeCurvePoints(QVariantList{
+        QVariantMap{{QStringLiteral("t"), 0.0}, {QStringLiteral("g"), 0.0}},
+        QVariantMap{{QStringLiteral("t"), 0.5}, {QStringLiteral("g"), 0.2}},
+        QVariantMap{{QStringLiteral("t"), 1.0}, {QStringLiteral("g"), 1.0}},
+    });
+    QCOMPARE(state.project()->tracks().at(1).clips.at(0).fadeCurve, drift::FadeCurve::Custom);
+    QVERIFY(qAbs(state.project()->tracks().at(0).clips.at(0).fadeShape.gainAt(0.5) - 0.2) < 1e-6);
+
+    state.endFadeCurveSession();
+    QVERIFY(!state.fadeCurveSessionActive());
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).fadeCurve, drift::FadeCurve::Linear);
+
+    state.beginFadeCurveSession(0, 0);
+    state.setFadeCurvePoints(QVariantList{
+        QVariantMap{{QStringLiteral("t"), 0.0}, {QStringLiteral("g"), 0.0}},
+        QVariantMap{{QStringLiteral("t"), 0.5}, {QStringLiteral("g"), 0.75}},
+        QVariantMap{{QStringLiteral("t"), 1.0}, {QStringLiteral("g"), 1.0}},
+    });
+    state.applyFadeCurve();
+    QVERIFY(!state.fadeCurveSessionActive());
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).fadeCurve, drift::FadeCurve::Custom);
+    QVERIFY(qAbs(state.project()->tracks().at(0).clips.at(0).fadeShape.gainAt(0.5) - 0.75) < 1e-6);
+    QCOMPARE(state.project()->tracks().at(1).clips.at(0).fadeCurve, drift::FadeCurve::Custom);
+    QVERIFY(qAbs(state.project()->tracks().at(1).clips.at(0).fadeShape.gainAt(0.5) - 0.75) < 1e-6);
+}
+
 void EditorStateTest::linkedAudioUnlinkAndMove()
 {
     AssetLibrary library;
@@ -942,6 +1006,60 @@ void EditorStateTest::addTransitionBetweenAdjacentClips()
     QVERIFY(!transition.isEmpty());
     QCOMPARE(transition.value(QStringLiteral("kind")).toString(), QStringLiteral("wipe_left"));
     QCOMPARE(transition.value(QStringLiteral("duration")).toDouble(), 0.75);
+}
+
+void EditorStateTest::addTransitionBetweenAdjacentTextClips()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("One"), 0.0);
+    state.setClipDuration(0, 0, 2.0);
+    state.addTextClip(QStringLiteral("Two"), 2.0);
+    state.setClipDuration(0, 1, 2.0);
+
+    QCOMPARE(state.project()->tracks().at(0).type, drift::TrackType::Text);
+    QCOMPARE(state.project()->tracks().at(0).clips.size(), 2);
+
+    state.addTransition(0, 0, QStringLiteral("crossfade"), 0.5);
+    const QVariantMap transition = state.transitionBetweenClips(0, 0);
+    QVERIFY(!transition.isEmpty());
+    QCOMPARE(transition.value(QStringLiteral("kind")).toString(), QStringLiteral("crossfade"));
+    QCOMPARE(transition.value(QStringLiteral("duration")).toDouble(), 0.5);
+}
+
+void EditorStateTest::clipAnimationUndoRestoresKind()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("Title"), 0.0);
+
+    const int track = state.selectedTrack();
+    const int clip = state.selectedClip();
+    QCOMPARE(state.project()->tracks().at(track).clips.at(clip).animIn.kind, drift::ClipAnimKind::None);
+
+    state.setClipAnimation(track, clip, QStringLiteral("animIn"),
+                           QVariantMap{{QStringLiteral("kind"), QStringLiteral("pop")},
+                                       {QStringLiteral("duration"), 0.4},
+                                       {QStringLiteral("curve"), QStringLiteral("smooth")}});
+    QCOMPARE(state.project()->tracks().at(track).clips.at(clip).animIn.kind, drift::ClipAnimKind::Pop);
+    QCOMPARE(state.project()->tracks().at(track).clips.at(clip).animIn.durationUs,
+             drift::secondsToUs(0.4));
+    QCOMPARE(state.project()->tracks().at(track).clips.at(clip).animIn.curve, drift::FadeCurve::Smooth);
+    QCOMPARE(state.project()->tracks().at(track).clips.at(clip).fadeInUs, drift::TimeUs{0});
+
+    state.setClipAnimation(track, clip, QStringLiteral("animIn"),
+                           QVariantMap{{QStringLiteral("kind"), QStringLiteral("fade")},
+                                       {QStringLiteral("duration"), 0.6},
+                                       {QStringLiteral("curve"), QStringLiteral("equalPower")}});
+    QCOMPARE(state.project()->tracks().at(track).clips.at(clip).animIn.kind, drift::ClipAnimKind::Fade);
+    QCOMPARE(state.project()->tracks().at(track).clips.at(clip).fadeInUs, drift::secondsToUs(0.6));
+    QCOMPARE(state.project()->tracks().at(track).clips.at(clip).fadeCurve, drift::FadeCurve::EqualPower);
+
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    QCOMPARE(state.project()->tracks().at(track).clips.at(clip).animIn.kind, drift::ClipAnimKind::Pop);
+    state.undo();
+    QCOMPARE(state.project()->tracks().at(track).clips.at(clip).animIn.kind, drift::ClipAnimKind::None);
 }
 
 void EditorStateTest::setTransitionKindAndDurationPersist()

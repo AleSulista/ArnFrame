@@ -344,6 +344,7 @@ QtObject {
         type: "type",
         smile: "smile",
         wand: "wand-sparkles",
+        sparkles: "sparkles",
         sliders: "sliders-horizontal",
         settings: "settings",
         upload: "upload",

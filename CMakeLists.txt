@@ -250,6 +250,10 @@ add_library(driftcore STATIC
     src/core/Bezier.h
     src/core/SpeedCurve.h
     src/core/SpeedCurve.cpp
+    src/core/FadeShape.h
+    src/core/FadeShape.cpp
+    src/core/ClipAnimation.h
+    src/core/ClipAnimation.cpp
     src/core/SubtitleCue.h
     src/core/SubtitleCue.cpp
     src/core/SrtIO.h
@@ -512,6 +516,7 @@ qt_add_qml_module(drift
         src/qml/SegmentationWindow.qml
         src/qml/DenoiseWindow.qml
         src/qml/SpeedCurveWindow.qml
+        src/qml/FadeCurveWindow.qml
         src/qml/PropertiesPanel.qml
         src/qml/components/properties/GeneralInspector.qml
         src/qml/components/properties/TextInspector.qml
@@ -519,6 +524,7 @@ qt_add_qml_module(drift
         src/qml/components/properties/AudioInspector.qml
         src/qml/components/properties/AudioEffectsInspector.qml
         src/qml/components/properties/SpeedFadeInspector.qml
+        src/qml/components/properties/AnimationInspector.qml
         src/qml/components/properties/TransitionInspector.qml
         src/qml/components/properties/BlendingInspector.qml
         src/qml/components/properties/ShapeInspector.qml

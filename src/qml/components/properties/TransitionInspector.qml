@@ -41,7 +41,7 @@ Item {
         if (t < 0 || !tracks || t >= tracks.length)
             return false
         const track = tracks[t]
-        if (track.type !== "video" && track.type !== "shape")
+        if (track.type !== "video" && track.type !== "shape" && track.type !== "text")
             return false
         if (c < 0 || c >= track.clips.length)
             return false
@@ -134,9 +134,9 @@ Item {
             width: parent.width
             wrapMode: Text.WordWrap
             visible: !root.hasActiveTransition && !root.canAddOutgoingTransition
-            text: root.clipKind === "video" || root.clipKind === "shape"
+            text: root.clipKind === "video" || root.clipKind === "shape" || root.clipKind === "text"
                   ? qsTr("Select where two clips overlap (shown in purple), or drag a clip so it overlaps the next one.")
-                  : qsTr("Transitions work between two clips on a video or shape track.")
+                  : qsTr("Transitions work between two clips on a video, shape, or text track.")
             color: Theme.mutedForeground
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSm
