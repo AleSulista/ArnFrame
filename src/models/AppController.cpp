@@ -2529,6 +2529,11 @@ void AppController::splitClipLeftAt(int trackIndex, int clipIndex, double second
     right.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     // Keep only the right half — everything left of the cut is dropped.
     track.clips[clipIndex] = right;
+    // Close the leading gap: keep the left edge put and pull followers.
+    if (m_rippleEnabled) {
+        track.clips[clipIndex].timelineStart -= offset;
+        applyRippleShift(track, clipIndex, -offset);
+    }
 
     pushProjectEdit(before, QStringLiteral("Split left"));
     finishEdit(QStringLiteral("Split left"));
@@ -2551,12 +2556,14 @@ void AppController::splitClipRightAt(int trackIndex, int clipIndex, double secon
 
     const drift::TimeUs offset = atUs - clip.timelineStart;
     const drift::Project before = m_project;
+    const drift::TimeUs oldDuration = clip.timelineDuration;
 
     drift::Clip discardedTail;
     if (!drift::splitClipAtOffset(clip, discardedTail, offset))
         return;
 
     // Keep only the left half — everything right of the cut is dropped.
+    applyRippleShift(track, clipIndex, clip.timelineDuration - oldDuration);
     pushProjectEdit(before, QStringLiteral("Split right"));
     finishEdit(QStringLiteral("Split right"));
     selectClip(trackIndex, clipIndex);
