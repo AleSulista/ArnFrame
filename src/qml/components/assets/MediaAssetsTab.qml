@@ -27,6 +27,8 @@ Item {
     signal replaceRequested(int assetIndex)
     // Emitted from the card/row context menu. The parent owns the rename dialog.
     signal renameRequested(int assetIndex)
+    // Emitted from the card/row context menu, image rows only. The parent owns the save dialog.
+    signal exportRequested(int assetIndex)
     // Emitted when the empty-state action asks to import media.
     signal importRequested()
 
@@ -326,6 +328,12 @@ Item {
                                 onTriggered: root.replaceRequested(assetIndex)
                             }
                             ThemedMenuItem {
+                                text: qsTr("Export image…")
+                                icon.name: Theme.icons.save
+                                visible: kind === "image"
+                                onTriggered: root.exportRequested(assetIndex)
+                            }
+                            ThemedMenuItem {
                                 text: qsTr("Remove from project")
                                 icon.name: Theme.icons.trash
                                 onTriggered: root.removeRequested(assetIndex)
@@ -501,6 +509,12 @@ Item {
                             text: qsTr("Replace media…")
                             icon.name: Theme.icons.refresh
                             onTriggered: root.replaceRequested(assetIndex)
+                        }
+                        ThemedMenuItem {
+                            text: qsTr("Export image…")
+                            icon.name: Theme.icons.save
+                            visible: kind === "image"
+                            onTriggered: root.exportRequested(assetIndex)
                         }
                         ThemedMenuItem {
                             text: qsTr("Remove from project")

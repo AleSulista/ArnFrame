@@ -273,6 +273,9 @@ public:
     // is — its position, trim, effects and transitions all survive. Asynchronous: true only means
     // the probe started, and the outcome arrives as assetReplaceFinished.
     Q_INVOKABLE bool replaceAssetSource(int assetIndex, const QUrl &url);
+    // Writes an image asset (a freeze frame, typically) out to `url`. The format follows the
+    // destination's extension, so the picker's name filter never has to be reported back.
+    Q_INVOKABLE bool exportAssetImage(int assetIndex, const QUrl &url);
     Q_INVOKABLE bool trackAcceptsAsset(int trackIndex, int assetIndex) const;
     Q_INVOKABLE QString trackTypeForAsset(int assetIndex) const;
     // presetId applies a built-in style pack on create; empty keeps the default text style.

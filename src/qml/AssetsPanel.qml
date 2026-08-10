@@ -149,6 +149,24 @@ PanelFrame {
         EditorState.replaceAssetSource(assetIndex, url)
     }
 
+    // Writes an image row back out to disk — the way a freeze frame captured in the preview
+    // leaves the project. The format follows the name the user picks, not the filter.
+    function requestExportAsset(assetIndex) {
+        const asset = AssetLibrary.assetAt(assetIndex)
+        if (!asset || asset.kind !== "image")
+            return
+        var url = FileDialogs.saveFile(qsTr("Export Image"), [
+            qsTr("PNG image (*.png)"),
+            qsTr("JPEG image (*.jpg *.jpeg)")
+        ], asset.name, "png")
+        if (!url || url.toString() === "")
+            return
+        if (EditorState.exportAssetImage(assetIndex, url))
+            Toasts.success(qsTr("Exported “%1”.").arg(asset.name))
+        else
+            Toasts.error(qsTr("Couldn’t export that image."))
+    }
+
     Connections {
         target: EditorState
 
@@ -858,6 +876,7 @@ PanelFrame {
                 onRemoveRequested: (assetIndex) => root.requestRemoveAsset(assetIndex)
                 onReplaceRequested: (assetIndex) => root.requestReplaceAsset(assetIndex)
                 onRenameRequested: (assetIndex) => root.requestRenameAsset(assetIndex)
+                onExportRequested: (assetIndex) => root.requestExportAsset(assetIndex)
                 onImportRequested: root.importMedia()
             }
         }

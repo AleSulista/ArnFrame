@@ -90,7 +90,7 @@ Item {
         if (type === "audio") return qsTr("Audio");
         if (type === "text") return qsTr("Text");
         if (type === "subtitle") return qsTr("Subtitle");
-        if (type === "shape") return qsTr("Shape");
+        if (type === "shape") return qsTr("Graphic");
         return qsTr("Video");
     }
 

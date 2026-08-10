@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QImage>
 #include <QProcess>
 #include <QSet>
 #include <QSettings>
@@ -66,6 +67,7 @@ private slots:
     void shapeStylePartialUpdateAndUndo();
     void replaceAssetSourceRebindsClipsAndClampsTrim();
     void replaceAssetSourceRefusesADifferentKind();
+    void exportAssetImageWritesPngAndJpeg();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -1717,6 +1719,42 @@ void EditorStateTest::replaceAssetSourceRefusesADifferentKind()
     QCOMPARE(project.tracks().at(state.selectedTrack()).clips.at(0).path, originalPath);
     // A refused swap must not leave an empty step on the stack for the user to undo.
     QCOMPARE(undoStack.count(), 0);
+}
+
+// The way a freeze frame leaves the project: a PNG destination copies the bytes through
+// untouched, while a .jpg destination re-encodes at the same size.
+void EditorStateTest::exportAssetImageWritesPngAndJpeg()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    QImage source(64, 48, QImage::Format_ARGB32);
+    source.fill(Qt::red);
+    const QString sourcePath = dir.filePath(QStringLiteral("freeze.png"));
+    QVERIFY(source.save(sourcePath, "PNG"));
+
+    AssetLibrary library;
+    AppController state(&library);
+
+    drift::MediaAsset asset;
+    asset.name = QStringLiteral("Freeze frame");
+    asset.path = sourcePath;
+    asset.kind = drift::MediaKind::Image;
+    asset.width = source.width();
+    asset.height = source.height();
+    QVERIFY(!library.addGeneratedAsset(asset).isEmpty());
+
+    const QString pngOut = dir.filePath(QStringLiteral("out.png"));
+    QVERIFY(state.exportAssetImage(0, QUrl::fromLocalFile(pngOut)));
+    QCOMPARE(QFileInfo(pngOut).size(), QFileInfo(sourcePath).size());
+
+    const QString jpegOut = dir.filePath(QStringLiteral("out.jpg"));
+    QVERIFY(state.exportAssetImage(0, QUrl::fromLocalFile(jpegOut)));
+    const QImage written(jpegOut);
+    QVERIFY(!written.isNull());
+    QCOMPARE(written.size(), source.size());
+
+    QVERIFY(!state.exportAssetImage(1, QUrl::fromLocalFile(dir.filePath(QStringLiteral("no.png")))));
 }
 
 QTEST_MAIN(EditorStateTest)

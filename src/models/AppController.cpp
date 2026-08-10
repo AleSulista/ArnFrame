@@ -1513,6 +1513,51 @@ bool AppController::replaceAssetSource(int assetIndex, const QUrl &url)
     return true;
 }
 
+bool AppController::exportAssetImage(int assetIndex, const QUrl &url)
+{
+    if (!m_assetLibrary)
+        return false;
+
+    const QVariantMap asset = m_assetLibrary->assetAt(assetIndex);
+    if (asset.value(QStringLiteral("kind")).toString()
+        != drift::mediaKindToString(drift::MediaKind::Image)) {
+        return false;
+    }
+
+    const QString sourcePath = asset.value(QStringLiteral("path")).toString();
+    if (sourcePath.isEmpty() || !QFileInfo(sourcePath).isFile())
+        return false;
+
+    // The path the picker returned is written to exactly as given — see FileDialogs::saveFile for
+    // why appending a suffix to it would write somewhere the document portal never registered.
+    const QString destPath = url.isLocalFile() ? url.toLocalFile() : QString();
+    if (destPath.isEmpty())
+        return false;
+
+    const QString suffix = QFileInfo(destPath).suffix().toLower();
+    const bool jpeg = suffix == QLatin1String("jpg") || suffix == QLatin1String("jpeg");
+
+    // Same format in and out: copy the bytes rather than decode and re-encode, so a freeze frame
+    // saved as PNG comes out pixel-for-pixel what the compositor produced.
+    if (!jpeg && suffix == QFileInfo(sourcePath).suffix().toLower()) {
+        QFile::remove(destPath); // The picker already confirmed the overwrite; copy() won't clobber.
+        return QFile::copy(sourcePath, destPath);
+    }
+
+    QImage image(sourcePath);
+    if (image.isNull())
+        return false;
+
+    if (jpeg) {
+        // JPEG has no alpha, and Qt writes transparent pixels as black without this.
+        if (image.hasAlphaChannel())
+            image = image.convertToFormat(QImage::Format_RGB32);
+        return image.save(destPath, "JPG", 95);
+    }
+
+    return image.save(destPath, "PNG");
+}
+
 void AppController::finalizeAssetReplace(const QString &assetId, const drift::MediaAsset &filled,
                                          bool ok)
 {
@@ -8924,7 +8969,9 @@ void AppController::freezeFrameAtPlayhead()
                 asset.hasAudioKnown = true;
                 const QString assetId = m_assetLibrary->addGeneratedAsset(asset);
 
-                const int trackIndex = drift::ensureTrackForClipType(m_project, drift::ClipType::Image, false);
+                // Inserted at the top: track 0 composites in front, so a freeze frame on a freshly
+                // appended track would sit behind the video it was captured from and show nothing.
+                const int trackIndex = drift::ensureTrackForClipType(m_project, drift::ClipType::Image, true);
 
                 drift::Track &track = m_project.tracks()[trackIndex];
                 const drift::TimeUs start = drift::resolveClipStart(m_project, track, -1, playheadUs,
@@ -8949,6 +8996,7 @@ void AppController::freezeFrameAtPlayhead()
                 track.clips.append(freezeClip);
                 pushProjectEdit(before, QStringLiteral("Freeze frame added"));
                 finishEdit(QStringLiteral("Freeze frame added"));
+                selectClip(trackIndex, track.clips.size() - 1);
             },
             Qt::QueuedConnection);
     });
