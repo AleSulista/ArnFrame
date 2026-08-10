@@ -644,7 +644,7 @@ void EditorStateTest::fontCatalogIsExposedToQml()
 
     const QVariantList catalog = state.fontCatalog();
     if (catalog.isEmpty())
-        QSKIP("font bundle not present — run scripts/fetch-fonts.py");
+        QSKIP("font bundle not present — see recipes/fetch-fonts.py in drift-addons");
 
     // Every key the FontPicker delegate and the weight combo read must actually arrive.
     for (const QVariant &entry : catalog) {

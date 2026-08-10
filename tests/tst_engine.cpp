@@ -1429,12 +1429,14 @@ void EngineTest::effectPresetStableIds()
         QStringLiteral("wave_warp"),       QStringLiteral("zoom_pulse"),
     };
 
+    // absolutePath() because the macro points out of the source tree with a ".." segment, while
+    // the catalog stores what QFileInfo::absoluteFilePath() produced — already cleaned.
+    const QString addonEffectsDir =
+        QDir(QString::fromUtf8(DRIFT_TEST_ADDON_EFFECTS_DIR)).absolutePath() + QLatin1Char('/');
+
     QSet<QString> seen;
     for (const QString &id : ids) {
         QVERIFY2(!id.isEmpty(), "preset id must not be empty");
-        QVERIFY2(id.contains(QLatin1Char('.')) || legacyBareIds.contains(id)
-                     || id.startsWith(QStringLiteral("face_")),
-                 qPrintable(QStringLiteral("stable id: %1").arg(id)));
         QVERIFY2(!seen.contains(id), qPrintable(QStringLiteral("duplicate id: %1").arg(id)));
         seen.insert(id);
 
@@ -1445,6 +1447,16 @@ void EngineTest::effectPresetStableIds()
                  qPrintable(QStringLiteral("display name missing for %1").arg(id)));
         QVERIFY2(!def->meta.category.isEmpty(),
                  qPrintable(QStringLiteral("category missing for %1").arg(id)));
+
+        // effects.core shipped its catalog with bare ids from 1.0.0 on, so this rule cannot
+        // retroactively rename them without breaking every project saved against it. The
+        // namespacing requirement applies to what this repo bundles; addon roots are only
+        // present when a sibling drift-addons checkout exists, and never on CI.
+        if (def->isGpu && def->gpu.packageDir.startsWith(addonEffectsDir))
+            continue;
+        QVERIFY2(id.contains(QLatin1Char('.')) || legacyBareIds.contains(id)
+                     || id.startsWith(QStringLiteral("face_")),
+                 qPrintable(QStringLiteral("stable id: %1").arg(id)));
     }
 }
 
@@ -2732,7 +2744,7 @@ namespace {
 #define SKIP_WITHOUT_FONTS()                                                                        \
     do {                                                                                            \
         if (fontCatalog().isEmpty())                                                                \
-            QSKIP("font bundle not present — run scripts/fetch-fonts.py");                          \
+            QSKIP("font bundle not present — see recipes/fetch-fonts.py in drift-addons");          \
     } while (false)
 
 drift::Clip makeTextClip(const QString &text, const QRectF &rect)

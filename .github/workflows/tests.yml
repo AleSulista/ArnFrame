@@ -1,0 +1,165 @@
+name: Tests
+
+# Runs the CTest suites on every push and pull request. package.yml also runs them, but only
+# on a manual dispatch or a release tag — this is what keeps a regression from sitting on main
+# until release day. It builds the same way package.yml's linux job does and then stops: no
+# install tree, no AppImage, no artifacts.
+on:
+  push:
+  pull_request:
+
+# A second push to the same ref makes the in-flight run irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: "6.10.3"
+  QT_MODULES: >-
+    qtmultimedia
+    qtimageformats
+  FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.deps
+  # Same pin as package.yml, for the same two reasons: the branch (not an exact autobuild)
+  # because BtbN deletes autobuild-<date> tags after ~2 weeks, and the gpl variant because the
+  # lgpl builds carry no x264/x265 — which would leave the exporter tests with no H.264
+  # encoder to exercise.
+  FFMPEG_BRANCH: "n7.1-latest"
+  FFMPEG_SUFFIX: "7.1"
+  CCACHE_MAXSIZE: "1G"
+
+jobs:
+  linux:
+    name: CTest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # fonts/, emoji-fonts/ and the addon effect catalogue are gitignored here — they are
+      # content, delivered as addons. Without them 16 tests QSKIP. Drift-Addons is public and
+      # commits everything except large weights (*.onnx/*.bin are gitignored there, with a
+      # sibling .sha256 in their place), so a sparse checkout of these three trees is all it
+      # takes. Sizes: fonts 18 MB, emoji font 44 MB, effects 6.3 MB.
+      - name: Check out addon content
+        uses: actions/checkout@v4
+        with:
+          repository: CutWire-Studios/Drift-Addons
+          path: drift-addons
+          sparse-checkout: |
+            staging/fonts-essentials/fonts
+            staging/stickers-harmonyos/emoji-font
+            staging/effects-core/effects
+
+      # tests/CMakeLists.txt hardcodes where each of these lives, so put them where it looks.
+      # The effects one is <source>/../drift-addons/... — outside the workspace, which
+      # actions/checkout refuses to write to, hence the symlink rather than a second checkout.
+      - name: Stage addon content where the tests expect it
+        run: |
+          cp -r drift-addons/staging/fonts-essentials/fonts "${GITHUB_WORKSPACE}/fonts"
+          cp -r drift-addons/staging/stickers-harmonyos/emoji-font "${GITHUB_WORKSPACE}/emoji-fonts"
+          ln -s "${GITHUB_WORKSPACE}/drift-addons" "${GITHUB_WORKSPACE}/../drift-addons"
+          # Assert rather than let 16 tests quietly go back to QSKIP if a path ever moves.
+          test -f "${GITHUB_WORKSPACE}/fonts/anton/family.json"
+          test -f "${GITHUB_WORKSPACE}/emoji-fonts/HarmonyOS_4.0.ttf"
+          test -f "${GITHUB_WORKSPACE}/../drift-addons/staging/effects-core/effects/turbulent_displace/effect.json"
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential ninja-build pkg-config git xvfb ccache \
+            libgl1-mesa-dev libegl1-mesa-dev libglib2.0-dev libdbus-1-dev \
+            libzstd-dev libssl-dev libsoundtouch-dev \
+            libpulse-dev libasound2-dev \
+            libfontconfig1-dev libfreetype6-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
+            libxcb1-dev libxcb-glx0-dev libxcb-keysyms1-dev libxcb-image0-dev libxcb-shm0-dev \
+            libxcb-icccm4-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shape0-dev \
+            libxcb-randr0-dev libxcb-render-util0-dev libxcb-xinerama0-dev libxcb-cursor-dev
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+          add-tools-to-path: true
+
+      # Deliberately the same key package.yml uses, so the two workflows share one JUCE clone
+      # and ONNX header download instead of each paying for it.
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: deps-linux-${{ hashFiles('CMakeLists.txt') }}
+
+      # The build tree is not cached, so every run reconfigures and recompiles from scratch —
+      # ccache is what makes that cheap. The sha in the key is what makes the cache save at
+      # all: actions/cache never re-saves on an exact-key hit, so a fixed key would freeze the
+      # cache at its first contents. restore-keys supplies the previous run's objects.
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-tests-${{ github.sha }}
+          restore-keys: ccache-tests-
+
+      - name: Fetch pinned FFmpeg
+        shell: bash
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}/.deps/ffmpeg"
+          mkdir -p "${GITHUB_WORKSPACE}/.deps/ffmpeg"
+          curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-${FFMPEG_BRANCH}-linux64-gpl-shared-${FFMPEG_SUFFIX}.tar.xz" \
+            | tar -xJf - --strip-components=1 -C "${GITHUB_WORKSPACE}/.deps/ffmpeg"
+          # 16 tests synthesize their clips by running the ffmpeg CLI through QProcess and QSKIP
+          # when QStandardPaths::findExecutable cannot find one. The runner image ships no ffmpeg,
+          # but the tarball just extracted above does — so put it on PATH rather than skipping.
+          echo "${GITHUB_WORKSPACE}/.deps/ffmpeg/bin" >> "${GITHUB_PATH}"
+
+      - name: Verify ffmpeg is on PATH
+        run: ffmpeg -hide_banner -encoders | grep -E "libx264|aac" | head -3
+
+      # DRIFT_BUNDLE_ONNXRUNTIME=OFF: only the headers are needed to compile. The runtime is
+      # dlopened from whichever Acceleration addon the user installs.
+      - name: Configure
+        run: |
+          export PKG_CONFIG_PATH="${GITHUB_WORKSPACE}/.deps/ffmpeg/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR};${GITHUB_WORKSPACE}/.deps/ffmpeg" \
+            -DFETCHCONTENT_BASE_DIR="${FETCHCONTENT_BASE_DIR}" \
+            -DDRIFT_BUNDLE_ONNXRUNTIME=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      # Everything, not just the test targets: this is the only workflow that sees an ordinary
+      # commit, so the app link and QML compilation should be covered here too.
+      - name: Build
+        run: cmake --build build --parallel
+
+      # Deliberately not QT_QPA_PLATFORM=offscreen: that plugin cannot create an OpenGL context
+      # on a runner with no /dev/dri, so every compositor test would render a null QImage and
+      # only some of them QSKIP on GpuEffectExecutor::isAvailable() — the rest would compare
+      # against nothing and still pass. llvmpipe works fine once there is an X server.
+      #
+      # LD_LIBRARY_PATH is appended to rather than prepended so libraries that already resolved
+      # keep resolving where they did. What it adds is libpostproc.so.58, which only the gpl
+      # FFmpeg ships and which libavfilter needs: CMake gives the test binaries a build RPATH
+      # covering that directory but emits it as DT_RUNPATH, and the loader applies RUNPATH only
+      # to the binary's own NEEDED entries, never to a dependency's.
+      #
+      # Serial, not ctest -j: the suites share QStandardPaths::AppDataLocation test-mode state.
+      - name: Test
+        run: |
+          export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:${GITHUB_WORKSPACE}/.deps/ffmpeg/lib"
+          QT_QPA_PLATFORM=xcb xvfb-run -a -s "-screen 0 1280x1024x24" ctest --test-dir build --output-on-failure
+
+      - name: ccache statistics
+        if: always()
+        run: ccache --show-stats
