@@ -513,11 +513,7 @@ Rectangle {
                 variant: "ghost"
                 tooltip: Theme.darkMode ? qsTr("Switch to light mode") : qsTr("Switch to dark mode")
                 anchors.verticalCenter: parent.verticalCenter
-                onClicked: {
-                    const next = !Theme.darkMode
-                    Theme.setDarkMode(next)
-                    EditorState.setProjectDarkMode(next)
-                }
+                onClicked: Theme.toggleDarkMode()
             }
         }
     }

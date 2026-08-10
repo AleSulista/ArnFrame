@@ -239,6 +239,10 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     // keyframe, and an animation appears where the user only meant to reposition something.
     m_autoKeyEnabled = settings.value(QStringLiteral("editor/autoKeyEnabled"), false).toBool();
     m_reopenLastProject = settings.value(QStringLiteral("editor/reopenLastProject"), false).toBool();
+    // Unset means the user has never toggled the theme, so the UI keeps tracking the OS.
+    const QVariant storedDarkMode = settings.value(QStringLiteral("ui/darkMode"));
+    m_darkModeOverridden = storedDarkMode.isValid();
+    m_darkModePreferred = storedDarkMode.toBool();
     loadAssetFavorites();
 
     // Periodically snapshot unsaved work to a recovery file so a crash doesn't
@@ -1794,12 +1798,15 @@ void AppController::setRippleEnabled(bool enabled)
     emit rippleEnabledChanged();
 }
 
-void AppController::setProjectDarkMode(bool enabled)
+void AppController::setDarkModePreference(bool enabled)
 {
-    if (m_projectDarkMode == enabled)
+    if (m_darkModeOverridden && m_darkModePreferred == enabled)
         return;
-    m_projectDarkMode = enabled;
-    emit projectDarkModeChanged();
+    m_darkModeOverridden = true;
+    m_darkModePreferred = enabled;
+    QSettings settings;
+    settings.setValue(QStringLiteral("ui/darkMode"), m_darkModePreferred);
+    emit darkModePreferenceChanged();
 }
 
 void AppController::setMediaGridMode(bool enabled)
@@ -9666,7 +9673,6 @@ QByteArray AppController::serializeProjectJson() const
     root.insert(QStringLiteral("playheadUs"), static_cast<double>(m_playheadUs));
     root.insert(QStringLiteral("snapEnabled"), m_snapEnabled);
     root.insert(QStringLiteral("rippleEnabled"), m_rippleEnabled);
-    root.insert(QStringLiteral("projectDarkMode"), m_projectDarkMode);
     root.insert(QStringLiteral("mediaGridMode"), m_mediaGridMode);
     return QJsonDocument(root).toJson(QJsonDocument::Indented);
 }
@@ -9726,10 +9732,6 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
     m_snapEnabled = root.value(QStringLiteral("snapEnabled")).toBool(true);
     m_rippleEnabled = root.value(QStringLiteral("rippleEnabled")).toBool(false);
 
-    if (root.contains(QStringLiteral("projectDarkMode"))) {
-        m_projectDarkMode = root.value(QStringLiteral("projectDarkMode")).toBool(true);
-        emit projectDarkModeChanged();
-    }
     if (root.contains(QStringLiteral("mediaGridMode"))) {
         m_mediaGridMode = root.value(QStringLiteral("mediaGridMode")).toBool(true);
         emit mediaGridModeChanged();

@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import Drift
 
 // Design tokens for the app shell and panel surfaces (dark + light), plus
 // shared layout/typography/iconography constants used across the UI.
@@ -14,21 +15,20 @@ QtObject {
     readonly property string fontFamily: _interLoader.name || "sans-serif"
     readonly property string monoFontFamily: "monospace"
 
-    // --- Light/dark mode: follows the OS by default, overridable at runtime ----
+    // --- Light/dark mode: follows the OS until the user picks a side -----------
     // Qt.styleHints.colorScheme is live-updated by the platform theme (Qt 6.5+).
+    // Once toggled, the choice lives in QSettings via EditorState and survives
+    // restarts; it is app-wide, not stored per project.
     readonly property bool systemPrefersDark: Qt.styleHints.colorScheme !== Qt.Light
-    property bool _userOverride: false
-    property bool _userDarkMode: true
-    readonly property bool darkMode: _userOverride ? _userDarkMode : systemPrefersDark
+    readonly property bool darkMode: EditorState.darkModeOverridden ? EditorState.darkModePreferred
+                                                                    : systemPrefersDark
 
     function toggleDarkMode() {
-        _userDarkMode = !darkMode;
-        _userOverride = true;
+        EditorState.setDarkModePreference(!darkMode);
     }
 
     function setDarkMode(enabled) {
-        _userDarkMode = enabled;
-        _userOverride = true;
+        EditorState.setDarkModePreference(enabled);
     }
 
     // --- Color palettes: app shell vs. panel surfaces, light and dark ------------

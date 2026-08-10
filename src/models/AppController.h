@@ -47,8 +47,12 @@ class AppController : public QObject
     Q_PROPERTY(bool snapEnabled READ snapEnabled WRITE setSnapEnabled NOTIFY snapEnabledChanged)
     Q_PROPERTY(bool rippleEnabled READ rippleEnabled WRITE setRippleEnabled NOTIFY rippleEnabledChanged)
   // Per-project UI prefs (serialized with the .drift file, not global QSettings).
-    Q_PROPERTY(bool projectDarkMode READ projectDarkMode WRITE setProjectDarkMode NOTIFY projectDarkModeChanged)
     Q_PROPERTY(bool mediaGridMode READ mediaGridMode WRITE setMediaGridMode NOTIFY mediaGridModeChanged)
+    // App-wide theme preference, backed by QSettings("ui/darkMode"). Until the user
+    // toggles once, darkModeOverridden is false and the UI follows the OS colour
+    // scheme live; after that the stored choice wins on every launch.
+    Q_PROPERTY(bool darkModeOverridden READ darkModeOverridden NOTIFY darkModePreferenceChanged)
+    Q_PROPERTY(bool darkModePreferred READ darkModePreferred NOTIFY darkModePreferenceChanged)
     Q_PROPERTY(bool autoKeyEnabled READ autoKeyEnabled WRITE setAutoKeyEnabled NOTIFY autoKeyEnabledChanged)
     // Opt-in: on launch, restore the last open project (saved .drift or unsaved recovery snapshot).
     Q_PROPERTY(bool reopenLastProject READ reopenLastProject WRITE setReopenLastProject NOTIFY reopenLastProjectChanged)
@@ -176,7 +180,8 @@ public:
     bool playing() const { return m_playing; }
     bool snapEnabled() const { return m_snapEnabled; }
     bool rippleEnabled() const { return m_rippleEnabled; }
-    bool projectDarkMode() const { return m_projectDarkMode; }
+    bool darkModeOverridden() const { return m_darkModeOverridden; }
+    bool darkModePreferred() const { return m_darkModePreferred; }
     bool mediaGridMode() const { return m_mediaGridMode; }
     bool autoKeyEnabled() const { return m_autoKeyEnabled; }
     bool reopenLastProject() const { return m_reopenLastProject; }
@@ -238,7 +243,7 @@ public:
     void setPlaying(bool playing);
     void setSnapEnabled(bool enabled);
     void setRippleEnabled(bool enabled);
-    void setProjectDarkMode(bool enabled);
+    Q_INVOKABLE void setDarkModePreference(bool enabled);
     void setMediaGridMode(bool enabled);
     void setAutoKeyEnabled(bool enabled);
     void setReopenLastProject(bool enabled);
@@ -697,7 +702,7 @@ signals:
     void playingChanged();
     void snapEnabledChanged();
     void rippleEnabledChanged();
-    void projectDarkModeChanged();
+    void darkModePreferenceChanged();
     void mediaGridModeChanged();
     void autoKeyEnabledChanged();
     void reopenLastProjectChanged();
@@ -897,7 +902,8 @@ protected:
     bool m_playing = false;
     bool m_snapEnabled = true;
     bool m_rippleEnabled = false;
-    bool m_projectDarkMode = true;
+    bool m_darkModeOverridden = false;
+    bool m_darkModePreferred = true;
     bool m_mediaGridMode = true;
     bool m_autoKeyEnabled = false;
     bool m_reopenLastProject = false;

@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QSet>
+#include <QSettings>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -38,6 +39,7 @@ private slots:
     void moveTrackReordersAndRemapsSelection();
     void addTrackInsertsEmptyTrackByType();
     void projectPersistenceRoundTrip();
+    void darkModePreferencePersistsAcrossSessions();
     void textStyleBlendModeKeyframesAndEffects();
     void previewSetTextRectScalesPixelSize();
     void fontCatalogIsExposedToQml();
@@ -380,7 +382,6 @@ void EditorStateTest::projectPersistenceRoundTrip()
     state.addTextClip(QStringLiteral("Persist"), 0.0);
     state.setTrackMuted(0, true);
     state.addBookmark(2.0, QStringLiteral("Mark"));
-    state.setProjectDarkMode(false);
     state.setMediaGridMode(false);
     QCOMPARE(state.tracks().size(), 2); // text + default video
 
@@ -397,8 +398,40 @@ void EditorStateTest::projectPersistenceRoundTrip()
              QStringLiteral("text"));
     QVERIFY(state.trackMuted(0));
     QCOMPARE(state.bookmarks().size(), 1);
-    QCOMPARE(state.projectDarkMode(), false);
     QCOMPARE(state.mediaGridMode(), false);
+}
+
+void EditorStateTest::darkModePreferencePersistsAcrossSessions()
+{
+    QStandardPaths::setTestModeEnabled(true);
+    const QString org = QCoreApplication::organizationName();
+    const QString app = QCoreApplication::applicationName();
+    QCoreApplication::setOrganizationName(QStringLiteral("DriftTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("DriftTest"));
+    const auto restore = qScopeGuard([&] {
+        QSettings().remove(QStringLiteral("ui/darkMode"));
+        QCoreApplication::setOrganizationName(org);
+        QCoreApplication::setApplicationName(app);
+        QStandardPaths::setTestModeEnabled(false);
+    });
+    QSettings().remove(QStringLiteral("ui/darkMode"));
+
+    AssetLibrary library;
+    {
+        AppController state(&library);
+        // Never toggled: no override, so the UI is free to follow the OS scheme.
+        QVERIFY(!state.darkModeOverridden());
+
+        QSignalSpy spy(&state, &AppController::darkModePreferenceChanged);
+        state.setDarkModePreference(false);
+        QCOMPARE(spy.count(), 1);
+        QVERIFY(state.darkModeOverridden());
+        QCOMPARE(state.darkModePreferred(), false);
+    }
+
+    AppController relaunched(&library);
+    QVERIFY(relaunched.darkModeOverridden());
+    QCOMPARE(relaunched.darkModePreferred(), false);
 }
 
 void EditorStateTest::textStyleBlendModeKeyframesAndEffects()
