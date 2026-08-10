@@ -40,6 +40,8 @@ icons=(
   align-start-horizontal align-center-horizontal align-end-horizontal
   # Timeline trim tools — vertical marks read as “keep from here”.
   align-start-vertical align-end-vertical
+  # Preview transport: frame step and time jump, either side of play/pause.
+  step-back step-forward rewind fast-forward
   # Timeline / media
   captions list-video move-horizontal mouse-pointer audio-lines video
   smartphone monitor square ratio

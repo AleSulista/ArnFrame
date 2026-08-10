@@ -7,6 +7,28 @@ ComboBox {
 
     property string tooltip: ""
 
+    // Analogue of implicitContentWidth, measured across every entry instead of only the current
+    // one. A width derived from implicitContentWidth changes as the selection does, and since the
+    // popup takes the control's width, anything sized to a short entry elides the whole list.
+    // Padded exactly like contentItem below, so the two are interchangeable in a width binding.
+    readonly property real widestContentWidth:
+        widestTextWidth + leftPadding + root.indicator.width + root.spacing
+
+    readonly property real widestTextWidth: {
+        void root.model // a replaced model is a new set of widths
+        void root.textRole
+        void root.font // FontMetrics is queried by call, so the font is not tracked on its own
+        let widest = 0
+        for (let i = 0; i < root.count; ++i)
+            widest = Math.max(widest, textMetrics.advanceWidth(String(root.textAt(i))))
+        return Math.ceil(widest)
+    }
+
+    FontMetrics {
+        id: textMetrics
+        font: root.font
+    }
+
     font.family: Theme.fontFamily
     font.pixelSize: Theme.fontSizeSm
     implicitHeight: Theme.controlHeight

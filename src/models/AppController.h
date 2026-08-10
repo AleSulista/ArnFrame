@@ -605,6 +605,14 @@ public:
     Q_INVOKABLE bool isAssetFavorite(const QString &tabId, const QString &itemId) const;
     Q_INVOKABLE void toggleAssetFavorite(const QString &tabId, const QString &itemId);
     Q_INVOKABLE void togglePlayback();
+    // Frame-accurate transport. Stepping quantizes to the project's frame grid first: the playhead
+    // can sit between frames after a scrub, and adding a frame duration to that would carry the
+    // off-grid offset forever.
+    Q_INVOKABLE void stepFrames(int frames);
+    Q_INVOKABLE void jumpSeconds(double seconds);
+    // The transport's jump buttons pick their amount from the modifiers held at click time, and
+    // AbstractButton::clicked carries none.
+    Q_INVOKABLE int keyboardModifiers() const;
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE double snapTime(double seconds) const;

@@ -2,6 +2,8 @@
 
 #include <QSettings>
 
+#include <algorithm>
+#include <array>
 #include <cstring>
 
 namespace {
@@ -15,6 +17,10 @@ constexpr int kPlayheadUpdateMs = 16; // ~60 Hz UI updates, independent of video
 // RAM per clip — 2 s of 720p NV12 is ~83 MB — and every edit or seek discards
 // the part of the buffer past the change.
 constexpr drift::TimeUs kReadAheadUs = 2 * drift::kUsPerSecond;
+
+// The rates the preview transport offers. All sit inside the stretcher's own clamp
+// (kMinCurveSpeed..kMaxCurveSpeed), and nothing outside this list is accepted.
+constexpr std::array<double, 6> kPlaybackRates{0.25, 0.5, 1.0, 1.5, 2.0, 4.0};
 
 } // namespace
 
@@ -146,6 +152,7 @@ void PlaybackEngine::setPlayheadUs(drift::TimeUs us)
     // routing back through this setter. That matters: the mixer's per-clip DSP is streaming, and a
     // reset on every tick would leave a retimed clip permanently re-priming instead of playing.
     m_mixer.resetClipAudioState();
+    m_audioStreamGeneration.fetch_add(1, std::memory_order_release);
     m_clock.reset(m_playheadUs, m_sampleRate);
     // reset() clears the running flag; resume the clock if we are still in play
     // so edits/seeks during playback don't freeze audio at one timeline spot.
@@ -222,6 +229,33 @@ void PlaybackEngine::setPlaybackMode(const QString &mode)
     }
 }
 
+void PlaybackEngine::setPlaybackRate(double rate)
+{
+    const auto match = std::find_if(kPlaybackRates.begin(), kPlaybackRates.end(),
+                                    [rate](double candidate) { return qFuzzyCompare(candidate, rate); });
+    if (match == kPlaybackRates.end()) {
+        qWarning("PlaybackEngine: ignoring unsupported playback rate %f", rate);
+        return;
+    }
+    if (qFuzzyCompare(m_playbackRate, *match))
+        return;
+
+    // Every position the clock reports is derived from its total rendered sample count, so a rate
+    // applied mid-flight would rescale audio that has already been played. Restart the transport
+    // from where it sits instead, exactly as a mode change does. Pausing first is also what makes
+    // the assignment safe: fillAudio reads the rate on the audio thread, and pause() does not
+    // return until the sink has stopped.
+    const bool wasPlaying = m_playing;
+    if (wasPlaying)
+        pause();
+
+    m_playbackRate = *match;
+    emit playbackRateChanged();
+
+    if (wasPlaying)
+        play();
+}
+
 drift::TimeUs PlaybackEngine::frameStepUs() const
 {
     return drift::frameDurationUs(m_project ? qMax(1, m_project->fps()) : 30);
@@ -254,6 +288,8 @@ void PlaybackEngine::play()
         return;
 
     m_mixer.resetClipAudioState();
+    m_audioStreamGeneration.fetch_add(1, std::memory_order_release);
+    m_clock.setRate(m_playbackRate);
     m_clock.reset(m_playheadUs, m_sampleRate);
     m_playing = true;
 
@@ -285,7 +321,12 @@ void PlaybackEngine::play()
     m_playheadTimer.start(kPlayheadUpdateMs);
 
     const int fps = m_project ? qMax(1, m_project->fps()) : 30;
-    const int tickMs = qMax(1, static_cast<int>(drift::usToSeconds(drift::frameDurationUs(fps)) * 1000.0));
+    // This is a display cadence, not a timeline one: a wall second should show about fps frames
+    // whatever the rate, and above 1x that simply means covering more timeline per frame. Below 1x
+    // the same interval would re-request the frame already on screen several times over, so the
+    // tick stretches with the rate instead.
+    const double frameMs = drift::usToSeconds(drift::frameDurationUs(fps)) * 1000.0;
+    const int tickMs = qMax(1, static_cast<int>(frameMs * qMax(1.0, 1.0 / m_playbackRate)));
     m_compositeTimer.start(tickMs);
 
     onPlayheadTick();
@@ -306,6 +347,7 @@ void PlaybackEngine::pause()
         m_playheadUs = m_clock.pausedAt();
     m_qualityRequestUs = -1;
     m_mixer.resetClipAudioState();
+    m_audioStreamGeneration.fetch_add(1, std::memory_order_release);
     QMetaObject::invokeMethod(
         m_device,
         [this] {
@@ -450,8 +492,31 @@ int PlaybackEngine::fillAudio(float *buffer, int sampleCount)
     // Mix at the produce position (audio we are generating into the buffer),
     // then anchor the visible playhead to what the sink has actually played so
     // video follows audio rather than leading it by the buffer depth.
-    const drift::TimeUs timeUs = m_clock.produceTimeUs();
-    m_mixer.mix(timeUs, sampleCount, m_sampleRate, buffer);
+    if (qFuzzyCompare(m_playbackRate, 1.0)) {
+        m_mixer.mix(m_clock.produceTimeUs(), sampleCount, m_sampleRate, buffer);
+    } else {
+        // Off 1x, the whole mix is treated as one source and stretched, which keeps the pitch and
+        // leaves AudioMixer alone — it maps sample counts to timeline microseconds 1:1 throughout,
+        // and threading a global rate through it would touch every clip overlap test in there.
+        // The retimer's "timeline" here is the sink's own output, and its "source" is the project
+        // timeline; it owns the read cursor, so the mixer is pulled at whatever position it wants.
+        drift::ClipAudioBlock block;
+        block.identity = m_audioStreamGeneration.load(std::memory_order_acquire);
+        block.sampleRate = m_sampleRate;
+        block.timelineStartUs = m_clock.renderedFramesUs();
+        block.sourceStartUs = m_clock.produceTimeUs();
+        block.tempo = m_playbackRate;
+
+        m_rateRetimer.process(
+            block,
+            [this](drift::TimeUs sourceStartUs, int frames, float *dst) {
+                m_mixer.mix(sourceStartUs, frames, m_sampleRate, dst);
+                // The mixer is silent rather than exhausted past the end of the timeline; playback
+                // stops on the playhead reaching the duration, not on the source running out.
+                return frames;
+            },
+            sampleCount, buffer);
+    }
     m_clock.onAudioSamplesRendered(sampleCount);
     if (m_sink)
         m_clock.syncPlaybackUs(static_cast<drift::TimeUs>(m_sink->processedUSecs()));

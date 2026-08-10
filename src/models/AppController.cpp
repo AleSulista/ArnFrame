@@ -1753,6 +1753,30 @@ void AppController::togglePlayback()
     setPlaying(!m_playback.isPlaying());
 }
 
+void AppController::stepFrames(int frames)
+{
+    if (frames == 0)
+        return;
+
+    // Stepping is a paused-only operation: leaving playback running would have the clock overwrite
+    // the stepped position on its next tick.
+    setPlaying(false);
+
+    const drift::TimeUs step = drift::frameDurationUs(projectFps());
+    const int64_t frame = (m_playheadUs + step / 2) / step;
+    setPlayheadUs((frame + frames) * step);
+}
+
+void AppController::jumpSeconds(double seconds)
+{
+    setPlayheadUs(m_playheadUs + drift::secondsToUs(seconds));
+}
+
+int AppController::keyboardModifiers() const
+{
+    return static_cast<int>(QGuiApplication::keyboardModifiers());
+}
+
 void AppController::setSnapEnabled(bool enabled)
 {
     if (m_snapEnabled == enabled)
