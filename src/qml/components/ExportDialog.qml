@@ -121,13 +121,20 @@ ThemedDialog {
         scaleOptions = EditorState.exportScaleOptions()
 
         var defaults = EditorState.exportDefaultSettings()
-        videoCodecId = firstAvailableId(videoCodecs, defaults.videoCodecId || "h264")
-        audioCodecId = firstAvailableId(audioCodecs, defaults.audioCodecId || "aac")
-        rateControl = defaults.rateControl || "crf"
-        crf = defaults.crf || 18
-        videoBitrateKbps = defaults.videoBitrateKbps || 12000
-        videoPreset = defaults.videoPreset || "medium"
-        audioBitrateKbps = defaults.audioBitrateKbps || 192
+        var remembered = EditorState.lastExportSettings()
+        var hasRemembered = !!(remembered
+                               && (remembered.scaleId || remembered.videoCodecId
+                                   || remembered.audioCodecId))
+        var src = hasRemembered ? remembered : defaults
+
+        exportMode = src.audioOnly ? "audio" : "video"
+        videoCodecId = firstAvailableId(videoCodecs, src.videoCodecId || defaults.videoCodecId || "h264")
+        audioCodecId = firstAvailableId(audioCodecs, src.audioCodecId || defaults.audioCodecId || "aac")
+        rateControl = src.rateControl || defaults.rateControl || "crf"
+        crf = (src.crf !== undefined && src.crf !== null) ? src.crf : (defaults.crf || 18)
+        videoBitrateKbps = src.videoBitrateKbps || defaults.videoBitrateKbps || 12000
+        videoPreset = src.videoPreset || defaults.videoPreset || "medium"
+        audioBitrateKbps = src.audioBitrateKbps || defaults.audioBitrateKbps || 192
         syncAudioBitrateChoice()
         advancedOpen = false
 
@@ -137,17 +144,36 @@ ThemedDialog {
         tagAlbumField.text = ""
         tagCommentField.text = meta.description || ""
 
-        if (scaleOptions.length > 0) {
-            scaleId = scaleOptions[0].id
-            targetHeight = scaleOptions[0].targetHeight
-            if (scaleOptions[0].videoBitrateKbps)
-                videoBitrateKbps = scaleOptions[0].videoBitrateKbps
-        } else {
-            scaleId = "source"
-            targetHeight = 0
+        var restoredScale = false
+        if (hasRemembered && src.scaleId && scaleOptions.length > 0) {
+            for (var i = 0; i < scaleOptions.length; ++i) {
+                if (scaleOptions[i].id === src.scaleId) {
+                    scaleId = scaleOptions[i].id
+                    targetHeight = scaleOptions[i].targetHeight
+                    // Keep the remembered bitrate when Advanced was customized; otherwise use
+                    // the chip's suggested bitrate for that scale.
+                    if (src.videoBitrateKbps === undefined || src.videoBitrateKbps === null)
+                        videoBitrateKbps = scaleOptions[i].videoBitrateKbps || videoBitrateKbps
+                    restoredScale = true
+                    break
+                }
+            }
+        }
+        if (!restoredScale) {
+            if (scaleOptions.length > 0) {
+                scaleId = scaleOptions[0].id
+                targetHeight = scaleOptions[0].targetHeight
+                if (!hasRemembered && scaleOptions[0].videoBitrateKbps)
+                    videoBitrateKbps = scaleOptions[0].videoBitrateKbps
+            } else {
+                scaleId = "source"
+                targetHeight = 0
+            }
         }
 
-        applyVideoCodecDefaults(codecById(videoCodecs, videoCodecId))
+        // Codec catalog defaults only on a fresh dialog — otherwise they wipe the remembered CRF.
+        if (!hasRemembered)
+            applyVideoCodecDefaults(codecById(videoCodecs, videoCodecId))
         refreshCodecMeta()
         syncComboIndices()
         open()
@@ -175,6 +201,7 @@ ThemedDialog {
 
     function buildSettings() {
         var s = {
+            "scaleId": scaleId,
             "targetHeight": targetHeight,
             "videoCodecId": videoCodecId,
             "rateControl": videoLossless ? "crf" : rateControl,
@@ -206,7 +233,8 @@ ThemedDialog {
         var suffix = EditorState.exportDefaultSuffix(container, isAudioOnly)
         var dialogTitle = isAudioOnly ? qsTr("Export Audio") : qsTr("Export Video")
         var url = FileDialogs.saveFile(dialogTitle, filters,
-                                       EditorState.projectName, suffix)
+                                       EditorState.projectName, suffix,
+                                       EditorState.lastExportFolder())
         if (url != "") {
             EditorState.exportWithSettings(url, buildSettings())
             Toasts.info(qsTr("Export started…"))

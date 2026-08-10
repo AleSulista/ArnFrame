@@ -678,6 +678,10 @@ public:
     Q_INVOKABLE QVariantList exportVideoCodecs() const;
     Q_INVOKABLE QVariantList exportAudioCodecs() const;
     Q_INVOKABLE QVariantMap exportDefaultSettings() const;
+    // Last dialog choices (scale + encode). Empty until the user has exported once.
+    Q_INVOKABLE QVariantMap lastExportSettings() const;
+    // Directory of the last successful save-picker choice; empty if never set or gone.
+    Q_INVOKABLE QString lastExportFolder() const;
     Q_INVOKABLE QString exportPreferredContainer(const QString &videoCodecId,
                                                 const QString &audioCodecId) const;
     Q_INVOKABLE QString exportPreferredAudioOnlyContainer(const QString &audioCodecId) const;
@@ -874,6 +878,8 @@ protected:
     // only — packageProject builds the request here and hands the finished copy to its worker.
     drift::bundle::WriteRequest buildWriteRequest(bool embedSource) const;
     void rememberEmbeddedSources(const QList<drift::bundle::MediaEntry> &media);
+    // Persist the save-picker folder and encode/scale choices for the next Export dialog.
+    void rememberExportChoice(const QString &outputPath, const QVariantMap &settings);
     // Repoint every path field the extraction moved. Clips duplicate their asset's path, so this
     // matches on the value rather than walking by id.
     void remapProjectPaths(const QHash<QString, QString> &remap);

@@ -10345,6 +10345,68 @@ QVariantMap AppController::exportDefaultSettings() const
     };
 }
 
+QVariantMap AppController::lastExportSettings() const
+{
+    QSettings settings;
+    settings.beginGroup(QStringLiteral("export"));
+    if (!settings.contains(QStringLiteral("videoCodecId"))
+        && !settings.contains(QStringLiteral("audioCodecId"))
+        && !settings.contains(QStringLiteral("scaleId"))) {
+        return {};
+    }
+
+    QVariantMap out;
+    const auto take = [&](const QString &key) {
+        if (settings.contains(key))
+            out.insert(key, settings.value(key));
+    };
+    take(QStringLiteral("scaleId"));
+    take(QStringLiteral("targetHeight"));
+    take(QStringLiteral("videoCodecId"));
+    take(QStringLiteral("rateControl"));
+    take(QStringLiteral("crf"));
+    take(QStringLiteral("videoBitrateKbps"));
+    take(QStringLiteral("videoPreset"));
+    take(QStringLiteral("audioCodecId"));
+    take(QStringLiteral("audioBitrateKbps"));
+    take(QStringLiteral("audioOnly"));
+    return out;
+}
+
+QString AppController::lastExportFolder() const
+{
+    const QString folder = QSettings().value(QStringLiteral("export/lastFolder")).toString();
+    if (folder.isEmpty() || !QDir(folder).exists())
+        return {};
+    return folder;
+}
+
+void AppController::rememberExportChoice(const QString &outputPath, const QVariantMap &settings)
+{
+    QSettings store;
+    const QFileInfo info(outputPath);
+    const QString folder = info.absolutePath();
+    if (!folder.isEmpty() && QDir(folder).exists())
+        store.setValue(QStringLiteral("export/lastFolder"), folder);
+
+    store.beginGroup(QStringLiteral("export"));
+    const auto put = [&](const QString &key) {
+        if (settings.contains(key))
+            store.setValue(key, settings.value(key));
+    };
+    put(QStringLiteral("scaleId"));
+    put(QStringLiteral("targetHeight"));
+    put(QStringLiteral("videoCodecId"));
+    put(QStringLiteral("rateControl"));
+    put(QStringLiteral("crf"));
+    put(QStringLiteral("videoBitrateKbps"));
+    put(QStringLiteral("videoPreset"));
+    put(QStringLiteral("audioCodecId"));
+    put(QStringLiteral("audioBitrateKbps"));
+    put(QStringLiteral("audioOnly"));
+    store.endGroup();
+}
+
 QString AppController::exportPreferredAudioOnlyContainer(const QString &audioCodecId) const
 {
     return Exporter::preferredAudioOnlyContainer(audioCodecId);
@@ -10386,6 +10448,7 @@ void AppController::exportWithPreset(const QUrl &outputUrl, const QString &prese
 {
     QVariantMap map = exportDefaultSettings();
     if (const ExportScalePreset *preset = Exporter::scalePresetById(presetId)) {
+        map.insert(QStringLiteral("scaleId"), preset->id);
         map.insert(QStringLiteral("targetHeight"), preset->targetHeight);
         map.insert(QStringLiteral("videoBitrateKbps"), preset->videoBitrateKbps);
     }
@@ -10405,6 +10468,8 @@ void AppController::exportWithSettings(const QUrl &outputUrl, const QVariantMap 
         setLastMessage(QStringLiteral("Export already in progress"), QStringLiteral("warning"));
         return;
     }
+
+    rememberExportChoice(outputPath, settings);
 
     const ExportSettings exportSettings = Exporter::settingsFromMap(settings);
 
