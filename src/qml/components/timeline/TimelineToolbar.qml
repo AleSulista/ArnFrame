@@ -10,7 +10,7 @@ import ".."
 Item {
     id: toolbar
 
-    // Owning TimelinePanel; provides zoom (read/write), zoom bounds and formatTime.
+    // Owning TimelinePanel; provides zoom (read/write via setZoom), zoom bounds and formatTime.
     property var panel
 
     height: Theme.timelineToolbarHeight
@@ -308,7 +308,7 @@ Item {
             glyph: Theme.icons.zoomOut
             variant: "text"
             tooltip: qsTr("Zoom out")
-            onClicked: toolbar.panel.zoom = Math.max(toolbar.panel.minZoom, toolbar.panel.zoom / 1.5)
+            onClicked: toolbar.panel.setZoom(toolbar.panel.zoom / 1.5)
         }
         ThemedSlider {
             id: zoomSlider
@@ -319,7 +319,8 @@ Item {
             from: 0
             to: 1
             value: Math.log(toolbar.panel.zoom / toolbar.panel.minZoom) / Math.log(toolbar.panel.maxZoom / toolbar.panel.minZoom)
-            onMoved: toolbar.panel.zoom = toolbar.panel.minZoom * Math.pow(toolbar.panel.maxZoom / toolbar.panel.minZoom, value)
+            onMoved: toolbar.panel.setZoom(
+                toolbar.panel.minZoom * Math.pow(toolbar.panel.maxZoom / toolbar.panel.minZoom, value))
             // There was no zoom readout anywhere, so the current level
             // was simply unknowable.
             valueFormatter: function () {
@@ -347,15 +348,14 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: toolbar.panel.zoom = Math.max(toolbar.panel.minZoom,
-                                                         Math.min(toolbar.panel.maxZoom, 1.0))
+                onClicked: toolbar.panel.setZoom(1.0)
             }
         }
         IconButton {
             glyph: Theme.icons.zoomIn
             variant: "text"
             tooltip: qsTr("Zoom in")
-            onClicked: toolbar.panel.zoom = Math.min(toolbar.panel.maxZoom, toolbar.panel.zoom * 1.5)
+            onClicked: toolbar.panel.setZoom(toolbar.panel.zoom * 1.5)
         }
         IconButton {
             glyph: Theme.icons.zoomFit

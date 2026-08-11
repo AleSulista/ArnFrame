@@ -71,6 +71,27 @@ PanelFrame {
         flick.contentX = 0
     }
 
+    // Keep `anchorSeconds` glued to the same viewport X after the scale change.
+    // Without this, zooming expands from the content origin and the playhead
+    // (or the point under the cursor) drifts off to the right.
+    function setZoomAround(newZoom, anchorSeconds, viewportX) {
+        const z = Math.max(minZoom, Math.min(maxZoom, newZoom))
+        if (z === zoom)
+            return
+        contentXAnimation.stop()
+        zoom = z
+        const newMaxX = Math.max(0, flick.contentWidth - flick.width)
+        flick.contentX = Math.max(0, Math.min(newMaxX,
+                                              anchorSeconds * pxPerSecond - viewportX))
+    }
+
+    // Toolbar / slider zoom: hold the playhead steady in the viewport.
+    function setZoom(newZoom) {
+        const anchorSeconds = Math.max(0, EditorState.playheadSeconds)
+        const viewportX = anchorSeconds * pxPerSecond - flick.contentX
+        setZoomAround(newZoom, anchorSeconds, viewportX)
+    }
+
     // Ruler tick interval (seconds): the smallest "nice" step whose labels still
     // have room to breathe at the current zoom, so timestamps never squash.
     readonly property real tickStepSeconds: {
@@ -525,12 +546,12 @@ PanelFrame {
         const maxX = Math.max(0, flick.contentWidth - flick.width)
         const maxY = Math.max(0, flick.contentHeight - flick.height)
         if (wheel.modifiers & Qt.ControlModifier) {
-            const t = wheel.x / pxPerSecond
+            // Wheel MouseAreas live in content space, so wheel.x is already a
+            // content X — keep that time fixed under the cursor.
+            const anchorSeconds = Math.max(0, wheel.x / pxPerSecond)
             const viewportX = wheel.x - flick.contentX
             const factor = wheel.angleDelta.y > 0 ? 1.15 : 1.0 / 1.15
-            zoom = Math.max(minZoom, Math.min(maxZoom, zoom * factor))
-            const newMaxX = Math.max(0, flick.contentWidth - flick.width)
-            flick.contentX = Math.max(0, Math.min(newMaxX, t * pxPerSecond - viewportX))
+            setZoomAround(zoom * factor, anchorSeconds, viewportX)
             return
         }
 
@@ -812,6 +833,8 @@ PanelFrame {
                                 if (pressed)
                                     scrubTo(mouse.x)
                             }
+                            // MouseArea would otherwise swallow wheel and block Ctrl-zoom.
+                            onWheel: (wheel) => root.handleTimelineWheel(wheel)
 
                             ThemedToolTip {
                                 text: qsTr("Click or drag to seek")
