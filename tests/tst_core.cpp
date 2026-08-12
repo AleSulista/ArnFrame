@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QSet>
 
 #include "core/ClipAnimation.h"
 #include "core/Keyframe.h"
@@ -75,6 +76,8 @@ private slots:
     void legacyTransitionJsonStillLoads();
     void transitionAudioCurves();
     void physicalOverlapTransitionWindow();
+    void clampClipStartNoOverlapPushesPastBlockers();
+    void clampTrimEdgesIgnoreExistingOverlaps();
     void backgroundSerialization();
     void fadeSerializationAndMultiplier();
     void clipAnimationSerializationAndSample();
@@ -2001,6 +2004,69 @@ void CoreTest::physicalOverlapTransitionWindow()
     QVERIFY(drift::transitionWindow(track, transition, startUs, endUs));
     QCOMPARE(startUs, drift::secondsToUs(1.5));
     QCOMPARE(endUs, drift::secondsToUs(2.0));
+}
+
+void CoreTest::clampClipStartNoOverlapPushesPastBlockers()
+{
+    drift::Track track;
+    track.type = drift::TrackType::Video;
+
+    drift::Clip blocker;
+    blocker.id = QStringLiteral("blocker");
+    blocker.timelineStart = drift::secondsToUs(1.0);
+    blocker.timelineDuration = drift::secondsToUs(2.0);
+    track.clips.append(blocker);
+
+    drift::Clip moving;
+    moving.id = QStringLiteral("moving");
+    moving.timelineDuration = drift::secondsToUs(1.0);
+
+    const QSet<QString> exclude{moving.id};
+    // Dropping into the blocker should land just after it.
+    QCOMPARE(drift::clampClipStartNoOverlap(track, exclude, drift::secondsToUs(1.5),
+                                            moving.timelineDuration),
+             drift::secondsToUs(3.0));
+    // Abutting the blocker is allowed.
+    QCOMPARE(drift::clampClipStartNoOverlap(track, exclude, drift::secondsToUs(3.0),
+                                            moving.timelineDuration),
+             drift::secondsToUs(3.0));
+    // Clear space before the blocker stays put.
+    QCOMPARE(drift::clampClipStartNoOverlap(track, exclude, 0, moving.timelineDuration), 0);
+}
+
+void CoreTest::clampTrimEdgesIgnoreExistingOverlaps()
+{
+    drift::Track track;
+    track.type = drift::TrackType::Video;
+
+    drift::Clip left;
+    left.id = QStringLiteral("left");
+    left.timelineStart = 0;
+    left.timelineDuration = drift::secondsToUs(2.0);
+
+    drift::Clip mid;
+    mid.id = QStringLiteral("mid");
+    mid.timelineStart = drift::secondsToUs(1.0); // already overlaps left
+    mid.timelineDuration = drift::secondsToUs(2.0);
+
+    drift::Clip right;
+    right.id = QStringLiteral("right");
+    right.timelineStart = drift::secondsToUs(4.0);
+    right.timelineDuration = drift::secondsToUs(1.0);
+
+    track.clips.append(left);
+    track.clips.append(mid);
+    track.clips.append(right);
+
+    const QSet<QString> excludeMid{mid.id};
+    // Extending mid left must not jump past the already-overlapping left clip.
+    QCOMPARE(drift::clampClipStartAgainstLeftNeighbors(track, excludeMid, mid.timelineStart,
+                                                       drift::secondsToUs(0.5)),
+             drift::secondsToUs(0.5));
+    // Extending mid right stops at the abutting/gapped right neighbor.
+    QCOMPARE(drift::clampClipEndNoOverlap(track, excludeMid, mid.timelineEnd(),
+                                          drift::secondsToUs(4.5)),
+             drift::secondsToUs(4.0));
 }
 
 void CoreTest::backgroundSerialization()

@@ -1243,6 +1243,9 @@ void EditorStateTest::overlapAutoAppliesCrossfade()
     AppController state(&library);
     appendAdjacentShapeClips(*state.project(), -drift::secondsToUs(0.5)); // 0.5s physical overlap
 
+    // Overlap is off by default; keep it on so the no-op move below does not push the
+    // already-overlapping clips apart before sync can create the crossfade.
+    state.setAllowClipOverlap(true);
     // Overlap sync runs on finishEdit; nudge via a no-op-ish move to trigger it.
     state.moveClip(0, 1, drift::usToSeconds(state.project()->tracks().at(0).clips.at(1).timelineStart));
 

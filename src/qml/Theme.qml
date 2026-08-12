@@ -395,6 +395,7 @@ QtObject {
         trimStart: "align-start-vertical",
         trimEnd: "align-end-vertical",
         blend: "blend",
+        option: "option",
         keyboard: "keyboard",
         crop: "crop",
         diamondPlus: "diamond-plus",

@@ -1843,6 +1843,14 @@ void AppController::setRippleEnabled(bool enabled)
     emit rippleEnabledChanged();
 }
 
+void AppController::setAllowClipOverlap(bool enabled)
+{
+    if (m_allowClipOverlap == enabled)
+        return;
+    m_allowClipOverlap = enabled;
+    emit allowClipOverlapChanged();
+}
+
 void AppController::setDarkModePreference(bool enabled)
 {
     if (m_darkModeOverridden && m_darkModePreferred == enabled)
@@ -2179,6 +2187,11 @@ void AppController::finishEdit(const QString &message)
 {
     syncOverlapTransitions(m_project);
     normalizeSelection();
+    if (m_selectedTransitionTrack >= 0) {
+        const QVariantMap selected = selectedTransitionData();
+        if (selected.isEmpty())
+            clearTransitionSelection();
+    }
     // During playback the engine clock owns the playhead. Seeking here would
     // PlaybackClock::reset() and (historically) stop the clock while audio kept
     // pulling — freezing A/V at one spot after drops like adding an effect.
@@ -2518,6 +2531,16 @@ void AppController::moveClip(int trackIndex, int clipIndex, double newStart)
         clip.timelineStart = qMax<drift::TimeUs>(0, clip.timelineStart + delta);
         movedIds.insert(clip.id);
     }
+    if (!m_allowClipOverlap) {
+        for (const QPair<int, int> &pair : targets) {
+            if (!isValidClipIndex(pair.first, pair.second))
+                continue;
+            drift::Track &targetTrack = m_project.tracks()[pair.first];
+            drift::Clip &clip = targetTrack.clips[pair.second];
+            clip.timelineStart = drift::clampClipStartNoOverlap(targetTrack, movedIds, clip.timelineStart,
+                                                                clip.timelineDuration);
+        }
+    }
     for (const QPair<int, int> &pair : targets) {
         if (!isValidClipIndex(pair.first, pair.second))
             continue;
@@ -2671,8 +2694,14 @@ void AppController::trimClipLeft(int trackIndex, int clipIndex, double newStart)
         return;
 
     drift::Clip &clip = track.clips[clipIndex];
-    const drift::TimeUs snappedStart = drift::snapTime(m_project, drift::secondsToUs(newStart), m_snapEnabled,
-                                                       m_playheadUs, extraSnapTargets());
+    drift::TimeUs snappedStart = drift::snapTime(m_project, drift::secondsToUs(newStart), m_snapEnabled,
+                                                 m_playheadUs, extraSnapTargets());
+    // Extending left can create a new overlap; clamp against neighbors when overlap is off.
+    if (!m_allowClipOverlap && snappedStart < clip.timelineStart) {
+        const QSet<QString> exclude{clip.id};
+        snappedStart = drift::clampClipStartAgainstLeftNeighbors(track, exclude, clip.timelineStart,
+                                                                 snappedStart);
+    }
     const drift::TimeUs delta = snappedStart - clip.timelineStart;
     if (delta == 0)
         return;
@@ -2759,8 +2788,12 @@ void AppController::trimClipRight(int trackIndex, int clipIndex, double newEnd)
         return;
 
     drift::Clip &clip = track.clips[clipIndex];
-    const drift::TimeUs snappedEnd = drift::snapTime(m_project, drift::secondsToUs(newEnd), m_snapEnabled,
-                                                     m_playheadUs, extraSnapTargets());
+    drift::TimeUs snappedEnd = drift::snapTime(m_project, drift::secondsToUs(newEnd), m_snapEnabled,
+                                               m_playheadUs, extraSnapTargets());
+    if (!m_allowClipOverlap && snappedEnd > clip.timelineEnd()) {
+        const QSet<QString> exclude{clip.id};
+        snappedEnd = drift::clampClipEndNoOverlap(track, exclude, clip.timelineEnd(), snappedEnd);
+    }
     drift::TimeUs newDuration = snappedEnd - clip.timelineStart;
 
     const bool syntheticVisual = isSyntheticTimelineClip(clip.type);
@@ -9076,11 +9109,23 @@ void AppController::nudgeSelection(double deltaSeconds)
         return;
     const drift::Project before = m_project;
     const drift::TimeUs deltaUs = drift::secondsToUs(deltaSeconds);
+    QSet<QString> movedIds;
     for (const QPair<int, int> &pair : pairs) {
         if (!isValidClipIndex(pair.first, pair.second))
             continue;
         drift::Clip &clip = m_project.tracks()[pair.first].clips[pair.second];
         clip.timelineStart = qMax<drift::TimeUs>(0, clip.timelineStart + deltaUs);
+        movedIds.insert(clip.id);
+    }
+    if (!m_allowClipOverlap) {
+        for (const QPair<int, int> &pair : pairs) {
+            if (!isValidClipIndex(pair.first, pair.second))
+                continue;
+            drift::Track &track = m_project.tracks()[pair.first];
+            drift::Clip &clip = track.clips[pair.second];
+            clip.timelineStart = drift::clampClipStartNoOverlap(track, movedIds, clip.timelineStart,
+                                                                clip.timelineDuration);
+        }
     }
     pushProjectEdit(before, QStringLiteral("Nudge selection"));
     finishEdit(QStringLiteral("Selection nudged"));
@@ -9704,6 +9749,11 @@ void AppController::normalizeSelection()
             kept.append(pair);
     }
     m_selection = kept;
+    if (m_selectedTransitionTrack >= 0) {
+        const QVariantMap selected = selectedTransitionData();
+        if (selected.isEmpty())
+            clearTransitionSelection();
+    }
     if (m_selection.isEmpty()) {
         m_selectedTrack = -1;
         m_selectedClip = -1;
@@ -9721,6 +9771,7 @@ QByteArray AppController::serializeProjectJson() const
     root.insert(QStringLiteral("playheadUs"), static_cast<double>(m_playheadUs));
     root.insert(QStringLiteral("snapEnabled"), m_snapEnabled);
     root.insert(QStringLiteral("rippleEnabled"), m_rippleEnabled);
+    root.insert(QStringLiteral("allowClipOverlap"), m_allowClipOverlap);
     root.insert(QStringLiteral("mediaGridMode"), m_mediaGridMode);
     return QJsonDocument(root).toJson(QJsonDocument::Indented);
 }
@@ -9779,6 +9830,7 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
     setPlaying(false);
     m_snapEnabled = root.value(QStringLiteral("snapEnabled")).toBool(true);
     m_rippleEnabled = root.value(QStringLiteral("rippleEnabled")).toBool(false);
+    m_allowClipOverlap = root.value(QStringLiteral("allowClipOverlap")).toBool(false);
 
     if (root.contains(QStringLiteral("mediaGridMode"))) {
         m_mediaGridMode = root.value(QStringLiteral("mediaGridMode")).toBool(true);
@@ -9798,6 +9850,7 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
     setDirty(false);
     emit snapEnabledChanged();
     emit rippleEnabledChanged();
+    emit allowClipOverlapChanged();
     emit tracksChanged();
     emit bookmarksChanged();
     emit projectNameChanged();
@@ -10092,6 +10145,7 @@ void AppController::newProject()
     emit projectLayoutChosenChanged();
     emit snapEnabledChanged();
     emit rippleEnabledChanged();
+    emit allowClipOverlapChanged();
     emit tracksChanged();
     emit bookmarksChanged();
     emit projectNameChanged();

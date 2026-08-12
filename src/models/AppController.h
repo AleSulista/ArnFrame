@@ -46,6 +46,7 @@ class AppController : public QObject
     Q_PROPERTY(bool playing READ playing WRITE setPlaying NOTIFY playingChanged)
     Q_PROPERTY(bool snapEnabled READ snapEnabled WRITE setSnapEnabled NOTIFY snapEnabledChanged)
     Q_PROPERTY(bool rippleEnabled READ rippleEnabled WRITE setRippleEnabled NOTIFY rippleEnabledChanged)
+    Q_PROPERTY(bool allowClipOverlap READ allowClipOverlap WRITE setAllowClipOverlap NOTIFY allowClipOverlapChanged)
   // Per-project UI prefs (serialized with the .drift file, not global QSettings).
     Q_PROPERTY(bool mediaGridMode READ mediaGridMode WRITE setMediaGridMode NOTIFY mediaGridModeChanged)
     // App-wide theme preference, backed by QSettings("ui/darkMode"). Until the user
@@ -180,6 +181,7 @@ public:
     bool playing() const { return m_playing; }
     bool snapEnabled() const { return m_snapEnabled; }
     bool rippleEnabled() const { return m_rippleEnabled; }
+    bool allowClipOverlap() const { return m_allowClipOverlap; }
     bool darkModeOverridden() const { return m_darkModeOverridden; }
     bool darkModePreferred() const { return m_darkModePreferred; }
     bool mediaGridMode() const { return m_mediaGridMode; }
@@ -243,6 +245,7 @@ public:
     void setPlaying(bool playing);
     void setSnapEnabled(bool enabled);
     void setRippleEnabled(bool enabled);
+    void setAllowClipOverlap(bool enabled);
     Q_INVOKABLE void setDarkModePreference(bool enabled);
     void setMediaGridMode(bool enabled);
     void setAutoKeyEnabled(bool enabled);
@@ -711,6 +714,7 @@ signals:
     void playingChanged();
     void snapEnabledChanged();
     void rippleEnabledChanged();
+    void allowClipOverlapChanged();
     void darkModePreferenceChanged();
     void mediaGridModeChanged();
     void autoKeyEnabledChanged();
@@ -913,6 +917,7 @@ protected:
     bool m_playing = false;
     bool m_snapEnabled = true;
     bool m_rippleEnabled = false;
+    bool m_allowClipOverlap = false;
     bool m_darkModeOverridden = false;
     bool m_darkModePreferred = true;
     bool m_mediaGridMode = true;

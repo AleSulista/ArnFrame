@@ -1310,35 +1310,31 @@ PanelFrame {
                                         property var rightClip: partnerIndex >= 0
                                             ? root.tracks[trackRow.trackIndex].clips[partnerIndex]
                                             : null
-                                        property bool clipsLinked: partnerIndex >= 0
+                                        property bool physicallyOverlapping: leftClip && rightClip
+                                            && rightClip.start < (leftClip.start + leftClip.duration)
                                         property real regionStart: {
-                                            if (!hasTransition && !clipsLinked)
+                                            if (!leftClip || !rightClip)
                                                 return 0
                                             if (hasTransition && transitionData.start !== undefined)
                                                 return transitionData.start
-                                            if (!rightClip)
-                                                return 0
-                                            const leftEnd = leftClip.start + leftClip.duration
-                                            if (rightClip.start < leftEnd)
+                                            if (physicallyOverlapping)
                                                 return rightClip.start
-                                            return leftEnd - 0.25
+                                            return 0
                                         }
                                         property real regionEnd: {
-                                            if (!hasTransition && !clipsLinked)
+                                            if (!leftClip || !rightClip)
                                                 return 0
                                             if (hasTransition && transitionData.end !== undefined)
                                                 return transitionData.end
-                                            if (!rightClip)
-                                                return 0
-                                            const leftEnd = leftClip.start + leftClip.duration
-                                            if (rightClip.start < leftEnd)
-                                                return leftEnd
-                                            return leftEnd + 0.25
+                                            if (physicallyOverlapping)
+                                                return leftClip.start + leftClip.duration
+                                            return 0
                                         }
                                         property bool showRegion: (trackType === "video"
                                                                    || trackType === "shape"
                                                                    || trackType === "text")
-                                                                  && clipsLinked
+                                                                  && leftClip && rightClip
+                                                                  && (physicallyOverlapping || hasTransition)
                                                                   && regionEnd > regionStart
 
                                         z: 10

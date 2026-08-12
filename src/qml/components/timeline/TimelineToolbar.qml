@@ -296,6 +296,14 @@ Item {
             active: EditorState.rippleEnabled
             onClicked: EditorState.rippleEnabled = !EditorState.rippleEnabled
         }
+        IconButton {
+            id: overlapButton
+            glyph: Theme.icons.option
+            variant: "text"
+            tooltip: qsTr("Allow clip overlap")
+            active: EditorState.allowClipOverlap
+            onClicked: EditorState.allowClipOverlap = !EditorState.allowClipOverlap
+        }
 
         Rectangle {
             width: Theme.borderWidth
