@@ -46,7 +46,7 @@
     <category>Video</category>
     <category>AudioVideoEditing</category>
   </categories>
-  <url type="homepage">https://github.com/CutWire-Studios/Drift</url>
+  <url type="homepage">https://cutwire.org/drift</url>
   <url type="bugtracker">https://github.com/CutWire-Studios/Drift/issues</url>
   <url type="vcs-browser">https://github.com/CutWire-Studios/Drift</url>
   <!-- Screenshot URLs are pinned to the release tag: Flathub rejects branch-based git URLs
@@ -86,6 +86,23 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.1" date="2026-08-12">
+      <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.2.1</url>
+      <description>
+        <p>A polish release focused on export options, playback controls, and everyday
+        editing quality-of-life.</p>
+        <ul>
+          <li>Export at different frame rates, including audio-only export</li>
+          <li>Export freeze frames as images; remember last export folder and settings</li>
+          <li>Playback controls for navigating the timeline</li>
+          <li>Animation tab with custom editable fade curves</li>
+          <li>Persist dark mode and media view; option to reopen the last project at startup</li>
+          <li>Timeline zoom stays centered on the playhead or cursor</li>
+          <li>Close gaps when trimming; clearer trim start/end icons</li>
+          <li>Avoid color-space conversion during composition that could reduce quality</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-08-07">
       <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.2.0</url>
       <description>

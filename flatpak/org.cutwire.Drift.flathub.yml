@@ -92,11 +92,11 @@ modules:
       # about a version flatpak will fetch on its own is noise the user cannot act on.
       - -DDRIFT_UPDATE_FEED_URL=
     sources:
-      # TODO: fill in v0.2.0's commit sha before opening the PR. flatpak-builder requires it —
+      # TODO: fill in v0.2.1's commit sha before opening the PR. flatpak-builder requires it —
       # a tag alone is not a fixed input.
       - type: git
         url: https://github.com/CutWire-Studios/Drift.git
-        tag: v0.2.0
+        tag: v0.2.1
         commit: "0000000000000000000000000000000000000000"
       # Audio effect DSP. Only juce_dsp and its dependencies are compiled; nothing GUI-facing.
       - type: git
