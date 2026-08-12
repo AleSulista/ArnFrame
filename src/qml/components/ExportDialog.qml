@@ -173,7 +173,10 @@ ThemedDialog {
                                    || remembered.audioCodecId))
         var src = hasRemembered ? remembered : defaults
 
-        exportMode = src.audioOnly ? "audio" : "video"
+        // Always open on Video. Exporting audio-only is the rare errand, so a single
+        // audio export should not leave the dialog in audio mode from then on; the
+        // codec/bitrate choices below are still restored either way.
+        exportMode = "video"
         videoCodecId = firstAvailableId(videoCodecs, src.videoCodecId || defaults.videoCodecId || "h264")
         audioCodecId = firstAvailableId(audioCodecs, src.audioCodecId || defaults.audioCodecId || "aac")
         rateControl = src.rateControl || defaults.rateControl || "crf"

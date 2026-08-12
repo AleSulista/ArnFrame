@@ -10362,23 +10362,35 @@ QVariantMap AppController::lastExportSettings() const
         return {};
     }
 
+    // A relaunch re-parses the INI and hands every value back as a QString, so the
+    // types have to be restored here. QML sees these directly, and in JavaScript the
+    // string "false" is truthy — an untyped audioOnly would put the export dialog in
+    // audio mode on every launch after the first.
     QVariantMap out;
-    const auto take = [&](const QString &key) {
+    const auto takeString = [&](const QString &key) {
         if (settings.contains(key))
-            out.insert(key, settings.value(key));
+            out.insert(key, settings.value(key).toString());
     };
-    take(QStringLiteral("scaleId"));
-    take(QStringLiteral("targetHeight"));
-    take(QStringLiteral("fpsNum"));
-    take(QStringLiteral("fpsDen"));
-    take(QStringLiteral("videoCodecId"));
-    take(QStringLiteral("rateControl"));
-    take(QStringLiteral("crf"));
-    take(QStringLiteral("videoBitrateKbps"));
-    take(QStringLiteral("videoPreset"));
-    take(QStringLiteral("audioCodecId"));
-    take(QStringLiteral("audioBitrateKbps"));
-    take(QStringLiteral("audioOnly"));
+    const auto takeInt = [&](const QString &key) {
+        if (settings.contains(key))
+            out.insert(key, settings.value(key).toInt());
+    };
+    const auto takeBool = [&](const QString &key) {
+        if (settings.contains(key))
+            out.insert(key, settings.value(key).toBool());
+    };
+    takeString(QStringLiteral("scaleId"));
+    takeInt(QStringLiteral("targetHeight"));
+    takeInt(QStringLiteral("fpsNum"));
+    takeInt(QStringLiteral("fpsDen"));
+    takeString(QStringLiteral("videoCodecId"));
+    takeString(QStringLiteral("rateControl"));
+    takeInt(QStringLiteral("crf"));
+    takeInt(QStringLiteral("videoBitrateKbps"));
+    takeString(QStringLiteral("videoPreset"));
+    takeString(QStringLiteral("audioCodecId"));
+    takeInt(QStringLiteral("audioBitrateKbps"));
+    takeBool(QStringLiteral("audioOnly"));
     return out;
 }
 

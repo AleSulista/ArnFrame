@@ -42,6 +42,7 @@ private slots:
     void projectPersistenceRoundTrip();
     void darkModePreferencePersistsAcrossSessions();
     void exportFrameRatePersistsAcrossSessions();
+    void lastExportSettingsNormalisesStringTypedValues();
     void textStyleBlendModeKeyframesAndEffects();
     void previewSetTextRectScalesPixelSize();
     void fontCatalogIsExposedToQml();
@@ -488,6 +489,52 @@ void EditorStateTest::exportFrameRatePersistsAcrossSessions()
     QCOMPARE(remembered.value(QStringLiteral("fpsNum")).toInt(), 30000);
     QCOMPARE(remembered.value(QStringLiteral("fpsDen")).toInt(), 1001);
     QCOMPARE(relaunched.lastExportFolder(), dir.path());
+}
+
+// A real relaunch re-parses the INI and every value comes back a QString. QML reads
+// this map directly, and JavaScript treats the string "false" as truthy — so an
+// untyped audioOnly opened the export dialog in audio mode on every launch after
+// the first. Writing strings here reproduces that round-trip without a second
+// process (same-process QSettings would otherwise serve typed values from cache).
+void EditorStateTest::lastExportSettingsNormalisesStringTypedValues()
+{
+    QStandardPaths::setTestModeEnabled(true);
+    const QString org = QCoreApplication::organizationName();
+    const QString app = QCoreApplication::applicationName();
+    QCoreApplication::setOrganizationName(QStringLiteral("DriftTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("DriftTest"));
+    const auto restore = qScopeGuard([&] {
+        QSettings().remove(QStringLiteral("export"));
+        QCoreApplication::setOrganizationName(org);
+        QCoreApplication::setApplicationName(app);
+        QStandardPaths::setTestModeEnabled(false);
+    });
+
+    {
+        QSettings store;
+        store.remove(QStringLiteral("export"));
+        store.beginGroup(QStringLiteral("export"));
+        store.setValue(QStringLiteral("scaleId"), QStringLiteral("source"));
+        store.setValue(QStringLiteral("videoCodecId"), QStringLiteral("h264"));
+        store.setValue(QStringLiteral("audioOnly"), QStringLiteral("false"));
+        store.setValue(QStringLiteral("fpsNum"), QStringLiteral("30000"));
+        store.setValue(QStringLiteral("fpsDen"), QStringLiteral("1001"));
+        store.setValue(QStringLiteral("crf"), QStringLiteral("23"));
+        store.endGroup();
+    }
+
+    AssetLibrary library;
+    AppController state(&library);
+    const QVariantMap remembered = state.lastExportSettings();
+
+    // Types, not just values: QML branches on these directly.
+    QCOMPARE(remembered.value(QStringLiteral("audioOnly")).typeId(), QMetaType::Bool);
+    QCOMPARE(remembered.value(QStringLiteral("audioOnly")).toBool(), false);
+    QCOMPARE(remembered.value(QStringLiteral("fpsNum")).typeId(), QMetaType::Int);
+    QCOMPARE(remembered.value(QStringLiteral("fpsNum")).toInt(), 30000);
+    QCOMPARE(remembered.value(QStringLiteral("fpsDen")).typeId(), QMetaType::Int);
+    QCOMPARE(remembered.value(QStringLiteral("crf")).typeId(), QMetaType::Int);
+    QCOMPARE(remembered.value(QStringLiteral("crf")).toInt(), 23);
 }
 
 void EditorStateTest::textStyleBlendModeKeyframesAndEffects()
