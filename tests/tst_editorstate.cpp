@@ -41,6 +41,7 @@ private slots:
     void addTrackInsertsEmptyTrackByType();
     void projectPersistenceRoundTrip();
     void darkModePreferencePersistsAcrossSessions();
+    void exportFrameRatePersistsAcrossSessions();
     void textStyleBlendModeKeyframesAndEffects();
     void previewSetTextRectScalesPixelSize();
     void fontCatalogIsExposedToQml();
@@ -434,6 +435,59 @@ void EditorStateTest::darkModePreferencePersistsAcrossSessions()
     AppController relaunched(&library);
     QVERIFY(relaunched.darkModeOverridden());
     QCOMPARE(relaunched.darkModePreferred(), false);
+}
+
+void EditorStateTest::exportFrameRatePersistsAcrossSessions()
+{
+    QStandardPaths::setTestModeEnabled(true);
+    const QString org = QCoreApplication::organizationName();
+    const QString app = QCoreApplication::applicationName();
+    QCoreApplication::setOrganizationName(QStringLiteral("DriftTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("DriftTest"));
+    const auto restore = qScopeGuard([&] {
+        QSettings().remove(QStringLiteral("export"));
+        QCoreApplication::setOrganizationName(org);
+        QCoreApplication::setApplicationName(app);
+        QStandardPaths::setTestModeEnabled(false);
+    });
+    QSettings().remove(QStringLiteral("export"));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString outPath = dir.filePath(QStringLiteral("out.mp4"));
+
+    AssetLibrary library;
+    {
+        AppController state(&library);
+        QVERIFY(state.lastExportSettings().isEmpty());
+
+        // The default entry follows the project rather than pinning a rate.
+        const QVariantList options = state.exportFrameRateOptions();
+        QVERIFY(!options.isEmpty());
+        QCOMPARE(options.first().toMap().value(QStringLiteral("id")).toString(),
+                 QStringLiteral("project"));
+        QCOMPARE(options.first().toMap().value(QStringLiteral("fpsNum")).toInt(), 0);
+
+        QVariantMap settings;
+        settings.insert(QStringLiteral("scaleId"), QStringLiteral("source"));
+        settings.insert(QStringLiteral("videoCodecId"), QStringLiteral("h264"));
+        settings.insert(QStringLiteral("audioCodecId"), QStringLiteral("aac"));
+        settings.insert(QStringLiteral("fpsNum"), 30000);
+        settings.insert(QStringLiteral("fpsDen"), 1001);
+
+        // The choice is remembered before any encoding starts, so an empty timeline
+        // still exercises the write path without needing an encoder.
+        QSignalSpy finished(&state, &AppController::exportFinished);
+        state.exportWithSettings(QUrl::fromLocalFile(outPath), settings);
+        // Must not outlive the worker: it captures `state`.
+        QVERIFY(finished.wait(15000));
+    }
+
+    AppController relaunched(&library);
+    const QVariantMap remembered = relaunched.lastExportSettings();
+    QCOMPARE(remembered.value(QStringLiteral("fpsNum")).toInt(), 30000);
+    QCOMPARE(remembered.value(QStringLiteral("fpsDen")).toInt(), 1001);
+    QCOMPARE(relaunched.lastExportFolder(), dir.path());
 }
 
 void EditorStateTest::textStyleBlendModeKeyframesAndEffects()

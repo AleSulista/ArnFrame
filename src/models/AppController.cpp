@@ -10319,6 +10319,11 @@ QVariantList AppController::exportScaleOptions() const
     return Exporter::scaleOptions(m_project.width(), m_project.height());
 }
 
+QVariantList AppController::exportFrameRateOptions() const
+{
+    return Exporter::frameRateOptions(m_project.fps());
+}
+
 QVariantList AppController::exportVideoCodecs() const
 {
     return Exporter::videoCodecs();
@@ -10334,6 +10339,8 @@ QVariantMap AppController::exportDefaultSettings() const
     const ExportSettings s = Exporter::defaultSettings();
     return QVariantMap{
         {QStringLiteral("targetHeight"), s.targetHeight},
+        {QStringLiteral("fpsNum"), s.fpsNum},
+        {QStringLiteral("fpsDen"), s.fpsDen},
         {QStringLiteral("videoCodecId"), s.videoCodecId},
         {QStringLiteral("rateControl"), s.rateControl},
         {QStringLiteral("crf"), s.crf},
@@ -10362,6 +10369,8 @@ QVariantMap AppController::lastExportSettings() const
     };
     take(QStringLiteral("scaleId"));
     take(QStringLiteral("targetHeight"));
+    take(QStringLiteral("fpsNum"));
+    take(QStringLiteral("fpsDen"));
     take(QStringLiteral("videoCodecId"));
     take(QStringLiteral("rateControl"));
     take(QStringLiteral("crf"));
@@ -10396,6 +10405,8 @@ void AppController::rememberExportChoice(const QString &outputPath, const QVaria
     };
     put(QStringLiteral("scaleId"));
     put(QStringLiteral("targetHeight"));
+    put(QStringLiteral("fpsNum"));
+    put(QStringLiteral("fpsDen"));
     put(QStringLiteral("videoCodecId"));
     put(QStringLiteral("rateControl"));
     put(QStringLiteral("crf"));

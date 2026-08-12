@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QPainter>
 #include <QProcess>
+#include <QScopeGuard>
 #include <QSet>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -48,6 +49,7 @@
 #include "core/Transition.h"
 
 extern "C" {
+#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/pixfmt.h>
 }
@@ -147,6 +149,11 @@ private slots:
     void exporterProducesAudioOnlyMp3();
     void exporterTagsSdrBt709ColorMetadata();
     void exporterDefaultCrfIsNearLosslessForH264();
+    void exporterSettingsFromMapValidatesFrameRate();
+    void exporterDefaultsToProjectFrameRate();
+    void exporterHonoursExportFrameRateOverride();
+    void exporterSupportsNtscFrameRates();
+    void exporterFrameRateAddsRealDetailToSlowedClips();
     void mixerHasNoBlockBoundaryDropout();
     void mixerSurvivesConcurrentClipAudioReset();
     void retimedClipAudioIsNotSilent();
@@ -3440,6 +3447,414 @@ void EngineTest::exporterDefaultCrfIsNearLosslessForH264()
     const ExportSettings defaults = Exporter::defaultSettings();
     if (defaults.videoCodecId == QLatin1String("h264"))
         QCOMPARE(defaults.crf, 18);
+}
+
+namespace {
+
+// One-second red-on-blue canvas; enough for the muxer to report a stable rate.
+drift::Project frameRateTestProject(int projectFps)
+{
+    drift::Project project;
+    project.setResolution(160, 90);
+    project.setFps(projectFps);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("shape");
+    clip.type = drift::ClipType::Shape;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(1.0);
+    clip.shapeStyle.kind = drift::ShapeKind::Rectangle;
+    clip.shapeStyle.fill = Qt::red;
+    clip.shapeStyle.strokeWidth = 0.0;
+    clip.transformX.setKeyframe(0, 70.0);
+    clip.transformY.setKeyframe(0, 35.0);
+    clip.transformW.setKeyframe(0, 20.0);
+    clip.transformH.setKeyframe(0, 20.0);
+    project.tracks()[0].clips.append(clip);
+    return project;
+}
+
+// Swaps in whatever encoders this FFmpeg build actually has; false means none.
+bool useAvailableCodecs(ExportSettings &settings)
+{
+    const auto pick = [](const QVariantList &catalog, QString &id) {
+        for (const QVariant &v : catalog) {
+            const QVariantMap m = v.toMap();
+            if (m.value(QStringLiteral("available")).toBool()) {
+                id = m.value(QStringLiteral("id")).toString();
+                return true;
+            }
+        }
+        return false;
+    };
+    if (!Exporter::videoCodecById(settings.videoCodecId).value(QStringLiteral("available")).toBool()
+        && !pick(Exporter::videoCodecs(), settings.videoCodecId)) {
+        return false;
+    }
+    if (!Exporter::audioCodecById(settings.audioCodecId).value(QStringLiteral("available")).toBool()
+        && !pick(Exporter::audioCodecs(), settings.audioCodecId)) {
+        return false;
+    }
+    return true;
+}
+
+// Frame rate the demuxer reports, plus a demuxed packet count (nb_frames is 0 on
+// some muxers, so count rather than trust it).
+bool probeVideoRate(const QString &path, AVRational &rate, int64_t &frameCount)
+{
+    rate = AVRational{0, 1};
+    frameCount = 0;
+
+    AVFormatContext *fmt = nullptr;
+    if (avformat_open_input(&fmt, path.toUtf8().constData(), nullptr, nullptr) < 0)
+        return false;
+    if (avformat_find_stream_info(fmt, nullptr) < 0) {
+        avformat_close_input(&fmt);
+        return false;
+    }
+    const int idx = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    if (idx < 0) {
+        avformat_close_input(&fmt);
+        return false;
+    }
+    const AVStream *st = fmt->streams[idx];
+    // r_frame_rate, not avg_frame_rate: the latter divides the frame count by the
+    // span to the *last frame's start*, so a 1s/25fps file reads back as 26.04.
+    rate = st->r_frame_rate.num > 0 ? st->r_frame_rate : st->avg_frame_rate;
+
+    AVPacket *pkt = av_packet_alloc();
+    while (pkt && av_read_frame(fmt, pkt) >= 0) {
+        if (pkt->stream_index == idx)
+            ++frameCount;
+        av_packet_unref(pkt);
+    }
+    av_packet_free(&pkt);
+    avformat_close_input(&fmt);
+    return rate.num > 0 && rate.den > 0;
+}
+
+// Decodes every frame and reports how many differ from the frame before them.
+// A frame that merely repeats its predecessor scores ~0 mean-absolute-difference
+// on the luma plane, so this separates real temporal detail from duplication.
+bool countDistinctFrames(const QString &path, int &total, int &changed, double threshold = 1.0)
+{
+    total = 0;
+    changed = 0;
+
+    AVFormatContext *fmt = nullptr;
+    if (avformat_open_input(&fmt, path.toUtf8().constData(), nullptr, nullptr) < 0)
+        return false;
+    const auto closeFmt = qScopeGuard([&] { avformat_close_input(&fmt); });
+    if (avformat_find_stream_info(fmt, nullptr) < 0)
+        return false;
+
+    const int idx = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    if (idx < 0)
+        return false;
+    const AVCodec *dec = avcodec_find_decoder(fmt->streams[idx]->codecpar->codec_id);
+    if (!dec)
+        return false;
+    AVCodecContext *ctx = avcodec_alloc_context3(dec);
+    if (!ctx)
+        return false;
+    const auto freeCtx = qScopeGuard([&] { avcodec_free_context(&ctx); });
+    if (avcodec_parameters_to_context(ctx, fmt->streams[idx]->codecpar) < 0)
+        return false;
+    if (avcodec_open2(ctx, dec, nullptr) < 0)
+        return false;
+
+    AVPacket *pkt = av_packet_alloc();
+    AVFrame *frame = av_frame_alloc();
+    if (!pkt || !frame) {
+        av_packet_free(&pkt);
+        av_frame_free(&frame);
+        return false;
+    }
+    const auto freeAv = qScopeGuard([&] {
+        av_packet_free(&pkt);
+        av_frame_free(&frame);
+    });
+
+    QByteArray previous;
+    const auto consume = [&]() {
+        while (avcodec_receive_frame(ctx, frame) >= 0) {
+            QByteArray luma;
+            luma.resize(frame->width * frame->height);
+            for (int y = 0; y < frame->height; ++y) {
+                std::memcpy(luma.data() + y * frame->width, frame->data[0] + y * frame->linesize[0],
+                            frame->width);
+            }
+            if (!previous.isEmpty() && previous.size() == luma.size()) {
+                double sum = 0.0;
+                const auto *a = reinterpret_cast<const uint8_t *>(previous.constData());
+                const auto *b = reinterpret_cast<const uint8_t *>(luma.constData());
+                for (int i = 0; i < luma.size(); ++i)
+                    sum += std::abs(static_cast<int>(a[i]) - static_cast<int>(b[i]));
+                if (sum / luma.size() > threshold)
+                    ++changed;
+            }
+            previous = luma;
+            ++total;
+        }
+    };
+
+    while (av_read_frame(fmt, pkt) >= 0) {
+        if (pkt->stream_index == idx) {
+            // EAGAIN means the decoder wants its output read before it will take
+            // more; dropping the packet there would silently lose a frame.
+            int rc = avcodec_send_packet(ctx, pkt);
+            while (rc == AVERROR(EAGAIN)) {
+                consume();
+                rc = avcodec_send_packet(ctx, pkt);
+            }
+            consume();
+        }
+        av_packet_unref(pkt);
+    }
+    avcodec_send_packet(ctx, nullptr);
+    consume();
+    return total > 0;
+}
+
+// Exports `project` at the given rate and reports what landed in the file.
+// Returns false only when this FFmpeg build cannot encode at all.
+bool exportAtRate(const drift::Project &project, int fpsNum, int fpsDen, const QString &dirPath,
+                  const QString &name, AVRational &rate, int64_t &frameCount,
+                  QString *outPathOut = nullptr)
+{
+    ExportSettings settings = Exporter::defaultSettings();
+    settings.videoCodecId = QStringLiteral("h264");
+    settings.audioCodecId = QStringLiteral("aac");
+    settings.rateControl = QStringLiteral("crf");
+    settings.crf = 18;
+    settings.fpsNum = fpsNum;
+    settings.fpsDen = fpsDen;
+    if (!useAvailableCodecs(settings))
+        return false;
+
+    const QString out = dirPath + QLatin1Char('/') + name + QLatin1Char('.')
+        + Exporter::defaultSuffix(
+                             Exporter::preferredContainer(settings.videoCodecId, settings.audioCodecId));
+
+    QString error;
+    if (!Exporter::run(project, settings, out, &error)) {
+        if (error.contains(QStringLiteral("encoder")))
+            return false;
+        qWarning("export failed: %s", qPrintable(error));
+        return false;
+    }
+    if (outPathOut)
+        *outPathOut = out;
+    return probeVideoRate(out, rate, frameCount);
+}
+
+// 1 second of 120 fps footage — the high-frame-rate source a slow-motion edit is
+// built on. Every frame is a flat grey stepping by 11 levels, so "is this frame
+// new or a repeat?" is unambiguous however the frame is scaled or colour-converted
+// (testsrc is too nearly-static at 64x64 to tell the two apart).
+QString makeHighRateVideo(QTemporaryDir &dir)
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        return {};
+
+    const QString out = dir.filePath(QStringLiteral("fast.mp4"));
+    const QStringList args{
+        QStringLiteral("-y"),
+        QStringLiteral("-f"), QStringLiteral("lavfi"),
+        QStringLiteral("-i"), QStringLiteral("color=c=black:s=64x64:r=120:d=1"),
+        // Escaped comma: the filtergraph parser would read a bare one as a filter break.
+        QStringLiteral("-vf"), QStringLiteral("geq=lum='mod(N*11\\,256)':cb=128:cr=128"),
+        QStringLiteral("-c:v"), QStringLiteral("libx264"),
+        QStringLiteral("-crf"), QStringLiteral("12"),
+        QStringLiteral("-g"), QStringLiteral("12"),
+        QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+        out,
+    };
+
+    QProcess proc;
+    proc.start(ffmpeg, args);
+    if (!proc.waitForFinished(30000) || proc.exitCode() != 0)
+        return {};
+    return QFileInfo::exists(out) ? out : QString{};
+}
+
+} // namespace
+
+// Pure validation — runs even on an FFmpeg build with no encoders at all.
+void EngineTest::exporterSettingsFromMapValidatesFrameRate()
+{
+    // Unset means "follow the project".
+    const ExportSettings none = Exporter::settingsFromMap({});
+    QCOMPARE(none.fpsNum, 0);
+    QCOMPARE(none.fpsDen, 1);
+
+    // A negative numerator or a zero denominator would produce a time_base the
+    // muxer rejects, so both fall back rather than propagating.
+    const ExportSettings negative = Exporter::settingsFromMap(
+        {{QStringLiteral("fpsNum"), -5}, {QStringLiteral("fpsDen"), 1}});
+    QCOMPARE(negative.fpsNum, 0);
+    QCOMPARE(negative.fpsDen, 1);
+
+    const ExportSettings zeroDen = Exporter::settingsFromMap(
+        {{QStringLiteral("fpsNum"), 30}, {QStringLiteral("fpsDen"), 0}});
+    QCOMPARE(zeroDen.fpsNum, 0);
+    QCOMPARE(zeroDen.fpsDen, 1);
+
+    const ExportSettings tooFast = Exporter::settingsFromMap(
+        {{QStringLiteral("fpsNum"), 9999}, {QStringLiteral("fpsDen"), 1}});
+    QCOMPARE(tooFast.fpsNum, kMaxExportFps);
+    QCOMPARE(tooFast.fpsDen, 1);
+
+    // NTSC rates must survive untouched — this is the whole point of keeping it rational.
+    const ExportSettings ntsc = Exporter::settingsFromMap(
+        {{QStringLiteral("fpsNum"), 30000}, {QStringLiteral("fpsDen"), 1001}});
+    QCOMPARE(ntsc.fpsNum, 30000);
+    QCOMPARE(ntsc.fpsDen, 1001);
+}
+
+void EngineTest::exporterDefaultsToProjectFrameRate()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    AVRational rate{};
+    int64_t frames = 0;
+    if (!exportAtRate(frameRateTestProject(25), 0, 1, dir.path(), QStringLiteral("project"), rate, frames))
+        QSKIP("No usable encoder in this FFmpeg build");
+
+    QVERIFY2(std::abs(av_q2d(rate) - 25.0) < 0.5, qPrintable(QStringLiteral("got %1").arg(av_q2d(rate))));
+    QVERIFY2(std::llabs(frames - 25) <= 1, qPrintable(QStringLiteral("got %1 frames").arg(frames)));
+}
+
+void EngineTest::exporterHonoursExportFrameRateOverride()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    // 25 fps project, 50 fps delivery: the export rate must win, and the file must
+    // hold twice the frames over the same one-second timeline.
+    AVRational rate{};
+    int64_t frames = 0;
+    if (!exportAtRate(frameRateTestProject(25), 50, 1, dir.path(), QStringLiteral("fast"), rate, frames))
+        QSKIP("No usable encoder in this FFmpeg build");
+
+    QVERIFY2(std::abs(av_q2d(rate) - 50.0) < 0.5, qPrintable(QStringLiteral("got %1").arg(av_q2d(rate))));
+    QVERIFY2(std::llabs(frames - 50) <= 1, qPrintable(QStringLiteral("got %1 frames").arg(frames)));
+}
+
+void EngineTest::exporterSupportsNtscFrameRates()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    AVRational rate{};
+    int64_t frames = 0;
+    if (!exportAtRate(frameRateTestProject(30), 30000, 1001, dir.path(), QStringLiteral("ntsc"), rate,
+                      frames)) {
+        QSKIP("No usable encoder in this FFmpeg build");
+    }
+
+    // Tolerance is deliberately tighter than the 0.03 gap between 29.97 and 30:
+    // an integer-fps exporter would land on 30.0 and fail here.
+    const double expected = 30000.0 / 1001.0;
+    QVERIFY2(std::abs(av_q2d(rate) - expected) < 0.01,
+             qPrintable(QStringLiteral("got %1, expected %2").arg(av_q2d(rate)).arg(expected)));
+    QVERIFY2(std::llabs(frames - 30) <= 1, qPrintable(QStringLiteral("got %1 frames").arg(frames)));
+}
+
+// The point of the feature: a higher export rate must yield genuinely new frames
+// for a slowed clip, not duplicates — but only while the source still has them.
+// 120 fps footage at 0.5x advances source time at 60 source-fps, so 60 fps of
+// export is exactly the ceiling and 240 fps is past it.
+void EngineTest::exporterFrameRateAddsRealDetailToSlowedClips()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = makeHighRateVideo(dir);
+    if (source.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    // Fixture sanity: the whole test is meaningless unless the source really does
+    // change every frame.
+    int sourceTotal = 0;
+    int sourceChanged = 0;
+    QVERIFY(countDistinctFrames(source, sourceTotal, sourceChanged));
+    QVERIFY2(sourceChanged > 100,
+             qPrintable(QStringLiteral("source only had %1/%2 changing frames")
+                            .arg(sourceChanged)
+                            .arg(sourceTotal)));
+
+    drift::Project project;
+    project.setResolution(64, 64);
+    project.setFps(30);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("slowmo");
+    clip.type = drift::ClipType::Video;
+    clip.path = source;
+    clip.timelineStart = 0;
+    clip.speed = 0.5;
+    clip.srcIn = 0;
+    // 1s of source stretched over 2s of timeline.
+    clip.timelineDuration = drift::secondsToUs(2.0);
+    clip.srcOut = clip.sourceSpanUs();
+    project.tracks()[0].clips.append(clip);
+
+    struct Result
+    {
+        int64_t encoded = 0; // packets written by the exporter
+        int total = 0;       // frames the decoder handed back
+        int changed = 0;
+    };
+    const auto exportAndCount = [&](int fps, const QString &name, Result &result) -> bool {
+        AVRational rate{};
+        QString path;
+        if (!exportAtRate(project, fps, 1, dir.path(), name, rate, result.encoded, &path))
+            return false;
+        return countDistinctFrames(path, result.total, result.changed);
+    };
+
+    Result slow;
+    Result fast;
+    Result beyond;
+    if (!exportAndCount(30, QStringLiteral("at30"), slow))
+        QSKIP("No usable encoder in this FFmpeg build");
+    QVERIFY(exportAndCount(60, QStringLiteral("at60"), fast));
+    QVERIFY(exportAndCount(240, QStringLiteral("at240"), beyond));
+
+    QCOMPARE(slow.encoded, 60);
+    QCOMPARE(fast.encoded, 120);
+    QCOMPARE(beyond.encoded, 480);
+
+    // Decoded count can trail the packet count by one when the mp4 edit list makes
+    // the demuxer drop the first frame; the packet counts above are the exact check.
+    QVERIFY2(std::abs(slow.total - 60) <= 1, qPrintable(QStringLiteral("decoded %1").arg(slow.total)));
+    QVERIFY2(std::abs(fast.total - 120) <= 1, qPrintable(QStringLiteral("decoded %1").arg(fast.total)));
+    QVERIFY2(std::abs(beyond.total - 480) <= 1,
+             qPrintable(QStringLiteral("decoded %1").arg(beyond.total)));
+
+    // Under the ceiling, essentially every frame is new: the extra frames are real
+    // temporal detail pulled from the source, which is what makes slow-mo smooth.
+    QVERIFY2(slow.changed >= 55, qPrintable(QStringLiteral("30fps: %1/60 new").arg(slow.changed)));
+    QVERIFY2(fast.changed >= 110, qPrintable(QStringLiteral("60fps: %1/120 new").arg(fast.changed)));
+    QVERIFY2(fast.changed > slow.changed * 1.5,
+             qPrintable(QStringLiteral("60fps gave %1 new frames vs %2 at 30fps")
+                            .arg(fast.changed)
+                            .arg(slow.changed)));
+
+    // Past the ceiling the source has nothing left to give, so frames repeat —
+    // asking for 4x the rate does not buy 4x the detail.
+    QVERIFY2(beyond.changed < beyond.total / 2,
+             qPrintable(QStringLiteral("240fps: %1/480 new").arg(beyond.changed)));
+    QVERIFY2(beyond.changed < fast.changed * 1.5,
+             qPrintable(QStringLiteral("240fps gave %1 new frames vs %2 at 60fps")
+                            .arg(beyond.changed)
+                            .arg(fast.changed)));
 }
 
 // The audio-effects addon content must parse into a usable catalog: known ids resolve, categories

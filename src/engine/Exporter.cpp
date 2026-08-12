@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QImage>
 
+#include <climits>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -19,6 +20,7 @@ extern "C" {
 #include <libavutil/dict.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
+#include <libavutil/rational.h>
 #include <libswscale/swscale.h>
 }
 
@@ -790,6 +792,52 @@ QVariantList Exporter::scaleOptions(int projectWidth, int projectHeight)
     return out;
 }
 
+QVariantList Exporter::frameRateOptions(int projectFps)
+{
+    struct FrameRatePreset
+    {
+        const char *id;
+        int num;
+        int den;
+        const char *label;
+    };
+
+    // NTSC rates carry a 1001 denominator; an integer fps could not express them,
+    // which is why ExportSettings keeps the rate rational.
+    static const FrameRatePreset presets[] = {
+        {"23.976", 24000, 1001, "23.976 fps (NTSC film)"},
+        {"24", 24, 1, "24 fps"},
+        {"25", 25, 1, "25 fps (PAL)"},
+        {"29.97", 30000, 1001, "29.97 fps (NTSC)"},
+        {"30", 30, 1, "30 fps"},
+        {"48", 48, 1, "48 fps"},
+        {"50", 50, 1, "50 fps"},
+        {"59.94", 60000, 1001, "59.94 fps (NTSC)"},
+        {"60", 60, 1, "60 fps"},
+        {"120", 120, 1, "120 fps"},
+        {"240", 240, 1, "240 fps"},
+    };
+
+    QVariantList out;
+    // 0/1 means "whatever the project is set to", so the export follows later
+    // project-setup changes instead of pinning the rate at dialog time.
+    out.append(QVariantMap{
+        {QStringLiteral("id"), QStringLiteral("project")},
+        {QStringLiteral("label"), QStringLiteral("Same as project (%1 fps)").arg(qMax(1, projectFps))},
+        {QStringLiteral("fpsNum"), 0},
+        {QStringLiteral("fpsDen"), 1},
+    });
+    for (const FrameRatePreset &preset : presets) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), QString::fromLatin1(preset.id)},
+            {QStringLiteral("label"), QString::fromLatin1(preset.label)},
+            {QStringLiteral("fpsNum"), preset.num},
+            {QStringLiteral("fpsDen"), preset.den},
+        });
+    }
+    return out;
+}
+
 ExportSettings Exporter::defaultSettings()
 {
     ExportSettings s;
@@ -827,6 +875,19 @@ ExportSettings Exporter::settingsFromMap(const QVariantMap &map)
     ExportSettings s = defaultSettings();
     if (map.contains(QStringLiteral("targetHeight")))
         s.targetHeight = map.value(QStringLiteral("targetHeight")).toInt();
+    if (map.contains(QStringLiteral("fpsNum")))
+        s.fpsNum = map.value(QStringLiteral("fpsNum")).toInt();
+    if (map.contains(QStringLiteral("fpsDen")))
+        s.fpsDen = map.value(QStringLiteral("fpsDen")).toInt();
+    // Anything nonsensical falls back to the project rate rather than producing a
+    // broken time_base the muxer would reject.
+    if (s.fpsNum <= 0 || s.fpsDen <= 0) {
+        s.fpsNum = 0;
+        s.fpsDen = 1;
+    } else if (static_cast<int64_t>(s.fpsNum) > static_cast<int64_t>(kMaxExportFps) * s.fpsDen) {
+        s.fpsNum = kMaxExportFps;
+        s.fpsDen = 1;
+    }
     if (map.contains(QStringLiteral("videoCodecId")))
         s.videoCodecId = map.value(QStringLiteral("videoCodecId")).toString();
     if (map.contains(QStringLiteral("rateControl")))
@@ -888,7 +949,16 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
     int outH = 0;
     scaleSize(projW, projH, settings.targetHeight, outW, outH);
 
-    const int fps = qMax(1, project.fps());
+    // The export rate is independent of the project rate: sampling the timeline
+    // faster pulls extra frames out of the source wherever it has them, which is
+    // what makes slowed clips look smooth.
+    AVRational frameRate{qMax(1, project.fps()), 1};
+    if (settings.fpsNum > 0 && settings.fpsDen > 0)
+        frameRate = AVRational{settings.fpsNum, settings.fpsDen};
+    av_reduce(&frameRate.num, &frameRate.den, frameRate.num, frameRate.den, INT_MAX);
+    const AVRational frameTb{frameRate.den, frameRate.num};
+    const double fpsValue = av_q2d(frameRate);
+
     const int sampleRate = project.sampleRate() > 0 ? project.sampleRate() : 48000;
     const drift::TimeUs durationUs = project.durationUs();
     if (durationUs <= 0) {
@@ -897,7 +967,8 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
         return false;
     }
 
-    const int64_t totalFrames = qMax<int64_t>(1, std::llround(static_cast<double>(durationUs) * fps / 1e6));
+    const int64_t totalFrames =
+        qMax<int64_t>(1, std::llround(static_cast<double>(durationUs) * fpsValue / 1e6));
     const int64_t totalAudioSamples =
         qMax<int64_t>(0, std::llround(static_cast<double>(durationUs) * sampleRate / 1e6));
 
@@ -953,9 +1024,9 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
         vctx->width = outW;
         vctx->height = outH;
         vctx->pix_fmt = vdef->pixFmt;
-        vctx->time_base = AVRational{1, fps};
-        vctx->framerate = AVRational{fps, 1};
-        vctx->gop_size = fps * 2;
+        vctx->time_base = frameTb;
+        vctx->framerate = frameRate;
+        vctx->gop_size = qMax(1, static_cast<int>(std::llround(fpsValue * 2.0)));
         vctx->max_b_frames = 2;
         applySdrBt709Tags(vctx);
         if (fmt->oformat->flags & AVFMT_GLOBALHEADER)
@@ -1090,7 +1161,8 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
                 break;
             }
 
-            const drift::TimeUs t = static_cast<drift::TimeUs>(std::llround(static_cast<double>(i) * 1e6 / fps));
+            const drift::TimeUs t = static_cast<drift::TimeUs>(
+                std::llround(static_cast<double>(i) * 1e6 * frameRate.den / frameRate.num));
             QImage img = compositor.compositeAt(t);
             if (img.isNull()) {
                 img = QImage(projW, projH, QImage::Format_RGBA8888);
@@ -1115,8 +1187,10 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
             if (!encodeWriteFrame(fmt, vctx, vstream, vframe, pkt, &error))
                 goto cleanup;
 
+            // Integer math keeps A/V in exact lockstep even on 1001-denominator rates.
             const int64_t targetSamples =
-                qMin(totalAudioSamples, ((i + 1) * static_cast<int64_t>(sampleRate)) / fps);
+                qMin(totalAudioSamples,
+                     ((i + 1) * static_cast<int64_t>(sampleRate) * frameRate.den) / frameRate.num);
             const int need = static_cast<int>(targetSamples - audioSamplesGenerated);
             if (need > 0) {
                 const size_t base = audioBuffer.size();

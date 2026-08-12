@@ -22,6 +22,14 @@ ThemedDialog {
     property int audioBitrateKbps: 192
     property bool advancedOpen: false
 
+    // Export frame rate. fpsNum 0 means "follow the project fps". Rational so the
+    // NTSC rates (30000/1001 and friends) survive the round-trip.
+    property string frameRateId: "project"
+    property int fpsNum: 0
+    property int fpsDen: 1
+    property var frameRateOptions: []
+    readonly property bool frameRateCustom: frameRateId === "custom"
+
     // Bitrate combo: preset kbps values, or "custom"
     property string audioBitrateChoice: "192"
     readonly property var audioBitratePresets: [96, 128, 160, 192, 256, 320]
@@ -66,6 +74,43 @@ ThemedDialog {
                 return list[i].id
         }
         return preferred
+    }
+
+    // Catalog from the engine plus a Custom… escape hatch for rates not listed.
+    readonly property var frameRateModel: {
+        var list = []
+        for (var i = 0; i < frameRateOptions.length; ++i)
+            list.push(frameRateOptions[i])
+        list.push({ id: "custom", label: qsTr("Custom…"), fpsNum: 0, fpsDen: 1 })
+        return list
+    }
+
+    // Picks the catalog entry matching num/den, else "custom" for a hand-typed rate.
+    function frameRateIdFor(num, den) {
+        if (!(num > 0) || !(den > 0))
+            return "project"
+        for (var i = 0; i < frameRateOptions.length; ++i) {
+            var o = frameRateOptions[i]
+            if (o.fpsNum === num && o.fpsDen === den)
+                return o.id
+        }
+        return "custom"
+    }
+
+    function applyFrameRateChoice(entry) {
+        if (!entry)
+            return
+        frameRateId = entry.id
+        if (entry.id === "custom") {
+            // Keep whatever rate was showing; only fall back when following the project.
+            if (!(fpsNum > 0)) {
+                fpsNum = EditorState.projectFps()
+                fpsDen = 1
+            }
+        } else {
+            fpsNum = entry.fpsNum
+            fpsDen = entry.fpsDen
+        }
     }
 
     function syncAudioBitrateChoice() {
@@ -119,6 +164,7 @@ ThemedDialog {
         videoCodecs = EditorState.exportVideoCodecs()
         audioCodecs = EditorState.exportAudioCodecs()
         scaleOptions = EditorState.exportScaleOptions()
+        frameRateOptions = EditorState.exportFrameRateOptions()
 
         var defaults = EditorState.exportDefaultSettings()
         var remembered = EditorState.lastExportSettings()
@@ -136,6 +182,17 @@ ThemedDialog {
         videoPreset = src.videoPreset || defaults.videoPreset || "medium"
         audioBitrateKbps = src.audioBitrateKbps || defaults.audioBitrateKbps || 192
         syncAudioBitrateChoice()
+
+        var restoredNum = (src.fpsNum !== undefined && src.fpsNum !== null) ? src.fpsNum : 0
+        var restoredDen = (src.fpsDen !== undefined && src.fpsDen !== null) ? src.fpsDen : 1
+        if (!(restoredNum > 0) || !(restoredDen > 0)) {
+            restoredNum = 0
+            restoredDen = 1
+        }
+        fpsNum = restoredNum
+        fpsDen = restoredDen
+        frameRateId = frameRateIdFor(restoredNum, restoredDen)
+
         advancedOpen = false
 
         var meta = EditorState.projectMetadata || {}
@@ -180,6 +237,8 @@ ThemedDialog {
     }
 
     function syncComboIndices() {
+        if (frameRateCombo)
+            frameRateCombo.currentIndex = Math.max(0, frameRateCombo.indexOfValue(frameRateId))
         if (videoCodecCombo)
             videoCodecCombo.currentIndex = Math.max(0, videoCodecCombo.indexOfValue(videoCodecId))
         if (audioCodecCombo)
@@ -203,6 +262,8 @@ ThemedDialog {
         var s = {
             "scaleId": scaleId,
             "targetHeight": targetHeight,
+            "fpsNum": isAudioOnly ? 0 : fpsNum,
+            "fpsDen": isAudioOnly ? 1 : fpsDen,
             "videoCodecId": videoCodecId,
             "rateControl": videoLossless ? "crf" : rateControl,
             "crf": crf,
@@ -330,6 +391,55 @@ ThemedDialog {
                                     root.videoBitrateKbps = modelData.videoBitrateKbps
                             }
                         }
+                    }
+                }
+
+                Column {
+                    width: parent.width
+                    spacing: Theme.spacingSm
+
+                    ThemedLabel {
+                        text: qsTr("Frame rate")
+                    }
+
+                    RowLayout {
+                        width: parent.width
+                        spacing: Theme.spacingMd
+
+                        ThemedComboBox {
+                            id: frameRateCombo
+                            Layout.fillWidth: true
+                            textRole: "label"
+                            valueRole: "id"
+                            model: root.frameRateModel
+                            onActivated: function (index) {
+                                root.applyFrameRateChoice(root.frameRateModel[index])
+                            }
+                        }
+
+                        ThemedNumberField {
+                            Layout.preferredWidth: 120
+                            visible: root.frameRateCustom
+                            from: 1
+                            to: 480
+                            step: 1
+                            unit: qsTr("fps")
+                            value: root.fpsNum > 0 ? root.fpsNum : EditorState.projectFps()
+                            // Whole numbers only here; every fractional rate worth
+                            // delivering (23.976 / 29.97 / 59.94) is already a preset.
+                            onEdited: function (v) {
+                                root.fpsNum = Math.round(v)
+                                root.fpsDen = 1
+                            }
+                        }
+                    }
+
+                    ThemedLabel {
+                        width: parent.width
+                        size: "sm"
+                        visible: root.fpsNum > 0
+                        height: visible ? implicitHeight : 0
+                        text: qsTr("Exporting above the project rate pulls extra frames from the source footage where it has them — this is what makes slowed clips look smooth. Where it doesn't, frames repeat.")
                     }
                 }
 

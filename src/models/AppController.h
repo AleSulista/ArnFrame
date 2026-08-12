@@ -675,6 +675,8 @@ public:
     Q_INVOKABLE bool restoreLastSessionIfEnabled();
     Q_INVOKABLE QVariantList exportPresets() const; // legacy scale ids/labels
     Q_INVOKABLE QVariantList exportScaleOptions() const;
+    // Frame rate choices; the "project" entry is labelled with the current project fps.
+    Q_INVOKABLE QVariantList exportFrameRateOptions() const;
     Q_INVOKABLE QVariantList exportVideoCodecs() const;
     Q_INVOKABLE QVariantList exportAudioCodecs() const;
     Q_INVOKABLE QVariantMap exportDefaultSettings() const;
