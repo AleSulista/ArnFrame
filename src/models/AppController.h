@@ -698,6 +698,7 @@ public:
     Q_INVOKABLE QVariantList exportFrameRateOptions() const;
     Q_INVOKABLE QVariantList exportVideoCodecs() const;
     Q_INVOKABLE QVariantList exportAudioCodecs() const;
+    Q_INVOKABLE bool exportGifAvailable() const;
     Q_INVOKABLE QVariantMap exportDefaultSettings() const;
     // Last dialog choices (scale + encode). Empty until the user has exported once.
     Q_INVOKABLE QVariantMap lastExportSettings() const;

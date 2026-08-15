@@ -43,6 +43,7 @@ struct ExportSettings
     QString audioCodecId = QStringLiteral("aac");
     int audioBitrateKbps = 192;
     bool audioOnly = false;
+    bool gifExport = false;
     QString metadataTitle;
     QString metadataArtist;
     QString metadataAlbum;
@@ -81,6 +82,8 @@ public:
 
     // Frame rate choices for the export dialog; the first entry follows `projectFps`.
     static QVariantList frameRateOptions(int projectFps);
+
+    static bool gifAvailable();
 
     static ExportSettings defaultSettings();
     static ExportSettings settingsFromMap(const QVariantMap &map);

@@ -153,6 +153,7 @@ private slots:
     void exporterDefaultsToProjectFrameRate();
     void exporterHonoursExportFrameRateOverride();
     void exporterHonoursWorkAreaRange();
+    void exporterProducesAnimatedGif();
     void exporterSupportsNtscFrameRates();
     void exporterFrameRateAddsRealDetailToSlowedClips();
     void mixerHasNoBlockBoundaryDropout();
@@ -3767,6 +3768,29 @@ void EngineTest::exporterHonoursWorkAreaRange()
     }
 
     QVERIFY2(std::llabs(frames - 25) <= 1, qPrintable(QStringLiteral("got %1 frames").arg(frames)));
+}
+
+void EngineTest::exporterProducesAnimatedGif()
+{
+    if (!Exporter::gifAvailable())
+        QSKIP("GIF encoder is not available in this FFmpeg build");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    drift::Project project = frameRateTestProject(25);
+    project.tracks()[0].clips[0].timelineDuration = drift::secondsToUs(0.4);
+
+    ExportSettings settings = Exporter::defaultSettings();
+    settings.gifExport = true;
+    settings.fpsNum = 10;
+    settings.fpsDen = 1;
+
+    const QString out = dir.filePath(QStringLiteral("loop.gif"));
+    QString error;
+    const bool ok = Exporter::run(project, settings, out, &error);
+    QVERIFY2(ok, qPrintable(error));
+    QVERIFY(QFileInfo(out).size() > 100);
 }
 
 void EngineTest::exporterSupportsNtscFrameRates()

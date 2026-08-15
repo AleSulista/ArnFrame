@@ -10,7 +10,7 @@ ThemedDialog {
     acceptText: qsTr("Export")
     preferredWidth: Theme.dialogWidthLg
 
-    property string exportMode: "video" // "video" | "audio"
+    property string exportMode: "video" // "video" | "audio" | "gif"
     property string scaleId: "source"
     property int targetHeight: 0
     property int videoBitrateKbps: 12000
@@ -57,6 +57,7 @@ ThemedDialog {
     readonly property var videoPresetList: (currentVideoCodec && currentVideoCodec.presets) ? currentVideoCodec.presets : []
     readonly property bool audioLossless: !!(currentAudioCodec && currentAudioCodec.lossless)
     readonly property bool isAudioOnly: exportMode === "audio"
+    readonly property bool isGifExport: exportMode === "gif"
 
     function codecById(list, id) {
         for (var i = 0; i < list.length; ++i) {
@@ -170,8 +171,17 @@ ThemedDialog {
                + String(frac).padStart(2, "0")
     }
 
+    function applyGifDefaults() {
+        if (!(fpsNum > 0) || frameRateId === "project") {
+            fpsNum = 15
+            fpsDen = 1
+            frameRateId = frameRateIdFor(15, 1)
+        }
+        if (EditorState.workAreaActive)
+            exportWorkAreaOnly = true
+    }
+
     function openDialog() {
-        exportMode = "video"
         videoCodecs = EditorState.exportVideoCodecs()
         audioCodecs = EditorState.exportAudioCodecs()
         scaleOptions = EditorState.exportScaleOptions()
@@ -181,13 +191,12 @@ ThemedDialog {
         var remembered = EditorState.lastExportSettings()
         var hasRemembered = !!(remembered
                                && (remembered.scaleId || remembered.videoCodecId
-                                   || remembered.audioCodecId))
+                                   || remembered.audioCodecId || remembered.gifExport))
         var src = hasRemembered ? remembered : defaults
 
-        // Always open on Video. Exporting audio-only is the rare errand, so a single
-        // audio export should not leave the dialog in audio mode from then on; the
-        // codec/bitrate choices below are still restored either way.
-        exportMode = "video"
+        // Always open on Video unless the last export was audio-only or GIF.
+        exportMode = hasRemembered && src.gifExport ? "gif"
+                : hasRemembered && src.audioOnly ? "audio" : "video"
         videoCodecId = firstAvailableId(videoCodecs, src.videoCodecId || defaults.videoCodecId || "h264")
         audioCodecId = firstAvailableId(audioCodecs, src.audioCodecId || defaults.audioCodecId || "aac")
         rateControl = src.rateControl || defaults.rateControl || "crf"
@@ -206,6 +215,8 @@ ThemedDialog {
         fpsNum = restoredNum
         fpsDen = restoredDen
         frameRateId = frameRateIdFor(restoredNum, restoredDen)
+        if (exportMode === "gif")
+            applyGifDefaults()
 
         advancedOpen = false
         exportWorkAreaOnly = EditorState.workAreaActive
@@ -255,6 +266,8 @@ ThemedDialog {
     function syncComboIndices() {
         if (frameRateCombo)
             frameRateCombo.currentIndex = Math.max(0, frameRateCombo.indexOfValue(frameRateId))
+        if (gifFrameRateCombo)
+            gifFrameRateCombo.currentIndex = Math.max(0, gifFrameRateCombo.indexOfValue(frameRateId))
         if (videoCodecCombo)
             videoCodecCombo.currentIndex = Math.max(0, videoCodecCombo.indexOfValue(videoCodecId))
         if (audioCodecCombo)
@@ -288,6 +301,7 @@ ThemedDialog {
             "audioCodecId": audioCodecId,
             "audioBitrateKbps": audioBitrateKbps,
             "audioOnly": isAudioOnly,
+            "gifExport": isGifExport,
             "exportWorkAreaOnly": exportWorkAreaOnly && EditorState.workAreaActive
         }
         if (s.exportWorkAreaOnly) {
@@ -308,12 +322,14 @@ ThemedDialog {
     }
 
     onAccepted: {
-        var container = isAudioOnly
-                ? EditorState.exportPreferredAudioOnlyContainer(audioCodecId)
-                : EditorState.exportPreferredContainer(videoCodecId, audioCodecId)
+        var container = isGifExport ? "gif"
+                : isAudioOnly
+                  ? EditorState.exportPreferredAudioOnlyContainer(audioCodecId)
+                  : EditorState.exportPreferredContainer(videoCodecId, audioCodecId)
         var filters = EditorState.exportSaveFilters(container, isAudioOnly)
         var suffix = EditorState.exportDefaultSuffix(container, isAudioOnly)
-        var dialogTitle = isAudioOnly ? qsTr("Export Audio") : qsTr("Export Video")
+        var dialogTitle = isGifExport ? qsTr("Export GIF")
+                : isAudioOnly ? qsTr("Export Audio") : qsTr("Export Video")
         var url = FileDialogs.saveFile(dialogTitle, filters,
                                        EditorState.projectName, suffix,
                                        EditorState.lastExportFolder())
@@ -373,6 +389,21 @@ ThemedDialog {
                         root.syncComboIndices()
                     }
                 }
+
+                ThemedToggleButton {
+                    text: qsTr("GIF")
+                    enabled: EditorState.exportGifAvailable()
+                    tooltip: enabled ? "" : qsTr("GIF encoder is not available in this build")
+                    checked: root.exportMode === "gif"
+                    onClicked: {
+                        if (root.exportMode === "gif")
+                            return
+                        root.exportMode = "gif"
+                        root.advancedOpen = false
+                        root.applyGifDefaults()
+                        root.syncComboIndices()
+                    }
+                }
             }
 
             ThemedCheckBox {
@@ -390,7 +421,7 @@ ThemedDialog {
             Column {
                 width: parent.width
                 spacing: Theme.spacingXl
-                visible: !root.isAudioOnly
+                visible: root.exportMode === "video"
                 height: visible ? implicitHeight : 0
                 clip: true
 
@@ -731,6 +762,90 @@ ThemedDialog {
                                 onEdited: function (v) { root.audioBitrateKbps = Math.round(v) }
                             }
                         }
+                    }
+                }
+            }
+
+            // ---- GIF mode ----
+            Column {
+                width: parent.width
+                spacing: Theme.spacingXl
+                visible: root.isGifExport
+                height: visible ? implicitHeight : 0
+                clip: true
+
+                ThemedLabel {
+                    width: parent.width
+                    size: "sm"
+                    text: qsTr("Animated GIF — no audio. Mark a work area for short loops, or export up to 60 seconds.")
+                }
+
+                ThemedLabel {
+                    text: qsTr("Downscale")
+                }
+
+                Flow {
+                    width: parent.width
+                    spacing: Theme.spacingMd
+
+                    Repeater {
+                        model: root.scaleOptions
+
+                        delegate: ThemedChip {
+                            required property var modelData
+                            text: modelData.label
+                            selected: root.scaleId === modelData.id
+                            tooltip: qsTr("Export at %1×%2").arg(modelData.width).arg(modelData.height)
+                            onClicked: {
+                                root.scaleId = modelData.id
+                                root.targetHeight = modelData.targetHeight
+                            }
+                        }
+                    }
+                }
+
+                Column {
+                    width: parent.width
+                    spacing: Theme.spacingSm
+
+                    ThemedLabel {
+                        text: qsTr("Frame rate")
+                    }
+
+                    RowLayout {
+                        width: parent.width
+                        spacing: Theme.spacingMd
+
+                        ThemedComboBox {
+                            id: gifFrameRateCombo
+                            Layout.fillWidth: true
+                            textRole: "label"
+                            valueRole: "id"
+                            model: root.frameRateModel
+                            onActivated: function (index) {
+                                root.applyFrameRateChoice(root.frameRateModel[index])
+                            }
+                        }
+
+                        ThemedNumberField {
+                            Layout.preferredWidth: 120
+                            visible: root.frameRateCustom
+                            from: 1
+                            to: 30
+                            step: 1
+                            unit: qsTr("fps")
+                            value: root.fpsNum > 0 ? root.fpsNum : 15
+                            onEdited: function (v) {
+                                root.fpsNum = Math.round(v)
+                                root.fpsDen = 1
+                            }
+                        }
+                    }
+
+                    ThemedLabel {
+                        width: parent.width
+                        size: "sm"
+                        text: qsTr("15 fps is a good default for small file sizes. GIF export is limited to 60 seconds.")
                     }
                 }
             }

@@ -10513,6 +10513,11 @@ QVariantList AppController::exportAudioCodecs() const
     return Exporter::audioCodecs();
 }
 
+bool AppController::exportGifAvailable() const
+{
+    return Exporter::gifAvailable();
+}
+
 QVariantMap AppController::exportDefaultSettings() const
 {
     const ExportSettings s = Exporter::defaultSettings();
@@ -10528,6 +10533,7 @@ QVariantMap AppController::exportDefaultSettings() const
         {QStringLiteral("audioCodecId"), s.audioCodecId},
         {QStringLiteral("audioBitrateKbps"), s.audioBitrateKbps},
         {QStringLiteral("audioOnly"), s.audioOnly},
+        {QStringLiteral("gifExport"), s.gifExport},
     };
 }
 
@@ -10570,6 +10576,7 @@ QVariantMap AppController::lastExportSettings() const
     takeString(QStringLiteral("audioCodecId"));
     takeInt(QStringLiteral("audioBitrateKbps"));
     takeBool(QStringLiteral("audioOnly"));
+    takeBool(QStringLiteral("gifExport"));
     takeBool(QStringLiteral("exportWorkAreaOnly"));
     return out;
 }
@@ -10607,6 +10614,7 @@ void AppController::rememberExportChoice(const QString &outputPath, const QVaria
     put(QStringLiteral("audioCodecId"));
     put(QStringLiteral("audioBitrateKbps"));
     put(QStringLiteral("audioOnly"));
+    put(QStringLiteral("gifExport"));
     put(QStringLiteral("exportWorkAreaOnly"));
     store.endGroup();
 }

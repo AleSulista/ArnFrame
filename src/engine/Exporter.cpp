@@ -22,6 +22,10 @@ extern "C" {
 #include <libavutil/opt.h>
 #include <libavutil/rational.h>
 #include <libswscale/swscale.h>
+
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
 }
 
 namespace {
@@ -650,6 +654,325 @@ cleanup:
     return ok;
 }
 
+constexpr drift::TimeUs kMaxGifDurationUs = 60 * drift::kUsPerSecond;
+
+AVFrame *rgbaImageToFrame(const QImage &image, int64_t pts)
+{
+    if (image.isNull())
+        return nullptr;
+
+    const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
+    AVFrame *frame = av_frame_alloc();
+    if (!frame)
+        return nullptr;
+
+    frame->format = AV_PIX_FMT_RGBA;
+    frame->width = rgba.width();
+    frame->height = rgba.height();
+    if (av_frame_get_buffer(frame, 32) < 0) {
+        av_frame_free(&frame);
+        return nullptr;
+    }
+
+    for (int y = 0; y < rgba.height(); ++y) {
+        std::memcpy(frame->data[0] + y * frame->linesize[0], rgba.constScanLine(y),
+                    static_cast<size_t>(rgba.bytesPerLine()));
+    }
+
+    frame->pts = pts;
+    return frame;
+}
+
+bool setupGifPaletteGraph(AVFilterGraph **graphOut, AVFilterContext **srcOut, AVFilterContext **sinkOut,
+                          int inW, int inH, int outW, int outH, AVRational timeBase, QString *errorOut)
+{
+    AVFilterGraph *graph = avfilter_graph_alloc();
+    if (!graph) {
+        if (errorOut)
+            *errorOut = QStringLiteral("Out of memory");
+        return false;
+    }
+
+    const AVFilter *buffersrc = avfilter_get_by_name("buffer");
+    const AVFilter *buffersink = avfilter_get_by_name("buffersink");
+    if (!buffersrc || !buffersink) {
+        avfilter_graph_free(&graph);
+        if (errorOut)
+            *errorOut = QStringLiteral("GIF palette filters are unavailable");
+        return false;
+    }
+
+    AVFilterContext *srcCtx = nullptr;
+    AVFilterContext *sinkCtx = nullptr;
+    const QByteArray args =
+        QString::asprintf("video_size=%dx%d:pix_fmt=rgba:time_base=%d/%d:pixel_aspect=1/1", inW, inH,
+                          timeBase.num, timeBase.den)
+            .toUtf8();
+    if (avfilter_graph_create_filter(&srcCtx, buffersrc, "in", args.constData(), nullptr, graph) < 0
+        || avfilter_graph_create_filter(&sinkCtx, buffersink, "out", nullptr, nullptr, graph) < 0) {
+        avfilter_graph_free(&graph);
+        if (errorOut)
+            *errorOut = QStringLiteral("Could not create GIF palette filters");
+        return false;
+    }
+
+    AVFilterInOut *outputs = avfilter_inout_alloc();
+    AVFilterInOut *inputs = avfilter_inout_alloc();
+    outputs->name = av_strdup("in");
+    outputs->filter_ctx = srcCtx;
+    outputs->pad_idx = 0;
+    outputs->next = nullptr;
+
+    inputs->name = av_strdup("out");
+    inputs->filter_ctx = sinkCtx;
+    inputs->pad_idx = 0;
+    inputs->next = nullptr;
+
+    const QString graphDesc =
+        QStringLiteral("[in] scale=%1:%2:flags=lanczos,split=2[s0][s1];"
+                       "[s0]palettegen=stats_mode=full:reserve_transparent=1[p];"
+                       "[s1][p]paletteuse=dither=bayer:bayer_scale=3[out]")
+            .arg(outW)
+            .arg(outH);
+    const QByteArray graphUtf8 = graphDesc.toUtf8();
+    if (avfilter_graph_parse_ptr(graph, graphUtf8.constData(), &inputs, &outputs, nullptr) < 0
+        || avfilter_graph_config(graph, nullptr) < 0) {
+        avfilter_inout_free(&inputs);
+        avfilter_inout_free(&outputs);
+        avfilter_graph_free(&graph);
+        if (errorOut)
+            *errorOut = QStringLiteral("Could not configure GIF palette filters");
+        return false;
+    }
+
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+    *graphOut = graph;
+    *srcOut = srcCtx;
+    *sinkOut = sinkCtx;
+    return true;
+}
+
+bool runGifExport(const drift::Project &project, const ExportSettings &settings, const QString &outputPath,
+                  QString *errorOut, const Exporter::ProgressFn &onProgress)
+{
+    const AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_GIF);
+    if (!codec) {
+        if (errorOut)
+            *errorOut = QStringLiteral("GIF encoder is not available");
+        return false;
+    }
+
+    const int projW = project.width();
+    const int projH = project.height();
+    if (projW <= 0 || projH <= 0) {
+        if (errorOut)
+            *errorOut = QStringLiteral("Invalid project resolution");
+        return false;
+    }
+
+    int outW = 0;
+    int outH = 0;
+    scaleSize(projW, projH, settings.targetHeight, outW, outH);
+
+    AVRational frameRate{qMax(1, project.fps()), 1};
+    if (settings.fpsNum > 0 && settings.fpsDen > 0)
+        frameRate = AVRational{settings.fpsNum, settings.fpsDen};
+    av_reduce(&frameRate.num, &frameRate.den, frameRate.num, frameRate.den, INT_MAX);
+    const AVRational frameTb{frameRate.den, frameRate.num};
+    const double fpsValue = av_q2d(frameRate);
+
+    drift::TimeUs rangeStartUs = 0;
+    drift::TimeUs rangeEndUs = 0;
+    resolveExportRange(project, settings, &rangeStartUs, &rangeEndUs, errorOut);
+    const drift::TimeUs durationUs = rangeEndUs - rangeStartUs;
+    if (durationUs <= 0)
+        return false;
+    if (durationUs > kMaxGifDurationUs) {
+        if (errorOut)
+            *errorOut = QStringLiteral("GIF export is limited to 60 seconds");
+        return false;
+    }
+
+    const int64_t totalFrames =
+        qMax<int64_t>(1, std::llround(static_cast<double>(durationUs) * fpsValue / 1e6));
+
+    AVFilterGraph *filterGraph = nullptr;
+    AVFilterContext *filterSrc = nullptr;
+    AVFilterContext *filterSink = nullptr;
+    if (!setupGifPaletteGraph(&filterGraph, &filterSrc, &filterSink, projW, projH, outW, outH, frameTb,
+                              errorOut)) {
+        return false;
+    }
+
+    AVFormatContext *fmt = nullptr;
+    AVCodecContext *vctx = nullptr;
+    AVStream *vstream = nullptr;
+    AVPacket *pkt = nullptr;
+    bool ok = false;
+    bool cancelled = false;
+    bool headerWritten = false;
+    QString error;
+
+    const QByteArray outUtf8 = outputPath.toUtf8();
+    avformat_alloc_output_context2(&fmt, nullptr, "gif", outUtf8.constData());
+    if (!fmt) {
+        error = QStringLiteral("Could not create GIF output");
+        goto cleanup;
+    }
+
+    {
+        vstream = avformat_new_stream(fmt, nullptr);
+        if (!vstream) {
+            error = QStringLiteral("Could not create output stream");
+            goto cleanup;
+        }
+
+        vctx = avcodec_alloc_context3(codec);
+        if (!vctx) {
+            error = QStringLiteral("Could not allocate GIF encoder");
+            goto cleanup;
+        }
+
+        vctx->width = outW;
+        vctx->height = outH;
+        vctx->pix_fmt = AV_PIX_FMT_PAL8;
+        vctx->time_base = frameTb;
+        vctx->framerate = frameRate;
+
+        if (avcodec_open2(vctx, codec, nullptr) < 0) {
+            error = QStringLiteral("Could not open GIF encoder");
+            goto cleanup;
+        }
+
+        avcodec_parameters_from_context(vstream->codecpar, vctx);
+        vstream->time_base = vctx->time_base;
+
+        if (!(fmt->oformat->flags & AVFMT_NOFILE)) {
+            if (avio_open(&fmt->pb, outUtf8.constData(), AVIO_FLAG_WRITE) < 0) {
+                error = QStringLiteral("Could not open the output file");
+                goto cleanup;
+            }
+        }
+
+        if (avformat_write_header(fmt, nullptr) < 0) {
+            error = QStringLiteral("Could not write the file header");
+            goto cleanup;
+        }
+        headerWritten = true;
+
+        pkt = av_packet_alloc();
+        if (!pkt) {
+            error = QStringLiteral("Out of memory");
+            goto cleanup;
+        }
+
+        FrameCompositor compositor;
+        compositor.setProject(&project);
+
+        for (int64_t i = 0; i < totalFrames; ++i) {
+            if (onProgress && !onProgress(static_cast<double>(i) / (totalFrames + 1))) {
+                cancelled = true;
+                break;
+            }
+
+            const drift::TimeUs t = rangeStartUs + static_cast<drift::TimeUs>(
+                std::llround(static_cast<double>(i) * 1e6 * frameRate.den / frameRate.num));
+            QImage img = compositor.compositeAt(t);
+            if (img.isNull()) {
+                img = QImage(projW, projH, QImage::Format_RGBA8888);
+                img.fill(Qt::black);
+            } else if (img.format() != QImage::Format_RGBA8888) {
+                img = img.convertToFormat(QImage::Format_RGBA8888);
+            }
+            if (img.width() != projW || img.height() != projH)
+                img = img.scaled(projW, projH, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+
+            AVFrame *srcFrame = rgbaImageToFrame(img, i);
+            if (!srcFrame) {
+                error = QStringLiteral("Could not prepare a GIF frame");
+                goto cleanup;
+            }
+
+            if (av_buffersrc_add_frame_flags(filterSrc, srcFrame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+                av_frame_free(&srcFrame);
+                error = QStringLiteral("GIF palette filter rejected a frame");
+                goto cleanup;
+            }
+            av_frame_free(&srcFrame);
+        }
+
+        if (!cancelled) {
+            if (av_buffersrc_add_frame_flags(filterSrc, nullptr, 0) < 0) {
+                error = QStringLiteral("Could not finalize GIF palette");
+                goto cleanup;
+            }
+
+            int64_t outPts = 0;
+            while (true) {
+                AVFrame *palFrame = av_frame_alloc();
+                if (!palFrame) {
+                    error = QStringLiteral("Out of memory");
+                    goto cleanup;
+                }
+
+                const int rc = av_buffersink_get_frame(filterSink, palFrame);
+                if (rc == AVERROR(EAGAIN) || rc == AVERROR_EOF) {
+                    av_frame_free(&palFrame);
+                    break;
+                }
+                if (rc < 0) {
+                    av_frame_free(&palFrame);
+                    error = QStringLiteral("Failed to read a GIF frame");
+                    goto cleanup;
+                }
+
+                palFrame->pts = outPts++;
+                if (!encodeWriteFrame(fmt, vctx, vstream, palFrame, pkt, &error)) {
+                    av_frame_free(&palFrame);
+                    goto cleanup;
+                }
+                av_frame_free(&palFrame);
+
+                if (onProgress)
+                    onProgress(static_cast<double>(outPts) / (totalFrames + 1));
+            }
+
+            if (!encodeWriteFrame(fmt, vctx, vstream, nullptr, pkt, &error))
+                goto cleanup;
+            if (av_write_trailer(fmt) < 0) {
+                error = QStringLiteral("Could not finalize the GIF");
+                goto cleanup;
+            }
+            ok = true;
+        }
+    }
+
+cleanup:
+    if (pkt)
+        av_packet_free(&pkt);
+    if (vctx)
+        avcodec_free_context(&vctx);
+    if (filterGraph)
+        avfilter_graph_free(&filterGraph);
+    if (fmt) {
+        if (headerWritten && !ok && fmt->pb)
+            av_write_trailer(fmt);
+        if (fmt->pb && !(fmt->oformat->flags & AVFMT_NOFILE))
+            avio_closep(&fmt->pb);
+        avformat_free_context(fmt);
+    }
+
+    if (!ok && QFile::exists(outputPath))
+        QFile::remove(outputPath);
+
+    if (!ok && errorOut) {
+        *errorOut = cancelled ? QStringLiteral("Export cancelled")
+                              : (error.isEmpty() ? QStringLiteral("GIF export failed") : error);
+    }
+    return ok;
+}
+
 } // namespace
 
 const QList<ExportScalePreset> &Exporter::scalePresets()
@@ -765,6 +1088,8 @@ QStringList Exporter::saveFilters(const QString &container, bool audioOnly)
     }
     if (container == QLatin1String("webm"))
         return {QStringLiteral("WebM video (*.webm)")};
+    if (container == QLatin1String("gif"))
+        return {QStringLiteral("GIF image (*.gif)")};
     if (container == QLatin1String("mkv"))
         return {QStringLiteral("Matroska video (*.mkv)"), QStringLiteral("MP4 video (*.mp4)")};
     return {QStringLiteral("MP4 video (*.mp4)"), QStringLiteral("Matroska video (*.mkv)")};
@@ -787,6 +1112,8 @@ QString Exporter::defaultSuffix(const QString &container, bool audioOnly)
     }
     if (container == QLatin1String("webm"))
         return QStringLiteral("webm");
+    if (container == QLatin1String("gif"))
+        return QStringLiteral("gif");
     if (container == QLatin1String("mkv"))
         return QStringLiteral("mkv");
     return QStringLiteral("mp4");
@@ -882,6 +1209,11 @@ QVariantList Exporter::frameRateOptions(int projectFps)
     return out;
 }
 
+bool Exporter::gifAvailable()
+{
+    return avcodec_find_encoder(AV_CODEC_ID_GIF) != nullptr;
+}
+
 ExportSettings Exporter::defaultSettings()
 {
     ExportSettings s;
@@ -948,6 +1280,8 @@ ExportSettings Exporter::settingsFromMap(const QVariantMap &map)
         s.audioBitrateKbps = map.value(QStringLiteral("audioBitrateKbps")).toInt();
     if (map.contains(QStringLiteral("audioOnly")))
         s.audioOnly = map.value(QStringLiteral("audioOnly")).toBool();
+    if (map.contains(QStringLiteral("gifExport")))
+        s.gifExport = map.value(QStringLiteral("gifExport")).toBool();
     if (map.contains(QStringLiteral("metadataTitle")))
         s.metadataTitle = map.value(QStringLiteral("metadataTitle")).toString();
     if (map.contains(QStringLiteral("metadataArtist")))
@@ -966,6 +1300,8 @@ ExportSettings Exporter::settingsFromMap(const QVariantMap &map)
 bool Exporter::run(const drift::Project &project, const ExportSettings &settings, const QString &outputPath,
                    QString *errorOut, const ProgressFn &onProgress)
 {
+    if (settings.gifExport)
+        return runGifExport(project, settings, outputPath, errorOut, onProgress);
     if (settings.audioOnly)
         return runAudioOnlyExport(project, settings, outputPath, errorOut, onProgress);
 
