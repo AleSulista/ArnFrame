@@ -167,15 +167,18 @@ jobs:
       # whatever the compositor returned, which is a null QImage when there is no GL context.
       # Models and font bundles that are not in the repo do skip themselves.
       #
-      # LD_LIBRARY_PATH is appended to rather than prepended so the libraries that already
-      # resolved keep resolving exactly where they did. What it adds is libpostproc.so.58, which
-      # only the gpl FFmpeg ships (postproc is GPL-only) and which libavfilter needs: CMake gives
-      # the test binaries a build RPATH covering that directory, but emits it as DT_RUNPATH, and
-      # the loader applies RUNPATH only to the binary's own NEEDED entries — never to a
-      # dependency's. libavfilter carries no RUNPATH of its own, so nothing found libpostproc.
+      # LD_LIBRARY_PATH is prepended rather than appended: install-qt-action puts Qt's lib dir on
+      # it, and QtMultimedia ships its own libavcodec.so.61 under the same soname, built with no
+      # external codec libraries. Appending let that copy win, so the suite exercised an FFmpeg
+      # the app was never built against and never ships. Prepending also still supplies
+      # libpostproc.so.58, which only the gpl FFmpeg ships (postproc is GPL-only) and which
+      # libavfilter needs: CMake gives the test binaries a build RPATH covering that directory,
+      # but emits it as DT_RUNPATH, and the loader applies RUNPATH only to the binary's own NEEDED
+      # entries — never to a dependency's. libavfilter carries no RUNPATH of its own, so nothing
+      # found libpostproc.
       - name: Test
         run: |
-          export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:${GITHUB_WORKSPACE}/.deps/ffmpeg/lib"
+          export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/.deps/ffmpeg/lib:${LD_LIBRARY_PATH:-}"
           QT_QPA_PLATFORM=xcb xvfb-run -a -s "-screen 0 1280x1024x24" ctest --test-dir build --output-on-failure
 
       - name: Stage install tree
@@ -195,7 +198,13 @@ jobs:
           # not: without QML_SOURCES_PATHS the qt plugin has nothing to scan and ships an AppImage
           # whose every import fails at startup.
           export QML_SOURCES_PATHS="${GITHUB_WORKSPACE}/src/qml"
-          export LD_LIBRARY_PATH="${QT_ROOT_DIR}/lib:${GITHUB_WORKSPACE}/.deps/ffmpeg/lib:${LD_LIBRARY_PATH:-}"
+          # The pinned FFmpeg must come before Qt's lib dir. QtMultimedia ships its own
+          # libavcodec.so.61 under the same soname, built with no external codec libraries at all
+          # — notably no libdav1d, and FFmpeg's native AV1 decoder is hwaccel-only, so that build
+          # cannot decode AV1 in software. With Qt's dir first, linuxdeploy resolved the soname
+          # there and shipped it in place of the FFmpeg the binary was built against, leaving AV1
+          # playable only on GPUs whose VAAPI/NVDEC covers it and black everywhere else.
+          export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/.deps/ffmpeg/lib:${QT_ROOT_DIR}/lib:${LD_LIBRARY_PATH:-}"
           export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so;libqwayland-egl.so"
           export EXTRA_QT_MODULES="waylandcompositor"
           #
