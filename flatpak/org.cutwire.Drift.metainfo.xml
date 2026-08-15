@@ -86,6 +86,20 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.2" date="2026-08-15">
+      <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.2.2</url>
+      <description>
+        <p>A quick bug-fix release for AppImage users only. If you installed Drift from Flathub,
+        the Arch package or the Windows installer, nothing changes for you and there is no need
+        to update.</p>
+        <ul>
+          <li>Videos that the AppImage refused to open, or played as a black picture, now work.
+          The AppImage was bundling a cut-down copy of FFmpeg that didn't have several codecs.</li>
+          <li>The AppImage now runs natively on Wayland instead of falling back to XWayland. The
+          Wayland platform plugin was missing from the bundle.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-08-12">
       <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.2.1</url>
       <description>
