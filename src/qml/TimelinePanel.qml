@@ -1032,6 +1032,64 @@ PanelFrame {
                                 }
                             }
                         }
+
+                        // Work area highlight in the bookmark lane (between In/Out markers).
+                        Rectangle {
+                            visible: EditorState.workAreaActive
+                            y: Theme.timelineRulerHeight
+                            height: Theme.timelineBookmarkRowHeight
+                            x: EditorState.workAreaInSeconds * root.pxPerSecond
+                            width: Math.max(0, (EditorState.workAreaOutSeconds - EditorState.workAreaInSeconds)
+                                             * root.pxPerSecond)
+                            color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.18)
+                            z: 1
+                        }
+                    }
+
+                    // Work area overlay across the track rows.
+                    Item {
+                        id: workAreaOverlay
+                        z: 1
+                        y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
+                        width: parent.width
+                        height: Math.max(root.totalTracksHeight() + Theme.trackGap,
+                                         flick.height - flick.headerHeight)
+
+                        readonly property real inX: EditorState.workAreaInSeconds >= 0
+                                                   ? EditorState.workAreaInSeconds * root.pxPerSecond
+                                                   : -1
+                        readonly property real outX: EditorState.workAreaOutSeconds >= 0
+                                                    ? EditorState.workAreaOutSeconds * root.pxPerSecond
+                                                    : -1
+
+                        Rectangle {
+                            visible: EditorState.workAreaActive
+                            x: parent.inX
+                            width: Math.max(0, parent.outX - parent.inX)
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.08)
+                        }
+
+                        Rectangle {
+                            visible: EditorState.workAreaInSeconds >= 0
+                            x: parent.inX
+                            width: 2
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            color: Theme.primary
+                            opacity: 0.85
+                        }
+
+                        Rectangle {
+                            visible: EditorState.workAreaOutSeconds >= 0
+                            x: parent.outX - width
+                            width: 2
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            color: Theme.primary
+                            opacity: 0.85
+                        }
                     }
 
                     // A project with no tracks used to render as a completely

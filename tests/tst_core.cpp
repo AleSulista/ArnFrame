@@ -356,6 +356,8 @@ void CoreTest::projectSerializationRoundTrip()
     project.tracks()[0].clips.append(clip);
 
     project.bookmarks().append({.timeUs = drift::secondsToUs(3.0), .label = QStringLiteral("Mark")});
+    project.setWorkAreaInUs(drift::secondsToUs(1.0));
+    project.setWorkAreaOutUs(drift::secondsToUs(4.0));
 
     const QJsonObject json = project.toJson();
     QString error;
@@ -370,6 +372,9 @@ void CoreTest::projectSerializationRoundTrip()
     QCOMPARE(loaded.tracks()[0].clips[0].timelineStart, clip.timelineStart);
     QCOMPARE(loaded.bookmarks().size(), 1);
     QCOMPARE(loaded.bookmarks()[0].label, QStringLiteral("Mark"));
+    QVERIFY(loaded.hasWorkArea());
+    QCOMPARE(loaded.workAreaInUs(), drift::secondsToUs(1.0));
+    QCOMPARE(loaded.workAreaOutUs(), drift::secondsToUs(4.0));
 }
 
 // A colour parameter is stored as a "#rrggbb" string rather than a number, so it has to survive the

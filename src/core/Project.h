@@ -77,6 +77,18 @@ public:
     const QList<Bookmark> &bookmarks() const { return m_bookmarks; }
     QList<Bookmark> &bookmarks() { return m_bookmarks; }
 
+    // Timeline work area (Mark In / Mark Out). Unset markers use -1.
+    TimeUs workAreaInUs() const { return m_workAreaInUs; }
+    TimeUs workAreaOutUs() const { return m_workAreaOutUs; }
+    void setWorkAreaInUs(TimeUs us) { m_workAreaInUs = us; }
+    void setWorkAreaOutUs(TimeUs us) { m_workAreaOutUs = us; }
+    void clearWorkArea()
+    {
+        m_workAreaInUs = -1;
+        m_workAreaOutUs = -1;
+    }
+    bool hasWorkArea() const { return m_workAreaInUs >= 0 && m_workAreaOutUs > m_workAreaInUs; }
+
     const Background &background() const { return m_background; }
     void setBackground(const Background &background) { m_background = background; }
 
@@ -110,6 +122,8 @@ private:
     int m_sampleRate = 48000;
     QList<Track> m_tracks;
     QList<Bookmark> m_bookmarks;
+    TimeUs m_workAreaInUs = -1;
+    TimeUs m_workAreaOutUs = -1;
     Background m_background;
     QList<QString> m_assetOrder;
     QHash<QString, MediaAsset> m_assetsById;

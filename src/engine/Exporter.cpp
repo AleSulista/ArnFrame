@@ -26,6 +26,50 @@ extern "C" {
 
 namespace {
 
+void resolveExportRange(const drift::Project &project, const ExportSettings &settings,
+                        drift::TimeUs *startUsOut, drift::TimeUs *endUsOut, QString *errorOut)
+{
+    const drift::TimeUs projectDuration = project.durationUs();
+    drift::TimeUs startUs = settings.startUs;
+    drift::TimeUs endUs = settings.endUs;
+
+    if (startUs == 0 && endUs == 0) {
+        startUs = 0;
+        endUs = projectDuration;
+    } else {
+        if (startUs < 0 || endUs <= startUs) {
+            if (errorOut)
+                *errorOut = QStringLiteral("Invalid export range");
+            *startUsOut = 0;
+            *endUsOut = 0;
+            return;
+        }
+        endUs = qMin(endUs, projectDuration);
+        if (endUs <= startUs) {
+            if (errorOut)
+                *errorOut = QStringLiteral("Export range is empty");
+            *startUsOut = 0;
+            *endUsOut = 0;
+            return;
+        }
+    }
+
+    if (endUs <= startUs) {
+        if (errorOut)
+            *errorOut = QStringLiteral("Timeline is empty");
+        *startUsOut = 0;
+        *endUsOut = 0;
+        return;
+    }
+
+    *startUsOut = startUs;
+    *endUsOut = endUs;
+}
+
+} // namespace
+
+namespace {
+
 enum class RateMode { Crf, Bitrate, Lossless };
 
 struct VideoCodecDef {
@@ -416,12 +460,12 @@ bool runAudioOnlyExport(const drift::Project &project, const ExportSettings &set
     }
 
     const int sampleRate = project.sampleRate() > 0 ? project.sampleRate() : 48000;
-    const drift::TimeUs durationUs = project.durationUs();
-    if (durationUs <= 0) {
-        if (errorOut)
-            *errorOut = QStringLiteral("Timeline is empty");
+    drift::TimeUs rangeStartUs = 0;
+    drift::TimeUs rangeEndUs = 0;
+    resolveExportRange(project, settings, &rangeStartUs, &rangeEndUs, errorOut);
+    const drift::TimeUs durationUs = rangeEndUs - rangeStartUs;
+    if (durationUs <= 0)
         return false;
-    }
 
     const int64_t totalAudioSamples =
         qMax<int64_t>(0, std::llround(static_cast<double>(durationUs) * sampleRate / 1e6));
@@ -560,8 +604,8 @@ bool runAudioOnlyExport(const drift::Project &project, const ExportSettings &set
             const int64_t chunkSamples = qMin<int64_t>(frameSize * 8, totalAudioSamples - audioSamplesGenerated);
             const size_t base = audioBuffer.size();
             audioBuffer.resize(base + static_cast<size_t>(chunkSamples) * 2);
-            const drift::TimeUs audioStartUs = static_cast<drift::TimeUs>(
-                (audioSamplesGenerated * drift::kUsPerSecond) / sampleRate);
+            const drift::TimeUs audioStartUs = rangeStartUs
+                + static_cast<drift::TimeUs>((audioSamplesGenerated * drift::kUsPerSecond) / sampleRate);
             mixer.mix(audioStartUs, static_cast<int>(chunkSamples), sampleRate, audioBuffer.data() + base);
             audioSamplesGenerated += chunkSamples;
             if (!flushAudioFrames(false))
@@ -912,6 +956,10 @@ ExportSettings Exporter::settingsFromMap(const QVariantMap &map)
         s.metadataAlbum = map.value(QStringLiteral("metadataAlbum")).toString();
     if (map.contains(QStringLiteral("metadataComment")))
         s.metadataComment = map.value(QStringLiteral("metadataComment")).toString();
+    if (map.contains(QStringLiteral("startUs")))
+        s.startUs = static_cast<drift::TimeUs>(map.value(QStringLiteral("startUs")).toDouble());
+    if (map.contains(QStringLiteral("endUs")))
+        s.endUs = static_cast<drift::TimeUs>(map.value(QStringLiteral("endUs")).toDouble());
     return s;
 }
 
@@ -960,12 +1008,12 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
     const double fpsValue = av_q2d(frameRate);
 
     const int sampleRate = project.sampleRate() > 0 ? project.sampleRate() : 48000;
-    const drift::TimeUs durationUs = project.durationUs();
-    if (durationUs <= 0) {
-        if (errorOut)
-            *errorOut = QStringLiteral("Timeline is empty");
+    drift::TimeUs rangeStartUs = 0;
+    drift::TimeUs rangeEndUs = 0;
+    resolveExportRange(project, settings, &rangeStartUs, &rangeEndUs, errorOut);
+    const drift::TimeUs durationUs = rangeEndUs - rangeStartUs;
+    if (durationUs <= 0)
         return false;
-    }
 
     const int64_t totalFrames =
         qMax<int64_t>(1, std::llround(static_cast<double>(durationUs) * fpsValue / 1e6));
@@ -1161,7 +1209,7 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
                 break;
             }
 
-            const drift::TimeUs t = static_cast<drift::TimeUs>(
+            const drift::TimeUs t = rangeStartUs + static_cast<drift::TimeUs>(
                 std::llround(static_cast<double>(i) * 1e6 * frameRate.den / frameRate.num));
             QImage img = compositor.compositeAt(t);
             if (img.isNull()) {
@@ -1195,8 +1243,9 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
             if (need > 0) {
                 const size_t base = audioBuffer.size();
                 audioBuffer.resize(base + static_cast<size_t>(need) * 2);
-                const drift::TimeUs audioStartUs = static_cast<drift::TimeUs>(
-                    (static_cast<int64_t>(audioSamplesGenerated) * drift::kUsPerSecond) / sampleRate);
+                const drift::TimeUs audioStartUs = rangeStartUs
+                    + static_cast<drift::TimeUs>(
+                        (static_cast<int64_t>(audioSamplesGenerated) * drift::kUsPerSecond) / sampleRate);
                 mixer.mix(audioStartUs, need, sampleRate, audioBuffer.data() + base);
                 audioSamplesGenerated = targetSamples;
             }

@@ -21,6 +21,7 @@ ThemedDialog {
     property string audioCodecId: "aac"
     property int audioBitrateKbps: 192
     property bool advancedOpen: false
+    property bool exportWorkAreaOnly: false
 
     // Export frame rate. fpsNum 0 means "follow the project fps". Rational so the
     // NTSC rates (30000/1001 and friends) survive the round-trip.
@@ -159,6 +160,16 @@ ThemedDialog {
             rateControl = "crf"
     }
 
+    function formatWorkAreaTime(seconds) {
+        const clamped = Math.max(0, seconds)
+        const m = Math.floor(clamped / 60)
+        const s = clamped - m * 60
+        const whole = Math.floor(s)
+        const frac = Math.floor((s - whole) * 100)
+        return String(m).padStart(2, "0") + ":" + String(whole).padStart(2, "0") + "."
+               + String(frac).padStart(2, "0")
+    }
+
     function openDialog() {
         exportMode = "video"
         videoCodecs = EditorState.exportVideoCodecs()
@@ -197,6 +208,8 @@ ThemedDialog {
         frameRateId = frameRateIdFor(restoredNum, restoredDen)
 
         advancedOpen = false
+        exportWorkAreaOnly = EditorState.workAreaActive
+                && (remembered.exportWorkAreaOnly === true)
 
         var meta = EditorState.projectMetadata || {}
         tagTitleField.text = meta.title || EditorState.projectName || ""
@@ -274,7 +287,12 @@ ThemedDialog {
             "videoPreset": videoPreset,
             "audioCodecId": audioCodecId,
             "audioBitrateKbps": audioBitrateKbps,
-            "audioOnly": isAudioOnly
+            "audioOnly": isAudioOnly,
+            "exportWorkAreaOnly": exportWorkAreaOnly && EditorState.workAreaActive
+        }
+        if (s.exportWorkAreaOnly) {
+            s.startUs = Math.round(EditorState.workAreaInSeconds * 1000000)
+            s.endUs = Math.round(EditorState.workAreaOutSeconds * 1000000)
         }
         if (isAudioOnly) {
             if (tagTitleField.text.length)
@@ -355,6 +373,17 @@ ThemedDialog {
                         root.syncComboIndices()
                     }
                 }
+            }
+
+            ThemedCheckBox {
+                width: parent.width
+                visible: EditorState.workAreaActive
+                text: qsTr("Export work area only (%1 – %2)")
+                      .arg(root.formatWorkAreaTime(EditorState.workAreaInSeconds))
+                      .arg(root.formatWorkAreaTime(EditorState.workAreaOutSeconds))
+                checked: root.exportWorkAreaOnly
+                tooltip: qsTr("Encode only the marked In/Out range instead of the full timeline")
+                onToggled: root.exportWorkAreaOnly = checked
             }
 
             // ---- Video mode ----

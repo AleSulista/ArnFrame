@@ -904,6 +904,14 @@ Project Project::fromJson(const QJsonObject &object, QString *errorOut)
         project.m_bookmarks.append(bookmark);
     }
 
+    project.clearWorkArea();
+    if (object.contains(QStringLiteral("workAreaInUs"))) {
+        project.setWorkAreaInUs(static_cast<TimeUs>(object.value(QStringLiteral("workAreaInUs")).toDouble(-1)));
+        project.setWorkAreaOutUs(static_cast<TimeUs>(object.value(QStringLiteral("workAreaOutUs")).toDouble(-1)));
+        if (!project.hasWorkArea())
+            project.clearWorkArea();
+    }
+
     // After the track block: an empty timeline routes through resetToDefaultTimeline(), which mints
     // a fresh id and timestamps. Read them last so a saved project keeps its own.
     const QString savedId = object.value(QStringLiteral("id")).toString();
@@ -963,7 +971,7 @@ QJsonObject Project::toJson() const
         });
     }
 
-    return QJsonObject{
+    QJsonObject root{
         {QStringLiteral("version"), kCurrentVersion},
         {QStringLiteral("projectName"), m_name},
         {QStringLiteral("id"), m_id},
@@ -980,6 +988,11 @@ QJsonObject Project::toJson() const
         {QStringLiteral("bookmarks"), bookmarksArray},
         {QStringLiteral("background"), backgroundToJson(m_background)},
     };
+    if (hasWorkArea()) {
+        root.insert(QStringLiteral("workAreaInUs"), static_cast<double>(m_workAreaInUs));
+        root.insert(QStringLiteral("workAreaOutUs"), static_cast<double>(m_workAreaOutUs));
+    }
+    return root;
 }
 
 } // namespace drift

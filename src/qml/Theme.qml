@@ -337,6 +337,7 @@ QtObject {
         trash: "trash-2",
         snowflake: "snowflake",
         bookmark: "bookmark",
+        repeat: "repeat",
         star: "star",
         layers: "layers",
         magnet: "magnet",

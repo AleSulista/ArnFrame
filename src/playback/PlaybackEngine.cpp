@@ -374,12 +374,39 @@ void PlaybackEngine::checkEndOfTimeline(drift::TimeUs timeUs)
     if (!m_project)
         return;
 
+    drift::TimeUs loopIn = 0;
+    drift::TimeUs loopOut = 0;
+    if (shouldLoopWorkArea(&loopIn, &loopOut)) {
+        if (timeUs >= loopOut) {
+            setPlayheadUs(loopIn);
+            return;
+        }
+        return;
+    }
+
     const drift::TimeUs durationUs = m_project->durationUs();
     if (timeUs >= durationUs) {
         m_playheadUs = durationUs;
         emit playheadUsChanged(static_cast<quint64>(m_playheadUs));
         QMetaObject::invokeMethod(this, &PlaybackEngine::pause, Qt::QueuedConnection);
     }
+}
+
+bool PlaybackEngine::shouldLoopWorkArea(drift::TimeUs *loopInOut, drift::TimeUs *loopOutOut) const
+{
+    if (!m_loopWorkArea || !m_project || !m_project->hasWorkArea())
+        return false;
+
+    const drift::TimeUs loopIn = m_project->workAreaInUs();
+    const drift::TimeUs loopOut = m_project->workAreaOutUs();
+    if (loopOut <= loopIn)
+        return false;
+
+    if (loopInOut)
+        *loopInOut = loopIn;
+    if (loopOutOut)
+        *loopOutOut = loopOut;
+    return true;
 }
 
 void PlaybackEngine::onPlayheadTick()

@@ -178,6 +178,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
         setDirty(true);
         emit tracksChanged();
         emit bookmarksChanged();
+        emit workAreaChanged();
         emit projectNameChanged();
         emit selectionChanged();
         emit backgroundChanged();
@@ -235,6 +236,8 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     settings.endGroup();
     m_guidesEnabled = settings.value(QStringLiteral("preview/guidesEnabled"), false).toBool();
     m_guideType = settings.value(QStringLiteral("preview/guideType"), QStringLiteral("thirds")).toString();
+    m_loopWorkAreaEnabled = settings.value(QStringLiteral("playback/loopWorkArea"), false).toBool();
+    m_playback.setLoopWorkArea(m_loopWorkAreaEnabled);
     // Off by default: with it on, nudging a clip while the playhead sits anywhere writes a
     // keyframe, and an animation appears where the user only meant to reposition something.
     m_autoKeyEnabled = settings.value(QStringLiteral("editor/autoKeyEnabled"), false).toBool();
@@ -1333,6 +1336,12 @@ QHash<QString, QString> defaultShortcuts()
         {QStringLiteral("toggleBookmark"), QStringLiteral("M")},
         {QStringLiteral("nextBookmark"), QStringLiteral("Shift+M")},
         {QStringLiteral("previousBookmark"), QStringLiteral("Ctrl+Shift+M")},
+        {QStringLiteral("markIn"), QStringLiteral("I")},
+        {QStringLiteral("markOut"), QStringLiteral("O")},
+        {QStringLiteral("goToIn"), QStringLiteral("Shift+I")},
+        {QStringLiteral("goToOut"), QStringLiteral("Shift+O")},
+        {QStringLiteral("clearInOut"), QStringLiteral("Alt+X")},
+        {QStringLiteral("toggleLoop"), QStringLiteral("Ctrl+L")},
         // The timeline tool modes live in QML, so Main.qml intercepts these rather
         // than triggerAction dispatching them. They are registered all the same, so
         // they show up in the shortcut list and can be rebound — hardcoded in
@@ -1756,6 +1765,12 @@ QVariantList AppController::actions() const
         action(QStringLiteral("toggleBookmark"), QStringLiteral("Add/remove bookmark at current time")),
         action(QStringLiteral("nextBookmark"), QStringLiteral("Go to next bookmark")),
         action(QStringLiteral("previousBookmark"), QStringLiteral("Go to previous bookmark")),
+        action(QStringLiteral("markIn"), QStringLiteral("Mark work area in")),
+        action(QStringLiteral("markOut"), QStringLiteral("Mark work area out")),
+        action(QStringLiteral("goToIn"), QStringLiteral("Go to work area in")),
+        action(QStringLiteral("goToOut"), QStringLiteral("Go to work area out")),
+        action(QStringLiteral("clearInOut"), QStringLiteral("Clear work area")),
+        action(QStringLiteral("toggleLoop"), QStringLiteral("Loop work area playback")),
         action(QStringLiteral("selectTool"), QStringLiteral("Select tool")),
         action(QStringLiteral("bladeTool"), QStringLiteral("Cut tool")),
     };
@@ -1786,8 +1801,15 @@ void AppController::setPlaying(bool playing)
 
     m_playing = playing;
     if (m_playing) {
-        if (m_playheadUs >= m_project.durationUs() && m_project.durationUs() > 0)
+        const drift::TimeUs durationUs = m_project.durationUs();
+        if (m_loopWorkAreaEnabled && m_project.hasWorkArea()) {
+            const drift::TimeUs loopIn = m_project.workAreaInUs();
+            const drift::TimeUs loopOut = m_project.workAreaOutUs();
+            if (m_playheadUs >= loopOut || m_playheadUs < loopIn)
+                setPlayheadUs(loopIn);
+        } else if (m_playheadUs >= durationUs && durationUs > 0) {
             setPlayheadUs(0);
+        }
         m_playback.setPlayheadUs(m_playheadUs);
         m_playback.play();
     } else {
@@ -8775,6 +8797,84 @@ QVariantList AppController::bookmarks() const
     return result;
 }
 
+double AppController::workAreaInSeconds() const
+{
+    return m_project.workAreaInUs() >= 0 ? drift::usToSeconds(m_project.workAreaInUs()) : -1.0;
+}
+
+double AppController::workAreaOutSeconds() const
+{
+    return m_project.workAreaOutUs() >= 0 ? drift::usToSeconds(m_project.workAreaOutUs()) : -1.0;
+}
+
+void AppController::setLoopWorkAreaEnabled(bool enabled)
+{
+    if (m_loopWorkAreaEnabled == enabled)
+        return;
+
+    m_loopWorkAreaEnabled = enabled;
+    m_playback.setLoopWorkArea(enabled);
+    QSettings().setValue(QStringLiteral("playback/loopWorkArea"), enabled);
+    emit loopWorkAreaEnabledChanged();
+}
+
+void AppController::markWorkAreaIn()
+{
+    const drift::Project before = m_project;
+    const drift::TimeUs at = qBound<drift::TimeUs>(0, m_playheadUs, qMax(m_project.durationUs(), drift::TimeUs{0}));
+    m_project.setWorkAreaInUs(at);
+    if (m_project.workAreaOutUs() >= 0 && m_project.workAreaOutUs() <= at)
+        m_project.setWorkAreaOutUs(-1);
+    pushProjectEdit(before, QStringLiteral("Mark work area in"));
+    finishEdit(QStringLiteral("Work area in marked"));
+    emit workAreaChanged();
+}
+
+void AppController::markWorkAreaOut()
+{
+    const drift::Project before = m_project;
+    const drift::TimeUs at = qBound<drift::TimeUs>(0, m_playheadUs, qMax(m_project.durationUs(), drift::TimeUs{0}));
+    m_project.setWorkAreaOutUs(at);
+    if (m_project.workAreaInUs() < 0 || m_project.workAreaInUs() >= at)
+        m_project.setWorkAreaInUs(0);
+    if (!m_project.hasWorkArea())
+        m_project.clearWorkArea();
+    pushProjectEdit(before, QStringLiteral("Mark work area out"));
+    finishEdit(QStringLiteral("Work area out marked"));
+    emit workAreaChanged();
+}
+
+void AppController::goToWorkAreaIn()
+{
+    if (!m_project.hasWorkArea())
+        return;
+    setPlayheadUs(m_project.workAreaInUs());
+}
+
+void AppController::goToWorkAreaOut()
+{
+    if (!m_project.hasWorkArea())
+        return;
+    setPlayheadUs(m_project.workAreaOutUs());
+}
+
+void AppController::clearWorkArea()
+{
+    if (!m_project.hasWorkArea() && m_project.workAreaInUs() < 0 && m_project.workAreaOutUs() < 0)
+        return;
+
+    const drift::Project before = m_project;
+    m_project.clearWorkArea();
+    pushProjectEdit(before, QStringLiteral("Clear work area"));
+    finishEdit(QStringLiteral("Work area cleared"));
+    emit workAreaChanged();
+}
+
+void AppController::toggleLoopWorkArea()
+{
+    setLoopWorkAreaEnabled(!m_loopWorkAreaEnabled);
+}
+
 void AppController::addBookmark(double seconds, const QString &label)
 {
     const drift::Project before = m_project;
@@ -9295,6 +9395,18 @@ void AppController::triggerAction(const QString &actionId)
         goToNextBookmark();
     else if (actionId == QStringLiteral("previousBookmark"))
         goToPreviousBookmark();
+    else if (actionId == QStringLiteral("markIn"))
+        markWorkAreaIn();
+    else if (actionId == QStringLiteral("markOut"))
+        markWorkAreaOut();
+    else if (actionId == QStringLiteral("goToIn"))
+        goToWorkAreaIn();
+    else if (actionId == QStringLiteral("goToOut"))
+        goToWorkAreaOut();
+    else if (actionId == QStringLiteral("clearInOut"))
+        clearWorkArea();
+    else if (actionId == QStringLiteral("toggleLoop"))
+        toggleLoopWorkArea();
 }
 
 void AppController::undo()
@@ -9670,6 +9782,10 @@ QList<drift::TimeUs> AppController::extraSnapTargets() const
     QList<drift::TimeUs> targets = m_beatSnapTargets;
     for (const drift::Bookmark &bookmark : m_project.bookmarks())
         targets.append(bookmark.timeUs);
+    if (m_project.hasWorkArea()) {
+        targets.append(m_project.workAreaInUs());
+        targets.append(m_project.workAreaOutUs());
+    }
     return targets;
 }
 
@@ -9773,6 +9889,7 @@ QByteArray AppController::serializeProjectJson() const
     root.insert(QStringLiteral("rippleEnabled"), m_rippleEnabled);
     root.insert(QStringLiteral("allowClipOverlap"), m_allowClipOverlap);
     root.insert(QStringLiteral("mediaGridMode"), m_mediaGridMode);
+    root.insert(QStringLiteral("loopWorkArea"), m_loopWorkAreaEnabled);
     return QJsonDocument(root).toJson(QJsonDocument::Indented);
 }
 
@@ -9837,6 +9954,12 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
         emit mediaGridModeChanged();
     }
 
+    if (root.contains(QStringLiteral("loopWorkArea"))) {
+        setLoopWorkAreaEnabled(root.value(QStringLiteral("loopWorkArea")).toBool(false));
+    } else {
+        m_playback.setLoopWorkArea(m_loopWorkAreaEnabled);
+    }
+
     if (root.contains(QStringLiteral("playheadUs"))) {
         setPlayheadUs(static_cast<drift::TimeUs>(root.value(QStringLiteral("playheadUs")).toDouble()));
     } else {
@@ -9853,6 +9976,7 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
     emit allowClipOverlapChanged();
     emit tracksChanged();
     emit bookmarksChanged();
+    emit workAreaChanged();
     emit projectNameChanged();
     emit projectMetadataChanged();
     emit backgroundChanged();
@@ -10148,6 +10272,7 @@ void AppController::newProject()
     emit allowClipOverlapChanged();
     emit tracksChanged();
     emit bookmarksChanged();
+    emit workAreaChanged();
     emit projectNameChanged();
     emit projectMetadataChanged();
     emit backgroundChanged();
@@ -10445,6 +10570,7 @@ QVariantMap AppController::lastExportSettings() const
     takeString(QStringLiteral("audioCodecId"));
     takeInt(QStringLiteral("audioBitrateKbps"));
     takeBool(QStringLiteral("audioOnly"));
+    takeBool(QStringLiteral("exportWorkAreaOnly"));
     return out;
 }
 
@@ -10481,6 +10607,7 @@ void AppController::rememberExportChoice(const QString &outputPath, const QVaria
     put(QStringLiteral("audioCodecId"));
     put(QStringLiteral("audioBitrateKbps"));
     put(QStringLiteral("audioOnly"));
+    put(QStringLiteral("exportWorkAreaOnly"));
     store.endGroup();
 }
 

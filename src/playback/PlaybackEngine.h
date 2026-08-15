@@ -59,6 +59,9 @@ public:
     void setPlayheadUs(drift::TimeUs us);
     drift::TimeUs playheadUs() const { return m_playheadUs; }
 
+    void setLoopWorkArea(bool enabled) { m_loopWorkArea = enabled; }
+    bool loopWorkArea() const { return m_loopWorkArea; }
+
     int previewTextureId() const;
     QSize previewTextureSize() const;
     bool hasFrame() const;
@@ -103,6 +106,7 @@ private:
     void onFrameReady(const GpuFrameTexture &frame);
     void checkEndOfTimeline(drift::TimeUs timeUs);
     bool isQualityMode() const { return m_playbackMode == QStringLiteral("quality"); }
+    bool shouldLoopWorkArea(drift::TimeUs *loopInOut, drift::TimeUs *loopOutOut) const;
     drift::TimeUs frameStepUs() const;
     FrameCompositor::RenderOptions playbackRenderOptions() const;
 
@@ -138,4 +142,5 @@ private:
     int m_previewRenderWidth = 0;
     int m_previewRenderHeight = 0;
     int m_sampleRate = 48000;
+    bool m_loopWorkArea = false;
 };

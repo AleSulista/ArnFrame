@@ -152,6 +152,7 @@ private slots:
     void exporterSettingsFromMapValidatesFrameRate();
     void exporterDefaultsToProjectFrameRate();
     void exporterHonoursExportFrameRateOverride();
+    void exporterHonoursWorkAreaRange();
     void exporterSupportsNtscFrameRates();
     void exporterFrameRateAddsRealDetailToSlowedClips();
     void mixerHasNoBlockBoundaryDropout();
@@ -3622,7 +3623,8 @@ bool countDistinctFrames(const QString &path, int &total, int &changed, double t
 // Returns false only when this FFmpeg build cannot encode at all.
 bool exportAtRate(const drift::Project &project, int fpsNum, int fpsDen, const QString &dirPath,
                   const QString &name, AVRational &rate, int64_t &frameCount,
-                  QString *outPathOut = nullptr)
+                  QString *outPathOut = nullptr, drift::TimeUs startUs = 0,
+                  drift::TimeUs endUs = 0)
 {
     ExportSettings settings = Exporter::defaultSettings();
     settings.videoCodecId = QStringLiteral("h264");
@@ -3631,6 +3633,10 @@ bool exportAtRate(const drift::Project &project, int fpsNum, int fpsDen, const Q
     settings.crf = 18;
     settings.fpsNum = fpsNum;
     settings.fpsDen = fpsDen;
+    if (startUs > 0 || endUs > 0) {
+        settings.startUs = startUs;
+        settings.endUs = endUs;
+    }
     if (!useAvailableCodecs(settings))
         return false;
 
@@ -3743,6 +3749,24 @@ void EngineTest::exporterHonoursExportFrameRateOverride()
 
     QVERIFY2(std::abs(av_q2d(rate) - 50.0) < 0.5, qPrintable(QStringLiteral("got %1").arg(av_q2d(rate))));
     QVERIFY2(std::llabs(frames - 50) <= 1, qPrintable(QStringLiteral("got %1 frames").arg(frames)));
+}
+
+void EngineTest::exporterHonoursWorkAreaRange()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    drift::Project project = frameRateTestProject(25);
+    project.tracks()[0].clips[0].timelineDuration = drift::secondsToUs(2.0);
+
+    AVRational rate{};
+    int64_t frames = 0;
+    if (!exportAtRate(project, 0, 1, dir.path(), QStringLiteral("slice"), rate, frames, nullptr,
+                      drift::secondsToUs(0.5), drift::secondsToUs(1.5))) {
+        QSKIP("No usable encoder in this FFmpeg build");
+    }
+
+    QVERIFY2(std::llabs(frames - 25) <= 1, qPrintable(QStringLiteral("got %1 frames").arg(frames)));
 }
 
 void EngineTest::exporterSupportsNtscFrameRates()

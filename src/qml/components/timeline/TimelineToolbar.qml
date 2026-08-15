@@ -154,6 +154,35 @@ Item {
             onClicked: EditorState.toggleBookmarkAtPlayhead()
         }
         IconButton {
+            glyph: Theme.icons.setStart
+            variant: "text"
+            tooltip: toolbar.withShortcut(qsTr("Mark work area in"), "markIn")
+            active: EditorState.workAreaInSeconds >= 0
+            onClicked: EditorState.markWorkAreaIn()
+        }
+        IconButton {
+            glyph: Theme.icons.setEnd
+            variant: "text"
+            tooltip: toolbar.withShortcut(qsTr("Mark work area out"), "markOut")
+            active: EditorState.workAreaOutSeconds >= 0
+            onClicked: EditorState.markWorkAreaOut()
+        }
+        IconButton {
+            glyph: Theme.icons.repeat
+            variant: "text"
+            tooltip: toolbar.withShortcut(qsTr("Loop work area playback"), "toggleLoop")
+            active: EditorState.loopWorkAreaEnabled
+            enabled: EditorState.workAreaActive
+            onClicked: EditorState.toggleLoopWorkArea()
+        }
+        IconButton {
+            glyph: Theme.icons.x
+            variant: "text"
+            tooltip: toolbar.withShortcut(qsTr("Clear work area"), "clearInOut")
+            enabled: EditorState.workAreaInSeconds >= 0 || EditorState.workAreaOutSeconds >= 0
+            onClicked: EditorState.clearWorkArea()
+        }
+        IconButton {
             glyph: Theme.icons.audioLines
             variant: "text"
             tooltip: toolbar.withShortcut(qsTr("Separate audio from video"), "separateAudio")
@@ -204,6 +233,28 @@ Item {
                 text: qsTr("Add/remove bookmark at current time")
                 icon.name: Theme.icons.bookmark
                 onTriggered: EditorState.toggleBookmarkAtPlayhead()
+            }
+            ThemedMenuItem {
+                text: toolbar.withShortcut(qsTr("Mark work area in"), "markIn")
+                icon.name: Theme.icons.setStart
+                onTriggered: EditorState.markWorkAreaIn()
+            }
+            ThemedMenuItem {
+                text: toolbar.withShortcut(qsTr("Mark work area out"), "markOut")
+                icon.name: Theme.icons.setEnd
+                onTriggered: EditorState.markWorkAreaOut()
+            }
+            ThemedMenuItem {
+                text: toolbar.withShortcut(qsTr("Loop work area playback"), "toggleLoop")
+                icon.name: Theme.icons.repeat
+                enabled: EditorState.workAreaActive
+                onTriggered: EditorState.toggleLoopWorkArea()
+            }
+            ThemedMenuItem {
+                text: toolbar.withShortcut(qsTr("Clear work area"), "clearInOut")
+                icon.name: Theme.icons.x
+                enabled: EditorState.workAreaInSeconds >= 0 || EditorState.workAreaOutSeconds >= 0
+                onTriggered: EditorState.clearWorkArea()
             }
             ThemedMenuSeparator { }
             ThemedMenuItem {

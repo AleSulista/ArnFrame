@@ -8,6 +8,8 @@
 
 #include <functional>
 
+#include "core/Time.h"
+
 namespace drift {
 class Project;
 }
@@ -45,6 +47,9 @@ struct ExportSettings
     QString metadataArtist;
     QString metadataAlbum;
     QString metadataComment;
+    // Optional export slice on the timeline. Both zero = encode the full project.
+    drift::TimeUs startUs = 0;
+    drift::TimeUs endUs = 0;
 };
 
 // WYSIWYG exporter: encodes frames straight from FrameCompositor and audio from

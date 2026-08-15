@@ -115,6 +115,18 @@ Item {
 
         IconButton {
             anchors.verticalCenter: parent.verticalCenter
+            glyph: Theme.icons.repeat
+            variant: "text"
+            tooltip: EditorState.loopWorkAreaEnabled
+                     ? qsTr("Loop work area on — click to turn off")
+                     : qsTr("Loop work area off — click to turn on")
+            active: EditorState.loopWorkAreaEnabled
+            enabled: EditorState.workAreaActive
+            onClicked: EditorState.toggleLoopWorkArea()
+        }
+
+        IconButton {
+            anchors.verticalCenter: parent.verticalCenter
             glyph: Theme.icons.fastForward
             variant: "text"
             tooltip: qsTr("Jump forward 1s · Shift for 5s · Ctrl for 10s")

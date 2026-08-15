@@ -35,6 +35,7 @@ private slots:
     void packagedProjectCarriesDerivedArtifacts();
     void undoBookmarkAdd();
     void bookmarkNavigationAndToggle();
+    void workAreaMarkClearAndUndo();
     void bookmarkSnapTarget();
     void renameClipAndAsset();
     void moveTrackReordersAndRemapsSelection();
@@ -223,6 +224,41 @@ void EditorStateTest::bookmarkNavigationAndToggle()
     state.setPlayheadSeconds(4.0);
     state.toggleBookmarkAtPlayhead();
     QCOMPARE(state.bookmarks().size(), 3);
+}
+
+void EditorStateTest::workAreaMarkClearAndUndo()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("Pad"), 0.0);
+    state.setClipDuration(0, 0, 10.0);
+
+    QVERIFY(!state.workAreaActive());
+
+    state.setPlayheadSeconds(2.0);
+    state.markWorkAreaIn();
+    QVERIFY(state.workAreaInSeconds() >= 0);
+    QVERIFY(!state.workAreaActive());
+
+    state.setPlayheadSeconds(6.0);
+    state.markWorkAreaOut();
+    QVERIFY(state.workAreaActive());
+    QCOMPARE(state.workAreaInSeconds(), 2.0);
+    QCOMPARE(state.workAreaOutSeconds(), 6.0);
+
+    state.goToWorkAreaIn();
+    QCOMPARE(state.playheadSeconds(), 2.0);
+    state.goToWorkAreaOut();
+    QCOMPARE(state.playheadSeconds(), 6.0);
+
+    state.setLoopWorkAreaEnabled(true);
+    QVERIFY(state.loopWorkAreaEnabled());
+
+    state.clearWorkArea();
+    QVERIFY(!state.workAreaActive());
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    QVERIFY(state.workAreaActive());
 }
 
 void EditorStateTest::bookmarkSnapTarget()
