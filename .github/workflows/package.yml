@@ -205,7 +205,7 @@ jobs:
           # there and shipped it in place of the FFmpeg the binary was built against, leaving AV1
           # playable only on GPUs whose VAAPI/NVDEC covers it and black everywhere else.
           export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/.deps/ffmpeg/lib:${QT_ROOT_DIR}/lib:${LD_LIBRARY_PATH:-}"
-          export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so;libqwayland-egl.so"
+          export EXTRA_PLATFORM_PLUGINS="libqwayland.so"
           export EXTRA_QT_MODULES="waylandcompositor"
           #
           # The -l lines are OpenSSL: Qt's ossl TLS backend dlopens libssl/libcrypto by soname, so
