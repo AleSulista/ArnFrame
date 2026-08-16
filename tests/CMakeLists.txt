@@ -19,11 +19,19 @@ qt_add_executable(tst_editorstate
     ../src/playback/PlaybackClock.cpp
     ../src/playback/CompositorService.cpp
     ../src/playback/ClipPreviewPlayer.cpp
+    ../src/mcp/McpSession.cpp
+    ../src/mcp/McpCatalog.cpp
+    ../src/mcp/McpProtocol.cpp
+    ../src/mcp/McpHttp.cpp
+    ../src/mcp/McpDispatcher.cpp
+    ../src/mcp/McpServer.cpp
+    ../src/mcp/McpStdio.cpp
 )
 target_include_directories(tst_editorstate PRIVATE ../src)
-target_link_libraries(tst_editorstate PRIVATE Qt6::Test Qt6::Gui Qt6::Multimedia Qt6::Concurrent driftcore driftengine)
+target_link_libraries(tst_editorstate PRIVATE Qt6::Test Qt6::Gui Qt6::Multimedia Qt6::Concurrent Qt6::Network driftcore driftengine)
 target_compile_definitions(tst_editorstate PRIVATE
-    DRIFT_TEST_DENOISE_MODEL_DIR="${CMAKE_SOURCE_DIR}/models/deepfilternet3")
+    DRIFT_TEST_DENOISE_MODEL_DIR="${CMAKE_SOURCE_DIR}/models/deepfilternet3"
+    DRIFT_VERSION="${PROJECT_VERSION}")
 add_test(NAME EditorState COMMAND tst_editorstate)
 drift_copy_effects(tst_editorstate)
 drift_copy_transitions(tst_editorstate)
@@ -68,3 +76,30 @@ target_compile_definitions(tst_engine PRIVATE
 add_test(NAME Engine COMMAND tst_engine)
 drift_copy_effects(tst_engine)
 drift_copy_transitions(tst_engine)
+
+qt_add_executable(tst_mcp
+    tst_mcp.cpp
+    ../src/mcp/McpSession.cpp
+    ../src/mcp/McpCatalog.cpp
+    ../src/mcp/McpProtocol.cpp
+    ../src/mcp/McpHttp.cpp
+    ../src/SegmentImageStore.cpp
+    ../src/ClipPreviewImageStore.cpp
+    ../src/models/AppController.cpp
+    ../src/models/AssetLibrary.cpp
+    ../src/models/TimelineModel.cpp
+    ../src/models/ClipListModel.cpp
+    ../src/playback/PlaybackEngine.cpp
+    ../src/playback/PlaybackClock.cpp
+    ../src/playback/CompositorService.cpp
+    ../src/playback/ClipPreviewPlayer.cpp
+    ../src/mcp/McpDispatcher.cpp
+    ../src/mcp/McpServer.cpp
+    ../src/mcp/McpStdio.cpp
+)
+target_include_directories(tst_mcp PRIVATE ../src)
+target_link_libraries(tst_mcp PRIVATE Qt6::Test Qt6::Gui Qt6::Network Qt6::Multimedia Qt6::Concurrent driftcore driftengine)
+target_compile_definitions(tst_mcp PRIVATE DRIFT_VERSION="${PROJECT_VERSION}")
+add_test(NAME Mcp COMMAND tst_mcp)
+drift_copy_effects(tst_mcp)
+drift_copy_transitions(tst_mcp)

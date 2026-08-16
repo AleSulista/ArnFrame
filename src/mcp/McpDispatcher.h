@@ -1,0 +1,76 @@
+#pragma once
+
+#include <QJsonObject>
+#include <QString>
+
+class AppController;
+
+namespace drift::mcp {
+
+class McpDispatcher
+{
+public:
+    explicit McpDispatcher(AppController *controller);
+
+    QJsonObject inspect(const QJsonObject &args) const;
+    QJsonObject apply(const QJsonObject &args);
+    QJsonObject applyOne(const QString &tool, const QJsonObject &args);
+    QJsonObject capture(const QJsonObject &args);
+
+private:
+    struct ClipRef {
+        int track = -1;
+        int clip = -1;
+        QString id;
+        bool valid() const { return track >= 0 && clip >= 0; }
+    };
+
+    ClipRef resolveClip(const QJsonObject &args) const;
+    int resolveAsset(const QJsonValue &value) const;
+    QJsonObject clipFeedback(const ClipRef &ref, const QJsonObject &extra = {}) const;
+    QJsonObject waitImport(const QStringList &ids);
+    bool isUndoable(const QString &tool) const;
+    void moveClipToRequested(const ClipRef &ref, double at);
+
+    QJsonObject opImportMedia(const QJsonObject &args);
+    QJsonObject opListAssets() const;
+    QJsonObject opRenameAsset(const QJsonObject &args);
+    QJsonObject opAddTrack(const QJsonObject &args);
+    QJsonObject opRemoveTrack(const QJsonObject &args);
+    QJsonObject opSetTrack(const QJsonObject &args);
+    QJsonObject opPlaceClip(const QJsonObject &args);
+    QJsonObject opMoveClip(const QJsonObject &args);
+    QJsonObject opSetDuration(const QJsonObject &args);
+    QJsonObject opSetTrim(const QJsonObject &args);
+    QJsonObject opMoveToTrack(const QJsonObject &args);
+    QJsonObject opSplitClip(const QJsonObject &args);
+    QJsonObject opDeleteClip(const QJsonObject &args);
+    QJsonObject opDuplicateClip(const QJsonObject &args);
+    QJsonObject opUndo();
+    QJsonObject opRedo();
+    QJsonObject opSetOverlap(const QJsonObject &args);
+    QJsonObject opSetTransform(const QJsonObject &args);
+    QJsonObject opResetTransform(const QJsonObject &args);
+    QJsonObject opSeek(const QJsonObject &args);
+    QJsonObject opPlay();
+    QJsonObject opPause();
+    QJsonObject opSetWorkArea(const QJsonObject &args);
+    QJsonObject opClearWorkArea();
+    QJsonObject opAddText(const QJsonObject &args);
+    QJsonObject opSetText(const QJsonObject &args);
+    QJsonObject opListEffects() const;
+    QJsonObject opListAudioEffects() const;
+    QJsonObject opListTransitions() const;
+    QJsonObject opAddEffect(const QJsonObject &args);
+    QJsonObject opRemoveEffect(const QJsonObject &args);
+    QJsonObject opSetEffectParam(const QJsonObject &args);
+    QJsonObject opAddAudioEffect(const QJsonObject &args);
+    QJsonObject opRemoveAudioEffect(const QJsonObject &args);
+    QJsonObject opSetAudioEffectParam(const QJsonObject &args);
+    QJsonObject opAddTransition(const QJsonObject &args);
+    QJsonObject opRemoveTransition(const QJsonObject &args);
+
+    AppController *m_controller = nullptr;
+};
+
+} // namespace drift::mcp
