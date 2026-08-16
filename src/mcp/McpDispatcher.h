@@ -69,6 +69,12 @@ private:
     QJsonObject opSetAudioEffectParam(const QJsonObject &args);
     QJsonObject opAddTransition(const QJsonObject &args);
     QJsonObject opRemoveTransition(const QJsonObject &args);
+    QJsonObject opListExportOptions() const;
+    QJsonObject opGetExportSettings() const;
+    QJsonObject opSetExportSettings(const QJsonObject &args);
+    QJsonObject opExport(const QJsonObject &args);
+    QJsonObject opExportStatus() const;
+    QJsonObject opCancelExport();
 
     AppController *m_controller = nullptr;
 };

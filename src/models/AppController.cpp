@@ -10697,10 +10697,12 @@ QString AppController::lastExportFolder() const
 void AppController::rememberExportChoice(const QString &outputPath, const QVariantMap &settings)
 {
     QSettings store;
-    const QFileInfo info(outputPath);
-    const QString folder = info.absolutePath();
-    if (!folder.isEmpty() && QDir(folder).exists())
-        store.setValue(QStringLiteral("export/lastFolder"), folder);
+    if (!outputPath.isEmpty()) {
+        const QFileInfo info(outputPath);
+        const QString folder = info.absolutePath();
+        if (!folder.isEmpty() && QDir(folder).exists())
+            store.setValue(QStringLiteral("export/lastFolder"), folder);
+    }
 
     store.beginGroup(QStringLiteral("export"));
     const auto put = [&](const QString &key) {
@@ -11011,11 +11013,13 @@ QJsonObject AppController::mcpInspect(bool includeClips) const
         {QStringLiteral("tracks"), tracks},
         {QStringLiteral("assets"), assets},
     };
-    if (m_project.hasWorkArea()) {
-        extra.insert(QStringLiteral("work_in"), workAreaInSeconds());
-        extra.insert(QStringLiteral("work_out"), workAreaOutSeconds());
-    }
-    return ok(extra);
+        if (m_project.hasWorkArea()) {
+            extra.insert(QStringLiteral("work_in"), workAreaInSeconds());
+            extra.insert(QStringLiteral("work_out"), workAreaOutSeconds());
+        }
+        if (m_exportInProgress)
+            extra.insert(QStringLiteral("exporting"), true);
+        return ok(extra);
 }
 
 bool AppController::mcpSetWorkArea(double inSeconds, double outSeconds)
@@ -11032,6 +11036,11 @@ bool AppController::mcpSetWorkArea(double inSeconds, double outSeconds)
     finishEdit(QStringLiteral("Work area set"));
     emit workAreaChanged();
     return true;
+}
+
+void AppController::mcpRememberExportSettings(const QVariantMap &settings)
+{
+    rememberExportChoice({}, settings);
 }
 
 bool AppController::mcpSetClipCanvas(int trackIndex, int clipIndex, const QVariantMap &patch)

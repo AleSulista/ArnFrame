@@ -316,6 +316,7 @@ public:
     bool mcpSetClipCanvas(int trackIndex, int clipIndex, const QVariantMap &patch);
     QJsonObject mcpCaptureFrame(double atSeconds, bool full);
     bool mcpSetWorkArea(double inSeconds, double outSeconds);
+    void mcpRememberExportSettings(const QVariantMap &settings);
     void mcpBeginBatch();
     void mcpEndBatch(const QString &text, bool pushUndo);
     // Strip chip click — folds `prop`'s curve away, or brings it back. Purely a view filter: the
@@ -973,6 +974,7 @@ protected:
     drift::bundle::WriteRequest buildWriteRequest(bool embedSource) const;
     void rememberEmbeddedSources(const QList<drift::bundle::MediaEntry> &media);
     // Persist the save-picker folder and encode/scale choices for the next Export dialog.
+    // Empty `outputPath` updates settings only and leaves lastExportFolder unchanged.
     void rememberExportChoice(const QString &outputPath, const QVariantMap &settings);
     // Repoint every path field the extraction moved. Clips duplicate their asset's path, so this
     // matches on the value rather than walking by id.

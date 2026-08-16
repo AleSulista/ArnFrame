@@ -20,6 +20,27 @@ QJsonObject mergeProps(QJsonObject a, const QJsonObject &b)
     return a;
 }
 
+QJsonObject exportSettingsProps()
+{
+    return {
+        {QStringLiteral("scale"), stringProp(QStringLiteral("Scale id from list_export_options (source, 1080, …)"))},
+        {QStringLiteral("height"), integerProp(QStringLiteral("Target height in pixels; 0 keeps project height"))},
+        {QStringLiteral("fps"), numberProp(QStringLiteral("Output fps. 0 = project rate. 29.97 and 23.976 are NTSC."))},
+        {QStringLiteral("video"), stringProp(QStringLiteral("Video codec id (h264, hevc, vp9, …)"))},
+        {QStringLiteral("audio"), stringProp(QStringLiteral("Audio codec id (aac, opus, …)"))},
+        {QStringLiteral("rate"), stringProp(QStringLiteral("crf or bitrate"))},
+        {QStringLiteral("crf"), integerProp(QStringLiteral("Quality when rate=crf (lower is better)"))},
+        {QStringLiteral("bitrate"), integerProp(QStringLiteral("Video kbps when rate=bitrate"))},
+        {QStringLiteral("preset"), stringProp(QStringLiteral("Encoder speed preset (ultrafast…veryslow)"))},
+        {QStringLiteral("audio_bitrate"), integerProp(QStringLiteral("Audio kbps"))},
+        {QStringLiteral("audio_only"), boolProp(QStringLiteral("Encode audio only"))},
+        {QStringLiteral("gif"), boolProp(QStringLiteral("Encode an animated GIF"))},
+        {QStringLiteral("work_area"), boolProp(QStringLiteral("Limit to the In/Out work area"))},
+        {QStringLiteral("in"), numberProp(QStringLiteral("Range start seconds (overrides work_area)"))},
+        {QStringLiteral("out"), numberProp(QStringLiteral("Range end seconds"))},
+    };
+}
+
 struct Op {
     const char *name;
     const char *toolbox;
@@ -208,6 +229,30 @@ const QList<Op> &ops()
           objectSchema({{QStringLiteral("track"), integerProp(QStringLiteral("Track index"))},
                         {QStringLiteral("id"), stringProp(QStringLiteral("Transition id"))}},
                        {QStringLiteral("track"), QStringLiteral("id")}) },
+
+        { "list_export_options", "export", "See codecs, scales, and fps choices",
+          "Available scale ids, fps ids, video/audio codecs (available only), and whether GIF export works.",
+          objectSchema({}) },
+        { "get_export_settings", "export", "See current encode settings",
+          "Resolved export settings (last used, else defaults), container/suffix, last folder, and busy state.",
+          objectSchema({}) },
+        { "set_export_settings", "export", "Change encode settings",
+          "Patch remembered export settings. Omitted fields stay as they are. Does not start an encode.",
+          objectSchema(exportSettingsProps()) },
+        { "export", "export", "Render the timeline to a file",
+          "Start an encode. wait=true (default) blocks until done. Use list_export_options for ids. "
+          "Omitted settings use the last export (or defaults).",
+          objectSchema(mergeProps({{QStringLiteral("path"), stringProp(QStringLiteral("Absolute output path"))},
+                                   {QStringLiteral("wait"), boolProp(QStringLiteral("Wait for completion (default true)"))},
+                                   {QStringLiteral("timeout"), numberProp(QStringLiteral("Seconds to wait; 0 = until done"))}},
+                                  exportSettingsProps()),
+                       {QStringLiteral("path")}) },
+        { "export_status", "export", "Check an in-flight encode",
+          "Busy flag, progress 0..1, and last export message.",
+          objectSchema({}) },
+        { "cancel_export", "export", "Stop an in-flight encode",
+          "Request cancel. The file may be incomplete.",
+          objectSchema({}) },
     };
     return k;
 }
@@ -222,7 +267,8 @@ QJsonObject opTool(const Op &op)
 QStringList toolboxNames()
 {
     return {QStringLiteral("media"),    QStringLiteral("timeline"), QStringLiteral("canvas"),
-            QStringLiteral("playback"), QStringLiteral("text"),     QStringLiteral("effects")};
+            QStringLiteral("playback"), QStringLiteral("text"),     QStringLiteral("effects"),
+            QStringLiteral("export")};
 }
 
 QJsonObject catalogPayload()
@@ -238,6 +284,7 @@ QJsonObject catalogPayload()
         {"playback", "Seek, play, pause, In/Out work area. Use capture (homepage) to see the frame."},
         {"text", "Add and edit title/caption clips."},
         {"effects", "Video/audio effects and transitions."},
+        {"export", "Encode settings and render the timeline to a file."},
     };
 
     QJsonArray toolboxes;
@@ -285,7 +332,7 @@ QJsonArray homepageTools()
     tools.append(toolDef(QStringLiteral("toolbox"),
                          QStringLiteral("Load one toolbox: returns full JSON schemas for its ops. Then call those ops via apply."),
                          objectSchema({{QStringLiteral("name"),
-                                        stringProp(QStringLiteral("media|timeline|canvas|playback|text|effects"))}},
+                                        stringProp(QStringLiteral("media|timeline|canvas|playback|text|effects|export"))}},
                                       {QStringLiteral("name")})));
     tools.append(toolDef(QStringLiteral("inspect"),
                          QStringLiteral("Compact project state (size, playhead, overlap, work area). Pass clips=true for per-clip rows (id, track, start, duration)."),
@@ -374,7 +421,7 @@ QString homepageHtml()
     body += QStringLiteral("</ul><p>Pinned endpoints: <code>/mcp/media</code>, "
                            "<code>/mcp/timeline</code>, <code>/mcp/canvas</code>, "
                            "<code>/mcp/playback</code>, <code>/mcp/text</code>, "
-                           "<code>/mcp/effects</code>.</p></body>");
+                           "<code>/mcp/effects</code>, <code>/mcp/export</code>.</p></body>");
     return body;
 }
 

@@ -1,12 +1,16 @@
 #include <QtTest>
 
 #include <QAbstractSocket>
+#include <QCoreApplication>
 #include <QEventLoop>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QObject>
+#include <QScopeGuard>
+#include <QSettings>
+#include <QStandardPaths>
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -37,6 +41,8 @@ private slots:
     void inspectIsCompact();
     void placeHonorsOverlapToggle();
     void workAreaRoundTrip();
+    void exportOptionsAndSettings();
+    void exportRequiresPathAndCanWait();
     void captureDoesNotInsertClip();
 };
 
@@ -113,13 +119,14 @@ void McpTest::catalogListsToolboxes()
     const QJsonObject cat = drift::mcp::catalogPayload();
     QVERIFY(cat.value(QStringLiteral("ok")).toBool());
     const QJsonArray boxes = cat.value(QStringLiteral("toolboxes")).toArray();
-    QCOMPARE(boxes.size(), 6);
+    QCOMPARE(boxes.size(), 7);
     QStringList names;
     for (const QJsonValue &v : boxes)
         names.append(v.toObject().value(QStringLiteral("name")).toString());
     QVERIFY(names.contains(QStringLiteral("media")));
     QVERIFY(names.contains(QStringLiteral("timeline")));
     QVERIFY(names.contains(QStringLiteral("canvas")));
+    QVERIFY(names.contains(QStringLiteral("export")));
 }
 
 void McpTest::toolboxUnknownIsError()
@@ -376,6 +383,91 @@ void McpTest::workAreaRoundTrip()
     const QJsonObject cleared = dispatcher.applyOne(QStringLiteral("clear_work_area"), {});
     QVERIFY(cleared.value(QStringLiteral("ok")).toBool());
     QVERIFY(!dispatcher.inspect({}).contains(QStringLiteral("work_in")));
+}
+
+void McpTest::exportOptionsAndSettings()
+{
+    QStandardPaths::setTestModeEnabled(true);
+    const QString org = QCoreApplication::organizationName();
+    const QString app = QCoreApplication::applicationName();
+    QCoreApplication::setOrganizationName(QStringLiteral("DriftMcpTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("DriftMcpTest"));
+    const auto restore = qScopeGuard([&] {
+        QSettings().remove(QStringLiteral("export"));
+        QCoreApplication::setOrganizationName(org);
+        QCoreApplication::setApplicationName(app);
+        QStandardPaths::setTestModeEnabled(false);
+    });
+    QSettings().remove(QStringLiteral("export"));
+
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject options = dispatcher.applyOne(QStringLiteral("list_export_options"), {});
+    QVERIFY(options.value(QStringLiteral("ok")).toBool());
+    QVERIFY(!options.value(QStringLiteral("video")).toArray().isEmpty());
+    QVERIFY(!options.value(QStringLiteral("fps")).toArray().isEmpty());
+    QVERIFY(options.contains(QStringLiteral("gif")));
+
+    const QJsonObject patched = dispatcher.applyOne(
+        QStringLiteral("set_export_settings"),
+        {{QStringLiteral("video"), QStringLiteral("h264")},
+         {QStringLiteral("fps"), 30},
+         {QStringLiteral("crf"), 23},
+         {QStringLiteral("gif"), false}});
+    QVERIFY(patched.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(patched.value(QStringLiteral("video")).toString(), QStringLiteral("h264"));
+    QCOMPARE(patched.value(QStringLiteral("fps")).toDouble(), 30.0);
+    QCOMPARE(patched.value(QStringLiteral("crf")).toInt(), 23);
+
+    const QJsonObject got = dispatcher.applyOne(QStringLiteral("get_export_settings"), {});
+    QCOMPARE(got.value(QStringLiteral("video")).toString(), QStringLiteral("h264"));
+    QCOMPARE(got.value(QStringLiteral("fps")).toDouble(), 30.0);
+    QCOMPARE(got.value(QStringLiteral("busy")).toBool(), false);
+}
+
+void McpTest::exportRequiresPathAndCanWait()
+{
+    QStandardPaths::setTestModeEnabled(true);
+    const QString org = QCoreApplication::organizationName();
+    const QString app = QCoreApplication::applicationName();
+    QCoreApplication::setOrganizationName(QStringLiteral("DriftMcpTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("DriftMcpTest"));
+    const auto restore = qScopeGuard([&] {
+        QSettings().remove(QStringLiteral("export"));
+        QCoreApplication::setOrganizationName(org);
+        QCoreApplication::setApplicationName(app);
+        QStandardPaths::setTestModeEnabled(false);
+    });
+    QSettings().remove(QStringLiteral("export"));
+
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject missing = dispatcher.applyOne(QStringLiteral("export"), {});
+    QCOMPARE(missing.value(QStringLiteral("ok")).toBool(), false);
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("bad_args"));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString outPath = dir.filePath(QStringLiteral("out.mp4"));
+    const QJsonObject result = dispatcher.applyOne(
+        QStringLiteral("export"),
+        {{QStringLiteral("path"), outPath},
+         {QStringLiteral("wait"), true},
+         {QStringLiteral("timeout"), 20}});
+    QVERIFY(result.value(QStringLiteral("ok")).toBool()
+            || result.value(QStringLiteral("error")).toString() == QStringLiteral("export_failed"));
+    if (result.value(QStringLiteral("ok")).toBool()) {
+        QCOMPARE(result.value(QStringLiteral("path")).toString(), outPath);
+        QVERIFY(QFile::exists(outPath));
+    }
+    QCOMPARE(dispatcher.applyOne(QStringLiteral("export_status"), {})
+                 .value(QStringLiteral("busy"))
+                 .toBool(),
+             false);
 }
 
 void McpTest::captureDoesNotInsertClip()

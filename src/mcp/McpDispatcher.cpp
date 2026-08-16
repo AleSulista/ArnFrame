@@ -2,10 +2,13 @@
 #include "mcp/McpCatalog.h"
 #include "mcp/McpJson.h"
 
+#include "core/Time.h"
 #include "models/AppController.h"
 #include "models/AssetLibrary.h"
 
+#include <QDir>
 #include <QEventLoop>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QObject>
@@ -100,6 +103,265 @@ QJsonObject compactCatalogItem(const QVariantMap &item)
     if (!category.isEmpty())
         o.insert(QStringLiteral("cat"), category);
     return o;
+}
+
+QJsonArray compactAvailableCodecs(const QVariantList &list)
+{
+    QJsonArray out;
+    for (const QVariant &v : list) {
+        const QVariantMap m = v.toMap();
+        if (!m.value(QStringLiteral("available")).toBool())
+            continue;
+        out.append(QJsonObject{{QStringLiteral("id"), m.value(QStringLiteral("id")).toString()},
+                               {QStringLiteral("label"), m.value(QStringLiteral("label")).toString()}});
+    }
+    return out;
+}
+
+QVariantMap mergedExportSettings(AppController *c)
+{
+    QVariantMap merged = c->exportDefaultSettings();
+    const QVariantMap last = c->lastExportSettings();
+    for (auto it = last.begin(); it != last.end(); ++it)
+        merged.insert(it.key(), it.value());
+    return merged;
+}
+
+void applyScaleId(AppController *c, QVariantMap &map, const QString &scaleId)
+{
+    if (scaleId.isEmpty())
+        return;
+    map.insert(QStringLiteral("scaleId"), scaleId);
+    for (const QVariant &v : c->exportScaleOptions()) {
+        const QVariantMap opt = v.toMap();
+        if (opt.value(QStringLiteral("id")).toString() == scaleId) {
+            map.insert(QStringLiteral("targetHeight"), opt.value(QStringLiteral("targetHeight")).toInt());
+            if (!map.contains(QStringLiteral("videoBitrateKbps")))
+                map.insert(QStringLiteral("videoBitrateKbps"),
+                           opt.value(QStringLiteral("videoBitrateKbps")).toInt());
+            return;
+        }
+    }
+}
+
+bool applyFps(AppController *c, QVariantMap &map, const QJsonValue &value)
+{
+    if (value.isString()) {
+        const QString id = value.toString().trimmed().toLower();
+        if (id == QLatin1String("project") || id == QLatin1String("0")) {
+            map.insert(QStringLiteral("fpsNum"), 0);
+            map.insert(QStringLiteral("fpsDen"), 1);
+            return true;
+        }
+        for (const QVariant &v : c->exportFrameRateOptions()) {
+            const QVariantMap opt = v.toMap();
+            if (opt.value(QStringLiteral("id")).toString().compare(id, Qt::CaseInsensitive) == 0) {
+                map.insert(QStringLiteral("fpsNum"), opt.value(QStringLiteral("fpsNum")).toInt());
+                map.insert(QStringLiteral("fpsDen"), opt.value(QStringLiteral("fpsDen")).toInt());
+                return true;
+            }
+        }
+        bool ok = false;
+        const double n = id.toDouble(&ok);
+        if (!ok)
+            return false;
+        return applyFps(c, map, QJsonValue(n));
+    }
+    if (!value.isDouble())
+        return false;
+    const double fps = value.toDouble();
+    if (fps <= 0) {
+        map.insert(QStringLiteral("fpsNum"), 0);
+        map.insert(QStringLiteral("fpsDen"), 1);
+        return true;
+    }
+    for (const QVariant &v : c->exportFrameRateOptions()) {
+        const QVariantMap opt = v.toMap();
+        const int num = opt.value(QStringLiteral("fpsNum")).toInt();
+        const int den = qMax(1, opt.value(QStringLiteral("fpsDen")).toInt());
+        if (num <= 0)
+            continue;
+        if (qAbs((double(num) / double(den)) - fps) < 0.01) {
+            map.insert(QStringLiteral("fpsNum"), num);
+            map.insert(QStringLiteral("fpsDen"), den);
+            return true;
+        }
+    }
+    map.insert(QStringLiteral("fpsNum"), qMax(1, qRound(fps)));
+    map.insert(QStringLiteral("fpsDen"), 1);
+    return true;
+}
+
+QString argString(const QJsonObject &args, const QString &a, const QString &b = {})
+{
+    if (args.contains(a) && args.value(a).isString())
+        return args.value(a).toString().trimmed();
+    if (!b.isEmpty() && args.contains(b) && args.value(b).isString())
+        return args.value(b).toString().trimmed();
+    return {};
+}
+
+bool applyExportPatch(AppController *c, QVariantMap &map, const QJsonObject &args, QString *error)
+{
+    const QString scale = argString(args, QStringLiteral("scale"), QStringLiteral("scaleId"));
+    if (!scale.isEmpty())
+        applyScaleId(c, map, scale);
+
+    if (args.contains(QStringLiteral("height")) || args.contains(QStringLiteral("targetHeight"))) {
+        const int height = jsonInt(args.contains(QStringLiteral("height")) ? args.value(QStringLiteral("height"))
+                                                                          : args.value(QStringLiteral("targetHeight")),
+                                   0);
+        map.insert(QStringLiteral("targetHeight"), qMax(0, height));
+    }
+
+    if (args.contains(QStringLiteral("fps"))) {
+        if (!applyFps(c, map, args.value(QStringLiteral("fps")))) {
+            if (error)
+                *error = QStringLiteral("Unknown fps");
+            return false;
+        }
+    }
+    if (args.contains(QStringLiteral("fpsNum")))
+        map.insert(QStringLiteral("fpsNum"), jsonInt(args.value(QStringLiteral("fpsNum")), 0));
+    if (args.contains(QStringLiteral("fpsDen")))
+        map.insert(QStringLiteral("fpsDen"), qMax(1, jsonInt(args.value(QStringLiteral("fpsDen")), 1)));
+
+    const QString video = argString(args, QStringLiteral("video"), QStringLiteral("videoCodecId"));
+    if (!video.isEmpty())
+        map.insert(QStringLiteral("videoCodecId"), video);
+    const QString audio = argString(args, QStringLiteral("audio"), QStringLiteral("audioCodecId"));
+    if (!audio.isEmpty())
+        map.insert(QStringLiteral("audioCodecId"), audio);
+    const QString rate = argString(args, QStringLiteral("rate"), QStringLiteral("rateControl"));
+    if (!rate.isEmpty())
+        map.insert(QStringLiteral("rateControl"), rate);
+    if (args.contains(QStringLiteral("crf")))
+        map.insert(QStringLiteral("crf"), jsonInt(args.value(QStringLiteral("crf")), 18));
+    if (args.contains(QStringLiteral("bitrate")) || args.contains(QStringLiteral("videoBitrateKbps"))) {
+        map.insert(QStringLiteral("videoBitrateKbps"),
+                   jsonInt(args.contains(QStringLiteral("bitrate")) ? args.value(QStringLiteral("bitrate"))
+                                                                   : args.value(QStringLiteral("videoBitrateKbps")),
+                           12000));
+    }
+    const QString preset = argString(args, QStringLiteral("preset"), QStringLiteral("videoPreset"));
+    if (!preset.isEmpty())
+        map.insert(QStringLiteral("videoPreset"), preset);
+    if (args.contains(QStringLiteral("audio_bitrate")) || args.contains(QStringLiteral("audioBitrateKbps"))) {
+        map.insert(QStringLiteral("audioBitrateKbps"),
+                   jsonInt(args.contains(QStringLiteral("audio_bitrate"))
+                               ? args.value(QStringLiteral("audio_bitrate"))
+                               : args.value(QStringLiteral("audioBitrateKbps")),
+                           192));
+    }
+
+    if (args.contains(QStringLiteral("audio_only")) || args.contains(QStringLiteral("audioOnly"))) {
+        map.insert(QStringLiteral("audioOnly"),
+                   jsonBool(args.contains(QStringLiteral("audio_only")) ? args.value(QStringLiteral("audio_only"))
+                                                                       : args.value(QStringLiteral("audioOnly"))));
+    }
+    if (args.contains(QStringLiteral("gif")) || args.contains(QStringLiteral("gifExport"))) {
+        map.insert(QStringLiteral("gifExport"),
+                   jsonBool(args.contains(QStringLiteral("gif")) ? args.value(QStringLiteral("gif"))
+                                                                : args.value(QStringLiteral("gifExport"))));
+    }
+
+    if (map.value(QStringLiteral("gifExport")).toBool()) {
+        map.insert(QStringLiteral("audioOnly"), false);
+        if (map.value(QStringLiteral("fpsNum")).toInt() <= 0) {
+            map.insert(QStringLiteral("fpsNum"), 15);
+            map.insert(QStringLiteral("fpsDen"), 1);
+        }
+    }
+
+    const bool workAreaRequested =
+        args.contains(QStringLiteral("work_area")) || args.contains(QStringLiteral("exportWorkAreaOnly"));
+    if (workAreaRequested) {
+        map.insert(QStringLiteral("exportWorkAreaOnly"),
+                   jsonBool(args.contains(QStringLiteral("work_area"))
+                                ? args.value(QStringLiteral("work_area"))
+                                : args.value(QStringLiteral("exportWorkAreaOnly"))));
+    }
+
+    const bool hasIn = args.contains(QStringLiteral("in"));
+    const bool hasOut = args.contains(QStringLiteral("out"));
+    if (hasIn || hasOut) {
+        const double inSec = hasIn ? jsonNumber(args.value(QStringLiteral("in")), 0) : 0;
+        const double outSec = hasOut ? jsonNumber(args.value(QStringLiteral("out")), -1) : -1;
+        if (hasOut && outSec <= inSec) {
+            if (error)
+                *error = QStringLiteral("out must be greater than in");
+            return false;
+        }
+        map.insert(QStringLiteral("startUs"), static_cast<double>(drift::secondsToUs(inSec)));
+        if (hasOut)
+            map.insert(QStringLiteral("endUs"), static_cast<double>(drift::secondsToUs(outSec)));
+        map.insert(QStringLiteral("exportWorkAreaOnly"), false);
+    } else if (map.value(QStringLiteral("exportWorkAreaOnly")).toBool()) {
+        if (!c->workAreaActive()) {
+            if (workAreaRequested) {
+                if (error)
+                    *error = QStringLiteral("No In/Out work area is set");
+                return false;
+            }
+            map.insert(QStringLiteral("exportWorkAreaOnly"), false);
+            map.remove(QStringLiteral("startUs"));
+            map.remove(QStringLiteral("endUs"));
+        } else {
+            map.insert(QStringLiteral("startUs"),
+                       static_cast<double>(drift::secondsToUs(c->workAreaInSeconds())));
+            map.insert(QStringLiteral("endUs"),
+                       static_cast<double>(drift::secondsToUs(c->workAreaOutSeconds())));
+        }
+    } else {
+        map.remove(QStringLiteral("startUs"));
+        map.remove(QStringLiteral("endUs"));
+    }
+    return true;
+}
+
+QJsonObject compactExportSettings(AppController *c, const QVariantMap &map)
+{
+    const int num = map.value(QStringLiteral("fpsNum")).toInt();
+    const int den = qMax(1, map.value(QStringLiteral("fpsDen")).toInt());
+    const bool gif = map.value(QStringLiteral("gifExport")).toBool();
+    const bool audioOnly = map.value(QStringLiteral("audioOnly")).toBool();
+    const QString video = map.value(QStringLiteral("videoCodecId")).toString();
+    const QString audio = map.value(QStringLiteral("audioCodecId")).toString();
+    const QString container = gif ? QStringLiteral("gif")
+                                  : audioOnly ? c->exportPreferredAudioOnlyContainer(audio)
+                                              : c->exportPreferredContainer(video, audio);
+    QJsonObject o{
+        {QStringLiteral("scale"), map.value(QStringLiteral("scaleId")).toString()},
+        {QStringLiteral("height"), map.value(QStringLiteral("targetHeight")).toInt()},
+        {QStringLiteral("fps"), num <= 0 ? 0.0 : (double(num) / double(den))},
+        {QStringLiteral("video"), video},
+        {QStringLiteral("audio"), audio},
+        {QStringLiteral("rate"), map.value(QStringLiteral("rateControl")).toString()},
+        {QStringLiteral("crf"), map.value(QStringLiteral("crf")).toInt()},
+        {QStringLiteral("bitrate"), map.value(QStringLiteral("videoBitrateKbps")).toInt()},
+        {QStringLiteral("preset"), map.value(QStringLiteral("videoPreset")).toString()},
+        {QStringLiteral("audio_bitrate"), map.value(QStringLiteral("audioBitrateKbps")).toInt()},
+        {QStringLiteral("audio_only"), audioOnly},
+        {QStringLiteral("gif"), gif},
+        {QStringLiteral("work_area"), map.value(QStringLiteral("exportWorkAreaOnly")).toBool()},
+        {QStringLiteral("container"), container},
+        {QStringLiteral("suffix"), c->exportDefaultSuffix(container, audioOnly && !gif)},
+    };
+    if (map.contains(QStringLiteral("startUs")) && map.contains(QStringLiteral("endUs"))) {
+        o.insert(QStringLiteral("in"), drift::usToSeconds(
+                                           static_cast<drift::TimeUs>(map.value(QStringLiteral("startUs")).toDouble())));
+        o.insert(QStringLiteral("out"), drift::usToSeconds(
+                                            static_cast<drift::TimeUs>(map.value(QStringLiteral("endUs")).toDouble())));
+    }
+    return o;
+}
+
+QString localExportPath(const QString &raw)
+{
+    const QString trimmed = raw.trimmed();
+    if (trimmed.startsWith(QLatin1String("file:")))
+        return QUrl(trimmed).toLocalFile();
+    return trimmed;
 }
 
 } // namespace
@@ -212,6 +474,9 @@ bool McpDispatcher::isUndoable(const QString &tool) const
         QStringLiteral("play"),         QStringLiteral("pause"),
         QStringLiteral("undo"),         QStringLiteral("redo"),
         QStringLiteral("set_overlap"),
+        QStringLiteral("list_export_options"), QStringLiteral("get_export_settings"),
+        QStringLiteral("set_export_settings"), QStringLiteral("export"),
+        QStringLiteral("export_status"),       QStringLiteral("cancel_export"),
     };
     return !skip.contains(tool);
 }
@@ -324,6 +589,18 @@ QJsonObject McpDispatcher::applyOne(const QString &tool, const QJsonObject &args
         return opAddTransition(args);
     if (tool == QLatin1String("remove_transition"))
         return opRemoveTransition(args);
+    if (tool == QLatin1String("list_export_options"))
+        return opListExportOptions();
+    if (tool == QLatin1String("get_export_settings"))
+        return opGetExportSettings();
+    if (tool == QLatin1String("set_export_settings"))
+        return opSetExportSettings(args);
+    if (tool == QLatin1String("export"))
+        return opExport(args);
+    if (tool == QLatin1String("export_status"))
+        return opExportStatus();
+    if (tool == QLatin1String("cancel_export"))
+        return opCancelExport();
     return err("unknown_op", tool);
 }
 
@@ -924,6 +1201,148 @@ QJsonObject McpDispatcher::opRemoveTransition(const QJsonObject &args)
         return err("bad_args", QStringLiteral("track and id required"));
     m_controller->removeTransition(track, id);
     return ok({{QStringLiteral("removed"), id}});
+}
+
+QJsonObject McpDispatcher::opListExportOptions() const
+{
+    QJsonArray scales;
+    for (const QVariant &v : m_controller->exportScaleOptions()) {
+        const QVariantMap m = v.toMap();
+        scales.append(QJsonObject{
+            {QStringLiteral("id"), m.value(QStringLiteral("id")).toString()},
+            {QStringLiteral("w"), m.value(QStringLiteral("width")).toInt()},
+            {QStringLiteral("h"), m.value(QStringLiteral("height")).toInt()},
+        });
+    }
+    QJsonArray fps;
+    for (const QVariant &v : m_controller->exportFrameRateOptions()) {
+        fps.append(QJsonObject{
+            {QStringLiteral("id"), v.toMap().value(QStringLiteral("id")).toString()},
+        });
+    }
+    return ok({
+        {QStringLiteral("scales"), scales},
+        {QStringLiteral("fps"), fps},
+        {QStringLiteral("video"), compactAvailableCodecs(m_controller->exportVideoCodecs())},
+        {QStringLiteral("audio"), compactAvailableCodecs(m_controller->exportAudioCodecs())},
+        {QStringLiteral("gif"), m_controller->exportGifAvailable()},
+        {QStringLiteral("folder"), m_controller->lastExportFolder()},
+    });
+}
+
+QJsonObject McpDispatcher::opGetExportSettings() const
+{
+    QJsonObject o = compactExportSettings(m_controller, mergedExportSettings(m_controller));
+    o.insert(QStringLiteral("folder"), m_controller->lastExportFolder());
+    o.insert(QStringLiteral("gif_ok"), m_controller->exportGifAvailable());
+    o.insert(QStringLiteral("busy"), m_controller->exportInProgress());
+    o.insert(QStringLiteral("progress"), m_controller->exportProgress());
+    return ok(o);
+}
+
+QJsonObject McpDispatcher::opSetExportSettings(const QJsonObject &args)
+{
+    QVariantMap map = mergedExportSettings(m_controller);
+    QString error;
+    if (!applyExportPatch(m_controller, map, args, &error))
+        return err("bad_args", error);
+    m_controller->mcpRememberExportSettings(map);
+    return opGetExportSettings();
+}
+
+QJsonObject McpDispatcher::opExport(const QJsonObject &args)
+{
+    if (m_controller->exportInProgress())
+        return err("export_busy", QStringLiteral("Export already in progress"));
+
+    QString path = localExportPath(args.value(QStringLiteral("path")).toString());
+    if (path.isEmpty())
+        return err("bad_args", QStringLiteral("path required"));
+
+    QVariantMap map = mergedExportSettings(m_controller);
+    QString error;
+    if (!applyExportPatch(m_controller, map, args, &error))
+        return err("bad_args", error);
+
+    const QJsonObject compact = compactExportSettings(m_controller, map);
+    const QString suffix = compact.value(QStringLiteral("suffix")).toString();
+    QFileInfo info(path);
+    if (info.isDir() || path.endsWith(QLatin1Char('/')) || path.endsWith(QLatin1Char('\\'))) {
+        const QString name = m_controller->projectName().isEmpty()
+                                 ? QStringLiteral("export")
+                                 : m_controller->projectName();
+        path = QDir(path).filePath(name + QLatin1Char('.') + suffix);
+        info.setFile(path);
+    } else if (info.suffix().isEmpty() && !suffix.isEmpty()) {
+        path += QLatin1Char('.') + suffix;
+        info.setFile(path);
+    }
+
+    const QString folder = info.absolutePath();
+    if (!folder.isEmpty() && !QDir().mkpath(folder))
+        return err("bad_args", QStringLiteral("Could not create output folder"));
+
+    const bool wait = jsonBool(args.value(QStringLiteral("wait")), true);
+    const double timeoutSec = jsonNumber(args.value(QStringLiteral("timeout")), 0);
+
+    bool finished = false;
+    bool success = false;
+    QEventLoop loop;
+    const auto conn = QObject::connect(
+        m_controller, &AppController::exportFinished, &loop, [&](bool ok) {
+            finished = true;
+            success = ok;
+            loop.quit();
+        });
+
+    m_controller->exportWithSettings(QUrl::fromLocalFile(info.absoluteFilePath()), map);
+
+    if (!wait) {
+        QObject::disconnect(conn);
+        if (finished && !success)
+            return err("export_failed", m_controller->lastMessage());
+        return ok({{QStringLiteral("started"), true},
+                   {QStringLiteral("path"), info.absoluteFilePath()},
+                   {QStringLiteral("busy"), m_controller->exportInProgress()}});
+    }
+
+    if (!finished) {
+        QTimer timeout;
+        if (timeoutSec > 0) {
+            timeout.setSingleShot(true);
+            QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+            timeout.start(static_cast<int>(timeoutSec * 1000.0));
+        }
+        loop.exec();
+    }
+    QObject::disconnect(conn);
+
+    if (!finished)
+        return err("export_timeout", QStringLiteral("Still encoding; call export_status or cancel_export"));
+    if (!success)
+        return err("export_failed", m_controller->lastMessage());
+
+    QJsonObject extra = compact;
+    extra.insert(QStringLiteral("path"), info.absoluteFilePath());
+    extra.insert(QStringLiteral("bytes"), QFile(info.absoluteFilePath()).size());
+    return ok(extra);
+}
+
+QJsonObject McpDispatcher::opExportStatus() const
+{
+    return ok({
+        {QStringLiteral("busy"), m_controller->exportInProgress()},
+        {QStringLiteral("progress"), m_controller->exportProgress()},
+        {QStringLiteral("message"), m_controller->lastMessage()},
+    });
+}
+
+QJsonObject McpDispatcher::opCancelExport()
+{
+    const bool busy = m_controller->exportInProgress();
+    if (busy)
+        m_controller->cancelExport();
+    return ok({{QStringLiteral("cancelled"), busy}});
 }
 
 } // namespace drift::mcp

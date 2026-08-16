@@ -342,7 +342,7 @@ This is local process control of the editor, not a sandbox. Any process on the m
 
 `drift --mcp-stdio` attaches to a running editor. If Agent access is off, it exits with a one-line error.
 
-Agents should call `catalog`, then `toolbox`, then `apply` with a list of ops. `inspect({clips:true})` returns clip ids. `capture` returns a JPEG of the composition.
+Agents should call `catalog`, then `toolbox`, then `apply` with a list of ops. `inspect({clips:true})` returns clip ids. `capture` returns a JPEG of the composition. The `export` toolbox encodes the timeline (settings + `export({path})`).
 
 **Flatpak:** importing host files may fail unless you grant filesystem access:
 
