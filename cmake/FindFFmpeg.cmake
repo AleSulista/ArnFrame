@@ -13,7 +13,7 @@ Sets FFmpeg_FOUND when all required components are present.
 
 pkg-config is used when it can answer, because it is the only source that also carries the
 transitive link flags a static FFmpeg needs. Where it cannot — MSVC, and the prebuilt
-win64/linux64 archives from BtbN/FFmpeg-Builds whose bundled .pc files carry the prefix of the
+win64/linux64 archives from CutWire-Studios/FFmpeg-Builds whose bundled .pc files carry the prefix of the
 machine they were built on — the component falls back to a plain find_path/find_library pair,
 which picks the archive up from CMAKE_PREFIX_PATH.
 #]]

@@ -22,12 +22,12 @@ env:
     qtmultimedia
     qtimageformats
   FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.deps
-  # Same pin as package.yml, for the same two reasons: the branch (not an exact autobuild)
-  # because BtbN deletes autobuild-<date> tags after ~2 weeks, and the gpl variant because the
-  # lgpl builds carry no x264/x265 — which would leave the exporter tests with no H.264
-  # encoder to exercise.
-  FFMPEG_BRANCH: "n7.1-latest"
-  FFMPEG_SUFFIX: "7.1"
+  # Same pin as package.yml: FFmpeg 7.1 gpl-shared, hosted on our CutWire-Studios/FFmpeg-Builds
+  # fork so we are not tied to BtbN's moving `latest` tag (which dropped n7.1 on 2026-08-17).
+  # The gpl variant, not lgpl: x264 and x265 are GPL, so the lgpl builds carry no H.264/H.265
+  # encoder — which would leave the exporter tests with nothing to exercise.
+  FFMPEG_REPO: "CutWire-Studios/FFmpeg-Builds"
+  FFMPEG_TAG: "n7.1"
   CCACHE_MAXSIZE: "1G"
 
 jobs:
@@ -115,7 +115,7 @@ jobs:
         run: |
           rm -rf "${GITHUB_WORKSPACE}/.deps/ffmpeg"
           mkdir -p "${GITHUB_WORKSPACE}/.deps/ffmpeg"
-          curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-${FFMPEG_BRANCH}-linux64-gpl-shared-${FFMPEG_SUFFIX}.tar.xz" \
+          curl -fsSL "https://github.com/${FFMPEG_REPO}/releases/download/${FFMPEG_TAG}/ffmpeg-${FFMPEG_TAG}-linux64-gpl-shared.tar.xz" \
             | tar -xJf - --strip-components=1 -C "${GITHUB_WORKSPACE}/.deps/ffmpeg"
           # 16 tests synthesize their clips by running the ffmpeg CLI through QProcess and QSKIP
           # when QStandardPaths::findExecutable cannot find one. The runner image ships no ffmpeg,

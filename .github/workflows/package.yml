@@ -37,15 +37,15 @@ env:
   # FFmpeg itself *and* loads Qt's multimedia backend for audio output, so both copies are in the
   # process; sharing a branch is what keeps that from being two ABIs of the same library.
   #
-  # The branch, not an exact autobuild: BtbN keeps only the last ~2 weeks of autobuild-<date> tags
-  # and deletes the rest, so an exact pin silently becomes a 404 on the first release after it
-  # ages out. The `latest` tag is permanent, and n7.1-latest never crosses a soversion.
+  # Hosted on CutWire-Studios/FFmpeg-Builds rather than BtbN's moving `latest` tag: BtbN dropped
+  # n7.1 from latest on 2026-08-17 (they now ship n8.1 / n9.0), and their dated autobuild tags are
+  # deleted after ~2 weeks. The n7.1 release on our fork is a stable URL for this soversion.
   #
   # The gpl variant, not lgpl: x264 and x265 are GPL, so the lgpl builds carry no H.264/H.265
   # encoder at all — which leaves the default export settings unencodable and MatteWriter with
   # nothing to write a matte with. Drift is GPLv3 (see LICENSE), so linking them is fine.
-  FFMPEG_BRANCH: "n7.1-latest"
-  FFMPEG_SUFFIX: "7.1"
+  FFMPEG_REPO: "CutWire-Studios/FFmpeg-Builds"
+  FFMPEG_TAG: "n7.1"
 
 jobs:
   flatpak:
@@ -144,7 +144,7 @@ jobs:
         run: |
           rm -rf "${GITHUB_WORKSPACE}/.deps/ffmpeg"
           mkdir -p "${GITHUB_WORKSPACE}/.deps/ffmpeg"
-          curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-${FFMPEG_BRANCH}-linux64-gpl-shared-${FFMPEG_SUFFIX}.tar.xz" \
+          curl -fsSL "https://github.com/${FFMPEG_REPO}/releases/download/${FFMPEG_TAG}/ffmpeg-${FFMPEG_TAG}-linux64-gpl-shared.tar.xz" \
             | tar -xJf - --strip-components=1 -C "${GITHUB_WORKSPACE}/.deps/ffmpeg"
 
       # DRIFT_BUNDLE_ONNXRUNTIME=OFF: a packaged build ships no runtime at all. Drift dlopens the
@@ -284,14 +284,14 @@ jobs:
           path: .deps
           key: deps-win-${{ hashFiles('CMakeLists.txt') }}
 
-      # Same pin as the Linux job, and for the same reason — see FFMPEG_BUILD_TAG above. These DLLs
+      # Same pin as the Linux job, and for the same reason — see FFMPEG_TAG above. These DLLs
       # deliberately land on top of the ones windeployqt copies out of Qt.
       - name: Fetch pinned FFmpeg
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force .deps\ffmpeg, .deps\ffmpeg_extracted -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path .deps\ffmpeg | Out-Null
-          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-$env:FFMPEG_BRANCH-win64-gpl-shared-$env:FFMPEG_SUFFIX.zip" -OutFile ffmpeg.zip
+          Invoke-WebRequest -Uri "https://github.com/$env:FFMPEG_REPO/releases/download/$env:FFMPEG_TAG/ffmpeg-$env:FFMPEG_TAG-win64-gpl-shared.zip" -OutFile ffmpeg.zip
           Expand-Archive -Path ffmpeg.zip -DestinationPath .deps\ffmpeg_extracted -Force
           $extractedRoot = (Get-ChildItem .deps\ffmpeg_extracted)[0].FullName
           Copy-Item -Path "$extractedRoot\*" -Destination .deps\ffmpeg -Recurse -Force
