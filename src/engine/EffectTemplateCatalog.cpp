@@ -242,12 +242,9 @@ QList<EffectTemplateEntry> scanDirectories(const QStringList &rootDirs)
                          qPrintable(error.isEmpty() ? QStringLiteral("invalid package") : error));
                 continue;
             }
-            if (seenIds.contains(entry->id)) {
-                // Installed addons supersede the bundled <appDir> copy — not an error.
-                qDebug("EffectTemplateCatalog: duplicate id '%s' in %s (ignored)",
-                       qPrintable(entry->id), qPrintable(packageDir));
+            // Installed addons supersede the bundled <appDir> copy — expected, so silent.
+            if (seenIds.contains(entry->id))
                 continue;
-            }
             seenIds.insert(entry->id);
             loaded.append(*entry);
         }

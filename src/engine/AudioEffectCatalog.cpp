@@ -148,13 +148,10 @@ QList<AudioEffectEntry> scanDirectories(const QStringList &rootDirs)
                          qPrintable(error.isEmpty() ? QStringLiteral("invalid package") : error));
                 continue;
             }
-            if (seenIds.contains(entry->id)) {
-                // Higher-priority roots (installed addons, DRIFT_*_DIR) intentionally
-                // supersede the bundled <appDir>/audio-effects copy — not an error.
-                qDebug("AudioEffectCatalog: duplicate id '%s' in %s (ignored)",
-                       qPrintable(entry->id), qPrintable(packageDir));
+            // Higher-priority roots (installed addons, DRIFT_*_DIR) intentionally supersede the
+            // bundled <appDir>/audio-effects copy — expected, so silent.
+            if (seenIds.contains(entry->id))
                 continue;
-            }
             seenIds.insert(entry->id);
             loaded.append(*entry);
         }

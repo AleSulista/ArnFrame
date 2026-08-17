@@ -18,13 +18,50 @@
 // native platform file picker, which routes through xdg-desktop-portal.
 #include <QApplication>
 #include <QIcon>
+#include <QLoggingCategory>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <QSurfaceFormat>
 #include <QtQml/qqml.h>
 
+extern "C" {
+#include <libavutil/log.h>
+}
+
+namespace {
+
+bool verboseLoggingRequested(int argc, char *argv[])
+{
+    if (qEnvironmentVariableIntValue("DRIFT_VERBOSE") != 0)
+        return true;
+    for (int i = 1; i < argc; ++i) {
+        if (qstrcmp(argv[i], "--verbose") == 0)
+            return true;
+    }
+    return false;
+}
+
+// FFmpeg logs at INFO and Qt prints every qDebug/qInfo, which buries the failures worth acting on
+// under per-frame filtergraph chatter. qWarning is this codebase's failure channel, so it stays on
+// either way. QT_LOGGING_RULES is applied after these (EnvironmentRules outrank ApiRules), so it
+// still overrides them.
+void applyLogLevel(bool verbose)
+{
+    QLoggingCategory::setFilterRules(verbose
+                                         ? QStringLiteral("*.debug=true\n"
+                                                          "*.info=true\n"
+                                                          "qt.*.debug=false")
+                                         : QStringLiteral("*.debug=false\n"
+                                                          "*.info=false"));
+    av_log_set_level(verbose ? AV_LOG_VERBOSE : AV_LOG_ERROR);
+}
+
+} // namespace
+
 int main(int argc, char *argv[])
 {
+    applyLogLevel(verboseLoggingRequested(argc, argv));
+
 #ifdef Q_OS_MACOS
     // NSOpenGLContext will not share between the legacy 2.1 context Qt defaults to and the 3.3
     // core one GlRuntime creates, and drops the share with only a warning, leaving the preview
