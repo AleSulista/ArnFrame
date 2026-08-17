@@ -14,6 +14,7 @@
 
 #include <QAtomicInt>
 #include <QHash>
+#include <QJsonObject>
 #include <QObject>
 #include <QPair>
 #include <QSet>
@@ -22,11 +23,16 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <memory>
 #include <optional>
 
 struct EffectTemplateEntry;
 
 class QTimer;
+
+namespace drift::mcp {
+class McpServer;
+}
 
 #include "playback/ClipPreviewPlayer.h"
 #include "playback/PlaybackEngine.h"
@@ -69,6 +75,16 @@ class AppController : public QObject
     Q_PROPERTY(bool autoKeyEnabled READ autoKeyEnabled WRITE setAutoKeyEnabled NOTIFY autoKeyEnabledChanged)
     // Opt-in: on launch, restore the last open project (saved .drift or unsaved recovery snapshot).
     Q_PROPERTY(bool reopenLastProject READ reopenLastProject WRITE setReopenLastProject NOTIFY reopenLastProjectChanged)
+    // Session-only localhost MCP for agents. Never persisted. Off at every launch.
+    Q_PROPERTY(bool mcpEnabled READ mcpEnabled WRITE setMcpEnabled NOTIFY mcpRunningChanged)
+    Q_PROPERTY(bool mcpRunning READ mcpRunning NOTIFY mcpRunningChanged)
+    Q_PROPERTY(QString mcpUrl READ mcpUrl NOTIFY mcpRunningChanged)
+    Q_PROPERTY(QString mcpToken READ mcpToken NOTIFY mcpRunningChanged)
+    Q_PROPERTY(int mcpPort READ mcpPort NOTIFY mcpRunningChanged)
+    Q_PROPERTY(QString mcpError READ mcpError NOTIFY mcpErrorChanged)
+    Q_PROPERTY(QString mcpCursorSnippet READ mcpCursorSnippet NOTIFY mcpRunningChanged)
+    Q_PROPERTY(QString mcpClaudeCommand READ mcpClaudeCommand NOTIFY mcpRunningChanged)
+    Q_PROPERTY(QString mcpStdioSnippet READ mcpStdioSnippet NOTIFY mcpRunningChanged)
     // The keyframe strip draws every animated property of the selected clip. This is the subset
     // the user has folded away: a view filter only — hiding a curve never changes what renders.
     Q_PROPERTY(QStringList keyframeGraphHiddenProperties READ keyframeGraphHiddenProperties
@@ -276,9 +292,38 @@ public:
     void setRippleEnabled(bool enabled);
     void setAllowClipOverlap(bool enabled);
     Q_INVOKABLE void setDarkModePreference(bool enabled);
+    Q_INVOKABLE void clearDarkModePreference();
     void setMediaGridMode(bool enabled);
     void setAutoKeyEnabled(bool enabled);
     void setReopenLastProject(bool enabled);
+    Q_INVOKABLE void setMcpEnabled(bool enabled);
+    bool mcpEnabled() const { return mcpRunning(); }
+    bool mcpRunning() const;
+    QString mcpUrl() const;
+    QString mcpToken() const;
+    int mcpPort() const;
+    QString mcpError() const;
+    QString mcpCursorSnippet() const;
+    QString mcpClaudeCommand() const;
+    QString mcpStdioSnippet() const;
+    Q_INVOKABLE void copyMcpCursorSnippet();
+    Q_INVOKABLE void copyMcpClaudeCommand();
+    Q_INVOKABLE void copyMcpStdioSnippet();
+    Q_INVOKABLE void copyMcpAgentGuide();
+    QString mcpAgentGuide() const;
+
+    // MCP helpers (GUI thread). Used by src/mcp, not QML.
+    QPair<int, int> mcpLocateClip(const QString &id) const;
+    QString mcpClipId(int trackIndex, int clipIndex) const;
+    QVariantMap mcpCompactClip(int trackIndex, int clipIndex, bool includeCanvas = true) const;
+    QJsonObject mcpInspect(bool includeClips, int sinceRevision = -1, bool detail = false) const;
+    int mcpRevision() const { return m_mcpEditRevision; }
+    bool mcpSetClipCanvas(int trackIndex, int clipIndex, const QVariantMap &patch);
+    QJsonObject mcpCaptureFrame(double atSeconds, bool full);
+    bool mcpSetWorkArea(double inSeconds, double outSeconds);
+    void mcpRememberExportSettings(const QVariantMap &settings);
+    void mcpBeginBatch();
+    void mcpEndBatch(const QString &text, bool pushUndo);
     // Strip chip click — folds `prop`'s curve away, or brings it back. Purely a view filter: the
     // chip stays put either way, and the animation keeps playing while it is hidden.
     Q_INVOKABLE void toggleKeyframeGraphPropertyVisible(const QString &prop);
@@ -756,6 +801,8 @@ signals:
     void mediaGridModeChanged();
     void autoKeyEnabledChanged();
     void reopenLastProjectChanged();
+    void mcpRunningChanged();
+    void mcpErrorChanged();
     void keyframeGraphVisibilityChanged();
     void subtitleEditingChanged();
     void selectedSubtitleCueChanged();
@@ -932,6 +979,7 @@ protected:
     drift::bundle::WriteRequest buildWriteRequest(bool embedSource) const;
     void rememberEmbeddedSources(const QList<drift::bundle::MediaEntry> &media);
     // Persist the save-picker folder and encode/scale choices for the next Export dialog.
+    // Empty `outputPath` updates settings only and leaves lastExportFolder unchanged.
     void rememberExportChoice(const QString &outputPath, const QVariantMap &settings);
     // Repoint every path field the extraction moved. Clips duplicate their asset's path, so this
     // matches on the value rather than walking by id.
@@ -1118,6 +1166,15 @@ protected:
     QVariantMap m_recoveryInfo;
     // Launch layout picker / first-clip setup completed for this empty project.
     bool m_projectLayoutChosen = false;
+
+    std::unique_ptr<drift::mcp::McpServer> m_mcp;
+    bool m_mcpUndoSuspended = false;
+    int m_mcpBatchDepth = 0;
+    drift::Project m_mcpBatchBefore;
+    int m_mcpEditRevision = 0;
+    mutable QHash<QString, QPair<int, int>> m_mcpClipIndex;
+    mutable int m_mcpClipIndexRevision = -1;
+    void rebuildMcpClipIndexIfNeeded() const;
 
     void setProjectLayoutChosen(bool chosen);
 

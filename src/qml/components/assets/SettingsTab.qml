@@ -359,6 +359,167 @@ Item {
                 tooltip: qsTr("Automatically restore the last open project. Unsaved work is kept in a side snapshot and never overwrites your save file.")
                 onToggled: EditorState.reopenLastProject = checked
             }
+
+            Text {
+                text: qsTr("Agent access")
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+                topPadding: Theme.spacingMd
+            }
+
+            Rectangle {
+                width: parent.width
+                height: mcpWarning.implicitHeight + Theme.spacingLg * 2
+                radius: Theme.radiusSm
+                color: Theme.panelSecondaryBg
+                border.width: Theme.borderWidth
+                border.color: Theme.warning
+
+                Text {
+                    id: mcpWarning
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.margins: Theme.spacingLg
+                    wrapMode: Text.WordWrap
+                    color: Theme.panelSecondaryForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                    text: qsTr("Lets local agents (Cursor, Claude Code) control this editor: import media, edit the timeline, and capture frames. Any process on this computer with the token can do the same. Off at every launch. Turn it off when you are done.")
+                }
+            }
+
+            ThemedSwitch {
+                checked: EditorState.mcpEnabled
+                text: qsTr("Enable for this session")
+                tooltip: qsTr("Start a localhost MCP server. Not saved. Stops when Drift quits or you turn this off.")
+                onToggled: EditorState.mcpEnabled = checked
+            }
+
+            ThemedLabel {
+                width: parent.width
+                visible: EditorState.mcpError.length > 0
+                text: EditorState.mcpError
+                color: Theme.destructive
+            }
+
+            Column {
+                width: parent.width
+                spacing: Theme.spacingMd
+                visible: EditorState.mcpRunning
+
+                ThemedLabel {
+                    width: parent.width
+                    text: qsTr("Listening on %1").arg(EditorState.mcpUrl)
+                    size: "sm"
+                    tone: "default"
+                }
+
+                ThemedLabel {
+                    width: parent.width
+                    text: qsTr("Token (shown once this session)")
+                }
+
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WrapAnywhere
+                    font.family: Theme.monoFontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                    color: Theme.panelForeground
+                    text: EditorState.mcpToken
+                    textFormat: Text.PlainText
+                }
+
+                Row {
+                    spacing: Theme.spacingMd
+                    width: parent.width
+
+                    ThemedButton {
+                        variant: "secondary"
+                        glyph: Theme.icons.copy
+                        text: qsTr("Copy Cursor config")
+                        tooltip: qsTr("Copy an mcp.json snippet with this session’s URL and token")
+                        onClicked: EditorState.copyMcpCursorSnippet()
+                    }
+
+                    ThemedButton {
+                        variant: "secondary"
+                        glyph: Theme.icons.copy
+                        text: qsTr("Copy Claude command")
+                        tooltip: qsTr("Copy a claude mcp add command for this session")
+                        onClicked: EditorState.copyMcpClaudeCommand()
+                    }
+                }
+
+                ThemedButton {
+                    variant: "ghost"
+                    glyph: Theme.icons.copy
+                    text: qsTr("Copy stdio attach (one-time setup)")
+                    tooltip: qsTr("Add this once to mcp.json. drift --mcp-stdio talks to whichever session is running. Agent access still has to be turned on in Drift.")
+                    onClicked: EditorState.copyMcpStdioSnippet()
+                }
+
+                ThemedButton {
+                    variant: "ghost"
+                    glyph: Theme.icons.copy
+                    text: qsTr("Copy agent guide")
+                    tooltip: qsTr("Copy workflow, conventions, and toolbox list for agents")
+                    onClicked: EditorState.copyMcpAgentGuide()
+                }
+
+                ThemedLabel {
+                    width: parent.width
+                    text: qsTr("Pinned endpoints: /mcp/media, /mcp/timeline, /mcp/canvas, /mcp/playback, /mcp/text, /mcp/effects, /mcp/project")
+                    size: "sm"
+                    tone: "muted"
+                    wrapMode: Text.WordWrap
+                }
+
+                Rectangle {
+                    width: parent.width
+                    radius: Theme.radiusSm
+                    color: Theme.panelSecondaryBg
+                    border.width: Theme.borderWidth
+                    border.color: Theme.border
+                    implicitHeight: mcpWorkflowColumn.implicitHeight + Theme.spacingLg * 2
+
+                    Column {
+                        id: mcpWorkflowColumn
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.margins: Theme.spacingLg
+                        spacing: Theme.spacingSm
+
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            color: Theme.panelSecondaryForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                            text: qsTr("Agent workflow")
+                            font.weight: Font.DemiBold
+                        }
+
+                        Repeater {
+                            model: [
+                                qsTr("1. Enable agent access for this session."),
+                                qsTr("2. Connect Cursor or Claude with the copied config."),
+                                qsTr("3. Call catalog, then toolbox, then apply with batched ops."),
+                                qsTr("4. Use inspect({clips:true}) for clip ids; capture() to verify frames.")
+                            ]
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                color: Theme.panelSecondaryForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                                text: modelData
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

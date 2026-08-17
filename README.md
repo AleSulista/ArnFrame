@@ -319,6 +319,39 @@ The token is not a secret — it ships in every binary. It exists so the bucket 
 
 These are CMake *cache* variables: changing the default in `CMakeLists.txt` does not affect an existing build directory, so pass `-D...` again or reconfigure from scratch.
 
+## Agent access (MCP)
+
+Optional, **off at every launch**. Settings → Agent access starts a localhost MCP server so Cursor or Claude Code can edit the open project (import media, place/trim clips, capture a still of the composition).
+
+This is local process control of the editor, not a sandbox. Any process on the machine with the session token can use it. Bind is `127.0.0.1` only; the token rotates each time you enable it.
+
+**Cursor / Claude Code (this session):** copy the snippet from Settings after enabling. The token changes every time.
+
+**One-time stdio setup** (no token in `mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "drift": {
+      "command": "/path/to/drift",
+      "args": ["--mcp-stdio"]
+    }
+  }
+}
+```
+
+`drift --mcp-stdio` attaches to a running editor. If Agent access is off, it exits with a one-line error.
+
+Agents should call `catalog`, then `toolbox`, then `apply` with a list of ops. `inspect({clips:true})` returns clip ids. `capture` returns a JPEG of the composition. See [AGENTS.md](AGENTS.md) for the full agent guide. The `export` toolbox encodes the timeline (settings + `export({path})`).
+
+**Flatpak:** importing host files may fail unless you grant filesystem access:
+
+```bash
+flatpak override --filesystem=home org.cutwire.Drift
+```
+
+Native and AppImage builds can import any path the process can read.
+
 ## CLI tools
 
 Built under `build/tools/`:
@@ -340,6 +373,7 @@ src/
   core/           Domain model (Project, Track, Clip, Keyframe, Effect) — no GUI
   engine/         FFmpeg: ClipReader, FrameCompositor, AudioMixer, EffectProcessor, Exporter
   models/         QML-facing models: AppController, AssetLibrary, TimelineModel, ClipListModel
+  mcp/            Opt-in localhost MCP server (agent access)
   playback/       PlaybackEngine, PlaybackClock, CompositorService
   preview/        PreviewItem (QQuickItem → QSGTexture)
   qml/            UI panels and components

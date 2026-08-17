@@ -857,6 +857,16 @@ void AssetLibrary::importUrls(const QList<QUrl> &urls)
     importFiles(paths);
 }
 
+QStringList AssetLibrary::importLocalPaths(const QStringList &paths)
+{
+    return importFilesReturningIds(paths);
+}
+
+bool AssetLibrary::isImportPending(const QString &assetId) const
+{
+    return m_importPending.contains(assetId);
+}
+
 QString AssetLibrary::addGeneratedAsset(drift::MediaAsset asset)
 {
     if (!m_project || asset.path.isEmpty())
@@ -875,8 +885,14 @@ QString AssetLibrary::addGeneratedAsset(drift::MediaAsset asset)
 
 void AssetLibrary::importFiles(const QStringList &paths)
 {
+    importFilesReturningIds(paths);
+}
+
+QStringList AssetLibrary::importFilesReturningIds(const QStringList &paths)
+{
+    QStringList ids;
     if (!m_project)
-        return;
+        return ids;
 
     for (const QString &path : paths) {
         const QFileInfo fileInfo(path);
@@ -887,6 +903,7 @@ void AssetLibrary::importFiles(const QStringList &paths)
         const int existingIndex = indexOfPath(absolutePath);
         if (existingIndex >= 0) {
             refreshMediaAt(existingIndex);
+            ids.append(assetIdAt(existingIndex));
             continue;
         }
 
@@ -902,5 +919,7 @@ void AssetLibrary::importFiles(const QStringList &paths)
         endInsertRows();
 
         startImportJob(placeholder.id, absolutePath, isImagePath(path));
+        ids.append(placeholder.id);
     }
+    return ids;
 }

@@ -45,6 +45,9 @@ public:
     int count() const { return rowCount(); }
 
     Q_INVOKABLE void importUrls(const QList<QUrl> &urls);
+    // Import local paths and return the asset ids involved (new or already-present).
+    QStringList importLocalPaths(const QStringList &paths);
+    bool isImportPending(const QString &assetId) const;
     // Registers media the app rendered itself (freeze frames and the like). The asset is already
     // complete, so this skips the probe and thumbnail jobs the import path runs. Returns its id.
     QString addGeneratedAsset(drift::MediaAsset asset);
@@ -91,6 +94,7 @@ signals:
 
 private:
     void importFiles(const QStringList &paths);
+    QStringList importFilesReturningIds(const QStringList &paths);
     bool containsPath(const QString &path) const;
     void refreshMediaAt(int index);
     void startImportJob(const QString &assetId, const QString &absolutePath, bool imageOnly);

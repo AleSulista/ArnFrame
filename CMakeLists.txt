@@ -465,6 +465,22 @@ qt_add_executable(drift
     src/models/TimelineModel.cpp
     src/models/ClipListModel.h
     src/models/ClipListModel.cpp
+    src/mcp/McpSession.h
+    src/mcp/McpSession.cpp
+    src/mcp/McpCatalog.h
+    src/mcp/McpCatalog.cpp
+    src/mcp/McpProtocol.h
+    src/mcp/McpProtocol.cpp
+    src/mcp/McpHttp.h
+    src/mcp/McpHttp.cpp
+    src/mcp/McpDispatcher.h
+    src/mcp/McpDispatcher.cpp
+    src/mcp/McpDispatcherExtended.cpp
+    src/mcp/McpServer.h
+    src/mcp/McpServer.cpp
+    src/mcp/McpStdio.h
+    src/mcp/McpStdio.cpp
+    src/mcp/McpJson.h
     src/playback/PlaybackEngine.h
     src/playback/PlaybackEngine.cpp
     src/playback/PlaybackClock.h

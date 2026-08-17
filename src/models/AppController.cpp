@@ -36,13 +36,19 @@
 #include "SegmentImageStore.h"
 #include "engine/TransitionCatalog.h"
 #include "engine/WhisperTranscriber.h"
+#include "mcp/McpCatalog.h"
+#include "mcp/McpJson.h"
+#include "mcp/McpServer.h"
 
+#include <QBuffer>
+#include <QClipboard>
 #include <QColor>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QCursor>
 #include <QDateTime>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
@@ -119,6 +125,8 @@ QCursor timelineTrimCursor(int side, int heightPx)
 
 AppController::~AppController()
 {
+    if (m_mcp)
+        m_mcp->stop();
     // ~QUndoStack clears the stack, which emits indexChanged into the lambda
     // below — but by then the members it touches (m_selection, the models) are
     // already gone. Cut the signals before any member is destroyed.
@@ -166,6 +174,11 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     }
 
     m_undoStack.setUndoLimit(kMaxUndoSteps);
+
+    m_mcp = std::make_unique<drift::mcp::McpServer>(this);
+    connect(m_mcp.get(), &drift::mcp::McpServer::runningChanged, this,
+            &AppController::mcpRunningChanged);
+    connect(m_mcp.get(), &drift::mcp::McpServer::errorChanged, this, &AppController::mcpErrorChanged);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, &AppController::undoStackChanged);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, [this] {
         m_timelineModel.refresh();
@@ -1893,6 +1906,16 @@ void AppController::setDarkModePreference(bool enabled)
     emit darkModePreferenceChanged();
 }
 
+void AppController::clearDarkModePreference()
+{
+    if (!m_darkModeOverridden)
+        return;
+    m_darkModeOverridden = false;
+    QSettings settings;
+    settings.remove(QStringLiteral("ui/darkMode"));
+    emit darkModePreferenceChanged();
+}
+
 void AppController::setWorkspaceLayoutPreference(const QString &layout)
 {
     const QString normalized = layout == QStringLiteral("portrait")
@@ -2235,6 +2258,8 @@ double AppController::sourceTimeAtPlayhead() const
 
 void AppController::pushProjectEdit(const drift::Project &before, const QString &text)
 {
+    if (m_mcpUndoSuspended)
+        return;
     m_undoStack.push(new drift::ProjectSnapshotCommand(&m_project, before, m_project, text));
 }
 
@@ -2268,6 +2293,7 @@ void AppController::finishEdit(const QString &message)
     // stack, so an edit now only clears a stale warning from an earlier attempt.
     Q_UNUSED(message)
     setLastMessage(QString());
+    ++m_mcpEditRevision;
 }
 
 void AppController::applyRippleShift(drift::Track &track, int fromClipIndex, drift::TimeUs delta)
@@ -5775,7 +5801,8 @@ void AppController::commitPreviewDrag()
         return;
 
     const QString text = m_previewDragText.isEmpty() ? QStringLiteral("Edit clip") : m_previewDragText;
-    m_undoStack.push(new drift::ProjectSnapshotCommand(&m_project, m_previewDragBefore, m_project, text));
+    if (!m_mcpUndoSuspended)
+        m_undoStack.push(new drift::ProjectSnapshotCommand(&m_project, m_previewDragBefore, m_project, text));
     m_previewDragActive = false;
     finishEdit(text);
 }
@@ -9455,6 +9482,7 @@ void AppController::undo()
     if (!m_undoStack.canUndo())
         return;
     m_undoStack.undo();
+    ++m_mcpEditRevision;
 }
 
 void AppController::redo()
@@ -9462,6 +9490,7 @@ void AppController::redo()
     if (!m_undoStack.canRedo())
         return;
     m_undoStack.redo();
+    ++m_mcpEditRevision;
 }
 
 namespace {
@@ -10682,10 +10711,12 @@ QString AppController::lastExportFolder() const
 void AppController::rememberExportChoice(const QString &outputPath, const QVariantMap &settings)
 {
     QSettings store;
-    const QFileInfo info(outputPath);
-    const QString folder = info.absolutePath();
-    if (!folder.isEmpty() && QDir(folder).exists())
-        store.setValue(QStringLiteral("export/lastFolder"), folder);
+    if (!outputPath.isEmpty()) {
+        const QFileInfo info(outputPath);
+        const QString folder = info.absolutePath();
+        if (!folder.isEmpty() && QDir(folder).exists())
+            store.setValue(QStringLiteral("export/lastFolder"), folder);
+    }
 
     store.beginGroup(QStringLiteral("export"));
     const auto put = [&](const QString &key) {
@@ -10815,4 +10846,417 @@ void AppController::exportWithSettings(const QUrl &outputUrl, const QVariantMap 
             },
             Qt::QueuedConnection);
     });
+}
+
+bool AppController::mcpRunning() const
+{
+    return m_mcp && m_mcp->running();
+}
+
+QString AppController::mcpUrl() const
+{
+    return m_mcp ? m_mcp->url() : QString();
+}
+
+QString AppController::mcpToken() const
+{
+    return m_mcp ? m_mcp->token() : QString();
+}
+
+int AppController::mcpPort() const
+{
+    return m_mcp ? int(m_mcp->port()) : 0;
+}
+
+QString AppController::mcpError() const
+{
+    return m_mcp ? m_mcp->error() : QString();
+}
+
+QString AppController::mcpCursorSnippet() const
+{
+    return m_mcp ? m_mcp->cursorSnippet() : QString();
+}
+
+QString AppController::mcpClaudeCommand() const
+{
+    return m_mcp ? m_mcp->claudeCommand() : QString();
+}
+
+QString AppController::mcpStdioSnippet() const
+{
+    const QJsonObject server{
+        {QStringLiteral("command"), QCoreApplication::applicationFilePath()},
+        {QStringLiteral("args"), QJsonArray{QStringLiteral("--mcp-stdio")}},
+    };
+    const QJsonObject root{
+        {QStringLiteral("mcpServers"), QJsonObject{{QStringLiteral("drift"), server}}},
+    };
+    return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Indented));
+}
+
+void AppController::setMcpEnabled(bool enabled)
+{
+    if (!m_mcp)
+        return;
+    if (enabled)
+        m_mcp->start();
+    else
+        m_mcp->stop();
+}
+
+namespace {
+
+void copyToClipboard(const QString &text)
+{
+    if (text.isEmpty())
+        return;
+    if (QClipboard *clip = QGuiApplication::clipboard())
+        clip->setText(text);
+}
+
+} // namespace
+
+void AppController::copyMcpCursorSnippet()
+{
+    copyToClipboard(mcpCursorSnippet());
+}
+
+void AppController::copyMcpClaudeCommand()
+{
+    copyToClipboard(mcpClaudeCommand());
+}
+
+void AppController::copyMcpStdioSnippet()
+{
+    copyToClipboard(mcpStdioSnippet());
+}
+
+QString AppController::mcpAgentGuide() const
+{
+    QString guide = drift::mcp::agentGuideText();
+    if (m_mcp && m_mcp->running()) {
+        guide += QStringLiteral("\nThis session:\nURL: %1\nToken: %2\n")
+                     .arg(mcpUrl(), mcpToken());
+    }
+    return guide;
+}
+
+void AppController::copyMcpAgentGuide()
+{
+    copyToClipboard(mcpAgentGuide());
+}
+
+void AppController::rebuildMcpClipIndexIfNeeded() const
+{
+    if (m_mcpClipIndexRevision == m_mcpEditRevision)
+        return;
+    m_mcpClipIndex.clear();
+    const QList<drift::Track> &tracks = m_project.tracks();
+    for (int t = 0; t < tracks.size(); ++t) {
+        const QList<drift::Clip> &clips = tracks.at(t).clips;
+        for (int c = 0; c < clips.size(); ++c)
+            m_mcpClipIndex.insert(clips.at(c).id, {t, c});
+    }
+    m_mcpClipIndexRevision = m_mcpEditRevision;
+}
+
+QPair<int, int> AppController::mcpLocateClip(const QString &id) const
+{
+    if (id.isEmpty())
+        return {-1, -1};
+    rebuildMcpClipIndexIfNeeded();
+    return m_mcpClipIndex.value(id, {-1, -1});
+}
+
+QString AppController::mcpClipId(int trackIndex, int clipIndex) const
+{
+    if (!isValidClipIndex(trackIndex, clipIndex))
+        return {};
+    return m_project.tracks().at(trackIndex).clips.at(clipIndex).id;
+}
+
+QVariantMap AppController::mcpCompactClip(int trackIndex, int clipIndex, bool includeCanvas) const
+{
+    if (!isValidClipIndex(trackIndex, clipIndex))
+        return {};
+    const drift::Clip &clip = m_project.tracks().at(trackIndex).clips.at(clipIndex);
+    QVariantMap out{
+        {QStringLiteral("id"), clip.id},
+        {QStringLiteral("kind"), drift::clipTypeToString(clip.type)},
+        {QStringLiteral("name"), clip.name},
+        {QStringLiteral("start"), drift::usToSeconds(clip.timelineStart)},
+        {QStringLiteral("duration"), drift::usToSeconds(clip.timelineDuration)},
+        {QStringLiteral("inPoint"), drift::usToSeconds(clip.srcIn)},
+        {QStringLiteral("outPoint"), drift::usToSeconds(clip.srcOut)},
+        {QStringLiteral("assetId"), clip.assetId},
+    };
+    if (!includeCanvas)
+        return out;
+
+    const double at = playheadSeconds();
+    out.insert(QStringLiteral("x"), propertyValueAt(trackIndex, clipIndex, QStringLiteral("x"), at, 0));
+    out.insert(QStringLiteral("y"), propertyValueAt(trackIndex, clipIndex, QStringLiteral("y"), at, 0));
+    out.insert(QStringLiteral("w"), propertyValueAt(trackIndex, clipIndex, QStringLiteral("width"), at, 0));
+    out.insert(QStringLiteral("h"), propertyValueAt(trackIndex, clipIndex, QStringLiteral("height"), at, 0));
+    out.insert(QStringLiteral("rotation"),
+               propertyValueAt(trackIndex, clipIndex, QStringLiteral("rotation"), at, 0));
+    out.insert(QStringLiteral("opacity"),
+               propertyValueAt(trackIndex, clipIndex, QStringLiteral("opacity"), at, 1));
+    return out;
+}
+
+QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision, bool detail) const
+{
+    using namespace drift::mcp;
+    if (sinceRevision >= 0 && sinceRevision == m_mcpEditRevision)
+        return ok({{QStringLiteral("unchanged"), true}, {QStringLiteral("revision"), m_mcpEditRevision}});
+
+    int clipCount = 0;
+    QJsonArray trackRows;
+    const QList<drift::Track> &projectTracks = m_project.tracks();
+    const QVariantList trackModels = detail ? tracks() : QVariantList{};
+    for (int t = 0; t < projectTracks.size(); ++t) {
+        const drift::Track &track = projectTracks.at(t);
+        clipCount += track.clips.size();
+        QJsonObject row{
+            {QStringLiteral("i"), t},
+            {QStringLiteral("type"), drift::trackTypeToString(track.type)},
+            {QStringLiteral("clips"), track.clips.size()},
+            {QStringLiteral("muted"), track.muted},
+            {QStringLiteral("hidden"), track.hidden},
+        };
+        if (detail && t < trackModels.size()) {
+            const QVariantMap tm = trackModels.at(t).toMap();
+            row.insert(QStringLiteral("showWaveform"), tm.value(QStringLiteral("showWaveform")).toBool());
+            row.insert(QStringLiteral("heightScale"), tm.value(QStringLiteral("heightScale")).toDouble());
+            const QVariantList transitions = tm.value(QStringLiteral("transitions")).toList();
+            QJsonArray trJson;
+            for (const QVariant &tr : transitions)
+                trJson.append(QJsonObject::fromVariantMap(tr.toMap()));
+            if (!trJson.isEmpty())
+                row.insert(QStringLiteral("transitions"), trJson);
+        }
+        if (includeClips) {
+            QJsonArray clips;
+            for (int c = 0; c < track.clips.size(); ++c) {
+                if (detail && t < trackModels.size()) {
+                    const QVariantList clipList = trackModels.at(t).toMap().value(QStringLiteral("clips")).toList();
+                    if (c < clipList.size())
+                        clips.append(QJsonObject::fromVariantMap(clipList.at(c).toMap()));
+                } else {
+                    const QVariantMap compact = mcpCompactClip(t, c, false);
+                    clips.append(QJsonObject::fromVariantMap(compact));
+                }
+            }
+            row.insert(QStringLiteral("items"), clips);
+        }
+        trackRows.append(row);
+    }
+
+    QJsonArray assets;
+    if (m_assetLibrary) {
+        for (int i = 0; i < m_assetLibrary->count(); ++i) {
+            const QVariantMap a = m_assetLibrary->assetAt(i);
+            assets.append(QJsonObject{
+                {QStringLiteral("index"), i},
+                {QStringLiteral("id"), a.value(QStringLiteral("id")).toString()},
+                {QStringLiteral("name"), a.value(QStringLiteral("name")).toString()},
+                {QStringLiteral("kind"), a.value(QStringLiteral("kind")).toString()},
+                {QStringLiteral("dur"), a.value(QStringLiteral("durationSeconds")).toDouble()},
+            });
+        }
+    }
+
+    QJsonObject extra{
+        {QStringLiteral("revision"), m_mcpEditRevision},
+        {QStringLiteral("name"), m_project.name()},
+        {QStringLiteral("w"), m_project.width()},
+        {QStringLiteral("h"), m_project.height()},
+        {QStringLiteral("fps"), m_project.fps()},
+        {QStringLiteral("dur"), drift::usToSeconds(m_project.durationUs())},
+        {QStringLiteral("playhead"), playheadSeconds()},
+        {QStringLiteral("playing"), playing()},
+        {QStringLiteral("overlap"), m_allowClipOverlap},
+        {QStringLiteral("clips"), clipCount},
+        {QStringLiteral("tracks"), trackRows},
+        {QStringLiteral("assets"), assets},
+        {QStringLiteral("path"), m_currentProjectPath},
+        {QStringLiteral("dirty"), m_dirty},
+        {QStringLiteral("background"), QJsonObject::fromVariantMap(background())},
+        {QStringLiteral("export"),
+         QJsonObject{{QStringLiteral("active"), m_exportInProgress},
+                     {QStringLiteral("progress"), m_exportProgress}}},
+    };
+    if (detail) {
+        QJsonArray marks;
+        for (const QVariant &v : bookmarks()) {
+            const QVariantMap b = v.toMap();
+            marks.append(QJsonObject{
+                {QStringLiteral("at"), b.value(QStringLiteral("seconds")).toDouble()},
+                {QStringLiteral("label"), b.value(QStringLiteral("label")).toString()},
+            });
+        }
+        extra.insert(QStringLiteral("bookmarks"), marks);
+        extra.insert(QStringLiteral("package"),
+                     QJsonObject{{QStringLiteral("active"), packaging()},
+                                 {QStringLiteral("progress"), packageProgress()}});
+        extra.insert(QStringLiteral("subtitleGen"),
+                     QJsonObject{{QStringLiteral("active"), subtitleGenerating()},
+                                 {QStringLiteral("progress"), subtitleGenProgress()},
+                                 {QStringLiteral("status"), subtitleGenStatus()}});
+        extra.insert(QStringLiteral("reverseRender"),
+                     QJsonObject{{QStringLiteral("active"), reverseRendering()},
+                                 {QStringLiteral("progress"), reverseRenderProgress()},
+                                 {QStringLiteral("status"), reverseRenderStatus()}});
+    }
+    if (m_project.hasWorkArea()) {
+        extra.insert(QStringLiteral("work_in"), workAreaInSeconds());
+        extra.insert(QStringLiteral("work_out"), workAreaOutSeconds());
+    }
+    return ok(extra);
+}
+
+bool AppController::mcpSetWorkArea(double inSeconds, double outSeconds)
+{
+    const drift::TimeUs inUs = qMax<drift::TimeUs>(0, drift::secondsToUs(inSeconds));
+    const drift::TimeUs outUs = drift::secondsToUs(outSeconds);
+    if (outUs <= inUs)
+        return false;
+
+    const drift::Project before = m_project;
+    m_project.setWorkAreaInUs(inUs);
+    m_project.setWorkAreaOutUs(outUs);
+    pushProjectEdit(before, QStringLiteral("Work area"));
+    finishEdit(QStringLiteral("Work area set"));
+    emit workAreaChanged();
+    return true;
+}
+
+void AppController::mcpRememberExportSettings(const QVariantMap &settings)
+{
+    rememberExportChoice({}, settings);
+}
+
+bool AppController::mcpSetClipCanvas(int trackIndex, int clipIndex, const QVariantMap &patch)
+{
+    if (!isValidClipIndex(trackIndex, clipIndex))
+        return false;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type == drift::ClipType::Audio)
+        return false;
+
+    const drift::Project before = m_project;
+    const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
+    bool any = false;
+    auto write = [&](const QString &patchKey, const QString &prop) {
+        if (!patch.contains(patchKey))
+            return;
+        any = writeClipPropValue(clip, prop, relative, patch.value(patchKey).toDouble(), true, true)
+              || any;
+    };
+    write(QStringLiteral("x"), QStringLiteral("x"));
+    write(QStringLiteral("y"), QStringLiteral("y"));
+    write(QStringLiteral("w"), QStringLiteral("width"));
+    write(QStringLiteral("h"), QStringLiteral("height"));
+    write(QStringLiteral("rotation"), QStringLiteral("rotation"));
+    write(QStringLiteral("opacity"), QStringLiteral("opacity"));
+    if (!any)
+        return false;
+
+    if (!m_mcpUndoSuspended) {
+        pushProjectEdit(before, QStringLiteral("MCP canvas"));
+        finishEdit(QStringLiteral("MCP canvas"));
+    } else {
+        emitPreviewFrame();
+    }
+    return true;
+}
+
+QJsonObject AppController::mcpCaptureFrame(double atSeconds, bool full)
+{
+    using namespace drift::mcp;
+    setPlaying(false);
+
+    const drift::TimeUs timeUs =
+        atSeconds < 0.0 ? m_playheadUs : qMax<drift::TimeUs>(0, drift::secondsToUs(atSeconds));
+    const auto snapshot = std::make_shared<const drift::Project>(m_project.detachedCopy());
+    FrameCompositor::RenderOptions options;
+    if (!full) {
+        const int longEdge = qMax(snapshot->width(), snapshot->height());
+        if (longEdge > 1280)
+            options.previewScale = 1280.0 / double(longEdge);
+    }
+
+    auto frame = std::make_shared<QImage>();
+    QEventLoop loop;
+    (void)QtConcurrent::run([snapshot, timeUs, options, frame, &loop]() {
+        FrameCompositor compositor;
+        compositor.setProject(snapshot.get());
+        *frame = compositor.compositeAt(timeUs, options);
+        QMetaObject::invokeMethod(&loop, &QEventLoop::quit, Qt::QueuedConnection);
+    });
+    loop.exec();
+
+    if (frame->isNull())
+        return textResult(err("capture_failed", QStringLiteral("Compositor returned no frame")), true);
+
+    const QJsonObject meta = ok({
+        {QStringLiteral("at"), drift::usToSeconds(timeUs)},
+        {QStringLiteral("w"), frame->width()},
+        {QStringLiteral("h"), frame->height()},
+        {QStringLiteral("full"), full},
+    });
+
+    if (full) {
+        const QString outPath = newFreezeFramePath(m_project.id());
+        if (outPath.isEmpty() || !frame->save(outPath, "PNG"))
+            return textResult(err("capture_failed", QStringLiteral("Could not write PNG")), true);
+        QJsonObject withPath = meta;
+        withPath.insert(QStringLiteral("path"), outPath);
+        return textResult(withPath);
+    }
+
+    QByteArray jpeg;
+    QBuffer buffer(&jpeg);
+    buffer.open(QIODevice::WriteOnly);
+    if (!frame->save(&buffer, "JPEG", 80))
+        return textResult(err("capture_failed", QStringLiteral("Could not encode JPEG")), true);
+
+    QJsonArray content;
+    content.append(QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("text")},
+        {QStringLiteral("text"), QString::fromUtf8(QJsonDocument(meta).toJson(QJsonDocument::Compact))},
+    });
+    content.append(QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("image")},
+        {QStringLiteral("mimeType"), QStringLiteral("image/jpeg")},
+        {QStringLiteral("data"), QString::fromLatin1(jpeg.toBase64())},
+    });
+    return {{QStringLiteral("content"), content}, {QStringLiteral("isError"), false}};
+}
+
+void AppController::mcpBeginBatch()
+{
+    if (m_mcpBatchDepth++ == 0) {
+        m_mcpBatchBefore = m_project.detachedCopy();
+        m_mcpUndoSuspended = true;
+    }
+}
+
+void AppController::mcpEndBatch(const QString &text, bool pushUndo)
+{
+    if (m_mcpBatchDepth <= 0)
+        return;
+    if (--m_mcpBatchDepth > 0)
+        return;
+    m_mcpUndoSuspended = false;
+    if (m_previewDragActive)
+        m_previewDragActive = false;
+    if (pushUndo)
+        pushProjectEdit(m_mcpBatchBefore, text);
+    finishEdit(text);
+    m_mcpBatchBefore = {};
 }

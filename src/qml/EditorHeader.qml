@@ -270,6 +270,52 @@ Rectangle {
             Layout.alignment: Qt.AlignVCenter
             spacing: Theme.spacingLg
 
+            Rectangle {
+                visible: EditorState.mcpRunning
+                height: 32
+                width: mcpBadgeRow.implicitWidth + Theme.spacingXl * 2
+                radius: Theme.radiusPill
+                color: Theme.panelSecondaryBg
+                border.width: Theme.borderWidth
+                border.color: Theme.warning
+                anchors.verticalCenter: parent.verticalCenter
+
+                Accessible.role: Accessible.StaticText
+                Accessible.name: qsTr("Agent access is on")
+
+                Row {
+                    id: mcpBadgeRow
+                    anchors.centerIn: parent
+                    spacing: Theme.spacingSm
+
+                    IconGlyph {
+                        glyph: Theme.icons.warning
+                        iconSize: Theme.iconSizeSm
+                        iconColor: Theme.warning
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text: qsTr("Agent")
+                        color: Theme.panelSecondaryForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeXs
+                        font.weight: Font.Medium
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                ThemedToolTip {
+                    visible: mcpBadgeHover.containsMouse
+                    text: qsTr("Agent access is on — localhost MCP is listening. Turn it off in Settings when you are done.")
+                }
+                MouseArea {
+                    id: mcpBadgeHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                }
+            }
+
             // Extras. Pulses with a red shockwave while essential packs or updates need
             // attention — the dialog itself never opens on its own (see UpdateDialog).
             Item {

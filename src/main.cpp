@@ -2,6 +2,7 @@
 #include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
 #include "engine/ReverseProxyCache.h"
+#include "mcp/McpStdio.h"
 #include "models/AddonManager.h"
 #include "models/AppController.h"
 #include "models/AssetLibrary.h"
@@ -17,6 +18,7 @@
 // QApplication (not QGuiApplication) is required so QFileDialog can use the
 // native platform file picker, which routes through xdg-desktop-portal.
 #include <QApplication>
+#include <QCoreApplication>
 #include <QIcon>
 #include <QLoggingCategory>
 #include <QQmlApplicationEngine>
@@ -61,6 +63,15 @@ void applyLogLevel(bool verbose)
 int main(int argc, char *argv[])
 {
     applyLogLevel(verboseLoggingRequested(argc, argv));
+
+    for (int i = 1; i < argc; ++i) {
+        if (qstrcmp(argv[i], "--mcp-stdio") == 0) {
+            QCoreApplication app(argc, argv);
+            QCoreApplication::setApplicationName("CutWire Drift");
+            QCoreApplication::setOrganizationName("CutWire Drift");
+            return drift::mcp::runStdioAttach();
+        }
+    }
 
 #ifdef Q_OS_MACOS
     // NSOpenGLContext will not share between the legacy 2.1 context Qt defaults to and the 3.3
