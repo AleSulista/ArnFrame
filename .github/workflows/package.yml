@@ -348,6 +348,27 @@ jobs:
           name: windows-installer
           path: dist/*.exe
 
+      # The same staged tree the installer wraps, minus the install: a zip holding a single Drift\
+      # folder that runs from wherever it is unpacked, touching no registry key and no Start menu.
+      # Relocatable, not self-contained — the app still keeps settings, addons, models and caches
+      # under %APPDATA%\Drift, so two copies on one machine share that state.
+      #
+      # 7z rather than Compress-Archive: the staged tree is several hundred MB of Qt and FFmpeg
+      # DLLs, which is where Compress-Archive's in-memory approach gets slow.
+      - name: Build portable zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path portable\Drift, dist\portable | Out-Null
+          Copy-Item dist\bin\* portable\Drift -Recurse -Force
+          & "$env:ProgramFiles\7-Zip\7z.exe" a -tzip -mx=9 `
+            "dist\portable\Drift-Portable-${{ inputs.version }}-x64.zip" .\portable\Drift
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: dist/portable/*.zip
+
   macos:
     name: macOS disk image
     # Apple Silicon only: Homebrew bottles are single-architecture.
