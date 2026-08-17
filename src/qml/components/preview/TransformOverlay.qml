@@ -99,6 +99,28 @@ Item {
         return result
     }
 
+    // Rotation sticks to each 15° step as it passes. The tolerance is in degrees,
+    // so the pull feels the same whatever the preview zoom. Ctrl passes straight
+    // through, as it does for the move and resize snaps above.
+    readonly property real rotateSnapStepDeg: 15
+    readonly property real rotateSnapTolDeg: 5
+
+    // Angles are written back into the same (-180, 180] range the inspector's
+    // rotation slider and setClipRotationSnap use.
+    function normalizeDeg(deg) {
+        let d = deg % 360
+        if (d > 180)
+            d -= 360
+        if (d <= -180)
+            d += 360
+        return d
+    }
+
+    function snapAngle(deg) {
+        const nearest = Math.round(deg / rotateSnapStepDeg) * rotateSnapStepDeg
+        return Math.abs(nearest - deg) <= rotateSnapTolDeg ? normalizeDeg(nearest) : deg
+    }
+
     Component.onCompleted: refreshOverlay()
 
     Connections {
@@ -242,6 +264,10 @@ Item {
             property int dragStartPixelSize: 64
             // True while a resize grip is held, for the size readout.
             property bool resizing: false
+            // True while the rotate grip is held, for the angle readout.
+            property bool rotating: false
+            // Clip angle minus pointer angle when the rotate grip was taken.
+            property real rotateGrabOffset: 0
 
             // Canvas edges and centre lines, in layout px.
             readonly property var snapTargetsX: [0, handle.canvasW / 2, handle.canvasW]
@@ -428,9 +454,22 @@ Item {
                 // is passed, turning a resize into a move.
                 enabled: !handle.editing && !handle.resizing
                 cursorShape: Qt.SizeAllCursor
+
+                // Press point in overlay coordinates. The box rides the cursor as
+                // it moves, so deltas are measured against the overlay, which
+                // stands still and keeps canvas axes whatever the box rotation is.
+                property real pressPx: 0
+                property real pressPy: 0
+
                 onActiveChanged: {
                     if (active) {
                         root.interacting = true
+                        // Taken at activation rather than at the press, so the drag
+                        // threshold is not replayed as a jump.
+                        const p = root.mapFromItem(null, bodyDrag.centroid.scenePosition.x,
+                                                         bodyDrag.centroid.scenePosition.y)
+                        bodyDrag.pressPx = p.x
+                        bodyDrag.pressPy = p.y
                         handle.dragStartX = handle.modelData.x
                         handle.dragStartY = handle.modelData.y
                         handle.liveX = handle.dragStartX
@@ -444,13 +483,13 @@ Item {
                         root.endInteraction()
                     }
                 }
-                onTranslationChanged: {
-                    // translation is in the rotated box frame; rotate it back to canvas axes
-                    const a = handle.rotation * Math.PI / 180
-                    const dx = translation.x * Math.cos(a) - translation.y * Math.sin(a)
-                    const dy = translation.x * Math.sin(a) + translation.y * Math.cos(a)
-                    let xPx = handle.dragStartX + dx / handle.sx
-                    let yPx = handle.dragStartY + dy / handle.sy
+                onCentroidChanged: {
+                    if (!active)
+                        return
+                    const p = root.mapFromItem(null, bodyDrag.centroid.scenePosition.x,
+                                                     bodyDrag.centroid.scenePosition.y)
+                    let xPx = handle.dragStartX + (p.x - bodyDrag.pressPx) / handle.sx
+                    let yPx = handle.dragStartY + (p.y - bodyDrag.pressPy) / handle.sy
                     // Both edges and the centre stick, so a clip can be landed
                     // flush against a canvas edge or dead-centre by feel.
                     // Ctrl passes straight through (Alt is the window drag on
@@ -706,9 +745,10 @@ Item {
                 }
             }
 
-            // Live size while resizing, the same readout the crop tool shows.
+            // Live size while resizing, the same readout the crop tool shows;
+            // the live angle while rotating.
             Rectangle {
-                visible: handle.resizing
+                visible: handle.resizing || handle.rotating
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: parent.bottom
                 anchors.topMargin: Theme.spacingLg
@@ -726,7 +766,9 @@ Item {
                 Text {
                     id: sizeLabel
                     anchors.centerIn: parent
-                    text: Math.round(handle.layoutW) + "×" + Math.round(handle.layoutH)
+                    text: handle.rotating
+                          ? Math.round(handle.rotation) + "°"
+                          : Math.round(handle.layoutW) + "×" + Math.round(handle.layoutH)
                     color: Theme.onMedia
                     font.family: Theme.monoFontFamily
                     font.pixelSize: Theme.fontSizeXs
@@ -761,14 +803,30 @@ Item {
                     id: rotateDrag
                     target: null
                     cursorShape: Qt.CrossCursor
+
+                    // Angle from the box centre to the pointer, in the same frame
+                    // as the clip rotation (the grip sits above the box, hence +90).
+                    function pointerAngle() {
+                        const p = root.mapFromItem(null, rotateDrag.centroid.scenePosition.x,
+                                                                 rotateDrag.centroid.scenePosition.y)
+                        const ang = Math.atan2(p.y - handle.centerY, p.x - handle.centerX)
+                        return ang * 180 / Math.PI + 90
+                    }
+
                     onActiveChanged: {
                         if (active) {
                             root.interacting = true
+                            handle.rotating = true
                             handle.liveRotation = handle.modelData.rotation
+                            // Turning starts from where the grip was taken, so
+                            // grabbing it does not snap the clip to the pointer.
+                            handle.rotateGrabOffset = handle.modelData.rotation
+                                    - rotateDrag.pointerAngle()
                             EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
                             handle.forceActiveFocus()
                             EditorState.beginPreviewDrag()
                         } else {
+                            handle.rotating = false
                             handle.liveRotation = 1e9
                             root.endInteraction()
                         }
@@ -776,10 +834,10 @@ Item {
                     onCentroidChanged: {
                         if (!active)
                             return
-                        const p = root.mapFromItem(null, rotateDrag.centroid.scenePosition.x,
-                                                                 rotateDrag.centroid.scenePosition.y)
-                        const ang = Math.atan2(p.y - handle.centerY, p.x - handle.centerX)
-                        const deg = ang * 180 / Math.PI + 90
+                        let deg = root.normalizeDeg(rotateDrag.pointerAngle()
+                                                    + handle.rotateGrabOffset)
+                        if (!(rotateDrag.centroid.modifiers & Qt.ControlModifier))
+                            deg = root.snapAngle(deg)
                         handle.liveRotation = deg
                         EditorState.previewSetClipRotation(
                             handle.modelData.track,

@@ -159,9 +159,13 @@ QMatrix4x4 modelMatrixFor(const GpuLayer &layer, const QSize &canvas)
     QMatrix4x4 m;
     // px → NDC
     m.translate(float(2.0 * cx / canvas.width() - 1.0), float(2.0 * cy / canvas.height() - 1.0));
-    m.scale(float(w / canvas.width()), float(h / canvas.height()));
-    // Matches QPainter: translate to centre, rotate, then flip.
+    m.scale(2.f / canvas.width(), 2.f / canvas.height());
+    // The rotation runs in pixel space, between the px → NDC step and the quad's
+    // own sizing: rotating the unrotated unit quad first and applying the layer
+    // size after would shear it whenever the layer or the canvas is not square.
     m.rotate(float(layer.rotation), 0.f, 0.f, 1.f);
+    // Quad spans [-1, 1], so half the layer size takes it to the full rect.
+    m.scale(float(w * 0.5), float(h * 0.5));
     m.scale(layer.flipH ? -1.f : 1.f, layer.flipV ? -1.f : 1.f);
     return m;
 }
