@@ -1,5 +1,7 @@
 #include "MediaThumbnail.h"
 
+#include "MediaProbe.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -8,6 +10,7 @@
 #include <QPainter>
 #include <QSize>
 #include <QStandardPaths>
+#include <QTransform>
 
 #include <algorithm>
 #include <cmath>
@@ -35,7 +38,8 @@ QString cacheDir()
 }
 
 // Bumped when the thumbnail geometry changes, so stale squashed caches are ignored.
-constexpr int kThumbnailCacheVersion = 2;
+// v3: display-matrix rotation is now applied, so v2 caches of rotated sources are sideways.
+constexpr int kThumbnailCacheVersion = 3;
 constexpr int kThumbnailMaxEdge = 320;
 
 QString cacheKeyFor(const QString &sourcePath)
@@ -90,11 +94,19 @@ double tileSeconds(int level, qint64 index)
 // `swsCache` is owned by the caller and reused across frames: sws_getCachedContext hands back
 // the same scaler whenever the geometry is unchanged, which it is for every frame of a source.
 // It frees the old one itself when the parameters do change, so storing its result is enough.
-QImage frameToImage(const AVFrame *frame, int width, int height, SwsContext **swsCache)
+// `width`/`height` are the size the caller wants back, in display orientation: with a
+// 90/270 display matrix the scaler targets the transposed size so the rotated result
+// still comes out exactly width x height, which is what the fixed filmstrip cells need.
+QImage frameToImage(const AVFrame *frame, int width, int height, SwsContext **swsCache, int rotation)
 {
+    int scaledW = width;
+    int scaledH = height;
+    if (rotation == 90 || rotation == 270)
+        std::swap(scaledW, scaledH);
+
     *swsCache = sws_getCachedContext(*swsCache, frame->width, frame->height,
                                      static_cast<AVPixelFormat>(frame->format),
-                                     width, height, AV_PIX_FMT_RGB24, SWS_BILINEAR,
+                                     scaledW, scaledH, AV_PIX_FMT_RGB24, SWS_BILINEAR,
                                      nullptr, nullptr, nullptr);
     if (!*swsCache)
         return {};
@@ -104,8 +116,8 @@ QImage frameToImage(const AVFrame *frame, int width, int height, SwsContext **sw
         return {};
 
     rgb->format = AV_PIX_FMT_RGB24;
-    rgb->width = width;
-    rgb->height = height;
+    rgb->width = scaledW;
+    rgb->height = scaledH;
     if (av_frame_get_buffer(rgb, 0) < 0) {
         av_frame_free(&rgb);
         return {};
@@ -113,8 +125,10 @@ QImage frameToImage(const AVFrame *frame, int width, int height, SwsContext **sw
 
     sws_scale(*swsCache, frame->data, frame->linesize, 0, frame->height, rgb->data, rgb->linesize);
 
-    QImage image(rgb->data[0], width, height, rgb->linesize[0], QImage::Format_RGB888);
-    const QImage copy = image.copy();
+    // transformed() allocates its own buffer; copy() is still needed at rotation 0
+    // because `image` only wraps the AVFrame that is freed just below.
+    QImage image(rgb->data[0], scaledW, scaledH, rgb->linesize[0], QImage::Format_RGB888);
+    const QImage copy = rotation == 0 ? image.copy() : image.transformed(QTransform().rotate(rotation));
 
     av_frame_free(&rgb);
     return copy;
@@ -143,7 +157,8 @@ bool decodeNextVideoFrame(AVFormatContext *fmt, int videoStreamIndex, AVCodecCon
             if (rc < 0)
                 return false;
 
-            outImage = frameToImage(frame, width, height, swsCache);
+            outImage = frameToImage(frame, width, height, swsCache,
+                                    displayRotationOf(fmt->streams[videoStreamIndex]));
             return !outImage.isNull();
         }
     }
@@ -287,7 +302,11 @@ QString MediaThumbnail::generate(const QString &sourcePath, const QString &kind)
         return {};
 
     const AVCodecParameters *par = fmt->streams[videoStreamIndex]->codecpar;
-    const QSize target = thumbnailSizeFor(par->width, par->height, par->sample_aspect_ratio);
+    QSize target = thumbnailSizeFor(par->width, par->height, par->sample_aspect_ratio);
+    // SAR applies to the coded width, so size the frame first and transpose after.
+    const int rotation = displayRotationOf(fmt->streams[videoStreamIndex]);
+    if (rotation == 90 || rotation == 270)
+        target.transpose();
     const bool saved = decodeFirstVideoFrame(fmt, videoStreamIndex, codecCtx, outPath,
                                              target.width(), target.height());
 

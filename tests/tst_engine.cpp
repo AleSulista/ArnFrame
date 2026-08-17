@@ -45,6 +45,7 @@
 #include "engine/ReverseProxyCache.h"
 #include "engine/ReverseRenderer.h"
 #include "engine/ClipReaderPool.h"
+#include "engine/MediaProbe.h"
 #include "engine/TransitionCatalog.h"
 #include "core/Transition.h"
 
@@ -76,6 +77,9 @@ private slots:
     void effectProcessorPassthroughWithoutEffects();
     void effectProcessorBrightness();
     void clipReaderSequentialAndSeek();
+    void clipReaderAppliesDisplayRotation_data();
+    void clipReaderAppliesDisplayRotation();
+    void reverseProxyKeepsDisplayRotation();
     void clipReaderAudioSequential();
     void compositorDefaultRenderStaysFullResolution();
     void compositorPreviewScaleRendersLowerResolution();
@@ -184,6 +188,7 @@ private slots:
 
 private:
     static QString makeColorSegmentsVideo(QTemporaryDir &dir);
+    static QString makeRotatedHalvesVideo(QTemporaryDir &dir, int displayDegrees);
     static QString makeToneAudio(QTemporaryDir &dir);
 };
 
@@ -953,6 +958,142 @@ void EngineTest::clipReaderSequentialAndSeek()
     // Backward jump forces a keyframe reseek and must not return a stale frame.
     QCOMPARE(dominant(500'000), QChar('R'));
     QCOMPARE(dominant(1'500'000), QChar('G'));
+}
+
+// 64x32 landscape, red left half / blue right half, tagged with a display matrix.
+// `displayDegrees` is the clockwise turn a player should apply, i.e. what
+// displayRotationOf() reports; the matrix stores its negation.
+QString EngineTest::makeRotatedHalvesVideo(QTemporaryDir &dir, int displayDegrees)
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        return {};
+
+    const QString flat = dir.filePath(QStringLiteral("halves-flat.mp4"));
+    QStringList makeArgs{
+        QStringLiteral("-y"),
+        QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+        QStringLiteral("color=c=red:s=32x32:r=25:d=1"),
+        QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+        QStringLiteral("color=c=blue:s=32x32:r=25:d=1"),
+        QStringLiteral("-filter_complex"), QStringLiteral("[0][1]hstack=inputs=2[v]"),
+        QStringLiteral("-map"), QStringLiteral("[v]"),
+        QStringLiteral("-c:v"), QStringLiteral("libx264"),
+        QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+        flat,
+    };
+
+    QProcess make;
+    make.start(ffmpeg, makeArgs);
+    if (!make.waitForFinished(30000) || make.exitCode() != 0)
+        return {};
+
+    // -display_rotation is an input option, so tagging needs a second stream-copy pass.
+    const QString out = dir.filePath(QStringLiteral("halves-rotated.mp4"));
+    QStringList tagArgs{
+        QStringLiteral("-y"),
+        QStringLiteral("-display_rotation:v:0"), QString::number(-displayDegrees),
+        QStringLiteral("-i"), flat,
+        QStringLiteral("-c"), QStringLiteral("copy"),
+        out,
+    };
+
+    QProcess tag;
+    tag.start(ffmpeg, tagArgs);
+    if (!tag.waitForFinished(30000) || tag.exitCode() != 0)
+        return {};
+    return QFileInfo::exists(out) ? out : QString{};
+}
+
+void EngineTest::clipReaderAppliesDisplayRotation_data()
+{
+    QTest::addColumn<int>("displayDegrees");
+    QTest::addColumn<QSize>("expectedSize");
+    // Where the source's red left half ends up once the frame is upright.
+    QTest::addColumn<QPoint>("redAt");
+    QTest::addColumn<QPoint>("blueAt");
+
+    QTest::newRow("90cw") << 90 << QSize(32, 64) << QPoint(16, 8) << QPoint(16, 56);
+    QTest::newRow("180") << 180 << QSize(64, 32) << QPoint(48, 16) << QPoint(16, 16);
+    QTest::newRow("270cw") << 270 << QSize(32, 64) << QPoint(16, 56) << QPoint(16, 8);
+}
+
+void EngineTest::clipReaderAppliesDisplayRotation()
+{
+    QFETCH(int, displayDegrees);
+    QFETCH(QSize, expectedSize);
+    QFETCH(QPoint, redAt);
+    QFETCH(QPoint, blueAt);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeRotatedHalvesVideo(dir, displayDegrees);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a rotated test clip");
+
+    ClipReader reader;
+    QVERIFY(reader.open(path));
+    QVERIFY(reader.hasVideo());
+
+    // The box is in display orientation: without the swap in decodeSizeFor a portrait
+    // box fitted against the landscape source decodes at half size.
+    QImage frame;
+    QVERIFY(reader.readVideoFrameAt(500'000, frame, expectedSize.width(), expectedSize.height()));
+    QCOMPARE(frame.size(), expectedSize);
+
+    const QRgb red = frame.pixel(redAt);
+    const QRgb blue = frame.pixel(blueAt);
+    QVERIFY(qRed(red) > qBlue(red));
+    QVERIFY(qBlue(blue) > qRed(blue));
+
+    // The preview path converts to NV12 separately and needs the same treatment.
+    Nv12Frame nv12;
+    QVERIFY(reader.readVideoFrameAtNv12(500'000, nv12, expectedSize.width(), expectedSize.height()));
+    QCOMPARE(QSize(nv12.width, nv12.height), expectedSize);
+    // Red is markedly brighter than blue, so luma alone shows the halves are upright.
+    const auto lumaAt = [&](QPoint p) {
+        return uchar(nv12.data.at(qsizetype(p.y()) * nv12.width + p.x()));
+    };
+    QVERIFY(lumaAt(redAt) > lumaAt(blueAt));
+}
+
+// The proxy re-encodes the source's pixels untouched, so it has to re-emit the source's
+// display matrix — otherwise reversing a rotated clip would play it back sideways.
+void EngineTest::reverseProxyKeepsDisplayRotation()
+{
+    if (!Exporter::videoCodecById(QStringLiteral("h264")).value(QStringLiteral("available")).toBool())
+        QSKIP("No H.264 encoder available in this FFmpeg build");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString sourcePath = makeRotatedHalvesVideo(dir, 90);
+    if (sourcePath.isEmpty())
+        QSKIP("ffmpeg not available to generate a rotated test clip");
+
+    const QString proxyPath = dir.filePath(QStringLiteral("reversed.mp4"));
+    QString error;
+    QVERIFY2(drift::renderReversed(sourcePath, 0, drift::kUsPerSecond, proxyPath, &error, {}),
+             qPrintable(error));
+
+    const MediaInfo info = MediaProbe::probe(proxyPath);
+    QVERIFY(info.ok);
+    bool sawVideo = false;
+    for (const StreamInfo &stream : info.streams) {
+        if (stream.type != StreamInfo::Type::Video)
+            continue;
+        sawVideo = true;
+        QCOMPARE(stream.rotationDegrees, 90);
+    }
+    QVERIFY(sawVideo);
+
+    // And the reader applies it, so the proxy decodes upright like the original does.
+    ClipReader reader;
+    QVERIFY(reader.open(proxyPath));
+    QImage frame;
+    QVERIFY(reader.readVideoFrameAt(500'000, frame, 32, 64));
+    QCOMPARE(frame.size(), QSize(32, 64));
+    const QRgb top = frame.pixel(16, 8);
+    QVERIFY(qRed(top) > qBlue(top));
 }
 
 QString EngineTest::makeToneAudio(QTemporaryDir &dir)

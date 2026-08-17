@@ -1,5 +1,7 @@
 #include "ReverseRenderer.h"
 
+#include "MediaProbe.h"
+
 #include <QFile>
 
 #include <algorithm>
@@ -8,6 +10,7 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/display.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libswscale/swscale.h>
@@ -30,7 +33,7 @@ public:
     ~ProxyEncoder() { abort(); }
 
     bool open(const QString &path, const AVCodecContext *dec, AVRational timeBase,
-              AVRational frameRate, QString *errorOut);
+              AVRational frameRate, int rotationDegrees, QString *errorOut);
     bool writeFrame(const AVFrame *src, int64_t pts, QString *errorOut);
     bool finish(QString *errorOut);
     void abort();
@@ -52,7 +55,7 @@ private:
 };
 
 bool ProxyEncoder::open(const QString &path, const AVCodecContext *dec, AVRational timeBase,
-                        AVRational frameRate, QString *errorOut)
+                        AVRational frameRate, int rotationDegrees, QString *errorOut)
 {
     auto fail = [&](const QString &message) {
         if (errorOut)
@@ -108,6 +111,18 @@ bool ProxyEncoder::open(const QString &path, const AVCodecContext *dec, AVRation
         return fail(QStringLiteral("Could not open the reversed encoder"));
 
     avcodec_parameters_from_context(m_stream->codecpar, m_ctx);
+    // The proxy keeps the source's pixels untouched, so it has to keep the source's
+    // display matrix too — otherwise a rotated clip decodes upright from the original
+    // and sideways from its reversed proxy. _set takes a clockwise angle while _get
+    // (behind displayRotationOf) reports counterclockwise, so this passes it unnegated.
+    if (rotationDegrees != 0) {
+        AVPacketSideData *sd = av_packet_side_data_new(&m_stream->codecpar->coded_side_data,
+                                                       &m_stream->codecpar->nb_coded_side_data,
+                                                       AV_PKT_DATA_DISPLAYMATRIX,
+                                                       sizeof(int32_t) * 9, 0);
+        if (sd)
+            av_display_rotation_set(reinterpret_cast<int32_t *>(sd->data), rotationDegrees);
+    }
     m_stream->time_base = m_ctx->time_base;
     // Without this the muxer infers the rate from packet timestamps and lands on 29.97 for a
     // 30 fps source, the same trap MatteWriter documents.
@@ -349,7 +364,7 @@ bool renderReversed(const QString &sourcePath, TimeUs coverInUs, TimeUs coverOut
     const int maxBatch = int(std::max<qint64>(1, kReverseBatchByteBudget / frameBytes));
 
     ProxyEncoder encoder;
-    if (!encoder.open(outPath, source.dec, timeBase, frameRate, errorOut))
+    if (!encoder.open(outPath, source.dec, timeBase, frameRate, displayRotationOf(stream), errorOut))
         return false;
 
     AVFrame *frame = av_frame_alloc();

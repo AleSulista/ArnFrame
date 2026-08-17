@@ -122,6 +122,9 @@ private:
     struct SwrContext *m_swr = nullptr;
     int m_videoStream = -1;
     int m_audioStream = -1;
+    // Source display-matrix rotation (0/90/180/270), applied to every decoded frame
+    // so everything downstream sees upright pixels.
+    int m_sourceRotation = 0;
     int m_outputSampleRate = 48000;
     bool m_hwAccelActive = false;
     bool m_hwAccelDisabled = false; // sticky after a failed VAAPI decode

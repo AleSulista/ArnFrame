@@ -1,11 +1,15 @@
 #include "ClipReader.h"
 
+#include "MediaProbe.h"
+
 #include <QThread>
+#include <QTransform>
 #include <QtMath>
 
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -86,7 +90,62 @@ AVPixelFormat hwGetFormat(AVCodecContext *ctx, const AVPixelFormat *pixFmts)
     return pixFmts ? pixFmts[0] : AV_PIX_FMT_NONE;
 }
 
-QImage frameToRgba(const AVFrame *frame, SwsContext *&sws, int targetWidth, int targetHeight)
+// Rotate a plane of Sample-sized elements. NV12's UV plane is half-resolution
+// interleaved U,V pairs, and 4:2:0's 2x2 subsampling is symmetric, so rotating it as
+// 16-bit samples keeps each pair's U,V order intact. Templated on the sample so the
+// inner loop is a plain typed store — this runs per preview frame.
+template <typename Sample>
+void rotatePlane(const Sample *src, Sample *dst, int srcW, int srcH, int rotation)
+{
+    const int dstW = (rotation == 180) ? srcW : srcH;
+    for (int y = 0; y < srcH; ++y) {
+        const Sample *row = src + qsizetype(y) * srcW;
+        for (int x = 0; x < srcW; ++x) {
+            int dx = 0;
+            int dy = 0;
+            switch (rotation) {
+            case 90:
+                dx = srcH - 1 - y;
+                dy = x;
+                break;
+            case 180:
+                dx = srcW - 1 - x;
+                dy = srcH - 1 - y;
+                break;
+            default: // 270
+                dx = y;
+                dy = srcW - 1 - x;
+                break;
+            }
+            dst[qsizetype(dy) * dstW + dx] = row[x];
+        }
+    }
+}
+
+Nv12Frame rotateNv12(const Nv12Frame &frame, int rotation)
+{
+    if (rotation == 0 || !frame.isValid())
+        return frame;
+
+    Nv12Frame out;
+    out.width = (rotation == 180) ? frame.width : frame.height;
+    out.height = (rotation == 180) ? frame.height : frame.width;
+    out.data.resize(frame.data.size());
+
+    const qsizetype yBytes = qsizetype(frame.width) * frame.height;
+    const uchar *src = reinterpret_cast<const uchar *>(frame.data.constData());
+    uchar *dst = reinterpret_cast<uchar *>(out.data.data());
+    rotatePlane(src, dst, frame.width, frame.height, rotation);
+    // Both dimensions are even (frameToNv12 masks them), so yBytes is even and the UV
+    // plane is 2-byte aligned — safe to walk it as U,V pairs.
+    rotatePlane(reinterpret_cast<const quint16 *>(src + yBytes),
+                reinterpret_cast<quint16 *>(dst + yBytes), frame.width / 2, frame.height / 2,
+                rotation);
+    return out;
+}
+
+QImage frameToRgba(const AVFrame *frame, SwsContext *&sws, int targetWidth, int targetHeight,
+                   int rotation)
 {
     if (!frame || targetWidth <= 0 || targetHeight <= 0)
         return {};
@@ -115,8 +174,12 @@ QImage frameToRgba(const AVFrame *frame, SwsContext *&sws, int targetWidth, int 
 
     sws_scale(sws, frame->data, frame->linesize, 0, frame->height, rgba->data, rgba->linesize);
 
+    // Qt's y-axis points down, so a positive angle is the clockwise turn a player would
+    // make — which is what displayRotationOf() reports. transformed() allocates its own
+    // buffer; copy() is still needed at rotation 0 because `image` only wraps the
+    // AVFrame that is freed just below.
     QImage image(rgba->data[0], targetWidth, targetHeight, rgba->linesize[0], QImage::Format_RGBA8888);
-    const QImage copy = image.copy();
+    const QImage copy = rotation == 0 ? image.copy() : image.transformed(QTransform().rotate(rotation));
     av_frame_free(&rgba);
     return copy;
 }
@@ -142,7 +205,8 @@ Nv12Frame packNv12(const AVFrame *nv12, int targetWidth, int targetHeight)
     return out;
 }
 
-Nv12Frame frameToNv12(const AVFrame *frame, SwsContext *&sws, int targetWidth, int targetHeight)
+Nv12Frame frameToNv12(const AVFrame *frame, SwsContext *&sws, int targetWidth, int targetHeight,
+                      int rotation)
 {
     Nv12Frame out;
     if (!frame || targetWidth <= 0 || targetHeight <= 0)
@@ -160,7 +224,7 @@ Nv12Frame frameToNv12(const AVFrame *frame, SwsContext *&sws, int targetWidth, i
     // directly skips a full-frame scale that would only be a copy.
     if (frame->format == AV_PIX_FMT_NV12 && frame->width == targetWidth
         && frame->height == targetHeight) {
-        return packNv12(frame, targetWidth, targetHeight);
+        return rotateNv12(packNv12(frame, targetWidth, targetHeight), rotation);
     }
 
     const int flags = swsFlagsForResize(frame->width, frame->height, targetWidth, targetHeight);
@@ -186,7 +250,7 @@ Nv12Frame frameToNv12(const AVFrame *frame, SwsContext *&sws, int targetWidth, i
 
     sws_scale(sws, frame->data, frame->linesize, 0, frame->height, nv12->data, nv12->linesize);
 
-    out = packNv12(nv12, targetWidth, targetHeight);
+    out = rotateNv12(packNv12(nv12, targetWidth, targetHeight), rotation);
     av_frame_free(&nv12);
     return out;
 }
@@ -241,6 +305,12 @@ QSize ClipReader::decodeSizeFor(int maxWidth, int maxHeight) const
         return {qMax(1, maxWidth), qMax(1, maxHeight)};
     if (maxWidth <= 0 || maxHeight <= 0)
         return {srcW, srcH};
+
+    // The caller's box is in display orientation but srcW/srcH are coded, and the
+    // returned size is the sws target — so match the box to the source instead of
+    // the other way round. The transpose happens after conversion.
+    if (m_sourceRotation == 90 || m_sourceRotation == 270)
+        std::swap(maxWidth, maxHeight);
 
     // Never decode larger than the source; scaling up is the compositor's job.
     const double fit = qMin(static_cast<double>(maxWidth) / srcW, static_cast<double>(maxHeight) / srcH);
@@ -412,6 +482,7 @@ void ClipReader::close()
 
     m_videoStream = -1;
     m_audioStream = -1;
+    m_sourceRotation = 0;
     m_hwAccelDisabled = false;
     m_hwScalerFailed = false;
     m_audioPositioned = false;
@@ -448,6 +519,7 @@ bool ClipReader::open(const QString &path)
     }
 
     if (m_videoStream >= 0) {
+        m_sourceRotation = displayRotationOf(m_fmt->streams[m_videoStream]);
         const AVRational rate = m_fmt->streams[m_videoStream]->avg_frame_rate;
         if (rate.num > 0 && rate.den > 0) {
             m_sourceFrameDurationUs =
@@ -757,7 +829,7 @@ bool ClipReader::transferHwFrameToImage(const AVFrame *hwFrame, QImage &out, int
     if (!swFrame)
         return false;
 
-    const QImage image = frameToRgba(swFrame, m_sws, targetWidth, targetHeight);
+    const QImage image = frameToRgba(swFrame, m_sws, targetWidth, targetHeight, m_sourceRotation);
     if (image.isNull())
         return false;
 
@@ -778,7 +850,7 @@ bool ClipReader::convertFrame(const AVFrame *frame, QImage &out, int targetWidth
     if (isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format)))
         return transferHwFrameToImage(frame, out, targetWidth, targetHeight);
 
-    const QImage image = frameToRgba(frame, m_sws, targetWidth, targetHeight);
+    const QImage image = frameToRgba(frame, m_sws, targetWidth, targetHeight, m_sourceRotation);
     if (image.isNull())
         return false;
     out = image;
@@ -798,7 +870,7 @@ bool ClipReader::convertFrameNv12(const AVFrame *frame, Nv12Frame &out, int targ
             return false;
     }
 
-    out = frameToNv12(swFrame, m_swsNv12, targetWidth, targetHeight);
+    out = frameToNv12(swFrame, m_swsNv12, targetWidth, targetHeight, m_sourceRotation);
     return out.isValid();
 }
 

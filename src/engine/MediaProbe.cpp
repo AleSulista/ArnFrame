@@ -9,9 +9,7 @@ extern "C" {
 #include <libavutil/dict.h>
 }
 
-namespace {
-
-int rotationOf(const AVStream *stream)
+int displayRotationOf(const AVStream *stream)
 {
     const AVPacketSideData *sd = av_packet_side_data_get(stream->codecpar->coded_side_data,
                                                           stream->codecpar->nb_coded_side_data,
@@ -30,6 +28,8 @@ int rotationOf(const AVStream *stream)
         rounded += 360;
     return rounded;
 }
+
+namespace {
 
 StreamInfo describeStream(const AVFormatContext *fmt, const AVStream *stream)
 {
@@ -52,7 +52,7 @@ StreamInfo describeStream(const AVFormatContext *fmt, const AVStream *stream)
         info.height = par->height;
         if (stream->avg_frame_rate.den != 0)
             info.fps = av_q2d(stream->avg_frame_rate);
-        info.rotationDegrees = rotationOf(stream);
+        info.rotationDegrees = displayRotationOf(stream);
         info.attachedPicture = (stream->disposition & AV_DISPOSITION_ATTACHED_PIC) != 0;
         break;
     case AVMEDIA_TYPE_AUDIO:

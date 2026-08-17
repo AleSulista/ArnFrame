@@ -45,3 +45,9 @@ class MediaProbe
 public:
     static MediaInfo probe(const QString &path);
 };
+
+struct AVStream;
+
+// The stream's display-matrix rotation, normalized to 0/90/180/270 the way players
+// interpret it. Anything that decodes pixels has to apply this itself.
+int displayRotationOf(const AVStream *stream);
