@@ -473,14 +473,14 @@ PanelFrame {
                         variant: "ghost"
                         tooltip: qsTr("Grid view")
                         active: assetsContent.gridMode
-                        onClicked: EditorState.setMediaGridMode(true)
+                        onClicked: EditorState.mediaGridMode = true
                     }
                     IconButton {
                         glyph: Theme.icons.list
                         variant: "ghost"
                         tooltip: qsTr("List view")
                         active: !assetsContent.gridMode
-                        onClicked: EditorState.setMediaGridMode(false)
+                        onClicked: EditorState.mediaGridMode = false
                     }
                     IconButton {
                         glyph: root.sortByKind ? Theme.icons.sortByKind : Theme.icons.sortByName
