@@ -313,8 +313,10 @@ public:
 
     // MCP helpers (GUI thread). Used by src/mcp, not QML.
     QPair<int, int> mcpLocateClip(const QString &id) const;
-    QVariantMap mcpCompactClip(int trackIndex, int clipIndex) const;
-    QJsonObject mcpInspect(bool includeClips) const;
+    QString mcpClipId(int trackIndex, int clipIndex) const;
+    QVariantMap mcpCompactClip(int trackIndex, int clipIndex, bool includeCanvas = true) const;
+    QJsonObject mcpInspect(bool includeClips, int sinceRevision = -1) const;
+    int mcpRevision() const { return m_mcpEditRevision; }
     bool mcpSetClipCanvas(int trackIndex, int clipIndex, const QVariantMap &patch);
     QJsonObject mcpCaptureFrame(double atSeconds, bool full);
     bool mcpSetWorkArea(double inSeconds, double outSeconds);
@@ -1168,6 +1170,10 @@ protected:
     bool m_mcpUndoSuspended = false;
     int m_mcpBatchDepth = 0;
     drift::Project m_mcpBatchBefore;
+    int m_mcpEditRevision = 0;
+    mutable QHash<QString, QPair<int, int>> m_mcpClipIndex;
+    mutable int m_mcpClipIndexRevision = -1;
+    void rebuildMcpClipIndexIfNeeded() const;
 
     void setProjectLayoutChosen(bool chosen);
 

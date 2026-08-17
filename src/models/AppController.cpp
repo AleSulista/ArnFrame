@@ -2283,6 +2283,7 @@ void AppController::finishEdit(const QString &message)
     // stack, so an edit now only clears a stale warning from an earlier attempt.
     Q_UNUSED(message)
     setLastMessage(QString());
+    ++m_mcpEditRevision;
 }
 
 void AppController::applyRippleShift(drift::Track &track, int fromClipIndex, drift::TimeUs delta)
@@ -9471,6 +9472,7 @@ void AppController::undo()
     if (!m_undoStack.canUndo())
         return;
     m_undoStack.undo();
+    ++m_mcpEditRevision;
 }
 
 void AppController::redo()
@@ -9478,6 +9480,7 @@ void AppController::redo()
     if (!m_undoStack.canRedo())
         return;
     m_undoStack.redo();
+    ++m_mcpEditRevision;
 }
 
 namespace {
@@ -10934,28 +10937,41 @@ void AppController::copyMcpAgentGuide()
     copyToClipboard(mcpAgentGuide());
 }
 
+void AppController::rebuildMcpClipIndexIfNeeded() const
+{
+    if (m_mcpClipIndexRevision == m_mcpEditRevision)
+        return;
+    m_mcpClipIndex.clear();
+    const QList<drift::Track> &tracks = m_project.tracks();
+    for (int t = 0; t < tracks.size(); ++t) {
+        const QList<drift::Clip> &clips = tracks.at(t).clips;
+        for (int c = 0; c < clips.size(); ++c)
+            m_mcpClipIndex.insert(clips.at(c).id, {t, c});
+    }
+    m_mcpClipIndexRevision = m_mcpEditRevision;
+}
+
 QPair<int, int> AppController::mcpLocateClip(const QString &id) const
 {
     if (id.isEmpty())
         return {-1, -1};
-    const QList<drift::Track> &tracks = m_project.tracks();
-    for (int t = 0; t < tracks.size(); ++t) {
-        const QList<drift::Clip> &clips = tracks.at(t).clips;
-        for (int c = 0; c < clips.size(); ++c) {
-            if (clips.at(c).id == id)
-                return {t, c};
-        }
-    }
-    return {-1, -1};
+    rebuildMcpClipIndexIfNeeded();
+    return m_mcpClipIndex.value(id, {-1, -1});
 }
 
-QVariantMap AppController::mcpCompactClip(int trackIndex, int clipIndex) const
+QString AppController::mcpClipId(int trackIndex, int clipIndex) const
+{
+    if (!isValidClipIndex(trackIndex, clipIndex))
+        return {};
+    return m_project.tracks().at(trackIndex).clips.at(clipIndex).id;
+}
+
+QVariantMap AppController::mcpCompactClip(int trackIndex, int clipIndex, bool includeCanvas) const
 {
     if (!isValidClipIndex(trackIndex, clipIndex))
         return {};
     const drift::Clip &clip = m_project.tracks().at(trackIndex).clips.at(clipIndex);
-    const double at = playheadSeconds();
-    return {
+    QVariantMap out{
         {QStringLiteral("id"), clip.id},
         {QStringLiteral("kind"), drift::clipTypeToString(clip.type)},
         {QStringLiteral("name"), clip.name},
@@ -10964,20 +10980,28 @@ QVariantMap AppController::mcpCompactClip(int trackIndex, int clipIndex) const
         {QStringLiteral("inPoint"), drift::usToSeconds(clip.srcIn)},
         {QStringLiteral("outPoint"), drift::usToSeconds(clip.srcOut)},
         {QStringLiteral("assetId"), clip.assetId},
-        {QStringLiteral("x"), propertyValueAt(trackIndex, clipIndex, QStringLiteral("x"), at, 0)},
-        {QStringLiteral("y"), propertyValueAt(trackIndex, clipIndex, QStringLiteral("y"), at, 0)},
-        {QStringLiteral("w"), propertyValueAt(trackIndex, clipIndex, QStringLiteral("width"), at, 0)},
-        {QStringLiteral("h"), propertyValueAt(trackIndex, clipIndex, QStringLiteral("height"), at, 0)},
-        {QStringLiteral("rotation"),
-         propertyValueAt(trackIndex, clipIndex, QStringLiteral("rotation"), at, 0)},
-        {QStringLiteral("opacity"),
-         propertyValueAt(trackIndex, clipIndex, QStringLiteral("opacity"), at, 1)},
     };
+    if (!includeCanvas)
+        return out;
+
+    const double at = playheadSeconds();
+    out.insert(QStringLiteral("x"), propertyValueAt(trackIndex, clipIndex, QStringLiteral("x"), at, 0));
+    out.insert(QStringLiteral("y"), propertyValueAt(trackIndex, clipIndex, QStringLiteral("y"), at, 0));
+    out.insert(QStringLiteral("w"), propertyValueAt(trackIndex, clipIndex, QStringLiteral("width"), at, 0));
+    out.insert(QStringLiteral("h"), propertyValueAt(trackIndex, clipIndex, QStringLiteral("height"), at, 0));
+    out.insert(QStringLiteral("rotation"),
+               propertyValueAt(trackIndex, clipIndex, QStringLiteral("rotation"), at, 0));
+    out.insert(QStringLiteral("opacity"),
+               propertyValueAt(trackIndex, clipIndex, QStringLiteral("opacity"), at, 1));
+    return out;
 }
 
-QJsonObject AppController::mcpInspect(bool includeClips) const
+QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision) const
 {
     using namespace drift::mcp;
+    if (sinceRevision >= 0 && sinceRevision == m_mcpEditRevision)
+        return ok({{QStringLiteral("unchanged"), true}, {QStringLiteral("revision"), m_mcpEditRevision}});
+
     int clipCount = 0;
     QJsonArray tracks;
     const QList<drift::Track> &projectTracks = m_project.tracks();
@@ -10994,7 +11018,7 @@ QJsonObject AppController::mcpInspect(bool includeClips) const
         if (includeClips) {
             QJsonArray clips;
             for (int c = 0; c < track.clips.size(); ++c) {
-                const QVariantMap compact = mcpCompactClip(t, c);
+                const QVariantMap compact = mcpCompactClip(t, c, false);
                 clips.append(QJsonObject::fromVariantMap(compact));
             }
             row.insert(QStringLiteral("items"), clips);
@@ -11017,6 +11041,7 @@ QJsonObject AppController::mcpInspect(bool includeClips) const
     }
 
     QJsonObject extra{
+        {QStringLiteral("revision"), m_mcpEditRevision},
         {QStringLiteral("name"), m_project.name()},
         {QStringLiteral("w"), m_project.width()},
         {QStringLiteral("h"), m_project.height()},

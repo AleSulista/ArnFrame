@@ -49,6 +49,8 @@ private slots:
     void exportVideoRequiresPath();
     void projectSetupRoundTrip();
     void captureDoesNotInsertClip();
+    void inspectRevisionUnchanged();
+    void listEffectsIncludesParams();
 };
 
 static QJsonObject rpc(const QString &method, const QJsonObject &params = {}, int id = 1)
@@ -570,6 +572,42 @@ void McpTest::captureDoesNotInsertClip()
     if (result.value(QStringLiteral("isError")).toBool())
         QSKIP("Compositor could not produce a frame in this environment");
     QVERIFY(result.value(QStringLiteral("content")).toArray().size() >= 1);
+}
+
+void McpTest::inspectRevisionUnchanged()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+    const QJsonObject first = dispatcher.inspect({});
+    QVERIFY(first.value(QStringLiteral("ok")).toBool());
+    QVERIFY(first.contains(QStringLiteral("revision")));
+    const int revision = first.value(QStringLiteral("revision")).toInt();
+    const QJsonObject unchanged = dispatcher.inspect({{QStringLiteral("since"), revision}});
+    QVERIFY(unchanged.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(unchanged.value(QStringLiteral("unchanged")).toBool(), true);
+    QCOMPARE(unchanged.value(QStringLiteral("revision")).toInt(), revision);
+}
+
+void McpTest::listEffectsIncludesParams()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+    const QJsonObject result = dispatcher.applyOne(QStringLiteral("list_effects"), {});
+    QVERIFY(result.value(QStringLiteral("ok")).toBool());
+    const QJsonArray effects = result.value(QStringLiteral("effects")).toArray();
+    QVERIFY(!effects.isEmpty());
+    bool sawParams = false;
+    for (const QJsonValue &v : effects) {
+        const QJsonArray params = v.toObject().value(QStringLiteral("params")).toArray();
+        if (!params.isEmpty()) {
+            sawParams = true;
+            QVERIFY(params.at(0).toObject().contains(QStringLiteral("key")));
+            break;
+        }
+    }
+    QVERIFY(sawParams);
 }
 
 QTEST_MAIN(McpTest)

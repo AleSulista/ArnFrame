@@ -102,7 +102,42 @@ QJsonObject compactCatalogItem(const QVariantMap &item)
     const QString category = item.value(QStringLiteral("category")).toString();
     if (!category.isEmpty())
         o.insert(QStringLiteral("cat"), category);
+    const QVariantList params = item.value(QStringLiteral("params")).toList();
+    if (!params.isEmpty()) {
+        QJsonArray compactParams;
+        for (const QVariant &param : params) {
+            const QVariantMap p = param.toMap();
+            QJsonObject row;
+            const QString key = p.value(QStringLiteral("key")).toString();
+            if (!key.isEmpty())
+                row.insert(QStringLiteral("key"), key);
+            const QString type = p.value(QStringLiteral("type")).toString();
+            if (!type.isEmpty())
+                row.insert(QStringLiteral("type"), type);
+            if (p.contains(QStringLiteral("default")))
+                row.insert(QStringLiteral("default"), QJsonValue::fromVariant(p.value(QStringLiteral("default"))));
+            if (p.contains(QStringLiteral("min")))
+                row.insert(QStringLiteral("min"), p.value(QStringLiteral("min")).toDouble());
+            if (p.contains(QStringLiteral("max")))
+                row.insert(QStringLiteral("max"), p.value(QStringLiteral("max")).toDouble());
+            if (p.value(QStringLiteral("isBoolean")).toBool())
+                row.insert(QStringLiteral("bool"), true);
+            if (!row.isEmpty())
+                compactParams.append(row);
+        }
+        if (!compactParams.isEmpty())
+            o.insert(QStringLiteral("params"), compactParams);
+    }
     return o;
+}
+
+QString findNewClipId(const QSet<QString> &before, const QSet<QString> &after)
+{
+    for (const QString &id : after) {
+        if (!before.contains(id))
+            return id;
+    }
+    return {};
 }
 
 QJsonArray compactAvailableCodecs(const QVariantList &list)
@@ -385,8 +420,7 @@ McpDispatcher::ClipRef McpDispatcher::resolveClip(const QJsonObject &args) const
     ref.track = jsonInt(args.value(QStringLiteral("track")));
     ref.clip = jsonInt(args.value(QStringLiteral("index")));
     if (ref.valid()) {
-        const QVariantMap clip = m_controller->mcpCompactClip(ref.track, ref.clip);
-        ref.id = clip.value(QStringLiteral("id")).toString();
+        ref.id = m_controller->mcpClipId(ref.track, ref.clip);
         if (ref.id.isEmpty())
             return {};
     }
@@ -462,7 +496,10 @@ void McpDispatcher::moveClipToRequested(const ClipRef &ref, double at)
 
 QJsonObject McpDispatcher::inspect(const QJsonObject &args) const
 {
-    return m_controller->mcpInspect(jsonBool(args.value(QStringLiteral("clips"))));
+    const int since = args.contains(QStringLiteral("since"))
+                          ? jsonInt(args.value(QStringLiteral("since")), -1)
+                          : -1;
+    return m_controller->mcpInspect(jsonBool(args.value(QStringLiteral("clips"))), since);
 }
 
 bool McpDispatcher::isUndoable(const QString &tool) const
@@ -781,7 +818,6 @@ QJsonObject McpDispatcher::opPlaceClip(const QJsonObject &args)
         m_controller->addClipFromAssetAt(
             asset,
             [&] {
-                // Default track for this asset kind; fall back to addClipFromAsset path via index  lookup.
                 for (int t = 0; t < m_controller->tracks().size(); ++t) {
                     if (m_controller->trackAcceptsAsset(t, asset))
                         return t;
@@ -789,16 +825,12 @@ QJsonObject McpDispatcher::opPlaceClip(const QJsonObject &args)
                 return 0;
             }(),
             at);
-        if (clipIdSet(m_controller) == before)
+        if (findNewClipId(before, clipIdSet(m_controller)).isEmpty())
             m_controller->addClipFromAssetOnNewTrackAt(asset, 0, at);
     }
 
     const QSet<QString> after = clipIdSet(m_controller);
-    QString newId;
-    for (const QString &id : after) {
-        if (!before.contains(id))
-            newId = id;
-    }
+    const QString newId = findNewClipId(before, after);
     if (newId.isEmpty())
         return err("type_mismatch", QStringLiteral("Clip was not placed"));
     const QPair<int, int> loc = m_controller->mcpLocateClip(newId);
@@ -928,11 +960,7 @@ QJsonObject McpDispatcher::opDuplicateClip(const QJsonObject &args)
     const QSet<QString> before = clipIdSet(m_controller);
     m_controller->selectClip(ref.track, ref.clip);
     m_controller->duplicateSelectedClip();
-    QString newId;
-    for (const QString &id : clipIdSet(m_controller)) {
-        if (!before.contains(id))
-            newId = id;
-    }
+    const QString newId = findNewClipId(before, clipIdSet(m_controller));
     if (newId.isEmpty())
         return err("bad_args", QStringLiteral("Duplicate refused"));
     const QPair<int, int> loc = m_controller->mcpLocateClip(newId);
@@ -1040,11 +1068,7 @@ QJsonObject McpDispatcher::opAddText(const QJsonObject &args)
                           : m_controller->playheadSeconds();
     const QSet<QString> before = clipIdSet(m_controller);
     m_controller->addTextClip(text, at, args.value(QStringLiteral("preset")).toString());
-    QString newId;
-    for (const QString &id : clipIdSet(m_controller)) {
-        if (!before.contains(id))
-            newId = id;
-    }
+    const QString newId = findNewClipId(before, clipIdSet(m_controller));
     if (newId.isEmpty())
         return err("bad_args", QStringLiteral("Text clip not added"));
     const QPair<int, int> loc = m_controller->mcpLocateClip(newId);

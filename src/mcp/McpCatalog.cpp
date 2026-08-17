@@ -432,8 +432,10 @@ QJsonArray homepageTools()
                      {QStringLiteral("name")})));
     tools.append(toolDef(
         QStringLiteral("inspect"),
-        QStringLiteral("When: Read state. Returns name, w, h, fps, dur, playhead, overlap, path, dirty, background, export {active, progress}, tracks, assets. Pass clips=true for per-clip rows (id, start, duration, transform)."),
-        objectSchema({{QStringLiteral("clips"), boolProp(QStringLiteral("Include per-clip rows"))}}),
+        QStringLiteral("When: Read state. Returns revision, name, w, h, fps, dur, playhead, overlap, path, dirty, background, export {active, progress}, tracks, assets. Pass clips=true for per-clip rows (id, start, duration, trim). Pass since=<revision> to skip the payload when nothing changed."),
+        objectSchema({{QStringLiteral("clips"), boolProp(QStringLiteral("Include per-clip rows"))},
+                      {QStringLiteral("since"),
+                       integerProp(QStringLiteral("Revision from a prior inspect; returns {unchanged:true} when current"))}}),
         toolAnnotations(true, false, true)));
     tools.append(toolDef(
         QStringLiteral("apply"),

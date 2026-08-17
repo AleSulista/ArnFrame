@@ -26,7 +26,7 @@ Drift can expose a localhost MCP server so Cursor, Claude Code, or other agents 
 1. **`catalog`** — toolboxes, per-op “when” hints, endpoints, units (no schemas).
 2. **`toolbox({name})`** — full JSON schemas for ops in that toolbox.
 3. **`apply({ops:[{tool, args}, …]})`** — run mutations in order; one undo step for the batch.
-4. **`inspect({clips:true})`** — project state and stable clip UUIDs.
+4. **`inspect({clips:true})`** — project state and stable clip UUIDs. Pass `since:<revision>` from a prior inspect to skip the payload when nothing changed.
 5. **`capture()`** — JPEG still of the composition (use to verify edits).
 
 Homepage endpoint: `POST /mcp` with `Authorization: Bearer <token>`.
@@ -41,6 +41,7 @@ Pinned endpoints (`/mcp/timeline`, `/mcp/project`, …) list that toolbox’s op
 | Clip reference | Prefer `clip` UUID from `inspect`; else `track` (0 = top) + `index` |
 | Overlap | Off by default — place/move snap to gaps unless `set_overlap` enables overlap |
 | Export | `export_video` is async — poll `inspect.export` or `export_status` |
+| Change detection | Every `inspect` includes `revision`; pass `since:<revision>` to get `{unchanged:true}` when state is current |
 
 ## Toolbox reference
 
