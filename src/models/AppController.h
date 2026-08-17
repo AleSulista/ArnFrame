@@ -308,6 +308,8 @@ public:
     Q_INVOKABLE void copyMcpCursorSnippet();
     Q_INVOKABLE void copyMcpClaudeCommand();
     Q_INVOKABLE void copyMcpStdioSnippet();
+    Q_INVOKABLE void copyMcpAgentGuide();
+    QString mcpAgentGuide() const;
 
     // MCP helpers (GUI thread). Used by src/mcp, not QML.
     QPair<int, int> mcpLocateClip(const QString &id) const;

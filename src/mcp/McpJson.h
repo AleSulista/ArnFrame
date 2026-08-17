@@ -67,11 +67,43 @@ inline QJsonObject arrayProp(const QJsonObject &items, const QString &descriptio
             {QStringLiteral("description"), description}};
 }
 
-inline QJsonObject toolDef(const QString &name, const QString &description, const QJsonObject &inputSchema)
+inline QJsonObject enumProp(const QString &description, const QStringList &values)
 {
-    return {{QStringLiteral("name"), name},
-            {QStringLiteral("description"), description},
-            {QStringLiteral("inputSchema"), inputSchema}};
+    QJsonArray enumValues;
+    for (const QString &value : values)
+        enumValues.append(value);
+    return {{QStringLiteral("type"), QStringLiteral("string")},
+            {QStringLiteral("enum"), enumValues},
+            {QStringLiteral("description"), description}};
+}
+
+inline QJsonObject propWithDefault(QJsonObject prop, const QJsonValue &defaultValue)
+{
+    prop.insert(QStringLiteral("default"), defaultValue);
+    return prop;
+}
+
+inline QJsonObject toolAnnotations(bool readOnly = false, bool destructive = false, bool idempotent = false)
+{
+    QJsonObject annotations;
+    if (readOnly)
+        annotations.insert(QStringLiteral("readOnlyHint"), true);
+    if (destructive)
+        annotations.insert(QStringLiteral("destructiveHint"), true);
+    if (idempotent)
+        annotations.insert(QStringLiteral("idempotentHint"), true);
+    return annotations;
+}
+
+inline QJsonObject toolDef(const QString &name, const QString &description, const QJsonObject &inputSchema,
+                           const QJsonObject &annotations = {})
+{
+    QJsonObject tool{{QStringLiteral("name"), name},
+                     {QStringLiteral("description"), description},
+                     {QStringLiteral("inputSchema"), inputSchema}};
+    if (!annotations.isEmpty())
+        tool.insert(QStringLiteral("annotations"), annotations);
+    return tool;
 }
 
 inline QJsonObject textResult(const QJsonObject &payload, bool isError = false)

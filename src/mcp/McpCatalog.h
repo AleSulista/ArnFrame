@@ -16,5 +16,6 @@ bool isHomepageTool(const QString &name);
 bool isKnownOp(const QString &name);
 QString toolboxForOp(const QString &name);
 QString homepageHtml();
+QString agentGuideText();
 
 } // namespace drift::mcp

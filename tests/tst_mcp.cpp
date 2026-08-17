@@ -28,6 +28,9 @@ class McpTest : public QObject
 
 private slots:
     void catalogListsToolboxes();
+    void catalogOpsIncludeWhen();
+    void toolboxDescriptionsIncludeWhen();
+    void toolboxAnnotationsPresent();
     void toolboxUnknownIsError();
     void toolboxReturnsSchemas();
     void protocolInitializeAndToolsList();
@@ -39,10 +42,12 @@ private slots:
     void applyUnknownOp();
     void applyBatchStopsAndUndoRevertsPrefix();
     void inspectIsCompact();
+    void inspectIncludesProjectFields();
     void placeHonorsOverlapToggle();
     void workAreaRoundTrip();
     void exportOptionsAndSettings();
-    void exportRequiresPathAndCanWait();
+    void exportVideoRequiresPath();
+    void projectSetupRoundTrip();
     void captureDoesNotInsertClip();
 };
 
@@ -126,7 +131,67 @@ void McpTest::catalogListsToolboxes()
     QVERIFY(names.contains(QStringLiteral("media")));
     QVERIFY(names.contains(QStringLiteral("timeline")));
     QVERIFY(names.contains(QStringLiteral("canvas")));
-    QVERIFY(names.contains(QStringLiteral("export")));
+    QVERIFY(names.contains(QStringLiteral("project")));
+}
+
+void McpTest::catalogOpsIncludeWhen()
+{
+    const QJsonObject cat = drift::mcp::catalogPayload();
+    const QJsonArray boxes = cat.value(QStringLiteral("toolboxes")).toArray();
+    QVERIFY(cat.contains(QStringLiteral("endpoints")));
+    QVERIFY(cat.contains(QStringLiteral("units")));
+    QVERIFY(cat.contains(QStringLiteral("workflow")));
+    QVERIFY(cat.contains(QStringLiteral("guide")));
+    for (const QJsonValue &v : boxes) {
+        const QJsonArray ops = v.toObject().value(QStringLiteral("ops")).toArray();
+        QVERIFY(!ops.isEmpty());
+        const QJsonObject first = ops.at(0).toObject();
+        QVERIFY(first.contains(QStringLiteral("name")));
+        QVERIFY(first.contains(QStringLiteral("when")));
+    }
+}
+
+void McpTest::toolboxDescriptionsIncludeWhen()
+{
+    const QJsonObject payload = drift::mcp::toolboxPayload(QStringLiteral("timeline"));
+    const QJsonArray tools = payload.value(QStringLiteral("tools")).toArray();
+    bool sawAddTrack = false;
+    for (const QJsonValue &v : tools) {
+        const QJsonObject tool = v.toObject();
+        if (tool.value(QStringLiteral("name")).toString() == QLatin1String("add_track")) {
+            sawAddTrack = true;
+            QVERIFY(tool.value(QStringLiteral("description")).toString().startsWith(QStringLiteral("When:")));
+            const QJsonObject type =
+                tool.value(QStringLiteral("inputSchema")).toObject()
+                    .value(QStringLiteral("properties")).toObject()
+                    .value(QStringLiteral("type")).toObject();
+            QVERIFY(type.contains(QStringLiteral("enum")));
+        }
+    }
+    QVERIFY(sawAddTrack);
+}
+
+void McpTest::toolboxAnnotationsPresent()
+{
+    const QJsonObject payload = drift::mcp::toolboxPayload(QStringLiteral("media"));
+    const QJsonArray tools = payload.value(QStringLiteral("tools")).toArray();
+    bool sawList = false;
+    bool sawRename = false;
+    for (const QJsonValue &v : tools) {
+        const QJsonObject tool = v.toObject();
+        const QString name = tool.value(QStringLiteral("name")).toString();
+        if (name == QLatin1String("list_assets")) {
+            sawList = true;
+            const QJsonObject ann = tool.value(QStringLiteral("annotations")).toObject();
+            QVERIFY(ann.value(QStringLiteral("readOnlyHint")).toBool());
+            QVERIFY(ann.value(QStringLiteral("idempotentHint")).toBool());
+        }
+        if (name == QLatin1String("rename_asset"))
+            sawRename = true;
+    }
+    QVERIFY(sawList);
+    QVERIFY(sawRename);
+    QVERIFY(drift::mcp::toolboxNames().contains(QStringLiteral("project")));
 }
 
 void McpTest::toolboxUnknownIsError()
@@ -318,10 +383,28 @@ void McpTest::inspectIsCompact()
     QCOMPARE(summary.value(QStringLiteral("overlap")).toBool(), false);
     QVERIFY(!summary.contains(QStringLiteral("work_in")));
     QVERIFY(!summary.toVariantMap().contains(QStringLiteral("effects")));
+    QCOMPARE(summary.value(QStringLiteral("path")).toString(), QString());
+    QCOMPARE(summary.value(QStringLiteral("dirty")).toBool(), true);
+    QVERIFY(summary.contains(QStringLiteral("background")));
+    QVERIFY(summary.contains(QStringLiteral("export")));
     const QJsonObject withClips = dispatcher.inspect({{QStringLiteral("clips"), true}});
     const QJsonArray tracks = withClips.value(QStringLiteral("tracks")).toArray();
     QVERIFY(!tracks.isEmpty());
     QVERIFY(tracks.at(0).toObject().contains(QStringLiteral("items")));
+}
+
+void McpTest::inspectIncludesProjectFields()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+    const QJsonObject inspect = dispatcher.inspect({});
+    QVERIFY(inspect.contains(QStringLiteral("path")));
+    QVERIFY(inspect.contains(QStringLiteral("dirty")));
+    QVERIFY(inspect.contains(QStringLiteral("background")));
+    const QJsonObject exportState = inspect.value(QStringLiteral("export")).toObject();
+    QVERIFY(exportState.contains(QStringLiteral("active")));
+    QVERIFY(exportState.contains(QStringLiteral("progress")));
 }
 
 void McpTest::placeHonorsOverlapToggle()
@@ -409,25 +492,9 @@ void McpTest::exportOptionsAndSettings()
     QVERIFY(!options.value(QStringLiteral("video")).toArray().isEmpty());
     QVERIFY(!options.value(QStringLiteral("fps")).toArray().isEmpty());
     QVERIFY(options.contains(QStringLiteral("gif")));
-
-    const QJsonObject patched = dispatcher.applyOne(
-        QStringLiteral("set_export_settings"),
-        {{QStringLiteral("video"), QStringLiteral("h264")},
-         {QStringLiteral("fps"), 30},
-         {QStringLiteral("crf"), 23},
-         {QStringLiteral("gif"), false}});
-    QVERIFY(patched.value(QStringLiteral("ok")).toBool());
-    QCOMPARE(patched.value(QStringLiteral("video")).toString(), QStringLiteral("h264"));
-    QCOMPARE(patched.value(QStringLiteral("fps")).toDouble(), 30.0);
-    QCOMPARE(patched.value(QStringLiteral("crf")).toInt(), 23);
-
-    const QJsonObject got = dispatcher.applyOne(QStringLiteral("get_export_settings"), {});
-    QCOMPARE(got.value(QStringLiteral("video")).toString(), QStringLiteral("h264"));
-    QCOMPARE(got.value(QStringLiteral("fps")).toDouble(), 30.0);
-    QCOMPARE(got.value(QStringLiteral("busy")).toBool(), false);
 }
 
-void McpTest::exportRequiresPathAndCanWait()
+void McpTest::exportVideoRequiresPath()
 {
     QStandardPaths::setTestModeEnabled(true);
     const QString org = QCoreApplication::organizationName();
@@ -446,28 +513,44 @@ void McpTest::exportRequiresPathAndCanWait()
     AppController state(&library);
     drift::mcp::McpDispatcher dispatcher(&state);
 
-    const QJsonObject missing = dispatcher.applyOne(QStringLiteral("export"), {});
+    const QJsonObject missing = dispatcher.applyOne(QStringLiteral("export_video"), {});
     QCOMPARE(missing.value(QStringLiteral("ok")).toBool(), false);
     QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("bad_args"));
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     const QString outPath = dir.filePath(QStringLiteral("out.mp4"));
-    const QJsonObject result = dispatcher.applyOne(
-        QStringLiteral("export"),
-        {{QStringLiteral("path"), outPath},
-         {QStringLiteral("wait"), true},
-         {QStringLiteral("timeout"), 20}});
-    QVERIFY(result.value(QStringLiteral("ok")).toBool()
-            || result.value(QStringLiteral("error")).toString() == QStringLiteral("export_failed"));
-    if (result.value(QStringLiteral("ok")).toBool()) {
-        QCOMPARE(result.value(QStringLiteral("path")).toString(), outPath);
-        QVERIFY(QFile::exists(outPath));
+    const QJsonObject started = dispatcher.applyOne(
+        QStringLiteral("export_video"), {{QStringLiteral("path"), outPath}});
+    if (started.value(QStringLiteral("ok")).toBool()) {
+        QVERIFY(started.value(QStringLiteral("started")).toBool());
+        const QJsonObject status = dispatcher.applyOne(QStringLiteral("export_status"), {});
+        QVERIFY(status.contains(QStringLiteral("busy")));
+        QVERIFY(status.contains(QStringLiteral("progress")));
     }
-    QCOMPARE(dispatcher.applyOne(QStringLiteral("export_status"), {})
-                 .value(QStringLiteral("busy"))
-                 .toBool(),
-             false);
+}
+
+void McpTest::projectSetupRoundTrip()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject setup = dispatcher.applyOne(
+        QStringLiteral("set_project_setup"),
+        {{QStringLiteral("width"), 1280}, {QStringLiteral("height"), 720}, {QStringLiteral("fps"), 30}});
+    QVERIFY(setup.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(setup.value(QStringLiteral("w")).toInt(), 1280);
+    QCOMPARE(setup.value(QStringLiteral("h")).toInt(), 720);
+    QCOMPARE(setup.value(QStringLiteral("fps")).toInt(), 30);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("test.dcut"));
+    const QJsonObject saved = dispatcher.applyOne(
+        QStringLiteral("save_project"), {{QStringLiteral("path"), path}});
+    QVERIFY(saved.value(QStringLiteral("ok")).toBool());
+    QVERIFY(QFile::exists(path));
 }
 
 void McpTest::captureDoesNotInsertClip()

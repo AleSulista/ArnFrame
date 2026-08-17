@@ -33,9 +33,14 @@ QJsonObject initializeResult()
          QJsonObject{{QStringLiteral("name"), QStringLiteral("drift")},
                      {QStringLiteral("version"), QStringLiteral(DRIFT_VERSION)}}},
         {QStringLiteral("instructions"),
-         QStringLiteral("Call catalog, then toolbox({name}) for schemas, then apply({ops}) "
-                        "to mutate. inspect({clips:true}) for clip ids. capture() for a still. "
-                        "Times are seconds. Clip ids are stable; track indices shift (0 = top).")},
+         QStringLiteral(
+             "Call catalog first, then toolbox({name}) for schemas, then apply({ops}) to mutate. "
+             "Homepage /mcp exposes catalog, toolbox, apply, inspect, capture. "
+             "Pinned /mcp/{toolbox} lists that toolbox's ops directly (no catalog/apply there). "
+             "Always prefer clip UUID from inspect({clips:true}). "
+             "inspect also returns path, dirty, background, and export progress. "
+             "capture() returns a composition still. Times are seconds. Track index 0 is top. "
+             "Clip overlap is off by default. export_video is async — poll inspect.export.")},
     };
 }
 

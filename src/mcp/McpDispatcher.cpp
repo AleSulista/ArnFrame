@@ -474,9 +474,8 @@ bool McpDispatcher::isUndoable(const QString &tool) const
         QStringLiteral("play"),         QStringLiteral("pause"),
         QStringLiteral("undo"),         QStringLiteral("redo"),
         QStringLiteral("set_overlap"),
-        QStringLiteral("list_export_options"), QStringLiteral("get_export_settings"),
-        QStringLiteral("set_export_settings"), QStringLiteral("export"),
-        QStringLiteral("export_status"),       QStringLiteral("cancel_export"),
+        QStringLiteral("list_export_options"), QStringLiteral("export_video"),
+        QStringLiteral("export_status"), QStringLiteral("save_project"),
     };
     return !skip.contains(tool);
 }
@@ -589,18 +588,20 @@ QJsonObject McpDispatcher::applyOne(const QString &tool, const QJsonObject &args
         return opAddTransition(args);
     if (tool == QLatin1String("remove_transition"))
         return opRemoveTransition(args);
+    if (tool == QLatin1String("set_project_setup"))
+        return opSetProjectSetup(args);
+    if (tool == QLatin1String("set_background"))
+        return opSetBackground(args);
+    if (tool == QLatin1String("set_metadata"))
+        return opSetMetadata(args);
+    if (tool == QLatin1String("save_project"))
+        return opSaveProject(args);
     if (tool == QLatin1String("list_export_options"))
         return opListExportOptions();
-    if (tool == QLatin1String("get_export_settings"))
-        return opGetExportSettings();
-    if (tool == QLatin1String("set_export_settings"))
-        return opSetExportSettings(args);
-    if (tool == QLatin1String("export"))
-        return opExport(args);
+    if (tool == QLatin1String("export_video"))
+        return opExportVideo(args);
     if (tool == QLatin1String("export_status"))
         return opExportStatus();
-    if (tool == QLatin1String("cancel_export"))
-        return opCancelExport();
     return err("unknown_op", tool);
 }
 
@@ -1203,6 +1204,64 @@ QJsonObject McpDispatcher::opRemoveTransition(const QJsonObject &args)
     return ok({{QStringLiteral("removed"), id}});
 }
 
+QJsonObject McpDispatcher::opSetProjectSetup(const QJsonObject &args)
+{
+    const int width = jsonInt(args.value(QStringLiteral("width")));
+    const int height = jsonInt(args.value(QStringLiteral("height")));
+    const int fps = jsonInt(args.value(QStringLiteral("fps")));
+    if (width <= 0 || height <= 0 || fps <= 0)
+        return err("bad_args", QStringLiteral("width, height, fps required"));
+    m_controller->setProjectSetup(width, height, fps);
+    return ok({{QStringLiteral("w"), width},
+               {QStringLiteral("h"), height},
+               {QStringLiteral("fps"), fps}});
+}
+
+QJsonObject McpDispatcher::opSetBackground(const QJsonObject &args)
+{
+    QVariantMap patch;
+    if (args.contains(QStringLiteral("kind")))
+        patch.insert(QStringLiteral("kind"), args.value(QStringLiteral("kind")).toString());
+    if (args.contains(QStringLiteral("color")))
+        patch.insert(QStringLiteral("color"), args.value(QStringLiteral("color")).toString());
+    if (args.contains(QStringLiteral("blurStrength")))
+        patch.insert(QStringLiteral("blurStrength"), jsonNumber(args.value(QStringLiteral("blurStrength")), 0));
+    if (patch.isEmpty())
+        return err("bad_args", QStringLiteral("At least one of kind, color, blurStrength required"));
+    m_controller->setBackground(patch);
+    return ok(QJsonObject::fromVariantMap(m_controller->background()));
+}
+
+QJsonObject McpDispatcher::opSetMetadata(const QJsonObject &args)
+{
+    const QVariantMap current = m_controller->projectMetadata();
+    const QString title =
+        args.contains(QStringLiteral("title")) ? args.value(QStringLiteral("title")).toString()
+                                               : current.value(QStringLiteral("title")).toString();
+    const QString author =
+        args.contains(QStringLiteral("author")) ? args.value(QStringLiteral("author")).toString()
+                                               : current.value(QStringLiteral("author")).toString();
+    const QString description = args.contains(QStringLiteral("description"))
+                                    ? args.value(QStringLiteral("description")).toString()
+                                    : current.value(QStringLiteral("description")).toString();
+    m_controller->setProjectMetadata(title, author, description);
+    return ok({{QStringLiteral("title"), title},
+               {QStringLiteral("author"), author},
+               {QStringLiteral("description"), description}});
+}
+
+QJsonObject McpDispatcher::opSaveProject(const QJsonObject &args)
+{
+    const QString path = args.value(QStringLiteral("path")).toString();
+    if (path.isEmpty())
+        return err("bad_args", QStringLiteral("path required"));
+    const QFileInfo info(path);
+    if (!info.absoluteDir().exists() && !QDir().mkpath(info.absolutePath()))
+        return err("bad_args", QStringLiteral("Could not create parent folder"));
+    m_controller->saveProject(QUrl::fromLocalFile(path));
+    return ok({{QStringLiteral("path"), path}});
+}
+
 QJsonObject McpDispatcher::opListExportOptions() const
 {
     QJsonArray scales;
@@ -1230,24 +1289,11 @@ QJsonObject McpDispatcher::opListExportOptions() const
     });
 }
 
-QJsonObject McpDispatcher::opGetExportSettings() const
+QJsonObject McpDispatcher::opExportVideo(const QJsonObject &args)
 {
-    QJsonObject o = compactExportSettings(m_controller, mergedExportSettings(m_controller));
-    o.insert(QStringLiteral("folder"), m_controller->lastExportFolder());
-    o.insert(QStringLiteral("gif_ok"), m_controller->exportGifAvailable());
-    o.insert(QStringLiteral("busy"), m_controller->exportInProgress());
-    o.insert(QStringLiteral("progress"), m_controller->exportProgress());
-    return ok(o);
-}
-
-QJsonObject McpDispatcher::opSetExportSettings(const QJsonObject &args)
-{
-    QVariantMap map = mergedExportSettings(m_controller);
-    QString error;
-    if (!applyExportPatch(m_controller, map, args, &error))
-        return err("bad_args", error);
-    m_controller->mcpRememberExportSettings(map);
-    return opGetExportSettings();
+    QJsonObject patched = args;
+    patched.insert(QStringLiteral("wait"), false);
+    return opExport(patched);
 }
 
 QJsonObject McpDispatcher::opExport(const QJsonObject &args)
@@ -1335,14 +1381,6 @@ QJsonObject McpDispatcher::opExportStatus() const
         {QStringLiteral("progress"), m_controller->exportProgress()},
         {QStringLiteral("message"), m_controller->lastMessage()},
     });
-}
-
-QJsonObject McpDispatcher::opCancelExport()
-{
-    const bool busy = m_controller->exportInProgress();
-    if (busy)
-        m_controller->cancelExport();
-    return ok({{QStringLiteral("cancelled"), busy}});
 }
 
 } // namespace drift::mcp

@@ -459,6 +459,66 @@ Item {
                     tooltip: qsTr("Add this once to mcp.json. drift --mcp-stdio talks to whichever session is running. Agent access still has to be turned on in Drift.")
                     onClicked: EditorState.copyMcpStdioSnippet()
                 }
+
+                ThemedButton {
+                    variant: "ghost"
+                    glyph: Theme.icons.copy
+                    text: qsTr("Copy agent guide")
+                    tooltip: qsTr("Copy workflow, conventions, and toolbox list for agents")
+                    onClicked: EditorState.copyMcpAgentGuide()
+                }
+
+                ThemedLabel {
+                    width: parent.width
+                    text: qsTr("Pinned endpoints: /mcp/media, /mcp/timeline, /mcp/canvas, /mcp/playback, /mcp/text, /mcp/effects, /mcp/project")
+                    size: "sm"
+                    tone: "muted"
+                    wrapMode: Text.WordWrap
+                }
+
+                Rectangle {
+                    width: parent.width
+                    radius: Theme.radiusSm
+                    color: Theme.panelSecondaryBg
+                    border.width: Theme.borderWidth
+                    border.color: Theme.border
+                    implicitHeight: mcpWorkflowColumn.implicitHeight + Theme.spacingLg * 2
+
+                    Column {
+                        id: mcpWorkflowColumn
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.margins: Theme.spacingLg
+                        spacing: Theme.spacingSm
+
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            color: Theme.panelSecondaryForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeXs
+                            text: qsTr("Agent workflow")
+                            font.weight: Font.DemiBold
+                        }
+
+                        Repeater {
+                            model: [
+                                qsTr("1. Enable agent access for this session."),
+                                qsTr("2. Connect Cursor or Claude with the copied config."),
+                                qsTr("3. Call catalog, then toolbox, then apply with batched ops."),
+                                qsTr("4. Use inspect({clips:true}) for clip ids; capture() to verify frames.")
+                            ]
+                            Text {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                color: Theme.panelSecondaryForeground
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeXs
+                                text: modelData
+                            }
+                        }
+                    }
+                }
             }
         }
     }

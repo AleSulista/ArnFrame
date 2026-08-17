@@ -36,6 +36,7 @@
 #include "SegmentImageStore.h"
 #include "engine/TransitionCatalog.h"
 #include "engine/WhisperTranscriber.h"
+#include "mcp/McpCatalog.h"
 #include "mcp/McpJson.h"
 #include "mcp/McpServer.h"
 
@@ -10918,6 +10919,21 @@ void AppController::copyMcpStdioSnippet()
     copyToClipboard(mcpStdioSnippet());
 }
 
+QString AppController::mcpAgentGuide() const
+{
+    QString guide = drift::mcp::agentGuideText();
+    if (m_mcp && m_mcp->running()) {
+        guide += QStringLiteral("\nThis session:\nURL: %1\nToken: %2\n")
+                     .arg(mcpUrl(), mcpToken());
+    }
+    return guide;
+}
+
+void AppController::copyMcpAgentGuide()
+{
+    copyToClipboard(mcpAgentGuide());
+}
+
 QPair<int, int> AppController::mcpLocateClip(const QString &id) const
 {
     if (id.isEmpty())
@@ -11012,14 +11028,18 @@ QJsonObject AppController::mcpInspect(bool includeClips) const
         {QStringLiteral("clips"), clipCount},
         {QStringLiteral("tracks"), tracks},
         {QStringLiteral("assets"), assets},
+        {QStringLiteral("path"), m_currentProjectPath},
+        {QStringLiteral("dirty"), m_dirty},
+        {QStringLiteral("background"), QJsonObject::fromVariantMap(background())},
+        {QStringLiteral("export"),
+         QJsonObject{{QStringLiteral("active"), m_exportInProgress},
+                     {QStringLiteral("progress"), m_exportProgress}}},
     };
-        if (m_project.hasWorkArea()) {
-            extra.insert(QStringLiteral("work_in"), workAreaInSeconds());
-            extra.insert(QStringLiteral("work_out"), workAreaOutSeconds());
-        }
-        if (m_exportInProgress)
-            extra.insert(QStringLiteral("exporting"), true);
-        return ok(extra);
+    if (m_project.hasWorkArea()) {
+        extra.insert(QStringLiteral("work_in"), workAreaInSeconds());
+        extra.insert(QStringLiteral("work_out"), workAreaOutSeconds());
+    }
+    return ok(extra);
 }
 
 bool AppController::mcpSetWorkArea(double inSeconds, double outSeconds)
