@@ -292,6 +292,7 @@ public:
     void setRippleEnabled(bool enabled);
     void setAllowClipOverlap(bool enabled);
     Q_INVOKABLE void setDarkModePreference(bool enabled);
+    Q_INVOKABLE void clearDarkModePreference();
     void setMediaGridMode(bool enabled);
     void setAutoKeyEnabled(bool enabled);
     void setReopenLastProject(bool enabled);
@@ -315,7 +316,7 @@ public:
     QPair<int, int> mcpLocateClip(const QString &id) const;
     QString mcpClipId(int trackIndex, int clipIndex) const;
     QVariantMap mcpCompactClip(int trackIndex, int clipIndex, bool includeCanvas = true) const;
-    QJsonObject mcpInspect(bool includeClips, int sinceRevision = -1) const;
+    QJsonObject mcpInspect(bool includeClips, int sinceRevision = -1, bool detail = false) const;
     int mcpRevision() const { return m_mcpEditRevision; }
     bool mcpSetClipCanvas(int trackIndex, int clipIndex, const QVariantMap &patch);
     QJsonObject mcpCaptureFrame(double atSeconds, bool full);

@@ -15,6 +15,7 @@ public:
     QJsonObject inspect(const QJsonObject &args) const;
     QJsonObject apply(const QJsonObject &args);
     QJsonObject applyOne(const QString &tool, const QJsonObject &args);
+    QJsonObject applyOneExtended(const QString &tool, const QJsonObject &args);
     QJsonObject capture(const QJsonObject &args);
 
 private:

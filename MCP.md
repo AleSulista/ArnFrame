@@ -26,7 +26,7 @@ Drift can expose a localhost MCP server so Cursor, Claude Code, or other agents 
 1. **`catalog`** — toolboxes, per-op “when” hints, endpoints, units (no schemas).
 2. **`toolbox({name})`** — full JSON schemas for ops in that toolbox.
 3. **`apply({ops:[{tool, args}, …]})`** — run mutations in order; one undo step for the batch.
-4. **`inspect({clips:true})`** — project state and stable clip UUIDs. Pass `since:<revision>` from a prior inspect to skip the payload when nothing changed.
+4. **`inspect({clips:true, detail:true})`** — project state, clip UUIDs, effects, transitions, bookmarks, async jobs.
 5. **`capture()`** — JPEG still of the composition (use to verify edits).
 
 Homepage endpoint: `POST /mcp` with `Authorization: Bearer <token>`.
@@ -42,21 +42,27 @@ Pinned endpoints (`/mcp/timeline`, `/mcp/project`, …) list that toolbox’s op
 | Overlap | Off by default — place/move snap to gaps unless `set_overlap` enables overlap |
 | Export | `export_video` is async — poll `inspect.export` or `export_status` |
 | Change detection | Every `inspect` includes `revision`; pass `since:<revision>` to get `{unchanged:true}` when state is current |
+| Media import | Local absolute paths, `file://` URLs, or `import_media_bytes` (base64) |
+| Async jobs | Package, Whisper subtitles, reverse proxy, segmentation, denoise, face detection — poll `inspect` with `detail:true` |
 
 ## Toolbox reference
 
 | Toolbox | When to use |
 |---------|-------------|
-| `media` | Import and inspect the media bin before placing clips |
-| `timeline` | Tracks, place/move/trim/split/delete, overlap, undo |
-| `canvas` | On-screen position, size, rotation, opacity |
+| `media` | Import (paths/bytes), list, rename, remove, replace, export still |
+| `timeline` | Tracks, clips, selection, bookmarks, copy/paste, A/V link |
+| `canvas` | Transform, flip, blend, mask, fade, speed, reverse, animation |
 | `playback` | Seek, play, pause, In/Out work area |
 | `text` | Title and caption clips |
-| `effects` | Video/audio effects and transitions |
-| `project` | Canvas size, background, metadata, save, export |
-| `keyframes` | Animate clip and effect properties |
-| `speed` | Variable playback speed (retimed clips) |
-| `ui` | Editor theme and keyboard shortcuts |
+| `shapes` | Builtin shapes, stickers, emoji, fonts, text presets |
+| `subtitles` | Subtitle clips, cues, import/export, Whisper generation |
+| `effects` | Video/audio effects, transitions, templates |
+| `project` | Open/new/save/package, canvas, background, metadata, export |
+| `keyframes` | Property animation keys and tangents |
+| `speed` | Speed ramps and custom fade curves |
+| `segmentation` | SAM-style cutout (session or one-shot) |
+| `ai` | Denoise and face detection |
+| `ui` | Theme, shortcuts, editor preferences |
 
 ## Example
 
@@ -74,10 +80,6 @@ Import, place, trim, and capture in one batch:
 ```
 
 (`capture` is a homepage tool — call it directly or after `apply` on `/mcp`.)
-
-## Limitations
-
-Not available via MCP yet: subtitles, segmentation.
 
 ## Security
 

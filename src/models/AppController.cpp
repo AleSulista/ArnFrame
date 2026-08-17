@@ -1906,6 +1906,16 @@ void AppController::setDarkModePreference(bool enabled)
     emit darkModePreferenceChanged();
 }
 
+void AppController::clearDarkModePreference()
+{
+    if (!m_darkModeOverridden)
+        return;
+    m_darkModeOverridden = false;
+    QSettings settings;
+    settings.remove(QStringLiteral("ui/darkMode"));
+    emit darkModePreferenceChanged();
+}
+
 void AppController::setWorkspaceLayoutPreference(const QString &layout)
 {
     const QString normalized = layout == QStringLiteral("portrait")
@@ -10996,15 +11006,16 @@ QVariantMap AppController::mcpCompactClip(int trackIndex, int clipIndex, bool in
     return out;
 }
 
-QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision) const
+QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision, bool detail) const
 {
     using namespace drift::mcp;
     if (sinceRevision >= 0 && sinceRevision == m_mcpEditRevision)
         return ok({{QStringLiteral("unchanged"), true}, {QStringLiteral("revision"), m_mcpEditRevision}});
 
     int clipCount = 0;
-    QJsonArray tracks;
+    QJsonArray trackRows;
     const QList<drift::Track> &projectTracks = m_project.tracks();
+    const QVariantList trackModels = detail ? tracks() : QVariantList{};
     for (int t = 0; t < projectTracks.size(); ++t) {
         const drift::Track &track = projectTracks.at(t);
         clipCount += track.clips.size();
@@ -11015,15 +11026,32 @@ QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision) cons
             {QStringLiteral("muted"), track.muted},
             {QStringLiteral("hidden"), track.hidden},
         };
+        if (detail && t < trackModels.size()) {
+            const QVariantMap tm = trackModels.at(t).toMap();
+            row.insert(QStringLiteral("showWaveform"), tm.value(QStringLiteral("showWaveform")).toBool());
+            row.insert(QStringLiteral("heightScale"), tm.value(QStringLiteral("heightScale")).toDouble());
+            const QVariantList transitions = tm.value(QStringLiteral("transitions")).toList();
+            QJsonArray trJson;
+            for (const QVariant &tr : transitions)
+                trJson.append(QJsonObject::fromVariantMap(tr.toMap()));
+            if (!trJson.isEmpty())
+                row.insert(QStringLiteral("transitions"), trJson);
+        }
         if (includeClips) {
             QJsonArray clips;
             for (int c = 0; c < track.clips.size(); ++c) {
-                const QVariantMap compact = mcpCompactClip(t, c, false);
-                clips.append(QJsonObject::fromVariantMap(compact));
+                if (detail && t < trackModels.size()) {
+                    const QVariantList clipList = trackModels.at(t).toMap().value(QStringLiteral("clips")).toList();
+                    if (c < clipList.size())
+                        clips.append(QJsonObject::fromVariantMap(clipList.at(c).toMap()));
+                } else {
+                    const QVariantMap compact = mcpCompactClip(t, c, false);
+                    clips.append(QJsonObject::fromVariantMap(compact));
+                }
             }
             row.insert(QStringLiteral("items"), clips);
         }
-        tracks.append(row);
+        trackRows.append(row);
     }
 
     QJsonArray assets;
@@ -11051,7 +11079,7 @@ QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision) cons
         {QStringLiteral("playing"), playing()},
         {QStringLiteral("overlap"), m_allowClipOverlap},
         {QStringLiteral("clips"), clipCount},
-        {QStringLiteral("tracks"), tracks},
+        {QStringLiteral("tracks"), trackRows},
         {QStringLiteral("assets"), assets},
         {QStringLiteral("path"), m_currentProjectPath},
         {QStringLiteral("dirty"), m_dirty},
@@ -11060,6 +11088,28 @@ QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision) cons
          QJsonObject{{QStringLiteral("active"), m_exportInProgress},
                      {QStringLiteral("progress"), m_exportProgress}}},
     };
+    if (detail) {
+        QJsonArray marks;
+        for (const QVariant &v : bookmarks()) {
+            const QVariantMap b = v.toMap();
+            marks.append(QJsonObject{
+                {QStringLiteral("at"), b.value(QStringLiteral("seconds")).toDouble()},
+                {QStringLiteral("label"), b.value(QStringLiteral("label")).toString()},
+            });
+        }
+        extra.insert(QStringLiteral("bookmarks"), marks);
+        extra.insert(QStringLiteral("package"),
+                     QJsonObject{{QStringLiteral("active"), packaging()},
+                                 {QStringLiteral("progress"), packageProgress()}});
+        extra.insert(QStringLiteral("subtitleGen"),
+                     QJsonObject{{QStringLiteral("active"), subtitleGenerating()},
+                                 {QStringLiteral("progress"), subtitleGenProgress()},
+                                 {QStringLiteral("status"), subtitleGenStatus()}});
+        extra.insert(QStringLiteral("reverseRender"),
+                     QJsonObject{{QStringLiteral("active"), reverseRendering()},
+                                 {QStringLiteral("progress"), reverseRenderProgress()},
+                                 {QStringLiteral("status"), reverseRenderStatus()}});
+    }
     if (m_project.hasWorkArea()) {
         extra.insert(QStringLiteral("work_in"), workAreaInSeconds());
         extra.insert(QStringLiteral("work_out"), workAreaOutSeconds());

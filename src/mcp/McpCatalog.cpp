@@ -401,7 +401,8 @@ const QList<Op> &ops()
                        {QStringLiteral("action"), QStringLiteral("keys")}) },
         { "reset_shortcuts", "ui", "Restore default shortcuts",
           "Reset every action binding to defaults.",
-          objectSchema({}) },
+          objectSchema({}) }
+#include "mcp/McpCatalogExtendedOps.inl"
     };
     return k;
 }
@@ -433,7 +434,8 @@ QStringList toolboxNames()
     return {QStringLiteral("media"),     QStringLiteral("timeline"), QStringLiteral("canvas"),
             QStringLiteral("playback"),  QStringLiteral("text"),     QStringLiteral("effects"),
             QStringLiteral("project"),   QStringLiteral("keyframes"), QStringLiteral("speed"),
-            QStringLiteral("ui")};
+            QStringLiteral("ui"),        QStringLiteral("shapes"),   QStringLiteral("subtitles"),
+            QStringLiteral("segmentation"), QStringLiteral("ai")};
 }
 
 QString agentGuideText()
@@ -457,7 +459,8 @@ QString agentGuideText()
         "- Clip overlap is off by default (place/move snap to gaps).\n"
         "- export_video is async; poll inspect.export until active is false.\n"
         "\n"
-        "Toolboxes: media, timeline, canvas, playback, text, effects, project, keyframes, speed, ui.\n");
+        "Toolboxes: media, timeline, canvas, playback, text, effects, project, keyframes, speed, ui, "
+        "shapes, subtitles, segmentation, ai.\n");
 }
 
 QJsonObject catalogPayload()
@@ -477,6 +480,10 @@ QJsonObject catalogPayload()
         {"keyframes", "Animate clip and effect properties over time."},
         {"speed", "Variable playback speed (retimed clips)."},
         {"ui", "Editor theme and keyboard shortcuts."},
+        {"shapes", "Builtin shapes, stickers, emoji, fonts."},
+        {"subtitles", "Subtitle clips, import/export, Whisper generation."},
+        {"segmentation", "SAM-style cutout and mask output."},
+        {"ai", "Denoise and face detection."},
     };
 
     QJsonArray toolboxes;
@@ -508,7 +515,8 @@ QJsonObject catalogPayload()
          QStringLiteral("catalog → toolbox({name}) → apply({ops:[{tool,args}…]})")},
         {QStringLiteral("hint"),
          QStringLiteral("toolbox({name}) then apply({ops:[{tool,args}…]}) for a batch. "
-                        "inspect({clips:true}) for clip ids. capture() for a still.")},
+                        "inspect({clips:true,detail:true}) for full clip rows. capture() for a still.")},
+        {QStringLiteral("limitations"), QJsonArray{}},
         {QStringLiteral("guide"), agentGuideText()},
     });
 }

@@ -499,7 +499,8 @@ QJsonObject McpDispatcher::inspect(const QJsonObject &args) const
     const int since = args.contains(QStringLiteral("since"))
                           ? jsonInt(args.value(QStringLiteral("since")), -1)
                           : -1;
-    return m_controller->mcpInspect(jsonBool(args.value(QStringLiteral("clips"))), since);
+    const bool detail = jsonBool(args.value(QStringLiteral("detail")));
+    return m_controller->mcpInspect(jsonBool(args.value(QStringLiteral("clips"))), since, detail);
 }
 
 bool McpDispatcher::isUndoable(const QString &tool) const
@@ -675,6 +676,9 @@ QJsonObject McpDispatcher::applyOne(const QString &tool, const QJsonObject &args
         return opSetShortcut(args);
     if (tool == QLatin1String("reset_shortcuts"))
         return opResetShortcuts();
+    const QJsonObject extended = applyOneExtended(tool, args);
+    if (!extended.value(QStringLiteral("error")).toString().startsWith(QLatin1String("unknown_op")))
+        return extended;
     return err("unknown_op", tool);
 }
 

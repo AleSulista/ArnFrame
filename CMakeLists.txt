@@ -475,6 +475,7 @@ qt_add_executable(drift
     src/mcp/McpHttp.cpp
     src/mcp/McpDispatcher.h
     src/mcp/McpDispatcher.cpp
+    src/mcp/McpDispatcherExtended.cpp
     src/mcp/McpServer.h
     src/mcp/McpServer.cpp
     src/mcp/McpStdio.h

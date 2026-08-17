@@ -126,7 +126,7 @@ void McpTest::catalogListsToolboxes()
     const QJsonObject cat = drift::mcp::catalogPayload();
     QVERIFY(cat.value(QStringLiteral("ok")).toBool());
     const QJsonArray boxes = cat.value(QStringLiteral("toolboxes")).toArray();
-    QCOMPARE(boxes.size(), 10);
+    QCOMPARE(boxes.size(), 14);
     QStringList names;
     for (const QJsonValue &v : boxes)
         names.append(v.toObject().value(QStringLiteral("name")).toString());
