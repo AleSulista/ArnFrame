@@ -126,13 +126,21 @@ PanelFrame {
                         id: preview
                         anchors.fill: parent
 
+                        // Auto quality sizes its canvas from this, so it has to be
+                        // real screen pixels: item geometry is in logical units, and
+                        // on a scaled display a canvas built from those is upscaled
+                        // by the ratio before it ever reaches the screen.
+                        readonly property real pixelRatio: Screen.devicePixelRatio
+
                         function updateRenderSize() {
-                            EditorState.playback.setPreviewRenderSize(Math.round(width), Math.round(height))
+                            EditorState.playback.setPreviewRenderSize(Math.round(width * pixelRatio),
+                                                                      Math.round(height * pixelRatio))
                         }
 
                         Component.onCompleted: updateRenderSize()
                         onWidthChanged: updateRenderSize()
                         onHeightChanged: updateRenderSize()
+                        onPixelRatioChanged: updateRenderSize()
                     }
 
                     Item {

@@ -22,6 +22,15 @@ constexpr drift::TimeUs kReadAheadUs = 2 * drift::kUsPerSecond;
 // (kMinCurveSpeed..kMaxCurveSpeed), and nothing outside this list is accepted.
 constexpr std::array<double, 6> kPlaybackRates{0.25, 0.5, 1.0, 1.5, 2.0, 4.0};
 
+// "full", "half" and "quarter" are exact: the preview renders at the fraction
+// asked for and nothing changes it underneath. "auto" starts from what "full"
+// would give and lets the compositor trade resolution for cadence.
+bool isKnownPreviewQuality(const QString &quality)
+{
+    return quality == QStringLiteral("full") || quality == QStringLiteral("half")
+        || quality == QStringLiteral("quarter") || quality == QStringLiteral("auto");
+}
+
 } // namespace
 
 AudioPlaybackIODevice::AudioPlaybackIODevice(PlaybackEngine *engine, QObject *parent)
@@ -62,16 +71,15 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
     , m_device(new AudioPlaybackIODevice(this))
 {
     const QString saved = QSettings().value(QStringLiteral("preview/quality")).toString().toLower();
-    if (saved == QStringLiteral("full") || saved == QStringLiteral("half")
-        || saved == QStringLiteral("quarter")) {
+    if (isKnownPreviewQuality(saved))
         m_previewQuality = saved;
-    }
 
     const QString savedMode =
         QSettings().value(QStringLiteral("preview/playbackMode")).toString().toLower();
     if (savedMode == QStringLiteral("fast") || savedMode == QStringLiteral("quality"))
         m_playbackMode = savedMode;
     m_compositor.setDropLateFrames(!isQualityMode());
+    m_compositor.setAdaptiveQuality(isAutoQuality());
 
     // The pull device and sink run on a dedicated thread; the GUI thread stays
     // free while audio is decoded and mixed on refill.
@@ -186,8 +194,7 @@ void PlaybackEngine::setPreviewQuality(const QString &quality)
     const QString normalized = quality.toLower();
     // An unrecognized value used to silently become "half", which quietly changed
     // what the user was looking at. Ignore it instead.
-    if (normalized != QStringLiteral("full") && normalized != QStringLiteral("half")
-        && normalized != QStringLiteral("quarter")) {
+    if (!isKnownPreviewQuality(normalized)) {
         qWarning("PlaybackEngine: ignoring unknown preview quality '%s'", qPrintable(quality));
         return;
     }
@@ -196,6 +203,7 @@ void PlaybackEngine::setPreviewQuality(const QString &quality)
 
     m_previewQuality = normalized;
     QSettings().setValue(QStringLiteral("preview/quality"), m_previewQuality);
+    m_compositor.setAdaptiveQuality(isAutoQuality());
     emit previewQualityChanged();
     refreshFrame();
 }
@@ -270,6 +278,10 @@ void PlaybackEngine::setPreviewRenderSize(int width, int height)
 
     m_previewRenderWidth = width;
     m_previewRenderHeight = height;
+    // Only Auto derives its scale from this size; re-compositing at a fixed
+    // fraction would render the identical frame again on every pixel of a drag.
+    if (!isAutoQuality())
+        return;
     if (m_playing)
         onCompositeTick();
     else
@@ -292,6 +304,7 @@ void PlaybackEngine::play()
     m_clock.setRate(m_playbackRate);
     m_clock.reset(m_playheadUs, m_sampleRate);
     m_playing = true;
+    m_compositor.setPlaybackActive(true);
 
     if (isQualityMode()) {
         // Quality mode is not realtime: the playhead steps one frame per
@@ -328,6 +341,10 @@ void PlaybackEngine::play()
     const double frameMs = drift::usToSeconds(drift::frameDurationUs(fps)) * 1000.0;
     const int tickMs = qMax(1, static_cast<int>(frameMs * qMax(1.0, 1.0 / m_playbackRate)));
     m_compositeTimer.start(tickMs);
+    // Auto quality reacts to composites that overrun two display ticks. Deriving
+    // the budget from the tick keeps it tied to the real cadence at this fps and
+    // rate, instead of a fixed figure that only ever suited 30 fps at 1x.
+    m_compositor.setLateFrameBudgetMs(tickMs * 2);
 
     onPlayheadTick();
     onCompositeTick();
@@ -339,6 +356,7 @@ void PlaybackEngine::pause()
         return;
 
     m_playing = false;
+    m_compositor.setPlaybackActive(false);
     m_playheadTimer.stop();
     m_compositeTimer.stop();
     m_clock.pause();
@@ -482,8 +500,15 @@ FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
     // and read-ahead during editing is thrown away by the next edit.
     options.readAheadUs = m_playing && !isQualityMode() ? kReadAheadUs : 0;
 
-    if (m_project && m_previewRenderWidth > 0 && m_previewRenderHeight > 0
-        && m_previewQuality == QStringLiteral("full")) {
+    // Auto is the only mode that looks at how big the preview is on screen: it
+    // renders no more pixels than are actually displayed, and the compositor may
+    // take it further down while playback cannot keep up. Full, Half and Quarter
+    // are fractions of the project resolution and nothing else — Full composites
+    // the same frame the export would, whatever size the panel happens to be.
+    // That matters beyond the video: renderScale also sizes text rasterisation,
+    // shape strokes and every effect's pixel radii, so a canvas fitted to a small
+    // panel renders coarse titles and graphics, not just a smaller picture.
+    if (isAutoQuality() && m_project && m_previewRenderWidth > 0 && m_previewRenderHeight > 0) {
         const double widthScale = static_cast<double>(m_previewRenderWidth) / qMax(1, m_project->width());
         const double heightScale = static_cast<double>(m_previewRenderHeight) / qMax(1, m_project->height());
         options.previewScale = qBound(0.1, qMin(widthScale, heightScale), 1.0);

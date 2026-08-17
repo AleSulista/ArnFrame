@@ -3,6 +3,7 @@
 #include "engine/FrameCompositor.h"
 #include "engine/GpuCompositor.h"
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QThread>
 
@@ -50,12 +51,28 @@ public:
                           FrameCompositor::RenderOptions options = FrameCompositor::RenderOptions{});
 
     // Fast playback (the default) drops frames that finish after the playhead has
-    // moved on and downscales when it keeps happening. Turn this off to present
-    // every rendered frame at the requested scale, however long it takes.
+    // moved on. Turn this off to present every rendered frame, however long it takes.
     void setDropLateFrames(bool drop);
 
-    // Multiplier applied on top of the caller's previewScale during playback
-    // overload (1.0 = full requested quality). Driven by stale-frame feedback.
+    // Automatic preview quality. Off — the default — every frame renders at exactly
+    // the previewScale the caller asked for: choosing Full means Full, whatever the
+    // machine is doing. On, the service walks that scale down while composites
+    // overrun their frame budget and back up once they stop, which only ever
+    // happens during fast-mode playback.
+    void setAdaptiveQuality(bool enabled);
+
+    // Realtime playback running. Adaptation measures playback frames only — paused
+    // and scrubbed frames have no deadline to miss — and ignores the first few
+    // frames of each run, which pay for opening and seeking the decoders.
+    void setPlaybackActive(bool active);
+
+    // Wall-clock budget for one composite before it counts against the adaptive
+    // scale. Callers derive it from the display cadence so it tracks project fps
+    // and playback rate rather than assuming 30 fps at 1x.
+    void setLateFrameBudgetMs(int ms);
+
+    // Multiplier applied on top of the caller's previewScale while adaptive
+    // quality is on (1.0 = full requested quality).
     double adaptiveScaleFactor() const;
 
 signals:
@@ -68,7 +85,8 @@ private slots:
 
 private:
     void dispatch(drift::TimeUs timeUs, const FrameCompositor::RenderOptions &options);
-    void noteFrameStale(bool stale);
+    void noteFrameLate(bool late);
+    void resetAdaptiveState();
     FrameCompositor::RenderOptions effectiveOptions(FrameCompositor::RenderOptions options) const;
 
     const drift::Project *m_project = nullptr;
@@ -84,12 +102,23 @@ private:
     std::atomic<int> m_pendingMaxTimeEchoHistoryFrames{-1};
     std::atomic<drift::TimeUs> m_pendingReadAheadUs{0};
     drift::TimeUs m_lastDispatchedTimeUs = -1;
+    // The scale the caller asked for, before any adaptive multiplier — that is
+    // applied at dispatch, so a change takes effect on the very next frame.
     FrameCompositor::RenderOptions m_lastDispatchedOptions;
+    // Wall time the in-flight composite has been running, which is what "late"
+    // means. The old measure was how far the playhead had moved, in timeline
+    // microseconds: at 4x that is four times larger for the same real delay, so
+    // fast rates were judged late no matter how quickly frames actually rendered.
+    QElapsedTimer m_renderElapsed;
 
-    // Adaptive quality: consecutive on-time frames recover; stale frames drop scale.
-    int m_staleStreak = 0;
+    // Adaptive quality: consecutive on-time frames recover; late frames drop scale.
+    int m_lateStreak = 0;
     int m_onTimeStreak = 0;
+    int m_warmupFramesLeft = 0;
+    int m_lateFrameBudgetMs = 100;
     double m_adaptiveScale = 1.0;
+    bool m_adaptiveQuality = false;
+    bool m_playbackActive = false;
     bool m_dropLateFrames = true;
 
     QThread m_thread;

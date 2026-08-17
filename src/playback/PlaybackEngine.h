@@ -106,6 +106,7 @@ private:
     void onFrameReady(const GpuFrameTexture &frame);
     void checkEndOfTimeline(drift::TimeUs timeUs);
     bool isQualityMode() const { return m_playbackMode == QStringLiteral("quality"); }
+    bool isAutoQuality() const { return m_previewQuality == QStringLiteral("auto"); }
     bool shouldLoopWorkArea(drift::TimeUs *loopInOut, drift::TimeUs *loopOutOut) const;
     drift::TimeUs frameStepUs() const;
     FrameCompositor::RenderOptions playbackRenderOptions() const;

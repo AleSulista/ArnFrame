@@ -168,9 +168,13 @@ Item {
             rightPadding: Theme.spacing2xl
             font.pixelSize: Theme.fontSizeXs
             // Display is capitalised; the engine stores the lowercase value.
-            readonly property var values: ["full", "half", "quarter"]
-            model: [qsTr("Full"), qsTr("Half"), qsTr("Quarter")]
-            tooltip: qsTr("Preview quality — lower is smoother while editing")
+            readonly property var values: ["full", "half", "quarter", "auto"]
+            model: [qsTr("Full"), qsTr("Half"), qsTr("Quarter"), qsTr("Auto")]
+            tooltip: qsTr("Preview quality — lower is smoother while editing.\n"
+                          + "Full, Half and Quarter are fixed fractions of the project resolution: "
+                          + "Full composites exactly what an export would.\n"
+                          + "Auto renders only as many pixels as the preview actually shows, and "
+                          + "lowers that further while playback cannot keep up.")
             currentIndex: Math.max(0, values.indexOf(EditorState.playback.previewQuality))
             onActivated: EditorState.playback.previewQuality = values[currentIndex]
         }
