@@ -508,6 +508,65 @@ Rectangle {
                 }
             }
 
+            // Workspace switcher. Portrait projects default to the portrait
+            // arrangement, but the choice stays the user's: a tall canvas on an
+            // ultrawide display is still comfortable in the landscape workspace, and
+            // a portrait *display* suits the portrait one whatever the canvas is.
+            // Picking either explicitly stops the canvas from driving it; "Auto"
+            // hands it back.
+            Item {
+                id: workspaceButton
+                width: Theme.iconButtonSize
+                height: Theme.iconButtonSize
+                anchors.verticalCenter: parent.verticalCenter
+
+                readonly property bool portrait: {
+                    const win = root.Window.window
+                    return win ? win.portraitWorkspace : false
+                }
+
+                IconButton {
+                    anchors.fill: parent
+                    glyph: workspaceButton.portrait ? Theme.icons.smartphone : Theme.icons.monitor
+                    variant: "ghost"
+                    active: workspaceMenu.opened
+                    tooltip: workspaceButton.portrait ? qsTr("Workspace: portrait")
+                                                      : qsTr("Workspace: landscape")
+                    onClicked: workspaceMenu.popup(0, workspaceButton.height + Theme.spacingMd)
+                }
+
+                ThemedContextMenu {
+                    id: workspaceMenu
+                    implicitWidth: 236
+
+                    // The active entry swaps its own icon for a tick rather than
+                    // adding a trailing column — every row keeps a glyph, so the
+                    // labels stay aligned.
+                    ThemedMenuItem {
+                        text: qsTr("Auto (follow canvas)")
+                        icon.name: EditorState.workspaceLayoutOverridden ? Theme.icons.grid
+                                                                         : Theme.icons.check
+                        onTriggered: EditorState.clearWorkspaceLayoutPreference()
+                    }
+
+                    ThemedMenuItem {
+                        text: qsTr("Landscape")
+                        icon.name: EditorState.workspaceLayoutOverridden
+                                   && EditorState.workspaceLayoutPreferred === "landscape"
+                                   ? Theme.icons.check : Theme.icons.monitor
+                        onTriggered: EditorState.setWorkspaceLayoutPreference("landscape")
+                    }
+
+                    ThemedMenuItem {
+                        text: qsTr("Portrait")
+                        icon.name: EditorState.workspaceLayoutOverridden
+                                   && EditorState.workspaceLayoutPreferred === "portrait"
+                                   ? Theme.icons.check : Theme.icons.smartphone
+                        onTriggered: EditorState.setWorkspaceLayoutPreference("portrait")
+                    }
+                }
+            }
+
             IconButton {
                 glyph: Theme.darkMode ? Theme.icons.sun : Theme.icons.moon
                 variant: "ghost"

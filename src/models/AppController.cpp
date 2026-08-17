@@ -246,6 +246,14 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     const QVariant storedDarkMode = settings.value(QStringLiteral("ui/darkMode"));
     m_darkModeOverridden = storedDarkMode.isValid();
     m_darkModePreferred = storedDarkMode.toBool();
+    // Likewise unset means the workspace still follows the canvas orientation.
+    const QVariant storedWorkspace = settings.value(QStringLiteral("ui/workspaceLayout"));
+    m_workspaceLayoutOverridden = storedWorkspace.isValid();
+    if (m_workspaceLayoutOverridden) {
+        m_workspaceLayoutPreferred = storedWorkspace.toString() == QStringLiteral("portrait")
+            ? QStringLiteral("portrait")
+            : QStringLiteral("landscape");
+    }
     loadAssetFavorites();
 
     // Periodically snapshot unsaved work to a recovery file so a crash doesn't
@@ -1882,6 +1890,30 @@ void AppController::setDarkModePreference(bool enabled)
     QSettings settings;
     settings.setValue(QStringLiteral("ui/darkMode"), m_darkModePreferred);
     emit darkModePreferenceChanged();
+}
+
+void AppController::setWorkspaceLayoutPreference(const QString &layout)
+{
+    const QString normalized = layout == QStringLiteral("portrait")
+        ? QStringLiteral("portrait")
+        : QStringLiteral("landscape");
+    if (m_workspaceLayoutOverridden && m_workspaceLayoutPreferred == normalized)
+        return;
+    m_workspaceLayoutOverridden = true;
+    m_workspaceLayoutPreferred = normalized;
+    QSettings settings;
+    settings.setValue(QStringLiteral("ui/workspaceLayout"), m_workspaceLayoutPreferred);
+    emit workspaceLayoutPreferenceChanged();
+}
+
+void AppController::clearWorkspaceLayoutPreference()
+{
+    if (!m_workspaceLayoutOverridden)
+        return;
+    m_workspaceLayoutOverridden = false;
+    QSettings settings;
+    settings.remove(QStringLiteral("ui/workspaceLayout"));
+    emit workspaceLayoutPreferenceChanged();
 }
 
 void AppController::setMediaGridMode(bool enabled)

@@ -577,6 +577,7 @@ qt_add_qml_module(drift
         src/qml/components/IconGlyph.qml
         src/qml/components/IconButton.qml
         src/qml/components/PanelFrame.qml
+        src/qml/components/PanelSplitHandle.qml
         src/qml/components/ClipFilmstrip.qml
         src/qml/components/AppScrollBar.qml
         src/qml/components/KeyframeDiamond.qml

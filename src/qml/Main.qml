@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls.Basic
-import QtQuick.Templates as T
 import QtQuick.Window
 import Drift
 import "components"
@@ -59,6 +58,18 @@ ApplicationWindow {
         enabled: window.previewFullscreen
         onActivated: window.togglePreviewFullscreen()
     }
+
+    // Which of the two panel arrangements the editor is in. The preference is
+    // stored as "not chosen" / portrait / landscape rather than a single bool, so
+    // the canvas can keep driving it until the user takes the decision away — the
+    // effective value is resolved here because it depends on both preference and
+    // canvas, which are separate notifiers on the C++ side.
+    readonly property string workspaceLayout: EditorState.workspaceLayoutOverridden
+                                              ? EditorState.workspaceLayoutPreferred
+                                              : (EditorState.projectPortrait ? "portrait" : "landscape")
+    readonly property bool portraitWorkspace: workspaceLayout === "portrait"
+
+    onPortraitWorkspaceChanged: rootSplit.relocatePreview()
 
     function configureAndAddAsset(assetIndex, runner) {
         if (!EditorState.shouldConfigureProjectForAsset(assetIndex)) {
@@ -428,151 +439,156 @@ ApplicationWindow {
             height: Math.max(0, parent.height
                                 - (window.previewFullscreen ? 0 : Theme.headerHeight))
 
+            // Two workspaces (issue #46). Landscape is the classic three-pane row
+            // above the timeline. Portrait lifts the preview out into a full-height
+            // column on the right, so a 9:16 frame is bounded by the window height
+            // instead of by the height of the top row — where it renders
+            // postage-stamp small. Only the preview moves between the two; assets,
+            // properties and the timeline keep their slots either way.
             SplitView {
-                id: outerSplit
+                id: rootSplit
                 anchors.fill: parent
                 // Edge-to-edge in fullscreen; the usual page padding otherwise.
                 anchors.margins: window.previewFullscreen ? 0 : Theme.pagePadding
                 anchors.topMargin: 0
-                orientation: Qt.Vertical
+                orientation: Qt.Horizontal
                 spacing: Theme.panelGap
 
-                // Handles were 1px and transparent at rest, so they were both
-                // undiscoverable and nearly impossible to hit. They are now a
-                // real target with a visible grip.
-                handle: Rectangle {
-                    id: outerHandle
-                    implicitWidth: outerSplit.orientation === Qt.Horizontal ? Theme.spacingMd : outerSplit.width
-                    implicitHeight: outerSplit.orientation === Qt.Horizontal ? outerSplit.height : Theme.spacingMd
-                    color: T.SplitHandle.pressed ? Theme.primary
-                        : (T.SplitHandle.hovered ? Theme.panelBorder : "transparent")
+                handle: PanelSplitHandle { view: rootSplit }
 
-                    Behavior on color {
-                        ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                    }
-
-                    // Grip dots: a resting affordance that reads as draggable.
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: Theme.spacingSm
-                        opacity: T.SplitHandle.hovered || T.SplitHandle.pressed ? 0 : 1
-
-                        Behavior on opacity {
-                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                        }
-
-                        Repeater {
-                            model: 3
-                            Rectangle {
-                                width: 2
-                                height: 2
-                                radius: 1
-                                color: Theme.panelBorder
-                            }
+                // Container.removeItem() *destroys* what it removes — takeItem() is
+                // the one that hands the item back. That distinction matters here:
+                // the preview owns the video sink and the GL runtime, so rebuilding
+                // it (via removeItem, or a Loader) would tear down the renderer and
+                // drop playback state on every workspace switch. Moving the one live
+                // instance keeps the switch free.
+                function relocatePreview() {
+                    const wantRoot = window.portraitWorkspace
+                    if (wantRoot === (previewPanel.SplitView.view === rootSplit))
+                        return
+                    const from = wantRoot ? innerSplit : rootSplit
+                    for (let i = 0; i < from.count; ++i) {
+                        if (from.itemAt(i) === previewPanel) {
+                            from.takeItem(i)
+                            break
                         }
                     }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        acceptedButtons: Qt.NoButton
-                        cursorShape: Qt.SplitVCursor
-                    }
+                    // Index 1 either way: after the assets panel in the landscape
+                    // row, after the editing stack in the portrait column.
+                    if (wantRoot)
+                        rootSplit.insertItem(1, previewPanel)
+                    else
+                        innerSplit.insertItem(1, previewPanel)
                 }
+
+                // The preview is declared in its landscape slot below, so a session
+                // that starts portrait needs one move once the tree exists. Also
+                // covers a layout flip that lands before this point during startup —
+                // relocatePreview() is a no-op when nothing has to move.
+                Component.onCompleted: relocatePreview()
 
                 SplitView {
-                    id: innerSplit
-                    // Sized against the enclosing SplitView by id. `parent` here
-                    // is the SplitView's own content item, which makes these
-                    // percentage constraints self-referential during a resize.
-                    // In fullscreen the timeline is hidden, so the normal 30–85%
-                    // band would leave a dead strip below the preview.
-                    //
-                    // Never set a fixed minimum larger than the current parent
-                    // size: on the first layout pass width/height are 0, and
-                    // Qt SplitView asserts when maximum < minimum (qBound).
-                    SplitView.preferredHeight: window.previewFullscreen
-                                               ? outerSplit.height : outerSplit.height * 0.5
-                    SplitView.minimumHeight: window.previewFullscreen
-                                             ? outerSplit.height
-                                             : Math.min(outerSplit.height, outerSplit.height * 0.3)
-                    SplitView.maximumHeight: window.previewFullscreen
-                                             ? outerSplit.height
-                                             : Math.max(SplitView.minimumHeight, outerSplit.height * 0.85)
-                    orientation: Qt.Horizontal
+                    id: outerSplit
+                    SplitView.fillWidth: true
+                    orientation: Qt.Vertical
                     spacing: Theme.panelGap
 
-                    handle: Rectangle {
-                        implicitWidth: innerSplit.orientation === Qt.Horizontal ? Theme.spacingMd : innerSplit.width
-                        implicitHeight: innerSplit.orientation === Qt.Horizontal ? innerSplit.height : Theme.spacingMd
-                        color: T.SplitHandle.pressed ? Theme.primary
-                            : (T.SplitHandle.hovered ? Theme.panelBorder : "transparent")
+                    handle: PanelSplitHandle { view: outerSplit }
 
-                        Behavior on color {
-                            ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                    // In the portrait workspace the preview is a sibling of this
+                    // whole stack, so fullscreen has to collapse the stack itself —
+                    // hiding only the panels inside it would leave the preview
+                    // confined to its column. SplitView drops hidden items from the
+                    // layout, so this hands the window to the preview.
+                    visible: !(window.previewFullscreen && window.portraitWorkspace)
+
+                    SplitView {
+                        id: innerSplit
+                        // Sized against the enclosing SplitView by id. `parent` here
+                        // is the SplitView's own content item, which makes these
+                        // percentage constraints self-referential during a resize.
+                        // In fullscreen the timeline is hidden, so the normal 30–85%
+                        // band would leave a dead strip below the preview.
+                        //
+                        // Never set a fixed minimum larger than the current parent
+                        // size: on the first layout pass width/height are 0, and
+                        // Qt SplitView asserts when maximum < minimum (qBound).
+                        SplitView.preferredHeight: window.previewFullscreen
+                                                   ? outerSplit.height : outerSplit.height * 0.5
+                        SplitView.minimumHeight: window.previewFullscreen
+                                                 ? outerSplit.height
+                                                 : Math.min(outerSplit.height, outerSplit.height * 0.3)
+                        SplitView.maximumHeight: window.previewFullscreen
+                                                 ? outerSplit.height
+                                                 : Math.max(SplitView.minimumHeight, outerSplit.height * 0.85)
+                        orientation: Qt.Horizontal
+                        spacing: Theme.panelGap
+
+                        handle: PanelSplitHandle { view: innerSplit }
+
+                        AssetsPanel {
+                            id: assetsPanel
+                            visible: !window.previewFullscreen
+                            // A quarter of the row alongside the preview. In portrait
+                            // the preview is gone from this row and the properties
+                            // panel — last, and the only one without a fill — soaks up
+                            // everything left over, so an unchanged quarter here left
+                            // the library at a third of the inspector's width. Half
+                            // splits the row evenly between the two instead.
+                            SplitView.preferredWidth: Math.max(0, innerSplit.width
+                                                               * (window.portraitWorkspace ? 0.5 : 0.25))
+                            // Cap mins to available width so 200+320+240 never exceeds a
+                            // zero/partial first layout pass (Qt asserts max < min).
+                            SplitView.minimumWidth: Math.min(200, Math.max(0, innerSplit.width * 0.2))
                         }
 
-                        Column {
-                            anchors.centerIn: parent
-                            spacing: Theme.spacingSm
-                            opacity: T.SplitHandle.hovered || T.SplitHandle.pressed ? 0 : 1
-
-                            Behavior on opacity {
-                                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                            }
-
-                            Repeater {
-                                model: 3
-                                Rectangle {
-                                    width: 2
-                                    height: 2
-                                    radius: 1
-                                    color: Theme.panelBorder
-                                }
-                            }
+                        // Declared in its landscape slot; rootSplit.relocatePreview()
+                        // moves this same instance out to the portrait column.
+                        PreviewPanel {
+                            id: previewPanel
+                            previewFullscreen: window.previewFullscreen
+                            onFullscreenRequested: window.togglePreviewFullscreen()
+                            // Landscape: the pane that absorbs the slack in the top
+                            // row. Portrait: a sized column, with the editing stack
+                            // taking the slack instead — except in fullscreen, where
+                            // the stack is hidden and the preview is all there is.
+                            SplitView.fillWidth: !window.portraitWorkspace || window.previewFullscreen
+                            // Portrait default: wide enough for the tall frame once
+                            // the panel's toolbar and transport rows are discounted,
+                            // capped so the libraries and timeline keep a usable
+                            // share. Ignored while fillWidth is set, and replaced
+                            // outright once the user drags the handle — SplitView
+                            // writes this attached property, which drops the binding.
+                            SplitView.preferredWidth: Math.max(0, Math.min(rootSplit.width * 0.4,
+                                                                           (rootSplit.height - 120) * 9 / 16))
+                            SplitView.minimumWidth: window.portraitWorkspace
+                                                    ? Math.min(260, Math.max(0, rootSplit.width * 0.2))
+                                                    : Math.min(320, Math.max(0, innerSplit.width * 0.3))
                         }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            acceptedButtons: Qt.NoButton
-                            cursorShape: Qt.SplitHCursor
+                        PropertiesPanel {
+                            id: propertiesPanel
+                            visible: !window.previewFullscreen
+                            SplitView.preferredWidth: Math.max(0, innerSplit.width * 0.25)
+                            SplitView.minimumWidth: Math.min(240, Math.max(0, innerSplit.width * 0.2))
+                            // Empty-state browse CTAs jump the assets panel to the
+                            // matching library tab.
+                            onBrowseEffectsRequested: assetsPanel.showTab("effects")
+                            onBrowseAudioEffectsRequested: assetsPanel.showTab("sounds")
                         }
                     }
 
-                    AssetsPanel {
-                        id: assetsPanel
+                    TimelinePanel {
+                        id: timelinePanel
                         visible: !window.previewFullscreen
-                        SplitView.preferredWidth: Math.max(0, innerSplit.width * 0.25)
-                        // Cap mins to available width so 200+320+240 never exceeds a
-                        // zero/partial first layout pass (Qt asserts max < min).
-                        SplitView.minimumWidth: Math.min(200, Math.max(0, innerSplit.width * 0.2))
-                    }
-
-                    PreviewPanel {
-                        previewFullscreen: window.previewFullscreen
-                        onFullscreenRequested: window.togglePreviewFullscreen()
-                        SplitView.fillWidth: true
-                        SplitView.minimumWidth: Math.min(320, Math.max(0, innerSplit.width * 0.3))
-                    }
-
-                    PropertiesPanel {
-                        id: propertiesPanel
-                        visible: !window.previewFullscreen
-                        SplitView.preferredWidth: Math.max(0, innerSplit.width * 0.25)
-                        SplitView.minimumWidth: Math.min(240, Math.max(0, innerSplit.width * 0.2))
-                        // Empty-state browse CTAs jump the assets panel to the
-                        // matching library tab.
-                        onBrowseEffectsRequested: assetsPanel.showTab("effects")
-                        onBrowseAudioEffectsRequested: assetsPanel.showTab("sounds")
+                        propertiesTab: propertiesPanel.currentTabId
+                        SplitView.preferredHeight: Math.max(0, outerSplit.height * 0.5)
+                        SplitView.minimumHeight: Math.min(140, Math.max(0, outerSplit.height * 0.2))
                     }
                 }
 
-                TimelinePanel {
-                    id: timelinePanel
-                    visible: !window.previewFullscreen
-                    propertiesTab: propertiesPanel.currentTabId
-                    SplitView.preferredHeight: Math.max(0, outerSplit.height * 0.5)
-                    SplitView.minimumHeight: Math.min(140, Math.max(0, outerSplit.height * 0.2))
-                }
+                // The preview is inserted here, after the editing stack, while the
+                // portrait workspace is active.
             }
         }
     }

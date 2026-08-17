@@ -54,6 +54,18 @@ class AppController : public QObject
     // scheme live; after that the stored choice wins on every launch.
     Q_PROPERTY(bool darkModeOverridden READ darkModeOverridden NOTIFY darkModePreferenceChanged)
     Q_PROPERTY(bool darkModePreferred READ darkModePreferred NOTIFY darkModePreferenceChanged)
+    // Editor workspace arrangement. In the landscape workspace the preview sits in the
+    // three-pane top row, so its size is bounded by that row's *height* — a 9:16 canvas
+    // ends up postage-stamp small. The portrait workspace gives the preview a full-height
+    // column beside the whole editing stack instead. Follows the canvas orientation until
+    // the user picks one explicitly, after which the stored choice wins on every launch —
+    // the same override rule as the theme above, backed by QSettings("ui/workspaceLayout").
+    // The effective layout is resolved in QML so it can track both signals at once.
+    Q_PROPERTY(bool projectPortrait READ projectPortrait NOTIFY tracksChanged)
+    Q_PROPERTY(bool workspaceLayoutOverridden READ workspaceLayoutOverridden
+                   NOTIFY workspaceLayoutPreferenceChanged)
+    Q_PROPERTY(QString workspaceLayoutPreferred READ workspaceLayoutPreferred
+                   NOTIFY workspaceLayoutPreferenceChanged)
     Q_PROPERTY(bool autoKeyEnabled READ autoKeyEnabled WRITE setAutoKeyEnabled NOTIFY autoKeyEnabledChanged)
     // Opt-in: on launch, restore the last open project (saved .drift or unsaved recovery snapshot).
     Q_PROPERTY(bool reopenLastProject READ reopenLastProject WRITE setReopenLastProject NOTIFY reopenLastProjectChanged)
@@ -189,6 +201,13 @@ public:
     bool allowClipOverlap() const { return m_allowClipOverlap; }
     bool darkModeOverridden() const { return m_darkModeOverridden; }
     bool darkModePreferred() const { return m_darkModePreferred; }
+    bool projectPortrait() const { return m_project.height() > m_project.width(); }
+    bool workspaceLayoutOverridden() const { return m_workspaceLayoutOverridden; }
+    QString workspaceLayoutPreferred() const { return m_workspaceLayoutPreferred; }
+    // "portrait" / "landscape"; anything else is treated as landscape.
+    Q_INVOKABLE void setWorkspaceLayoutPreference(const QString &layout);
+    // Back to following the canvas orientation.
+    Q_INVOKABLE void clearWorkspaceLayoutPreference();
     bool mediaGridMode() const { return m_mediaGridMode; }
     bool autoKeyEnabled() const { return m_autoKeyEnabled; }
     bool reopenLastProject() const { return m_reopenLastProject; }
@@ -733,6 +752,7 @@ signals:
     void rippleEnabledChanged();
     void allowClipOverlapChanged();
     void darkModePreferenceChanged();
+    void workspaceLayoutPreferenceChanged();
     void mediaGridModeChanged();
     void autoKeyEnabledChanged();
     void reopenLastProjectChanged();
@@ -940,6 +960,8 @@ protected:
     bool m_loopWorkAreaEnabled = false;
     bool m_darkModeOverridden = false;
     bool m_darkModePreferred = true;
+    bool m_workspaceLayoutOverridden = false;
+    QString m_workspaceLayoutPreferred = QStringLiteral("landscape");
     bool m_mediaGridMode = true;
     bool m_autoKeyEnabled = false;
     bool m_reopenLastProject = false;
