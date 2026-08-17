@@ -832,6 +832,9 @@ signals:
     void recoveryChanged();
     void recentProjectsChanged();
     void projectLayoutChosenChanged();
+    // The document has been swapped wholesale (New Project, or opening another one). The
+    // auxiliary windows edit one clip each, so they have nothing left to act on and close.
+    void projectReset();
     void transformBlocked(const QString &reason);
     // Outcome of replaceAssetSource. `message` is a ready-to-show reason on failure and the new
     // media's name on success. `adjustedClips` counts clips whose source range no longer fitted
@@ -915,6 +918,11 @@ protected:
     void restoreFilmstripsAfterLoad();
     void normalizeSelection();
     bool isValidClipIndex(int trackIndex, int clipIndex) const;
+
+    // Drops everything scoped to the outgoing project — clipboard, timeline-keyed caches, the
+    // auxiliary-window sessions. Called by both newProject and applyProjectJson, before the
+    // document is replaced, so the two paths cannot drift apart again.
+    void resetSessionState();
 
     QByteArray serializeProjectJson() const;
     bool applyProjectJson(const QByteArray &data, QString *error);

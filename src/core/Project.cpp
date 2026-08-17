@@ -834,8 +834,32 @@ QString Project::assetIdAt(int index) const
 
 Project Project::fromJson(const QJsonObject &object, QString *errorOut)
 {
-    Project project;
+    const auto fail = [errorOut](const QString &message) {
+        if (errorOut)
+            *errorOut = message;
+        return Project{};
+    };
+
+    // The earliest format did not write this key, hence the default rather than a required field.
     const int version = object.value(QStringLiteral("version")).toInt(1);
+
+    // Document format, which is bumped independently of the .drift container revision
+    // ProjectBundle gates on — a newer document inside a 1.x container passes that check. Without
+    // this, whatever the newer version added is dropped on read and can then be saved back over
+    // the original, which looks like a successful open.
+    if (version > kCurrentVersion) {
+        return fail(QStringLiteral("This project was saved by a newer version of Drift "
+                                   "(project format %1; this build reads up to %2).")
+                        .arg(version)
+                        .arg(kCurrentVersion));
+    }
+
+    // Every version writes a tracks array — an empty timeline included, as `[]`. Without this any
+    // JSON object at all, `{}` included, parses into a plausible-looking empty project.
+    if (!object.value(QStringLiteral("tracks")).isArray())
+        return fail(QStringLiteral("This file isn’t a Drift project."));
+
+    Project project;
 
     project.setName(object.value(QStringLiteral("projectName")).toString(QStringLiteral("Untitled Project")));
     project.setFps(object.value(QStringLiteral("fps")).toInt(30));

@@ -274,6 +274,16 @@ ApplicationWindow {
             }
         }
 
+        // Each of these edits one clip of the project that was just discarded, so there is
+        // nothing left for them to act on. The C++ sessions are already torn down; onClosing
+        // calls the same end*Session() again, which no-ops.
+        function onProjectReset() {
+            segmentationWindow.close()
+            denoiseWindow.close()
+            speedCurveWindow.close()
+            fadeCurveWindow.close()
+        }
+
         function onProjectLayoutChosenChanged() {
             if (!EditorState.projectLayoutChosen) {
                 // New Project reasserts this even when already false, so the layout

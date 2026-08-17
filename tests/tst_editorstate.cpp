@@ -41,6 +41,8 @@ private slots:
     void moveTrackReordersAndRemapsSelection();
     void addTrackInsertsEmptyTrackByType();
     void projectPersistenceRoundTrip();
+    void newProjectClearsEverything();
+    void projectSetupOnPristineProjectStaysClean();
     void darkModePreferencePersistsAcrossSessions();
     void exportFrameRatePersistsAcrossSessions();
     void lastExportSettingsNormalisesStringTypedValues();
@@ -439,6 +441,81 @@ void EditorStateTest::projectPersistenceRoundTrip()
     QVERIFY(state.trackMuted(0));
     QCOMPARE(state.bookmarks().size(), 1);
     QCOMPARE(state.mediaGridMode(), false);
+}
+
+// resetToDefaultTimeline() only clears the tracks, so New Project used to keep the asset pool,
+// name, canvas size, bookmarks and work area of the project it replaced.
+void EditorStateTest::newProjectClearsEverything()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    drift::MediaAsset asset;
+    asset.name = QStringLiteral("clip.mp4");
+    asset.kind = drift::MediaKind::Video;
+    asset.path = QStringLiteral("/nonexistent/clip.mp4");
+    asset.durationUs = drift::secondsToUs(5.0);
+    state.project()->addAsset(asset);
+    library.syncToProject();
+    QCOMPARE(library.count(), 1);
+
+    state.addTextClip(QStringLiteral("Old"), 0.0);
+    state.addBookmark(2.0, QStringLiteral("Mark"));
+    state.setPlayheadSeconds(1.0);
+    state.markWorkAreaIn();
+    state.setPlayheadSeconds(3.0);
+    state.markWorkAreaOut();
+    state.setProjectMetadata(QStringLiteral("Old project"), QStringLiteral("Ada"),
+                             QStringLiteral("Notes"));
+    state.setProjectSetup(1080, 1920, 60);
+    state.setMediaGridMode(false);
+    QVERIFY(state.workAreaActive());
+    QVERIFY(state.hasUnsavedChanges());
+
+    state.newProject();
+
+    QCOMPARE(library.count(), 0);
+    QVERIFY(state.project()->assets().isEmpty());
+    QVERIFY(state.project()->assetOrder().isEmpty());
+    QCOMPARE(state.projectName(), QStringLiteral("Untitled Project"));
+    QCOMPARE(state.projectMetadata().value(QStringLiteral("description")).toString(), QString());
+    QCOMPARE(state.bookmarks().size(), 0);
+    QVERIFY(!state.workAreaActive());
+    QCOMPARE(state.projectWidth(), 1920);
+    QCOMPARE(state.projectHeight(), 1080);
+    QCOMPARE(state.projectFps(), 30);
+    QCOMPARE(state.tracks().size(), 1);
+    QCOMPARE(state.tracks().at(0).toMap().value(QStringLiteral("type")).toString(),
+             QStringLiteral("video"));
+    QVERIFY(state.project()->tracks().at(0).clips.isEmpty());
+    QCOMPARE(state.mediaGridMode(), true);
+    QVERIFY(!state.hasUnsavedChanges());
+    QVERIFY(!state.undoAvailable());
+}
+
+// Answering the first-run layout chooser is the project taking its initial shape, not an edit, so
+// it must not leave a brand-new project dirty with an undo step.
+void EditorStateTest::projectSetupOnPristineProjectStaysClean()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    state.setProjectSetup(1080, 1920, 60);
+
+    QCOMPARE(state.projectWidth(), 1080);
+    QCOMPARE(state.projectHeight(), 1920);
+    QCOMPARE(state.projectFps(), 60);
+    QVERIFY(!state.hasUnsavedChanges());
+    QVERIFY(!state.undoAvailable());
+
+    // Once there is something to undo back to, it is a real edit again.
+    state.addTextClip(QStringLiteral("Titled"), 0.0);
+    state.setProjectSetup(1920, 1080, 30);
+    QVERIFY(state.hasUnsavedChanges());
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    QCOMPARE(state.projectWidth(), 1080);
+    QCOMPARE(state.projectHeight(), 1920);
 }
 
 void EditorStateTest::darkModePreferencePersistsAcrossSessions()

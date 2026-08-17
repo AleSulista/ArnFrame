@@ -36,6 +36,7 @@ private slots:
     void legacyFractionalTransformMigration();
     void volumeKeyframeSerialization();
     void projectLoadsLegacyV1Format();
+    void projectRejectsUnreadableDocuments();
     void trackAllowsClipTypes();
     void subtitleCueSerialization();
     void subtitleCueLookup();
@@ -568,6 +569,47 @@ void CoreTest::projectLoadsLegacyV1Format()
     QCOMPARE(project.tracks()[0].clips[0].timelineStart, drift::secondsToUs(1.0));
     QCOMPARE(project.tracks()[0].clips[0].srcIn, drift::secondsToUs(0.5));
     QVERIFY(!project.tracks()[0].clips[0].assetId.isEmpty());
+}
+
+// fromJson used to have no failure path at all: every field fell back to a default and the
+// errorOut param was only ever cleared. Both of these loaded as a plausible-looking project.
+void CoreTest::projectRejectsUnreadableDocuments()
+{
+    // A document from a future format. The .drift container revision is bumped separately, so
+    // ProjectBundle's own gate does not catch this.
+    {
+        drift::Project project;
+        QJsonObject json = project.toJson();
+        json[QStringLiteral("version")] = drift::Project::kCurrentVersion + 1;
+
+        QString error;
+        drift::Project::fromJson(json, &error);
+        QVERIFY(!error.isEmpty());
+        QVERIFY(error.contains(QStringLiteral("newer version")));
+    }
+
+    // Not a project document. Anything without a tracks array used to come back as an empty
+    // project named "Untitled Project", which could then be saved back over the original.
+    {
+        QString error;
+        drift::Project::fromJson(QJsonObject{}, &error);
+        QVERIFY(!error.isEmpty());
+
+        error.clear();
+        drift::Project::fromJson(QJsonObject{{QStringLiteral("hello"), QStringLiteral("world")}},
+                                 &error);
+        QVERIFY(!error.isEmpty());
+    }
+
+    // The current version, and an empty timeline, both still load.
+    {
+        drift::Project project;
+        project.tracks().clear();
+        QString error;
+        const drift::Project loaded = drift::Project::fromJson(project.toJson(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(loaded.tracks().size(), 1); // empty timeline falls back to one video track
+    }
 }
 
 void CoreTest::trackAllowsClipTypes()
@@ -2109,8 +2151,11 @@ void CoreTest::backgroundSerialization()
             {QStringLiteral("fps"), 30},
             {QStringLiteral("width"), 1920},
             {QStringLiteral("height"), 1080},
+            {QStringLiteral("tracks"), QJsonArray{}},
         };
-        const drift::Project loaded = drift::Project::fromJson(root);
+        QString error;
+        const drift::Project loaded = drift::Project::fromJson(root, &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
         QCOMPARE(loaded.background().kind, drift::BackgroundKind::Color);
         QCOMPARE(loaded.background().color, QColor(Qt::black));
     }
