@@ -54,6 +54,9 @@ Pinned endpoints (`/mcp/timeline`, `/mcp/project`, …) list that toolbox’s op
 | `text` | Title and caption clips |
 | `effects` | Video/audio effects and transitions |
 | `project` | Canvas size, background, metadata, save, export |
+| `keyframes` | Animate clip and effect properties |
+| `speed` | Variable playback speed (retimed clips) |
+| `ui` | Editor theme and keyboard shortcuts |
 
 ## Example
 
@@ -74,7 +77,7 @@ Import, place, trim, and capture in one batch:
 
 ## Limitations
 
-Not available via MCP yet: keyframes, subtitles, segmentation, speed curves, editor UI preferences (theme, shortcuts).
+Not available via MCP yet: subtitles, segmentation.
 
 ## Security
 

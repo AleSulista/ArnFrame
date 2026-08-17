@@ -40,7 +40,8 @@ QJsonObject initializeResult()
              "Always prefer clip UUID from inspect({clips:true}). "
              "inspect also returns path, dirty, background, and export progress. "
              "capture() returns a composition still. Times are seconds. Track index 0 is top. "
-             "Clip overlap is off by default. export_video is async — poll inspect.export.")},
+             "Clip overlap is off by default. export_video is async — poll inspect.export. "
+             "Toolboxes keyframes, speed, and ui cover animation, speed ramps, and editor preferences.")},
     };
 }
 

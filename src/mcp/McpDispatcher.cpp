@@ -513,6 +513,10 @@ bool McpDispatcher::isUndoable(const QString &tool) const
         QStringLiteral("set_overlap"),
         QStringLiteral("list_export_options"), QStringLiteral("export_video"),
         QStringLiteral("export_status"), QStringLiteral("save_project"),
+        QStringLiteral("list_animated_properties"), QStringLiteral("list_keyframes"),
+        QStringLiteral("list_speed_curve"), QStringLiteral("get_ui_preferences"),
+        QStringLiteral("list_shortcuts"), QStringLiteral("set_theme"),
+        QStringLiteral("set_shortcut"), QStringLiteral("reset_shortcuts"),
     };
     return !skip.contains(tool);
 }
@@ -639,6 +643,38 @@ QJsonObject McpDispatcher::applyOne(const QString &tool, const QJsonObject &args
         return opExportVideo(args);
     if (tool == QLatin1String("export_status"))
         return opExportStatus();
+    if (tool == QLatin1String("list_animated_properties"))
+        return opListAnimatedProperties(args);
+    if (tool == QLatin1String("list_keyframes"))
+        return opListKeyframes(args);
+    if (tool == QLatin1String("set_keyframe"))
+        return opSetKeyframe(args);
+    if (tool == QLatin1String("remove_keyframe"))
+        return opRemoveKeyframe(args);
+    if (tool == QLatin1String("set_keyframe_interpolation"))
+        return opSetKeyframeInterpolation(args);
+    if (tool == QLatin1String("set_keyframe_tangents"))
+        return opSetKeyframeTangents(args);
+    if (tool == QLatin1String("set_keyframe_hold"))
+        return opSetKeyframeHold(args);
+    if (tool == QLatin1String("set_property_keyframes_enabled"))
+        return opSetPropertyKeyframesEnabled(args);
+    if (tool == QLatin1String("list_speed_curve"))
+        return opListSpeedCurve(args);
+    if (tool == QLatin1String("set_speed_curve"))
+        return opSetSpeedCurve(args);
+    if (tool == QLatin1String("clear_speed_curve"))
+        return opClearSpeedCurve(args);
+    if (tool == QLatin1String("get_ui_preferences"))
+        return opGetUiPreferences();
+    if (tool == QLatin1String("set_theme"))
+        return opSetTheme(args);
+    if (tool == QLatin1String("list_shortcuts"))
+        return opListShortcuts();
+    if (tool == QLatin1String("set_shortcut"))
+        return opSetShortcut(args);
+    if (tool == QLatin1String("reset_shortcuts"))
+        return opResetShortcuts();
     return err("unknown_op", tool);
 }
 
@@ -1405,6 +1441,288 @@ QJsonObject McpDispatcher::opExportStatus() const
         {QStringLiteral("progress"), m_controller->exportProgress()},
         {QStringLiteral("message"), m_controller->lastMessage()},
     });
+}
+
+QJsonArray McpDispatcher::speedPointsToJson(const QVariantList &points)
+{
+    QJsonArray out;
+    for (const QVariant &entry : points) {
+        const QVariantMap map = entry.toMap();
+        out.append(QJsonObject{
+            {QStringLiteral("pos"), map.value(QStringLiteral("pos")).toDouble()},
+            {QStringLiteral("speed"), map.value(QStringLiteral("speed"), 1.0).toDouble()},
+            {QStringLiteral("inDx"), map.value(QStringLiteral("inDx")).toDouble()},
+            {QStringLiteral("inDy"), map.value(QStringLiteral("inDy")).toDouble()},
+            {QStringLiteral("outDx"), map.value(QStringLiteral("outDx")).toDouble()},
+            {QStringLiteral("outDy"), map.value(QStringLiteral("outDy")).toDouble()},
+            {QStringLiteral("corner"), map.value(QStringLiteral("corner")).toBool()},
+        });
+    }
+    return out;
+}
+
+QVariantList McpDispatcher::speedPointsFromJson(const QJsonArray &points)
+{
+    QVariantList out;
+    for (const QJsonValue &entry : points) {
+        const QJsonObject map = entry.toObject();
+        out.append(QVariantMap{
+            {QStringLiteral("pos"), map.value(QStringLiteral("pos")).toDouble()},
+            {QStringLiteral("speed"), map.contains(QStringLiteral("speed")) ? map.value(QStringLiteral("speed")).toDouble()
+                                                                            : 1.0},
+            {QStringLiteral("inDx"), map.value(QStringLiteral("inDx")).toDouble()},
+            {QStringLiteral("inDy"), map.value(QStringLiteral("inDy")).toDouble()},
+            {QStringLiteral("outDx"), map.value(QStringLiteral("outDx")).toDouble()},
+            {QStringLiteral("outDy"), map.value(QStringLiteral("outDy")).toDouble()},
+            {QStringLiteral("corner"), map.value(QStringLiteral("corner")).toBool()},
+        });
+    }
+    return out;
+}
+
+QJsonObject McpDispatcher::opListAnimatedProperties(const QJsonObject &args) const
+{
+    const ClipRef ref = resolveClip(args);
+    if (!ref.valid())
+        return err("not_found", QStringLiteral("Unknown clip"));
+    const QStringList props = m_controller->clipAnimatedProperties(ref.track, ref.clip);
+    QJsonArray list;
+    for (const QString &prop : props)
+        list.append(prop);
+    return ok({{QStringLiteral("props"), list}});
+}
+
+QJsonObject McpDispatcher::opListKeyframes(const QJsonObject &args) const
+{
+    const ClipRef ref = resolveClip(args);
+    if (!ref.valid())
+        return err("not_found", QStringLiteral("Unknown clip"));
+    const QString prop = args.value(QStringLiteral("prop")).toString().trimmed();
+    if (prop.isEmpty())
+        return err("bad_args", QStringLiteral("prop required"));
+    const QVariantList keys = m_controller->clipKeyframes(ref.track, ref.clip, prop);
+    QJsonArray points;
+    for (const QVariant &entry : keys) {
+        const QVariantMap map = entry.toMap();
+        points.append(QJsonObject{
+            {QStringLiteral("seconds"), map.value(QStringLiteral("seconds")).toDouble()},
+            {QStringLiteral("value"), map.value(QStringLiteral("value")).toDouble()},
+            {QStringLiteral("inDx"), map.value(QStringLiteral("inDx")).toDouble()},
+            {QStringLiteral("inDy"), map.value(QStringLiteral("inDy")).toDouble()},
+            {QStringLiteral("outDx"), map.value(QStringLiteral("outDx")).toDouble()},
+            {QStringLiteral("outDy"), map.value(QStringLiteral("outDy")).toDouble()},
+            {QStringLiteral("corner"), map.value(QStringLiteral("corner")).toBool()},
+            {QStringLiteral("hold"), map.value(QStringLiteral("hold")).toBool()},
+            {QStringLiteral("easing"), map.value(QStringLiteral("easing")).toString()},
+            {QStringLiteral("custom"), map.value(QStringLiteral("custom")).toBool()},
+        });
+    }
+    const bool enabled = m_controller->clipPropertyKeyframesEnabled(ref.track, ref.clip, prop);
+    return ok({{QStringLiteral("prop"), prop}, {QStringLiteral("enabled"), enabled}, {QStringLiteral("keys"), points}});
+}
+
+QJsonObject McpDispatcher::opSetKeyframe(const QJsonObject &args)
+{
+    const ClipRef ref = resolveClip(args);
+    if (!ref.valid())
+        return err("not_found", QStringLiteral("Unknown clip"));
+    const QString prop = args.value(QStringLiteral("prop")).toString().trimmed();
+    if (prop.isEmpty())
+        return err("bad_args", QStringLiteral("prop required"));
+    if (!args.contains(QStringLiteral("at")) || !args.contains(QStringLiteral("value")))
+        return err("bad_args", QStringLiteral("at and value required"));
+    const double at = jsonNumber(args.value(QStringLiteral("at")), 0);
+    const double value = jsonNumber(args.value(QStringLiteral("value")), 0);
+    m_controller->setClipKeyframe(ref.track, ref.clip, prop, at, value);
+    const ClipRef after = resolveClip(QJsonObject{{QStringLiteral("clip"), ref.id}});
+    return ok(clipFeedback(after, {{QStringLiteral("prop"), prop}, {QStringLiteral("at"), at}}));
+}
+
+QJsonObject McpDispatcher::opRemoveKeyframe(const QJsonObject &args)
+{
+    const ClipRef ref = resolveClip(args);
+    if (!ref.valid())
+        return err("not_found", QStringLiteral("Unknown clip"));
+    const QString prop = args.value(QStringLiteral("prop")).toString().trimmed();
+    if (prop.isEmpty() || !args.contains(QStringLiteral("at")))
+        return err("bad_args", QStringLiteral("prop and at required"));
+    m_controller->removeClipKeyframe(ref.track, ref.clip, prop, jsonNumber(args.value(QStringLiteral("at")), 0));
+    return ok({{QStringLiteral("prop"), prop}});
+}
+
+QJsonObject McpDispatcher::opSetKeyframeInterpolation(const QJsonObject &args)
+{
+    const ClipRef ref = resolveClip(args);
+    if (!ref.valid())
+        return err("not_found", QStringLiteral("Unknown clip"));
+    const QString prop = args.value(QStringLiteral("prop")).toString().trimmed();
+    const QString mode = args.value(QStringLiteral("mode")).toString().trimmed().toLower();
+    if (prop.isEmpty() || !args.contains(QStringLiteral("at")) || mode.isEmpty())
+        return err("bad_args", QStringLiteral("prop, at, and mode required"));
+    const double at = jsonNumber(args.value(QStringLiteral("at")), 0);
+    m_controller->setPlayheadSeconds(at);
+    m_controller->setKeyframeInterpolation(ref.track, ref.clip, prop, mode);
+    return ok({{QStringLiteral("prop"), prop}, {QStringLiteral("at"), at}, {QStringLiteral("mode"), mode}});
+}
+
+QJsonObject McpDispatcher::opSetKeyframeTangents(const QJsonObject &args)
+{
+    const ClipRef ref = resolveClip(args);
+    if (!ref.valid())
+        return err("not_found", QStringLiteral("Unknown clip"));
+    const QString prop = args.value(QStringLiteral("prop")).toString().trimmed();
+    if (prop.isEmpty() || !args.contains(QStringLiteral("at")))
+        return err("bad_args", QStringLiteral("prop and at required"));
+    const double at = jsonNumber(args.value(QStringLiteral("at")), 0);
+    m_controller->setKeyframeTangents(ref.track, ref.clip, prop, at,
+                                    jsonNumber(args.value(QStringLiteral("inDx")), 0),
+                                    jsonNumber(args.value(QStringLiteral("inDy")), 0),
+                                    jsonNumber(args.value(QStringLiteral("outDx")), 0),
+                                    jsonNumber(args.value(QStringLiteral("outDy")), 0),
+                                    jsonBool(args.value(QStringLiteral("corner"))));
+    return ok({{QStringLiteral("prop"), prop}, {QStringLiteral("at"), at}});
+}
+
+QJsonObject McpDispatcher::opSetKeyframeHold(const QJsonObject &args)
+{
+    const ClipRef ref = resolveClip(args);
+    if (!ref.valid())
+        return err("not_found", QStringLiteral("Unknown clip"));
+    const QString prop = args.value(QStringLiteral("prop")).toString().trimmed();
+    if (prop.isEmpty() || !args.contains(QStringLiteral("at")) || !args.contains(QStringLiteral("hold")))
+        return err("bad_args", QStringLiteral("prop, at, and hold required"));
+    m_controller->setKeyframeHold(ref.track, ref.clip, prop, jsonNumber(args.value(QStringLiteral("at")), 0),
+                                  jsonBool(args.value(QStringLiteral("hold"))));
+    return ok({{QStringLiteral("prop"), prop}});
+}
+
+QJsonObject McpDispatcher::opSetPropertyKeyframesEnabled(const QJsonObject &args)
+{
+    const ClipRef ref = resolveClip(args);
+    if (!ref.valid())
+        return err("not_found", QStringLiteral("Unknown clip"));
+    const QString prop = args.value(QStringLiteral("prop")).toString().trimmed();
+    if (prop.isEmpty() || !args.contains(QStringLiteral("enabled")))
+        return err("bad_args", QStringLiteral("prop and enabled required"));
+    m_controller->setClipPropertyKeyframesEnabled(ref.track, ref.clip, prop,
+                                                  jsonBool(args.value(QStringLiteral("enabled"))));
+    return ok({{QStringLiteral("prop"), prop},
+               {QStringLiteral("enabled"),
+                m_controller->clipPropertyKeyframesEnabled(ref.track, ref.clip, prop)}});
+}
+
+QJsonObject McpDispatcher::opListSpeedCurve(const QJsonObject &args)
+{
+    const ClipRef ref = resolveClip(args);
+    if (!ref.valid())
+        return err("not_found", QStringLiteral("Unknown clip"));
+    if (m_controller->speedCurveSessionActive())
+        m_controller->endSpeedCurveSession();
+    m_controller->beginSpeedCurveSession(ref.track, ref.clip);
+    if (!m_controller->speedCurveSessionActive())
+        return err("bad_args", QStringLiteral("Clip cannot use a speed curve"));
+    const QVariantMap clipMap = m_controller->clipAt(ref.track, ref.clip);
+    const bool hasCurve = clipMap.value(QStringLiteral("hasSpeedCurve")).toBool();
+    const QJsonArray points = speedPointsToJson(m_controller->speedCurvePoints());
+    const double retimed = m_controller->speedCurveRetimedDuration();
+    m_controller->endSpeedCurveSession();
+    return ok({{QStringLiteral("hasCurve"), hasCurve},
+               {QStringLiteral("points"), points},
+               {QStringLiteral("retimedDuration"), retimed}});
+}
+
+QJsonObject McpDispatcher::opSetSpeedCurve(const QJsonObject &args)
+{
+    const ClipRef ref = resolveClip(args);
+    if (!ref.valid())
+        return err("not_found", QStringLiteral("Unknown clip"));
+    const QJsonArray pointArray = args.value(QStringLiteral("points")).toArray();
+    if (pointArray.size() < 2)
+        return err("bad_args", QStringLiteral("points needs at least two entries"));
+    if (m_controller->speedCurveSessionActive())
+        m_controller->endSpeedCurveSession();
+    m_controller->beginSpeedCurveSession(ref.track, ref.clip);
+    if (!m_controller->speedCurveSessionActive())
+        return err("bad_args", QStringLiteral("Clip cannot use a speed curve"));
+    m_controller->setSpeedCurvePoints(speedPointsFromJson(pointArray));
+    m_controller->applySpeedCurve();
+    const int track = m_controller->selectedTrack();
+    const int clip = m_controller->selectedClip();
+    const QString newId = m_controller->mcpClipId(track, clip);
+    m_controller->endSpeedCurveSession();
+    if (newId.isEmpty())
+        return err("bad_args", QStringLiteral("Speed curve was not applied"));
+    return ok({{QStringLiteral("id"), newId},
+               {QStringLiteral("track"), track},
+               {QStringLiteral("index"), clip},
+               {QStringLiteral("retimedDuration"), m_controller->clipAt(track, clip).value(QStringLiteral("duration")).toDouble()}});
+}
+
+QJsonObject McpDispatcher::opClearSpeedCurve(const QJsonObject &args)
+{
+    const ClipRef ref = resolveClip(args);
+    if (!ref.valid())
+        return err("not_found", QStringLiteral("Unknown clip"));
+    m_controller->clearClipSpeedCurve(ref.track, ref.clip);
+    const ClipRef after = resolveClip(QJsonObject{{QStringLiteral("clip"), ref.id}});
+    return ok(clipFeedback(after));
+}
+
+QJsonObject McpDispatcher::opGetUiPreferences() const
+{
+    return ok({
+        {QStringLiteral("theme"),
+         QJsonObject{{QStringLiteral("overridden"), m_controller->darkModeOverridden()},
+                     {QStringLiteral("dark"), m_controller->darkModePreferred()}}},
+        {QStringLiteral("autoKey"), m_controller->autoKeyEnabled()},
+        {QStringLiteral("mediaGrid"), m_controller->mediaGridMode()},
+        {QStringLiteral("reopenLastProject"), m_controller->reopenLastProject()},
+    });
+}
+
+QJsonObject McpDispatcher::opSetTheme(const QJsonObject &args)
+{
+    if (!args.contains(QStringLiteral("dark")))
+        return err("bad_args", QStringLiteral("dark required"));
+    m_controller->setDarkModePreference(jsonBool(args.value(QStringLiteral("dark"))));
+    return ok({
+        {QStringLiteral("overridden"), m_controller->darkModeOverridden()},
+        {QStringLiteral("dark"), m_controller->darkModePreferred()},
+    });
+}
+
+QJsonObject McpDispatcher::opListShortcuts() const
+{
+    QJsonArray actions;
+    for (const QVariant &entry : m_controller->actions()) {
+        const QVariantMap map = entry.toMap();
+        actions.append(QJsonObject{
+            {QStringLiteral("id"), map.value(QStringLiteral("id")).toString()},
+            {QStringLiteral("label"), map.value(QStringLiteral("label")).toString()},
+            {QStringLiteral("shortcut"), map.value(QStringLiteral("shortcut")).toString()},
+        });
+    }
+    return ok({{QStringLiteral("actions"), actions}});
+}
+
+QJsonObject McpDispatcher::opSetShortcut(const QJsonObject &args)
+{
+    const QString action = args.value(QStringLiteral("action")).toString().trimmed();
+    if (action.isEmpty())
+        return err("bad_args", QStringLiteral("action required"));
+    if (!args.contains(QStringLiteral("keys")))
+        return err("bad_args", QStringLiteral("keys required"));
+    const QString keys = args.value(QStringLiteral("keys")).toString();
+    const QString conflict = m_controller->setShortcut(action, keys);
+    if (!conflict.isEmpty())
+        return err("conflict", conflict);
+    return ok({{QStringLiteral("action"), action}, {QStringLiteral("keys"), keys}});
+}
+
+QJsonObject McpDispatcher::opResetShortcuts()
+{
+    m_controller->resetShortcuts();
+    return ok({{QStringLiteral("reset"), true}});
 }
 
 } // namespace drift::mcp

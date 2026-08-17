@@ -47,6 +47,19 @@ QJsonObject textStyleSchema()
     });
 }
 
+QJsonObject speedPointSchema()
+{
+    return objectSchema({
+        {QStringLiteral("pos"), numberProp(QStringLiteral("Normalised position 0..1 over trimmed source"))},
+        {QStringLiteral("speed"), numberProp(QStringLiteral("Playback rate at this point"))},
+        {QStringLiteral("inDx"), numberProp(QStringLiteral("Incoming tangent dx (curve space)"))},
+        {QStringLiteral("inDy"), numberProp(QStringLiteral("Incoming tangent dy"))},
+        {QStringLiteral("outDx"), numberProp(QStringLiteral("Outgoing tangent dx"))},
+        {QStringLiteral("outDy"), numberProp(QStringLiteral("Outgoing tangent dy"))},
+        {QStringLiteral("corner"), boolProp(QStringLiteral("Break tangent collinearity"))},
+    });
+}
+
 QJsonObject exportSettingsProps()
 {
     return {
@@ -296,6 +309,99 @@ const QList<Op> &ops()
         { "export_status", "project", "Check an in-flight encode",
           "Returns {busy, progress, message}. Also available as inspect.export.",
           objectSchema({}), true, false, true },
+
+        { "list_animated_properties", "keyframes", "See what animates on a clip",
+          "Returns property names with keyframe animation (x, y, width, height, rotation, opacity, volume, fx.N.param).",
+          objectSchema(clipRefProps()), true, false, true },
+        { "list_keyframes", "keyframes", "Read keys for one property",
+          "Returns [{seconds, value, inDx, inDy, outDx, outDy, corner, hold, easing, custom}]. Times are timeline seconds.",
+          objectSchema(mergeProps({{QStringLiteral("prop"),
+                                    stringProp(QStringLiteral("Property: x, y, width, height, rotation, opacity, volume, or fx.N.key"))}},
+                                  clipRefProps()),
+                       {QStringLiteral("prop")}),
+          true, false, true },
+        { "set_keyframe", "keyframes", "Add or update a key",
+          "Set a keyframe at timeline seconds. Property names match list_keyframes.",
+          objectSchema(mergeProps({{QStringLiteral("prop"), stringProp(QStringLiteral("Animated property"))},
+                                   {QStringLiteral("at"), numberProp(QStringLiteral("Timeline seconds"))},
+                                   {QStringLiteral("value"), numberProp(QStringLiteral("Property value"))}},
+                                  clipRefProps()),
+                       {QStringLiteral("prop"), QStringLiteral("at"), QStringLiteral("value")}) },
+        { "remove_keyframe", "keyframes", "Delete a key",
+          "Remove the nearest keyframe at timeline seconds.",
+          objectSchema(mergeProps({{QStringLiteral("prop"), stringProp(QStringLiteral("Animated property"))},
+                                   {QStringLiteral("at"), numberProp(QStringLiteral("Timeline seconds"))}},
+                                  clipRefProps()),
+                       {QStringLiteral("prop"), QStringLiteral("at")}),
+          false, true },
+        { "set_keyframe_interpolation", "keyframes", "Set linear/hold/ease on a key",
+          "Set easing preset on the key nearest `at` seconds (linear, hold, ease).",
+          objectSchema(mergeProps(
+              {{QStringLiteral("prop"), stringProp(QStringLiteral("Animated property"))},
+               {QStringLiteral("at"), numberProp(QStringLiteral("Timeline seconds"))},
+               {QStringLiteral("mode"), enumProp(QStringLiteral("Interpolation"),
+                                                {QStringLiteral("linear"), QStringLiteral("hold"),
+                                                 QStringLiteral("ease")})}},
+              clipRefProps()),
+                       {QStringLiteral("prop"), QStringLiteral("at"), QStringLiteral("mode")}) },
+        { "set_keyframe_tangents", "keyframes", "Shape bezier handles",
+          "Set tangent handles in seconds / property units relative to the key at `at`.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("prop"), stringProp(QStringLiteral("Animated property"))},
+               {QStringLiteral("at"), numberProp(QStringLiteral("Timeline seconds"))},
+               {QStringLiteral("inDx"), numberProp(QStringLiteral("Incoming handle dx seconds"))},
+               {QStringLiteral("inDy"), numberProp(QStringLiteral("Incoming handle dy"))},
+               {QStringLiteral("outDx"), numberProp(QStringLiteral("Outgoing handle dx seconds"))},
+               {QStringLiteral("outDy"), numberProp(QStringLiteral("Outgoing handle dy"))},
+               {QStringLiteral("corner"), boolProp(QStringLiteral("Break tangent collinearity"))}},
+              clipRefProps()),
+                       {QStringLiteral("prop"), QStringLiteral("at")}) },
+        { "set_keyframe_hold", "keyframes", "Step-hold a key",
+          "When true the property holds until the next key.",
+          objectSchema(mergeProps({{QStringLiteral("prop"), stringProp(QStringLiteral("Animated property"))},
+                                   {QStringLiteral("at"), numberProp(QStringLiteral("Timeline seconds"))},
+                                   {QStringLiteral("hold"), boolProp(QStringLiteral("Hold until next key"))}},
+                                  clipRefProps()),
+                       {QStringLiteral("prop"), QStringLiteral("at"), QStringLiteral("hold")}) },
+        { "set_property_keyframes_enabled", "keyframes", "Mute animation without deleting keys",
+          "When false keys are kept but the property holds its first key's value.",
+          objectSchema(mergeProps({{QStringLiteral("prop"), stringProp(QStringLiteral("Animated property"))},
+                                   {QStringLiteral("enabled"), boolProp(QStringLiteral("Keyframes drive the property"))}},
+                                  clipRefProps()),
+                       {QStringLiteral("prop"), QStringLiteral("enabled")}) },
+
+        { "list_speed_curve", "speed", "Read a clip's speed ramp",
+          "Returns {hasCurve, points:[{pos,speed,…}], retimedDuration}. Opens a transient read of the curve.",
+          objectSchema(clipRefProps()), true, false, true },
+        { "set_speed_curve", "speed", "Apply a custom speed ramp",
+          "Replace the clip with a retimed copy carrying the curve. Needs at least two points. Returns new clip id.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("points"),
+                arrayProp(speedPointSchema(), QStringLiteral("Speed curve control points"))}},
+              clipRefProps()),
+                       {QStringLiteral("points")}) },
+        { "clear_speed_curve", "speed", "Remove a speed ramp",
+          "Clear the curve and restore scalar-speed timeline duration.",
+          objectSchema(clipRefProps()), false, true },
+
+        { "get_ui_preferences", "ui", "Read editor UI settings",
+          "Returns theme {overridden, dark} and editor flags (autoKey, mediaGrid, reopenLastProject).",
+          objectSchema({}), true, false, true },
+        { "set_theme", "ui", "Set dark or light theme",
+          "Set explicit dark-mode preference (does not follow OS until cleared in the app).",
+          objectSchema({{QStringLiteral("dark"), boolProp(QStringLiteral("true = dark, false = light"))}},
+                       {QStringLiteral("dark")}) },
+        { "list_shortcuts", "ui", "List action bindings",
+          "Returns [{id, label, shortcut}] for editor actions.",
+          objectSchema({}), true, false, true },
+        { "set_shortcut", "ui", "Rebind a shortcut",
+          "Bind keys to an action id from list_shortcuts. Empty keys clears. Returns conflict label on failure.",
+          objectSchema({{QStringLiteral("action"), stringProp(QStringLiteral("Action id"))},
+                        {QStringLiteral("keys"), stringProp(QStringLiteral("Qt key sequence, e.g. Ctrl+S"))}},
+                       {QStringLiteral("action"), QStringLiteral("keys")}) },
+        { "reset_shortcuts", "ui", "Restore default shortcuts",
+          "Reset every action binding to defaults.",
+          objectSchema({}) },
     };
     return k;
 }
@@ -324,9 +430,10 @@ QJsonArray endpointList()
 
 QStringList toolboxNames()
 {
-    return {QStringLiteral("media"),    QStringLiteral("timeline"), QStringLiteral("canvas"),
-            QStringLiteral("playback"), QStringLiteral("text"),     QStringLiteral("effects"),
-            QStringLiteral("project")};
+    return {QStringLiteral("media"),     QStringLiteral("timeline"), QStringLiteral("canvas"),
+            QStringLiteral("playback"),  QStringLiteral("text"),     QStringLiteral("effects"),
+            QStringLiteral("project"),   QStringLiteral("keyframes"), QStringLiteral("speed"),
+            QStringLiteral("ui")};
 }
 
 QString agentGuideText()
@@ -350,7 +457,7 @@ QString agentGuideText()
         "- Clip overlap is off by default (place/move snap to gaps).\n"
         "- export_video is async; poll inspect.export until active is false.\n"
         "\n"
-        "Toolboxes: media, timeline, canvas, playback, text, effects, project.\n");
+        "Toolboxes: media, timeline, canvas, playback, text, effects, project, keyframes, speed, ui.\n");
 }
 
 QJsonObject catalogPayload()
@@ -367,6 +474,9 @@ QJsonObject catalogPayload()
         {"text", "Add and edit title/caption clips."},
         {"effects", "Video/audio effects and transitions."},
         {"project", "Canvas size, background, metadata, save, and export."},
+        {"keyframes", "Animate clip and effect properties over time."},
+        {"speed", "Variable playback speed (retimed clips)."},
+        {"ui", "Editor theme and keyboard shortcuts."},
     };
 
     QJsonArray toolboxes;

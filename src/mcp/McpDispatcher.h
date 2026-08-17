@@ -77,6 +77,25 @@ private:
     QJsonObject opExportVideo(const QJsonObject &args);
     QJsonObject opExportStatus() const;
     QJsonObject opExport(const QJsonObject &args);
+    QJsonObject opListAnimatedProperties(const QJsonObject &args) const;
+    QJsonObject opListKeyframes(const QJsonObject &args) const;
+    QJsonObject opSetKeyframe(const QJsonObject &args);
+    QJsonObject opRemoveKeyframe(const QJsonObject &args);
+    QJsonObject opSetKeyframeInterpolation(const QJsonObject &args);
+    QJsonObject opSetKeyframeTangents(const QJsonObject &args);
+    QJsonObject opSetKeyframeHold(const QJsonObject &args);
+    QJsonObject opSetPropertyKeyframesEnabled(const QJsonObject &args);
+    QJsonObject opListSpeedCurve(const QJsonObject &args);
+    QJsonObject opSetSpeedCurve(const QJsonObject &args);
+    QJsonObject opClearSpeedCurve(const QJsonObject &args);
+    QJsonObject opGetUiPreferences() const;
+    QJsonObject opSetTheme(const QJsonObject &args);
+    QJsonObject opListShortcuts() const;
+    QJsonObject opSetShortcut(const QJsonObject &args);
+    QJsonObject opResetShortcuts();
+
+    static QJsonArray speedPointsToJson(const QVariantList &points);
+    static QVariantList speedPointsFromJson(const QJsonArray &points);
 
     AppController *m_controller = nullptr;
 };
