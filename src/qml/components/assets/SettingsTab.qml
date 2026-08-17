@@ -15,6 +15,10 @@ Item {
         anchors.fill: parent
         contentHeight: settingsColumn.height + Theme.spacing3xl
         clip: true
+        // Bumped by ThemedSlider while a handle is dragged, so the page
+        // doesn't steal the drag.
+        property int dragLocks: 0
+        interactive: dragLocks === 0
         ScrollBar.vertical: AppScrollBar { }
 
         Column {

@@ -7,7 +7,6 @@ Slider {
     id: root
 
     property var _flickable: null
-    property bool _flickableWasInteractive: true
 
     // Shown in a tooltip while dragging. Set a formatter for units/precision.
     property bool showValueTooltip: true
@@ -37,10 +36,14 @@ Slider {
     onFromChanged: if (from > to) to = from
     onToChanged: if (to < from) from = to
 
+    // Only Flickables that opt in with `property int dragLocks: 0` and fold it
+    // into their `interactive` binding are lockable. Writing `interactive`
+    // directly would destroy that binding, leaving the Flickable stuck at
+    // whatever value it happened to hold when the drag started.
     function findFlickable(item) {
         var node = item
         while (node) {
-            if (node.contentX !== undefined && node.interactive !== undefined && node.contentHeight !== undefined)
+            if (node.dragLocks !== undefined && node.contentHeight !== undefined)
                 return node
             node = node.parent
         }
@@ -49,7 +52,7 @@ Slider {
 
     function restoreFlickable() {
         if (_flickable) {
-            _flickable.interactive = _flickableWasInteractive
+            _flickable.dragLocks = Math.max(0, _flickable.dragLocks - 1)
             _flickable = null
         }
     }
@@ -61,10 +64,10 @@ Slider {
         target: root
         function onPressedChanged() {
             if (root.pressed) {
-                root._flickable = root.findFlickable(root.parent)
-                if (root._flickable) {
-                    root._flickableWasInteractive = root._flickable.interactive
-                    root._flickable.interactive = false
+                if (!root._flickable) {
+                    root._flickable = root.findFlickable(root.parent)
+                    if (root._flickable)
+                        root._flickable.dragLocks++
                 }
             } else {
                 root.restoreFlickable()

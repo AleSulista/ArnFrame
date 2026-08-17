@@ -49,6 +49,7 @@ Row {
                 colorDialog.selectedColor = root.hex
                 colorDialog.open()
             }
+            onWheel: (wheel) => { wheel.accepted = false }
         }
     }
 

@@ -380,6 +380,7 @@ Column {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: valuePopup.openEditor()
+                    onWheel: (wheel) => { wheel.accepted = false }
                 }
 
                 ThemedToolTip {

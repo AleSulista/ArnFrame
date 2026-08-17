@@ -352,7 +352,10 @@ ThemedDialog {
         contentHeight: exportColumn.height
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        interactive: contentHeight > height
+        // Bumped by ThemedSlider while a handle is dragged, so the dialog
+        // doesn't steal the drag.
+        property int dragLocks: 0
+        interactive: contentHeight > height && dragLocks === 0
         ScrollBar.vertical: AppScrollBar {
             policy: contentFlick.contentHeight > contentFlick.height
                     ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded

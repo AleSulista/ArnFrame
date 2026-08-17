@@ -345,7 +345,11 @@ PanelFrame {
                 contentHeight: tabColumn.height + Theme.spacing3xl
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                interactive: contentHeight > height
+                // Bumped by ThemedSlider while a handle is dragged, so the panel
+                // doesn't steal the drag. Folded into the binding rather than
+                // written to `interactive` directly, which would destroy it.
+                property int dragLocks: 0
+                interactive: contentHeight > height && dragLocks === 0
                 ScrollBar.vertical: AppScrollBar {
                     policy: tabFlick.contentHeight > tabFlick.height
                             ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
