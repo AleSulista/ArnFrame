@@ -153,13 +153,13 @@ ThemedDialog {
             const t = templates[i]
             for (let q = 0; q < qualities.length; ++q) {
                 const edge = qualities[q].shortEdge
-                const long = qualities[q].longEdge
+                const longSide = qualities[q].longEdge
                 let tw = 0
                 let th = 0
                 switch (t.aspect) {
                 case "9:16":
                     tw = edge
-                    th = long
+                    th = longSide
                     break
                 case "4:5":
                     tw = edge
@@ -170,7 +170,7 @@ ThemedDialog {
                     th = edge
                     break
                 default:
-                    tw = long
+                    tw = longSide
                     th = edge
                     break
                 }
