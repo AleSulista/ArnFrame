@@ -111,7 +111,7 @@ Item {
                 width: (parent.width - parent.spacing) / 2
                 spacing: 4
                 Text {
-                    text: qsTr("Starts at (s)")
+                    text: qsTr("Starts at")
                     color: Theme.mutedForeground
                     font.pixelSize: Theme.fontSizeXs
                     font.family: Theme.fontFamily
@@ -133,7 +133,7 @@ Item {
                 width: (parent.width - parent.spacing) / 2
                 spacing: 4
                 Text {
-                    text: qsTr("Duration (s)")
+                    text: qsTr("Duration")
                     color: Theme.mutedForeground
                     font.pixelSize: Theme.fontSizeXs
                     font.family: Theme.fontFamily
@@ -174,7 +174,7 @@ Item {
                     width: (parent.width - parent.spacing) / 2
                     spacing: 4
                     Text {
-                        text: qsTr("From (s)")
+                        text: qsTr("From")
                         HoverHandler { id: tipHover1231 }
                         ThemedToolTip { text: qsTr("Seconds into the file where this clip starts"); visible: tipHover1231.hovered }
                         color: Theme.mutedForeground
@@ -197,7 +197,7 @@ Item {
                     width: (parent.width - parent.spacing) / 2
                     spacing: 4
                     Text {
-                        text: qsTr("To (s)")
+                        text: qsTr("To")
                         HoverHandler { id: tipHover1252 }
                         ThemedToolTip { text: qsTr("Seconds into the file where this clip ends"); visible: tipHover1252.hovered }
                         color: Theme.mutedForeground

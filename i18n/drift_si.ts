@@ -745,13 +745,7 @@
         <translation>උපසිරැසි ආයාත කරන ලදී</translation>
     </message>
     <message>
-        <location line="-41"/>
-        <location line="+42"/>
-        <source>Imported %1 subtitle(s)</source>
-        <translation>උපසිරැසි %1ක් ආයාත කරන ලදී</translation>
-    </message>
-    <message>
-        <location line="-27"/>
+        <location line="-26"/>
         <source>Select a subtitle clip to import into</source>
         <translation>ආයාත කිරීම සඳහා උපසිරැසි ක්ලිපයක් තෝරන්න</translation>
     </message>
@@ -808,12 +802,7 @@
         <translation>ආරම්භ කරමින්…</translation>
     </message>
     <message>
-        <location line="-1572"/>
-        <source>Creating captions...</source>
-        <translation>උපසිරැසි නිර්මාණය කරමින්...</translation>
-    </message>
-    <message>
-        <location line="+36"/>
+        <location line="-1536"/>
         <location line="+871"/>
         <location line="+238"/>
         <location line="+457"/>
@@ -943,12 +932,7 @@
         <translation>සූදානම් වෙමින්…</translation>
     </message>
     <message>
-        <location line="-236"/>
-        <source>Cutting out subject...</source>
-        <translation>විෂයය වෙන් කරමින්...</translation>
-    </message>
-    <message>
-        <location line="+76"/>
+        <location line="-160"/>
         <source>Clip is too short to cut out</source>
         <translation>වෙන් කිරීමට ක්ලිපය කෙටි වැඩිය</translation>
     </message>
@@ -1005,12 +989,7 @@
         <translation>ස්කෑන් කිරීමට ක්ලිපයේ වීඩියෝ නොමැත</translation>
     </message>
     <message>
-        <location line="+15"/>
-        <source>Detecting faces...</source>
-        <translation>මුහුණු හඳුනාගනිමින්...</translation>
-    </message>
-    <message>
-        <location line="+59"/>
+        <location line="+74"/>
         <source>Clip is too short to scan</source>
         <translation>ස්කෑන් කිරීමට ක්ලිපය කෙටි වැඩිය</translation>
     </message>
@@ -1134,10 +1113,34 @@
         <source>Ready</source>
         <translation>සූදානම්</translation>
     </message>
+    <message numerus="yes">
+        <location line="-1655"/>
+        <location line="+42"/>
+        <source>Imported %n subtitles</source>
+        <translation>
+            <numerusform>උපසිරැසි %nක් ආයාත කරන ලදී</numerusform>
+            <numerusform>උපසිරැසි %nක් ආයාත කරන ලදී</numerusform>
+        </translation>
+    </message>
     <message>
-        <location line="+53"/>
-        <source>Removing noise...</source>
-        <translation>ඝෝෂා ඉවත් කරමින්...</translation>
+        <location line="+90"/>
+        <source>Creating captions…</source>
+        <translation>උපසිරැසි නිර්මාණය කරමින්…</translation>
+    </message>
+    <message>
+        <location line="+869"/>
+        <source>Cutting out subject…</source>
+        <translation>විෂයය වෙන් කරමින්…</translation>
+    </message>
+    <message>
+        <location line="+240"/>
+        <source>Detecting faces…</source>
+        <translation>මුහුණු හඳුනාගනිමින්…</translation>
+    </message>
+    <message>
+        <location line="+467"/>
+        <source>Removing noise…</source>
+        <translation>ඝෝෂා ඉවත් කරමින්…</translation>
     </message>
     <message>
         <location line="+12"/>
@@ -1919,13 +1922,21 @@
         <source>Paste</source>
         <translation>අලවන්න</translation>
     </message>
-    <message>
+    <message numerus="yes">
         <location line="+4"/>
-        <source>Pasted %1 clip(s)</source>
-        <translation>ක්ලිප් %1ක් අලවන ලදී</translation>
+        <source>Pasted %n clips</source>
+        <translation>
+            <numerusform>ක්ලිප් %nක් අලවන ලදී</numerusform>
+            <numerusform>ක්ලිප් %nක් අලවන ලදී</numerusform>
+        </translation>
     </message>
     <message>
-        <location line="+32"/>
+        <location line="+1575"/>
+        <source>Exporting…</source>
+        <translation>නිර්යාත කරමින්…</translation>
+    </message>
+    <message>
+        <location line="-1543"/>
         <source>Nudge selection</source>
         <translation>තේරීම මඳක් චලනය කරන්න</translation>
     </message>
@@ -1992,12 +2003,7 @@
         <translation>නිර්යාත කිරීම දැනටමත් සිදුවෙමින් පවතී</translation>
     </message>
     <message>
-        <location line="+16"/>
-        <source>Exporting...</source>
-        <translation>නිර්යාත කරමින්...</translation>
-    </message>
-    <message>
-        <location line="+26"/>
+        <location line="+42"/>
         <source>Export complete</source>
         <translation>නිර්යාත කිරීම සම්පූර්ණයි</translation>
     </message>
@@ -2030,37 +2036,13 @@
         <source>Imported %1 of %2 files. %3 could not be read.</source>
         <translation>ගොනු %2කින් %1ක් ආයාත කරන ලදී. %3ක් කියවීමට නොහැකි විය.</translation>
     </message>
-    <message numerus="yes">
-        <location line="+3"/>
-        <source>Imported %n file(s).</source>
-        <translation>
-            <numerusform>ගොනු %nක් ආයාත කරන ලදී.</numerusform>
-            <numerusform>ගොනු %nක් ආයාත කරන ලදී.</numerusform>
-        </translation>
-    </message>
     <message>
-        <location line="+2"/>
+        <location line="+5"/>
         <source>Could not import that file — the format may be unsupported.</source>
         <translation>එම ගොනුව ආයාත කිරීමට නොහැකි විය — ආකෘතියට සහය නොදක්වයි විය හැක.</translation>
     </message>
-    <message numerus="yes">
-        <location line="+2"/>
-        <source>Could not import any of the %n selected file(s).</source>
-        <translation>
-            <numerusform>තෝරාගත් ගොනු %nන් කිසිවක් ආයාත කිරීමට නොහැකි විය.</numerusform>
-            <numerusform>තෝරාගත් ගොනු %nන් කිසිවක් ආයාත කිරීමට නොහැකි විය.</numerusform>
-        </translation>
-    </message>
-    <message numerus="yes">
-        <location line="+17"/>
-        <source>“%1” is still used by %n clip(s) on the timeline.</source>
-        <translation>
-            <numerusform>“%1” තවමත් කාලරේඛාවේ ක්ලිප් %nක් මඟින් භාවිත කෙරේ.</numerusform>
-            <numerusform>“%1” තවමත් කාලරේඛාවේ ක්ලිප් %nක් මඟින් භාවිත කෙරේ.</numerusform>
-        </translation>
-    </message>
     <message>
-        <location line="+10"/>
+        <location line="+29"/>
         <source>Remove this media?</source>
         <translation>මෙම මාධ්‍යය ඉවත් කරන්නද?</translation>
     </message>
@@ -2136,8 +2118,32 @@
         <translation>එම පින්තූරය නිර්යාත කිරීමට නොහැකි විය.</translation>
     </message>
     <message numerus="yes">
-        <location line="+11"/>
-        <source>Replaced with “%1”. %n clip(s) were shortened to fit the new file.</source>
+        <location line="-128"/>
+        <source>Imported %n files.</source>
+        <translation>
+            <numerusform>ගොනු %nක් ආයාත කරන ලදී.</numerusform>
+            <numerusform>ගොනු %nක් ආයාත කරන ලදී.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location line="+4"/>
+        <source>Could not import any of the %n selected files.</source>
+        <translation>
+            <numerusform>තෝරාගත් ගොනු %nන් කිසිවක් ආයාත කිරීමට නොහැකි විය.</numerusform>
+            <numerusform>තෝරාගත් ගොනු %nන් කිසිවක් ආයාත කිරීමට නොහැකි විය.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location line="+17"/>
+        <source>“%1” is still used by %n clips on the timeline.</source>
+        <translation>
+            <numerusform>“%1” තවමත් කාලරේඛාවේ ක්ලිප් %nක් මඟින් භාවිත කෙරේ.</numerusform>
+            <numerusform>“%1” තවමත් කාලරේඛාවේ ක්ලිප් %nක් මඟින් භාවිත කෙරේ.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location line="+118"/>
+        <source>Replaced with “%1”. %n clips were shortened to fit the new file.</source>
         <translation>
             <numerusform>“%1” සමඟ ප්‍රතිස්ථාපනය විය. නව ගොනුවට සරිලන සේ ක්ලිප් %nක් කෙටි කරන ලදී.</numerusform>
             <numerusform>“%1” සමඟ ප්‍රතිස්ථාපනය විය. නව ගොනුවට සරිලන සේ ක්ලිප් %nක් කෙටි කරන ලදී.</numerusform>
@@ -3602,16 +3608,26 @@
     </message>
     <message>
         <location line="+24"/>
-        <source>Starts at (s)</source>
-        <translation>ආරම්භය (තත්)</translation>
+        <source>Starts at</source>
+        <translation>ආරම්භය</translation>
     </message>
     <message>
         <location line="+22"/>
-        <source>Duration (s)</source>
-        <translation>කාලසීමාව (තත්)</translation>
+        <source>Duration</source>
+        <translation>කාලසීමාව</translation>
     </message>
     <message>
-        <location line="+25"/>
+        <location line="+41"/>
+        <source>From</source>
+        <translation>සිට</translation>
+    </message>
+    <message>
+        <location line="+23"/>
+        <source>To</source>
+        <translation>දක්වා</translation>
+    </message>
+    <message>
+        <location line="-39"/>
         <source>Trim</source>
         <translation>කප්පාදුව</translation>
     </message>
@@ -3621,22 +3637,12 @@
         <translation>මෙම ක්ලිපය මඟින් වාදනය කරන්නේ මුල් ගොනුවේ කුමන කොටසද යන්න</translation>
     </message>
     <message>
-        <location line="+14"/>
-        <source>From (s)</source>
-        <translation>සිට (තත්)</translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+16"/>
         <source>Seconds into the file where this clip starts</source>
         <translation>මෙම ක්ලිපය ආරම්භ වන මුල් ගොනුවේ තත්පර ගණන</translation>
     </message>
     <message>
-        <location line="+21"/>
-        <source>To (s)</source>
-        <translation>දක්වා (තත්)</translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+23"/>
         <source>Seconds into the file where this clip ends</source>
         <translation>මෙම ක්ලිපය අවසන් වන මුල් ගොනුවේ තත්පර ගණන</translation>
     </message>
@@ -3734,10 +3740,13 @@
         <source>No keyframes</source>
         <translation>කීෆ්‍රේම නැත</translation>
     </message>
-    <message>
+    <message numerus="yes">
         <location line="+1"/>
-        <source> keyframe(s)</source>
-        <translation> කීෆ්‍රේම</translation>
+        <source>%n keyframes</source>
+        <translation>
+            <numerusform>කීෆ්‍රේම %nක්</numerusform>
+            <numerusform>කීෆ්‍රේම %nක්</numerusform>
+        </translation>
     </message>
     <message>
         <location line="+6"/>
@@ -6143,10 +6152,13 @@ Quality: තථ්‍ය කාලයට වඩා සෙමින්, ශබ්
         <source>Subtitles</source>
         <translation>උපසිරැසි</translation>
     </message>
-    <message>
+    <message numerus="yes">
         <location line="+7"/>
-        <source> caption(s)</source>
-        <translation> උපසිරැසි</translation>
+        <source>%n captions</source>
+        <translation>
+            <numerusform>උපසිරැසි %nක්</numerusform>
+            <numerusform>උපසිරැසි %nක්</numerusform>
+        </translation>
     </message>
     <message>
         <location line="+179"/>
@@ -7446,7 +7458,7 @@ Quality: තථ්‍ය කාලයට වඩා සෙමින්, ශබ්
     </message>
     <message numerus="yes">
         <location line="-341"/>
-        <source>This removes the track and its %n clip(s). You can undo afterwards.</source>
+        <source>This removes the track and its %n clips. You can undo afterwards.</source>
         <translation>
             <numerusform>මෙමඟින් ට්‍රැකය සහ එහි ඇති ක්ලිප් %n ඉවත් කෙරේ. පසුව ඔබට එය අහෝසි කළ හැක.</numerusform>
             <numerusform>මෙමඟින් ට්‍රැකය සහ එහි ඇති ක්ලිප් %n ඉවත් කෙරේ. පසුව ඔබට එය අහෝසි කළ හැක.</numerusform>
@@ -7664,8 +7676,8 @@ Quality: තථ්‍ය කාලයට වඩා සෙමින්, ශබ්
     </message>
     <message>
         <location line="+33"/>
-        <source>Duration (s)</source>
-        <translation>කාලසීමාව (තත්)</translation>
+        <source>Duration</source>
+        <translation>කාලසීමාව</translation>
     </message>
     <message>
         <location line="+50"/>

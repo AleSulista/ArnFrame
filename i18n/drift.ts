@@ -745,13 +745,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-41"/>
-        <location line="+42"/>
-        <source>Imported %1 subtitle(s)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="-27"/>
+        <location line="-26"/>
         <source>Select a subtitle clip to import into</source>
         <translation type="unfinished"></translation>
     </message>
@@ -808,12 +802,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1572"/>
-        <source>Creating captions...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+36"/>
+        <location line="-1536"/>
         <location line="+871"/>
         <location line="+238"/>
         <location line="+457"/>
@@ -943,12 +932,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-236"/>
-        <source>Cutting out subject...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+76"/>
+        <location line="-160"/>
         <source>Clip is too short to cut out</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1005,12 +989,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+15"/>
-        <source>Detecting faces...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+59"/>
+        <location line="+74"/>
         <source>Clip is too short to scan</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1134,9 +1113,33 @@
         <source>Ready</source>
         <translation type="unfinished"></translation>
     </message>
+    <message numerus="yes">
+        <location line="-1655"/>
+        <location line="+42"/>
+        <source>Imported %n subtitles</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
     <message>
-        <location line="+53"/>
-        <source>Removing noise...</source>
+        <location line="+90"/>
+        <source>Creating captions…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+869"/>
+        <source>Cutting out subject…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+240"/>
+        <source>Detecting faces…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+467"/>
+        <source>Removing noise…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1919,13 +1922,21 @@
         <source>Paste</source>
         <translation type="unfinished"></translation>
     </message>
-    <message>
+    <message numerus="yes">
         <location line="+4"/>
-        <source>Pasted %1 clip(s)</source>
+        <source>Pasted %n clips</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <location line="+1575"/>
+        <source>Exporting…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+32"/>
+        <location line="-1543"/>
         <source>Nudge selection</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1992,12 +2003,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+16"/>
-        <source>Exporting...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+26"/>
+        <location line="+42"/>
         <source>Export complete</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2030,37 +2036,13 @@
         <source>Imported %1 of %2 files. %3 could not be read.</source>
         <translation type="unfinished"></translation>
     </message>
-    <message numerus="yes">
-        <location line="+3"/>
-        <source>Imported %n file(s).</source>
-        <translation type="unfinished">
-            <numerusform></numerusform>
-            <numerusform></numerusform>
-        </translation>
-    </message>
     <message>
-        <location line="+2"/>
+        <location line="+5"/>
         <source>Could not import that file — the format may be unsupported.</source>
         <translation type="unfinished"></translation>
     </message>
-    <message numerus="yes">
-        <location line="+2"/>
-        <source>Could not import any of the %n selected file(s).</source>
-        <translation type="unfinished">
-            <numerusform></numerusform>
-            <numerusform></numerusform>
-        </translation>
-    </message>
-    <message numerus="yes">
-        <location line="+17"/>
-        <source>“%1” is still used by %n clip(s) on the timeline.</source>
-        <translation type="unfinished">
-            <numerusform></numerusform>
-            <numerusform></numerusform>
-        </translation>
-    </message>
     <message>
-        <location line="+10"/>
+        <location line="+29"/>
         <source>Remove this media?</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2136,8 +2118,32 @@
         <translation type="unfinished"></translation>
     </message>
     <message numerus="yes">
-        <location line="+11"/>
-        <source>Replaced with “%1”. %n clip(s) were shortened to fit the new file.</source>
+        <location line="-128"/>
+        <source>Imported %n files.</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location line="+4"/>
+        <source>Could not import any of the %n selected files.</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location line="+17"/>
+        <source>“%1” is still used by %n clips on the timeline.</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location line="+118"/>
+        <source>Replaced with “%1”. %n clips were shortened to fit the new file.</source>
         <translation type="unfinished">
             <numerusform></numerusform>
             <numerusform></numerusform>
@@ -3602,16 +3608,26 @@
     </message>
     <message>
         <location line="+24"/>
-        <source>Starts at (s)</source>
+        <source>Starts at</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+22"/>
-        <source>Duration (s)</source>
+        <source>Duration</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+25"/>
+        <location line="+41"/>
+        <source>From</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+23"/>
+        <source>To</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-39"/>
         <source>Trim</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3621,22 +3637,12 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+14"/>
-        <source>From (s)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+16"/>
         <source>Seconds into the file where this clip starts</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+21"/>
-        <source>To (s)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+2"/>
+        <location line="+23"/>
         <source>Seconds into the file where this clip ends</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3734,10 +3740,13 @@
         <source>No keyframes</source>
         <translation type="unfinished"></translation>
     </message>
-    <message>
+    <message numerus="yes">
         <location line="+1"/>
-        <source> keyframe(s)</source>
-        <translation type="unfinished"></translation>
+        <source>%n keyframes</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
     </message>
     <message>
         <location line="+6"/>
@@ -6138,10 +6147,13 @@ Quality: renders and shows every single frame, silently and slower than real tim
         <source>Subtitles</source>
         <translation type="unfinished"></translation>
     </message>
-    <message>
+    <message numerus="yes">
         <location line="+7"/>
-        <source> caption(s)</source>
-        <translation type="unfinished"></translation>
+        <source>%n captions</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
     </message>
     <message>
         <location line="+179"/>
@@ -7441,7 +7453,7 @@ Quality: renders and shows every single frame, silently and slower than real tim
     </message>
     <message numerus="yes">
         <location line="-341"/>
-        <source>This removes the track and its %n clip(s). You can undo afterwards.</source>
+        <source>This removes the track and its %n clips. You can undo afterwards.</source>
         <translation type="unfinished">
             <numerusform></numerusform>
             <numerusform></numerusform>
@@ -7659,7 +7671,7 @@ Quality: renders and shows every single frame, silently and slower than real tim
     </message>
     <message>
         <location line="+33"/>
-        <source>Duration (s)</source>
+        <source>Duration</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

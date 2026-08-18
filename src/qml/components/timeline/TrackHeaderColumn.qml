@@ -46,7 +46,7 @@ Item {
             wrapMode: Text.WordWrap
             size: "sm"
             text: confirmDeleteTrack.clipCount > 0
-                  ? qsTr("This removes the track and its %n clip(s). You can undo afterwards.",
+                  ? qsTr("This removes the track and its %n clips. You can undo afterwards.",
                          "", confirmDeleteTrack.clipCount)
                   : qsTr("This removes the empty track. You can undo afterwards.")
         }

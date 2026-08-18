@@ -457,7 +457,7 @@ Item {
                     wrapMode: Text.WordWrap
                     text: {
                         const keys = root.keyCount === 0 ? qsTr("No keyframes")
-                                                         : (root.keyCount + qsTr(" keyframe(s)"))
+                                                         : qsTr("%n keyframes", "", root.keyCount)
                         if (!EditorState.beatGridVisible || !root.analyzed)
                             return keys
                         // The detector publishes no bpm when the tempo estimate was not

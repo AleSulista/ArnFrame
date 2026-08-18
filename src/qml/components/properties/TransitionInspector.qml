@@ -218,7 +218,7 @@ Item {
                 width: parent.width
                 spacing: 4
                 Text {
-                    text: qsTr("Duration (s)")
+                    text: qsTr("Duration")
                     color: Theme.mutedForeground
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeXs

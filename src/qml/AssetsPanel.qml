@@ -36,11 +36,11 @@ PanelFrame {
             Toasts.warning(qsTr("Imported %1 of %2 files. %3 could not be read.")
                            .arg(added).arg(urls.length).arg(skipped))
         else if (added > 0)
-            Toasts.success(qsTr("Imported %n file(s).", "", added))
+            Toasts.success(qsTr("Imported %n files.", "", added))
         else if (urls.length === 1)
             Toasts.error(qsTr("Could not import that file — the format may be unsupported."))
         else
-            Toasts.error(qsTr("Could not import any of the %n selected file(s).", "", urls.length))
+            Toasts.error(qsTr("Could not import any of the %n selected files.", "", urls.length))
     }
 
     // True while an import is running, so the panel can show progress.
@@ -57,7 +57,7 @@ PanelFrame {
         const inUse = EditorState.clipCountForAsset(assetIndex)
         const name = AssetLibrary.assetAt(assetIndex).name
         if (inUse > 0) {
-            Toasts.warning(qsTr("“%1” is still used by %n clip(s) on the timeline.", "", inUse).arg(name))
+            Toasts.warning(qsTr("“%1” is still used by %n clips on the timeline.", "", inUse).arg(name))
             return
         }
         root.pendingRemovalIndex = assetIndex
@@ -175,7 +175,7 @@ PanelFrame {
             if (!ok) {
                 Toasts.warning(message)
             } else if (adjustedClips > 0) {
-                Toasts.warning(qsTr("Replaced with “%1”. %n clip(s) were shortened to fit the new file.",
+                Toasts.warning(qsTr("Replaced with “%1”. %n clips were shortened to fit the new file.",
                                     "", adjustedClips).arg(message))
             } else {
                 Toasts.success(qsTr("Replaced with “%1”.").arg(message))

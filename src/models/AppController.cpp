@@ -3320,7 +3320,7 @@ bool AppController::importSubtitleFile(const QUrl &url, double atSeconds)
     pushProjectEdit(before, tr("Subtitles imported"));
     finishEdit(tr("Subtitles imported"));
     selectClip(trackIndex, track.clips.size() - 1);
-    setLastMessage(tr("Imported %1 subtitle(s)").arg(cues.size()));
+    setLastMessage(tr("Imported %n subtitles", "", int(cues.size())));
     return true;
 }
 
@@ -3362,7 +3362,7 @@ bool AppController::importSubtitleFileIntoClip(int trackIndex, int clipIndex, co
     }
     pushProjectEdit(before, tr("Subtitles imported"));
     finishEdit(tr("Subtitles imported"));
-    setLastMessage(tr("Imported %1 subtitle(s)").arg(cues.size()));
+    setLastMessage(tr("Imported %n subtitles", "", int(cues.size())));
     return true;
 }
 
@@ -3452,7 +3452,7 @@ void AppController::generateSubtitlesForClip(int trackIndex, int clipIndex, cons
     emit subtitleGenStatusChanged();
     m_subtitleGenerating = true;
     emit subtitleGeneratingChanged();
-    setLastMessage(tr("Creating captions..."));
+    setLastMessage(tr("Creating captions…"));
 
     const QString path = clip.path;
     const drift::TimeUs srcIn = clip.srcIn;
@@ -4321,7 +4321,7 @@ void AppController::segmentClip(int trackIndex, int clipIndex, const QVariantLis
     emit segmentStatusChanged();
     m_segmenting = true;
     emit segmentingChanged();
-    setLastMessage(tr("Cutting out subject..."));
+    setLastMessage(tr("Cutting out subject…"));
 
     const QString path = clip.path;
     const drift::TimeUs srcIn = clip.srcIn;
@@ -4561,7 +4561,7 @@ void AppController::detectFacesForClip(int trackIndex, int clipIndex)
     emit faceDetectStatusChanged();
     m_faceDetecting = true;
     emit faceDetectingChanged();
-    setLastMessage(tr("Detecting faces..."));
+    setLastMessage(tr("Detecting faces…"));
 
     const QString path = clip.path;
     const drift::TimeUs srcIn = clip.srcIn;
@@ -5028,7 +5028,7 @@ void AppController::applyDenoise(int trackIndex, int clipIndex)
     emit denoiseStatusChanged();
     m_denoising = true;
     emit denoisingChanged();
-    setLastMessage(tr("Removing noise..."));
+    setLastMessage(tr("Removing noise…"));
 
     const QString path = clip.path;
     const drift::TimeUs srcIn = clip.srcIn;
@@ -9373,7 +9373,7 @@ void AppController::pasteAtPlayhead()
     m_selection = inserted;
     m_selectedTrack = inserted.constLast().first;
     m_selectedClip = inserted.constLast().second;
-    finishEdit(tr("Pasted %1 clip(s)").arg(inserted.size()));
+    finishEdit(tr("Pasted %n clips", "", int(inserted.size())));
 }
 
 void AppController::nudgeSelection(double deltaSeconds)
@@ -10948,7 +10948,7 @@ void AppController::exportWithSettings(const QUrl &outputUrl, const QVariantMap 
     emit exportProgressChanged();
     m_exportInProgress = true;
     emit exportInProgressChanged();
-    setLastMessage(tr("Exporting..."));
+    setLastMessage(tr("Exporting…"));
 
     // Snapshot the project so edits during export can't race the encoder.
     const drift::Project snapshot = m_project;
