@@ -471,12 +471,12 @@
     </message>
     <message>
         <location line="+133"/>
-        <location line="+8709"/>
+        <location line="+8733"/>
         <source>New project</source>
         <translation>නව ව්‍යාපෘතිය</translation>
     </message>
     <message>
-        <location line="-8708"/>
+        <location line="-8732"/>
         <source>Open project</source>
         <translation>ව්‍යාපෘතිය විවෘත කරන්න</translation>
     </message>
@@ -1935,7 +1935,7 @@
         <translation>තේරීම මඳක් චලනය කරන ලදී</translation>
     </message>
     <message>
-        <location line="+834"/>
+        <location line="+858"/>
         <location line="+30"/>
         <location line="+632"/>
         <source>That save location isn’t valid</source>
