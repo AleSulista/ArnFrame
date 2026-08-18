@@ -309,7 +309,7 @@ jobs:
 
       - name: Build
         shell: pwsh
-        run: cmake --build build --config Release --target drift --parallel
+        run: cmake --build build --config Release --target drift audiobackendcheck --parallel
 
       - name: Stage runtime files
         shell: pwsh
@@ -326,6 +326,32 @@ jobs:
           # the exe, and the app resolves them relative to it.
           foreach ($dir in "effects", "transitions", "effect-templates", "audio-effects") {
             Copy-Item "build\Release\$dir" dist\bin -Recurse -Force
+          }
+
+      # The one part of this package that can break silently. QAudioSink gets its devices from Qt's
+      # multimedia backend plugin, and the FFmpeg copy above deliberately lands on top of the DLLs
+      # windeployqt took out of Qt (see FFMPEG_TAG). If that combination leaves the plugin unable
+      # to load, audio playback is silent while video — which uses the FFmpeg Drift links directly
+      # — keeps working, so nothing else here would notice.
+      #
+      # The device count is reported but not asserted: runners have no audio endpoint.
+      - name: Verify audio backend
+        shell: pwsh
+        env:
+          QT_DEBUG_PLUGINS: "1"
+        run: |
+          $plugin = "dist\bin\multimedia\ffmpegmediaplugin.dll"
+          if (-not (Test-Path $plugin)) {
+            Get-ChildItem dist\bin\multimedia -ErrorAction SilentlyContinue
+            throw "$plugin was not deployed; QAudioSink would have no devices at all"
+          }
+          $check = (Get-ChildItem build\tools -Recurse -Filter audiobackendcheck.exe)[0].FullName
+          Copy-Item $check dist\bin -Force
+          & dist\bin\audiobackendcheck.exe $plugin
+          $status = $LASTEXITCODE
+          Remove-Item dist\bin\audiobackendcheck.exe -Force
+          if ($status -ne 0) {
+            throw "the multimedia backend plugin does not load against the DLLs being shipped"
           }
 
       - name: Build Inno Setup installer

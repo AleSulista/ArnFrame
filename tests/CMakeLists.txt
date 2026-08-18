@@ -17,6 +17,7 @@ qt_add_executable(tst_editorstate
     ../src/models/ClipListModel.cpp
     ../src/playback/PlaybackEngine.cpp
     ../src/playback/PlaybackClock.cpp
+    ../src/playback/AudioOutputChannel.cpp
     ../src/playback/CompositorService.cpp
     ../src/playback/ClipPreviewPlayer.cpp
     ../src/mcp/McpSession.cpp
@@ -40,9 +41,10 @@ drift_copy_transitions(tst_editorstate)
 qt_add_executable(tst_playback
     tst_playback.cpp
     ../src/playback/PlaybackClock.cpp
+    ../src/playback/AudioOutputChannel.cpp
 )
 target_include_directories(tst_playback PRIVATE ../src)
-target_link_libraries(tst_playback PRIVATE Qt6::Test driftcore)
+target_link_libraries(tst_playback PRIVATE Qt6::Test Qt6::Multimedia driftcore)
 add_test(NAME Playback COMMAND tst_playback)
 
 qt_add_executable(tst_addonpackage tst_addonpackage.cpp)
@@ -92,6 +94,7 @@ qt_add_executable(tst_mcp
     ../src/models/ClipListModel.cpp
     ../src/playback/PlaybackEngine.cpp
     ../src/playback/PlaybackClock.cpp
+    ../src/playback/AudioOutputChannel.cpp
     ../src/playback/CompositorService.cpp
     ../src/playback/ClipPreviewPlayer.cpp
     ../src/mcp/McpDispatcher.cpp

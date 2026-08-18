@@ -60,6 +60,7 @@
 #include <QPixmap>
 #include <QLibraryInfo>
 #include <QLocale>
+#include <QAudioDevice>
 #include <QSettings>
 #include <QTranslator>
 #include <QSet>
@@ -243,6 +244,35 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
             &AppController::speedCurvePlayingChanged);
     connect(&m_speedCurvePlayer, &ClipPreviewPlayer::durationChanged, this,
             &AppController::speedCurveChanged);
+
+    m_audioOutputDeviceId =
+        QSettings().value(QStringLiteral("audio/outputDeviceId")).toString();
+    if (!m_audioOutputDeviceId.isEmpty()) {
+        const QByteArray id = m_audioOutputDeviceId.toUtf8();
+        m_playback.setAudioDeviceId(id);
+        m_speedCurvePlayer.setAudioDeviceId(id);
+    }
+    connect(&m_mediaDevices, &QMediaDevices::audioOutputsChanged, this,
+            &AppController::audioOutputDevicesChanged);
+    // Silent playback used to be entirely invisible: the sink failed to open and nothing said so,
+    // in the UI or the log.
+    connect(&m_playback, &PlaybackEngine::audioError, this, [this](const QString &message) {
+        if (message == m_lastAudioError)
+            return;
+        m_lastAudioError = message;
+        setLastMessage(message, QStringLiteral("error"));
+    });
+
+    // An empty device list on a machine that plainly has speakers means the multimedia backend
+    // plugin did not load — which is silent everywhere else, because video decoding does not go
+    // through it. Deferred so the toast host exists by the time this fires.
+    if (QMediaDevices::audioOutputs().isEmpty()) {
+        qWarning("AppController: no audio output devices; playback will be silent");
+        QTimer::singleShot(0, this, [this] {
+            setLastMessage(tr("No audio output devices were found, so playback will be silent."),
+                           QStringLiteral("warning"));
+        });
+    }
 
     m_playback.setProject(&m_project);
     connect(&m_playback, &PlaybackEngine::playheadUsChanged, this, [this](quint64 us) {
@@ -2242,6 +2272,34 @@ void AppController::setGuideType(const QString &type)
     QSettings settings;
     settings.setValue(QStringLiteral("preview/guideType"), m_guideType);
     emit guidesChanged();
+}
+
+QVariantList AppController::audioOutputDevices() const
+{
+    QVariantList devices;
+    devices.append(QVariantMap{{QStringLiteral("id"), QString()},
+                               {QStringLiteral("label"), tr("System default")}});
+    const QList<QAudioDevice> outputs = QMediaDevices::audioOutputs();
+    for (const QAudioDevice &device : outputs) {
+        devices.append(QVariantMap{{QStringLiteral("id"), QString::fromUtf8(device.id())},
+                                   {QStringLiteral("label"), device.description()}});
+    }
+    return devices;
+}
+
+void AppController::setAudioOutputDeviceId(const QString &id)
+{
+    if (id == m_audioOutputDeviceId)
+        return;
+
+    m_audioOutputDeviceId = id;
+    QSettings().setValue(QStringLiteral("audio/outputDeviceId"), id);
+    // The id is kept even when that device is not currently present: the sinks fall back to the
+    // default and pick the chosen one back up when it reappears.
+    const QByteArray bytes = id.toUtf8();
+    m_playback.setAudioDeviceId(bytes);
+    m_speedCurvePlayer.setAudioDeviceId(bytes);
+    emit audioOutputDeviceIdChanged();
 }
 
 void AppController::setLastMessage(const QString &message, const QString &severity)

@@ -1,6 +1,11 @@
 add_executable(probe probe.cpp)
 target_link_libraries(probe PRIVATE Qt6::Core driftengine)
 
+# Not shipped: the Windows packaging job stages it beside drift.exe, runs it against the deployed
+# multimedia plugin, and deletes it again. See tools/audiobackendcheck.cpp.
+add_executable(audiobackendcheck audiobackendcheck.cpp)
+target_link_libraries(audiobackendcheck PRIVATE Qt6::Core Qt6::Multimedia)
+
 add_executable(renderframe renderframe.cpp)
 target_include_directories(renderframe PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(renderframe PRIVATE Qt6::Core Qt6::Gui driftengine driftcore)

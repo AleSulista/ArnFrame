@@ -1,5 +1,8 @@
 #include <QtTest>
 
+#include <QMediaDevices>
+
+#include "playback/AudioOutputChannel.h"
 #include "playback/PlaybackClock.h"
 
 class PlaybackTest : public QObject
@@ -17,6 +20,11 @@ private slots:
     void avSyncWithinTolerance();
     void rateScalesProduceAndPlayback();
     void renderedFramesIgnoreRate();
+    void convertsFloatToInt16();
+    void clampsBeyondFullScale();
+    void downmixesToMono();
+    void silencesChannelsBeyondStereo();
+    void negotiatesAFormatTheDeviceAccepts();
 };
 
 void PlaybackTest::clockPausedPosition()
@@ -157,6 +165,92 @@ void PlaybackTest::renderedFramesIgnoreRate()
     // Sink domain, so no rate: this is what the post-mix retimer's output cursor advances by.
     QCOMPARE(clock.renderedFramesUs(), drift::secondsToUs(0.1));
     QCOMPARE(clock.produceTimeUs(), drift::secondsToUs(0.05));
+}
+
+
+// The sink only takes interleaved stereo float where the device says it can; everywhere else the
+// mix has to be converted on the way out, and getting that wrong is silence or noise, not a crash.
+void PlaybackTest::convertsFloatToInt16()
+{
+    QAudioFormat format;
+    format.setSampleRate(48000);
+    format.setChannelCount(2);
+    format.setSampleFormat(QAudioFormat::Int16);
+
+    const float stereo[] = {0.0f, 1.0f, -1.0f, 0.5f};
+    qint16 out[4] = {};
+    drift::writeInterleaved(stereo, 2, format, reinterpret_cast<char *>(out));
+
+    QCOMPARE(out[0], qint16(0));
+    QCOMPARE(out[1], qint16(32767));
+    QCOMPARE(out[2], qint16(-32767));
+    QCOMPARE(out[3], qint16(16383));
+}
+
+// Effects and gain stages can push the mix past full scale; wrapping there is the loudest possible
+// artefact, so it has to clip instead.
+void PlaybackTest::clampsBeyondFullScale()
+{
+    QAudioFormat format;
+    format.setSampleRate(48000);
+    format.setChannelCount(2);
+    format.setSampleFormat(QAudioFormat::Int32);
+
+    const float stereo[] = {4.0f, -4.0f};
+    qint32 out[2] = {};
+    drift::writeInterleaved(stereo, 1, format, reinterpret_cast<char *>(out));
+
+    QCOMPARE(out[0], qint32(2147483647));
+    QCOMPARE(out[1], qint32(-2147483647));
+}
+
+void PlaybackTest::downmixesToMono()
+{
+    QAudioFormat format;
+    format.setSampleRate(48000);
+    format.setChannelCount(1);
+    format.setSampleFormat(QAudioFormat::Float);
+
+    const float stereo[] = {1.0f, 0.0f, 0.4f, 0.6f};
+    float out[2] = {};
+    drift::writeInterleaved(stereo, 2, format, reinterpret_cast<char *>(out));
+
+    QCOMPARE(out[0], 0.5f);
+    QCOMPARE(out[1], 0.5f);
+}
+
+// A 5.1 device gets the mix in its front pair and silence elsewhere, rather than the stereo stream
+// smeared across every channel.
+void PlaybackTest::silencesChannelsBeyondStereo()
+{
+    QAudioFormat format;
+    format.setSampleRate(48000);
+    format.setChannelCount(6);
+    format.setSampleFormat(QAudioFormat::Float);
+
+    const float stereo[] = {0.25f, -0.25f};
+    float out[6] = {9, 9, 9, 9, 9, 9};
+    drift::writeInterleaved(stereo, 1, format, reinterpret_cast<char *>(out));
+
+    QCOMPARE(out[0], 0.25f);
+    QCOMPARE(out[1], -0.25f);
+    for (int channel = 2; channel < 6; ++channel)
+        QCOMPARE(out[channel], 0.0f);
+}
+
+// The bug this all exists for: asking a device for a format it does not take used to leave a sink
+// that opened and played nothing.
+void PlaybackTest::negotiatesAFormatTheDeviceAccepts()
+{
+    const QAudioDevice device = QMediaDevices::defaultAudioOutput();
+    if (device.isNull())
+        QSKIP("no audio output device on this machine");
+
+    // 12345 Hz is not a rate any real device runs at, so this exercises the fallback.
+    const QAudioFormat format = drift::negotiateAudioFormat(device, 12345);
+    QVERIFY(format.isValid());
+    QVERIFY(format.sampleRate() > 0);
+    QVERIFY(format.channelCount() > 0);
 }
 
 QTEST_MAIN(PlaybackTest)

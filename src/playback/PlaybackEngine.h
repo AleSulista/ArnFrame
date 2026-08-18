@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AudioOutputChannel.h"
 #include "CompositorService.h"
 #include "PlaybackClock.h"
 #include "core/Project.h"
@@ -7,34 +8,12 @@
 #include "engine/AudioMixer.h"
 #include "engine/audio/ClipAudioRetimer.h"
 
-#include <QAudioFormat>
-#include <QAudioSink>
-#include <QIODevice>
 #include <QImage>
 #include <QMutex>
 #include <QObject>
-#include <QThread>
 #include <QTimer>
 
 #include <atomic>
-
-class PlaybackEngine;
-
-// Pull-mode audio device; rendered samples advance the audio-master clock.
-class AudioPlaybackIODevice : public QIODevice
-{
-public:
-    explicit AudioPlaybackIODevice(PlaybackEngine *engine, QObject *parent = nullptr);
-
-    qint64 readData(char *data, qint64 maxlen) override;
-    qint64 writeData(const char *data, qint64 len) override;
-    // Endless generated source: always advertise data so the sink keeps pulling.
-    qint64 bytesAvailable() const override;
-    bool isSequential() const override { return true; }
-
-private:
-    PlaybackEngine *m_engine = nullptr;
-};
 
 // Audio-master playback: mixes timeline audio and composites preview frames off the GUI thread.
 class PlaybackEngine : public QObject
@@ -87,7 +66,13 @@ public:
     // omitted from the composited frame so the QML inline editor stands in for it.
     void setEditingClipId(const QString &id);
 
+    // Empty id follows the system default. Applied to the sink immediately.
+    void setAudioDeviceId(const QByteArray &id) { m_audio.setDeviceId(id); }
+
 signals:
+    // Playback cannot produce sound; carries a message meant for the user.
+    void audioError(const QString &message);
+
     void currentFrameChanged();
     void playingChanged();
     void previewQualityChanged();
@@ -96,10 +81,9 @@ signals:
     void playheadUsChanged(quint64 us);
 
 private:
-    friend class AudioPlaybackIODevice;
-
     int fillAudio(float *buffer, int sampleCount);
     void ensureAudioSink();
+    void onAudioSampleRateChanged();
     void onPlayheadTick();
     void onCompositeTick();
     void onCompositeFinished();
@@ -115,12 +99,7 @@ private:
     PlaybackClock m_clock;
     CompositorService m_compositor;
     AudioMixer m_mixer;
-    QAudioFormat m_format;
-    // The sink and its pull device live on m_audioThread so that ring-buffer
-    // refills (which synchronously decode audio) never block the GUI thread.
-    QThread m_audioThread;
-    QAudioSink *m_sink = nullptr;
-    AudioPlaybackIODevice *m_device = nullptr;
+    AudioOutputChannel m_audio;
     QTimer m_playheadTimer;
     QTimer m_compositeTimer;
     GpuFrameTexture m_currentFrame;
@@ -142,6 +121,8 @@ private:
     QString m_editingClipId;
     int m_previewRenderWidth = 0;
     int m_previewRenderHeight = 0;
+    // The rate the sink negotiated, which is what the mixer renders at and what the clock counts
+    // samples in — not necessarily the project's rate, since the device has the final say.
     int m_sampleRate = 48000;
     bool m_loopWorkArea = false;
 };

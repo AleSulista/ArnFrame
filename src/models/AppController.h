@@ -15,6 +15,7 @@
 #include <QAtomicInt>
 #include <QHash>
 #include <QJsonObject>
+#include <QMediaDevices>
 #include <QObject>
 #include <QPair>
 #include <QSet>
@@ -46,6 +47,11 @@ class AppController : public QObject
     Q_PROPERTY(TimelineModel *timelineModel READ timelineModel CONSTANT)
     Q_PROPERTY(ClipListModel *clipListModel READ clipListModel CONSTANT)
     Q_PROPERTY(PlaybackEngine *playback READ playback CONSTANT)
+    // Output devices to choose between, each {id, label}; the first entry has an empty id and
+    // means "whatever the system default is at the time", which is also the default choice.
+    Q_PROPERTY(QVariantList audioOutputDevices READ audioOutputDevices NOTIFY audioOutputDevicesChanged)
+    Q_PROPERTY(QString audioOutputDeviceId READ audioOutputDeviceId WRITE setAudioOutputDeviceId
+                   NOTIFY audioOutputDeviceIdChanged)
     Q_PROPERTY(QVariantList tracks READ tracks NOTIFY tracksChanged)
     Q_PROPERTY(double playheadSeconds READ playheadSeconds WRITE setPlayheadSeconds NOTIFY playheadSecondsChanged)
     Q_PROPERTY(double durationSeconds READ durationSeconds NOTIFY tracksChanged)
@@ -209,6 +215,9 @@ public:
     TimelineModel *timelineModel() { return &m_timelineModel; }
     ClipListModel *clipListModel() { return &m_clipListModel; }
     PlaybackEngine *playback() { return &m_playback; }
+    QVariantList audioOutputDevices() const;
+    QString audioOutputDeviceId() const { return m_audioOutputDeviceId; }
+    void setAudioOutputDeviceId(const QString &id);
     drift::Project *project() { return &m_project; }
     const drift::Project *project() const { return &m_project; }
 
@@ -824,6 +833,8 @@ signals:
     void tracksChanged();
     void playheadSecondsChanged();
     void playingChanged();
+    void audioOutputDevicesChanged();
+    void audioOutputDeviceIdChanged();
     void snapEnabledChanged();
     void rippleEnabledChanged();
     void allowClipOverlapChanged();
@@ -1039,6 +1050,11 @@ protected:
     // declared first and torn down last.
     drift::Project m_project;
     PlaybackEngine m_playback;
+    // Only for its audioOutputsChanged signal — the sinks resolve devices themselves.
+    QMediaDevices m_mediaDevices;
+    QString m_audioOutputDeviceId;
+    // The audio error already on screen, so a device that fails repeatedly toasts once.
+    QString m_lastAudioError;
     QUndoStack m_undoStack;
     drift::TimeUs m_playheadUs = 0;
     bool m_playing = false;

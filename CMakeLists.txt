@@ -486,6 +486,8 @@ qt_add_executable(drift
     src/playback/PlaybackEngine.cpp
     src/playback/PlaybackClock.h
     src/playback/PlaybackClock.cpp
+    src/playback/AudioOutputChannel.h
+    src/playback/AudioOutputChannel.cpp
     src/playback/ClipPreviewPlayer.h
     src/playback/ClipPreviewPlayer.cpp
     src/playback/CompositorService.h

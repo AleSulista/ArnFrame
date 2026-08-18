@@ -5,8 +5,6 @@
 #include "engine/ClipReaderPool.h"
 #include "engine/ReverseProxyCache.h"
 
-#include <QAudioSink>
-
 #include <cstring>
 
 namespace {
@@ -19,38 +17,6 @@ constexpr int kFrameMaxWidth = 960;
 constexpr int kFrameMaxHeight = 540;
 
 } // namespace
-
-ClipPreviewAudioDevice::ClipPreviewAudioDevice(ClipPreviewPlayer *player, QObject *parent)
-    : QIODevice(parent)
-    , m_player(player)
-{
-    open(QIODevice::ReadOnly);
-}
-
-qint64 ClipPreviewAudioDevice::readData(char *data, qint64 maxlen)
-{
-    if (!m_player || maxlen <= 0)
-        return 0;
-
-    const int maxSamples = static_cast<int>(maxlen / (sizeof(float) * 2));
-    if (maxSamples <= 0)
-        return 0;
-
-    const int samples = m_player->fillAudio(reinterpret_cast<float *>(data), maxSamples);
-    return static_cast<qint64>(samples) * static_cast<qint64>(sizeof(float) * 2);
-}
-
-qint64 ClipPreviewAudioDevice::writeData(const char *data, qint64 len)
-{
-    Q_UNUSED(data);
-    Q_UNUSED(len);
-    return -1;
-}
-
-qint64 ClipPreviewAudioDevice::bytesAvailable() const
-{
-    return (1 << 20) + QIODevice::bytesAvailable();
-}
 
 void ClipPreviewFrameWorker::decode(const QString &path, qint64 sourceUs, int maxWidth, int maxHeight,
                                     quint64 token)
@@ -66,12 +32,13 @@ void ClipPreviewFrameWorker::decode(const QString &path, qint64 sourceUs, int ma
 
 ClipPreviewPlayer::ClipPreviewPlayer(QObject *parent)
     : QObject(parent)
-    , m_device(new ClipPreviewAudioDevice(this))
+    , m_audio(QStringLiteral("ClipPreviewAudio"), this)
     , m_frameWorker(new ClipPreviewFrameWorker)
 {
-    m_device->moveToThread(&m_audioThread);
-    m_audioThread.setObjectName(QStringLiteral("ClipPreviewAudio"));
-    m_audioThread.start();
+    m_audio.setFillCallback([this](float *stereo, int frames) { return fillAudio(stereo, frames); });
+    connect(&m_audio, &AudioOutputChannel::sampleRateChanged, this,
+            &ClipPreviewPlayer::onAudioSampleRateChanged);
+    m_sampleRate = m_audio.sampleRate();
 
     m_frameWorker->moveToThread(&m_frameThread);
     m_frameThread.setObjectName(QStringLiteral("ClipPreviewDecode"));
@@ -92,45 +59,34 @@ ClipPreviewPlayer::~ClipPreviewPlayer()
     m_frameTimer.stop();
     m_clock.stop();
 
-    QMetaObject::invokeMethod(
-        m_device,
-        [this] {
-            if (m_sink) {
-                m_sink->stop();
-                delete m_sink;
-                m_sink = nullptr;
-            }
-        },
-        Qt::BlockingQueuedConnection);
-    m_audioThread.quit();
-    m_audioThread.wait();
+    // Blocking, so no refill can be inside fillAudio() while this object comes apart.
+    m_audio.stop();
 
     m_frameThread.quit();
     m_frameThread.wait();
-
-    delete m_device;
-    m_device = nullptr;
 }
 
 void ClipPreviewPlayer::ensureAudioSink()
 {
-    QMetaObject::invokeMethod(
-        m_device,
-        [this] {
-            m_format.setSampleRate(m_sampleRate);
-            m_format.setChannelCount(2);
-            m_format.setSampleFormat(QAudioFormat::Float);
-            if (!m_sink)
-                m_sink = new QAudioSink(m_format, m_device);
-        },
-        Qt::BlockingQueuedConnection);
+    m_sampleRate = m_audio.sampleRate();
+}
+
+// The device settled on a rate other than the project's; the retimer and clock both count in
+// output samples, so start them over on the new one.
+void ClipPreviewPlayer::onAudioSampleRateChanged()
+{
+    m_sampleRate = m_audio.sampleRate();
+    m_clock.reset(m_positionUs, m_sampleRate);
+    if (m_playing)
+        m_clock.start();
 }
 
 void ClipPreviewPlayer::setClip(const drift::Clip &clip, int sampleRate, int fps)
 {
     pause();
 
-    m_sampleRate = qMax(8000, sampleRate);
+    m_audio.setPreferredSampleRate(qMax(8000, sampleRate));
+    m_sampleRate = m_audio.sampleRate();
     m_fps = qMax(1, fps);
 
     {
@@ -213,13 +169,9 @@ void ClipPreviewPlayer::play()
     m_clock.start();
     m_playing = true;
 
-    QMetaObject::invokeMethod(
-        m_device,
-        [this] {
-            if (m_sink)
-                m_sink->start(m_device);
-        },
-        Qt::BlockingQueuedConnection);
+    // May settle on a rate the clip was not prepared at, which comes back as sampleRateChanged and
+    // re-anchors the clock — so this has to follow m_playing being set.
+    m_audio.start();
 
     emit playingChanged();
 
@@ -238,13 +190,7 @@ void ClipPreviewPlayer::pause()
     m_clock.pause();
     m_positionUs = m_clock.pausedAt();
 
-    QMetaObject::invokeMethod(
-        m_device,
-        [this] {
-            if (m_sink)
-                m_sink->stop();
-        },
-        Qt::BlockingQueuedConnection);
+    m_audio.stop();
 
     emit playingChanged();
     emit positionChanged();
@@ -341,7 +287,6 @@ int ClipPreviewPlayer::fillAudio(float *buffer, int sampleCount)
     }
 
     m_clock.onAudioSamplesRendered(sampleCount);
-    if (m_sink)
-        m_clock.syncPlaybackUs(static_cast<drift::TimeUs>(m_sink->processedUSecs()));
+    m_clock.syncPlaybackUs(static_cast<drift::TimeUs>(m_audio.processedUSecs()));
     return sampleCount;
 }

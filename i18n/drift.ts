@@ -426,7 +426,7 @@
 <context>
     <name>AppController</name>
     <message>
-        <location filename="../src/models/AppController.cpp" line="+1516"/>
+        <location filename="../src/models/AppController.cpp" line="+1546"/>
         <source>Media removed</source>
         <translation type="unfinished"></translation>
     </message>
@@ -471,12 +471,12 @@
     </message>
     <message>
         <location line="+133"/>
-        <location line="+8735"/>
+        <location line="+8763"/>
         <source>New project</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-8734"/>
+        <location line="-8762"/>
         <source>Open project</source>
         <translation type="unfinished"></translation>
     </message>
@@ -527,13 +527,13 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+965"/>
+        <location line="+993"/>
         <location line="+1"/>
         <source>Split at current time</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-965"/>
+        <location line="-993"/>
         <source>Merge adjacent clips</source>
         <translation type="unfinished"></translation>
     </message>
@@ -589,18 +589,18 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+7186"/>
+        <location line="+7214"/>
         <source>Mark work area in</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-7185"/>
-        <location line="+7199"/>
+        <location line="-7213"/>
+        <location line="+7227"/>
         <source>Mark work area out</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-7198"/>
+        <location line="-7226"/>
         <source>Go to work area in</source>
         <translation type="unfinished"></translation>
     </message>
@@ -611,12 +611,12 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+7222"/>
+        <location line="+7250"/>
         <source>Clear work area</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-7221"/>
+        <location line="-7249"/>
         <source>Loop work area playback</source>
         <translation type="unfinished"></translation>
     </message>
@@ -632,11 +632,12 @@
     </message>
     <message>
         <location line="+204"/>
+        <location line="+218"/>
         <source>System default</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+422"/>
+        <location line="+232"/>
         <location line="+1"/>
         <location line="+116"/>
         <location line="+1"/>
@@ -1123,7 +1124,12 @@
         </translation>
     </message>
     <message>
-        <location line="+91"/>
+        <location line="-3151"/>
+        <source>No audio output devices were found, so playback will be silent.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+3242"/>
         <source>Creating captions…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2514,6 +2520,34 @@
     </message>
 </context>
 <context>
+    <name>AudioOutputChannel</name>
+    <message>
+        <location filename="../src/playback/AudioOutputChannel.cpp" line="+14"/>
+        <source>The audio device could not be opened. Another program may be using it exclusively.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>The audio device stopped responding.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>The audio device was disconnected.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+250"/>
+        <source>No audio output device is available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>The audio device does not support playback of this project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>BlendingInspector</name>
     <message>
         <location filename="../src/qml/components/properties/BlendingInspector.qml" line="+39"/>
@@ -3779,7 +3813,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+313"/>
+        <location line="+321"/>
         <source>Move keyframe</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4718,7 +4752,7 @@ Quality: renders and shows every single frame, silently and slower than real tim
 <context>
     <name>PropertyKeyframeRow</name>
     <message>
-        <location filename="../src/qml/components/PropertyKeyframeRow.qml" line="+160"/>
+        <location filename="../src/qml/components/PropertyKeyframeRow.qml" line="+220"/>
         <source>%1 has no keyframes yet</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4763,17 +4797,28 @@ Quality: renders and shows every single frame, silently and slower than real tim
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+27"/>
+        <location line="+31"/>
+        <source>Previous keyframe</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+14"/>
         <source>Remove %1&apos;s keyframe at the playhead</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="+1"/>
+        <location line="+34"/>
         <source>Add a keyframe for %1 at the playhead</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+90"/>
+        <location line="-16"/>
+        <source>Next keyframe</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+100"/>
         <source>Edit %1</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5281,12 +5326,12 @@ Quality: renders and shows every single frame, silently and slower than real tim
     </message>
     <message>
         <location line="+30"/>
-        <location line="+330"/>
+        <location line="+354"/>
         <source>Choose background colour</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-307"/>
+        <location line="-331"/>
         <source>Enter a color like #FF0000</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5297,7 +5342,17 @@ Quality: renders and shows every single frame, silently and slower than real tim
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+16"/>
+        <location line="+14"/>
+        <source>Audio output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+12"/>
+        <source>Where playback is heard. “System default” follows whatever your computer is set to, including when that changes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+14"/>
         <source>Updates</source>
         <translation type="unfinished"></translation>
     </message>

@@ -281,6 +281,30 @@ Item {
                 }
             }
 
+            Text {
+                text: qsTr("Audio output")
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+                topPadding: Theme.spacingMd
+            }
+
+            ThemedComboBox {
+                id: audioOutputCombo
+                textRole: "label"
+                valueRole: "id"
+                model: EditorState.audioOutputDevices
+                tooltip: qsTr("Where playback is heard. “System default” follows whatever your computer is set to, including when that changes.")
+                currentIndex: {
+                    for (var i = 0; i < model.length; ++i) {
+                        if (model[i].id === EditorState.audioOutputDeviceId)
+                            return i
+                    }
+                    return 0
+                }
+                onActivated: EditorState.audioOutputDeviceId = model[currentIndex].id
+            }
+
             // Hidden entirely on builds a package manager updates (Flatpak, Arch): there is no
             // switch to offer when the check is compiled out.
             Text {

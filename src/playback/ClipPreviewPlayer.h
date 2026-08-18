@@ -1,13 +1,12 @@
 #pragma once
 
+#include "AudioOutputChannel.h"
 #include "PlaybackClock.h"
 #include "core/Clip.h"
 #include "core/SpeedCurve.h"
 #include "core/Time.h"
 #include "engine/audio/ClipAudioRetimer.h"
 
-#include <QAudioFormat>
-#include <QIODevice>
 #include <QImage>
 #include <QMutex>
 #include <QObject>
@@ -16,24 +15,6 @@
 #include <QTimer>
 
 #include <atomic>
-
-class QAudioSink;
-class ClipPreviewPlayer;
-
-// Pull-mode audio device for the preview; rendered samples advance the clock.
-class ClipPreviewAudioDevice : public QIODevice
-{
-public:
-    explicit ClipPreviewAudioDevice(ClipPreviewPlayer *player, QObject *parent = nullptr);
-
-    qint64 readData(char *data, qint64 maxlen) override;
-    qint64 writeData(const char *data, qint64 len) override;
-    qint64 bytesAvailable() const override;
-    bool isSequential() const override { return true; }
-
-private:
-    ClipPreviewPlayer *m_player = nullptr;
-};
 
 // Decodes frames off the GUI thread. Requests are stamped with a token and stale ones are
 // dropped, so a scrub that outruns the decoder collapses to its newest position instead of
@@ -85,6 +66,9 @@ public:
     void pause();
     void seek(drift::TimeUs us);
 
+    // Empty id follows the system default.
+    void setAudioDeviceId(const QByteArray &id) { m_audio.setDeviceId(id); }
+
 signals:
     void frameChanged();
     void frameSizeChanged();
@@ -93,10 +77,9 @@ signals:
     void durationChanged();
 
 private:
-    friend class ClipPreviewAudioDevice;
-
     int fillAudio(float *buffer, int sampleCount);
     void ensureAudioSink();
+    void onAudioSampleRateChanged();
     void onPositionTick();
     void requestFrame(drift::TimeUs positionUs);
     void onDecoded(const QImage &image, quint64 token);
@@ -111,10 +94,7 @@ private:
     drift::ClipAudioRetimer m_retimer;
 
     PlaybackClock m_clock;
-    QAudioFormat m_format;
-    QThread m_audioThread;
-    QAudioSink *m_sink = nullptr;
-    ClipPreviewAudioDevice *m_device = nullptr;
+    AudioOutputChannel m_audio;
 
     QThread m_frameThread;
     ClipPreviewFrameWorker *m_frameWorker = nullptr;
@@ -126,6 +106,7 @@ private:
     QSize m_frameSize;
     drift::TimeUs m_positionUs = 0;
     std::atomic<bool> m_playing = false;
+    // The rate the device negotiated, not necessarily the project's — see PlaybackEngine.
     int m_sampleRate = 48000;
     int m_fps = 30;
 };

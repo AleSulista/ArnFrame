@@ -33,42 +33,9 @@ bool isKnownPreviewQuality(const QString &quality)
 
 } // namespace
 
-AudioPlaybackIODevice::AudioPlaybackIODevice(PlaybackEngine *engine, QObject *parent)
-    : QIODevice(parent)
-    , m_engine(engine)
-{
-    open(QIODevice::ReadOnly);
-}
-
-qint64 AudioPlaybackIODevice::readData(char *data, qint64 maxlen)
-{
-    if (!m_engine || maxlen <= 0)
-        return 0;
-
-    const int maxSamples = static_cast<int>(maxlen / (sizeof(float) * 2));
-    if (maxSamples <= 0)
-        return 0;
-
-    float *buffer = reinterpret_cast<float *>(data);
-    const int samples = m_engine->fillAudio(buffer, maxSamples);
-    return static_cast<qint64>(samples) * static_cast<qint64>(sizeof(float) * 2);
-}
-
-qint64 AudioPlaybackIODevice::writeData(const char *data, qint64 len)
-{
-    Q_UNUSED(data);
-    Q_UNUSED(len);
-    return -1;
-}
-
-qint64 AudioPlaybackIODevice::bytesAvailable() const
-{
-    return (1 << 20) + QIODevice::bytesAvailable();
-}
-
 PlaybackEngine::PlaybackEngine(QObject *parent)
     : QObject(parent)
-    , m_device(new AudioPlaybackIODevice(this))
+    , m_audio(QStringLiteral("PlaybackAudio"), this)
 {
     const QString saved = QSettings().value(QStringLiteral("preview/quality")).toString().toLower();
     if (isKnownPreviewQuality(saved))
@@ -81,11 +48,11 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
     m_compositor.setDropLateFrames(!isQualityMode());
     m_compositor.setAdaptiveQuality(isAutoQuality());
 
-    // The pull device and sink run on a dedicated thread; the GUI thread stays
-    // free while audio is decoded and mixed on refill.
-    m_device->moveToThread(&m_audioThread);
-    m_audioThread.setObjectName(QStringLiteral("PlaybackAudio"));
-    m_audioThread.start();
+    m_audio.setFillCallback([this](float *stereo, int frames) { return fillAudio(stereo, frames); });
+    connect(&m_audio, &AudioOutputChannel::sampleRateChanged, this,
+            &PlaybackEngine::onAudioSampleRateChanged);
+    connect(&m_audio, &AudioOutputChannel::errorOccurred, this, &PlaybackEngine::audioError);
+    m_sampleRate = m_audio.sampleRate();
 
     m_playheadTimer.setTimerType(Qt::PreciseTimer);
     m_compositeTimer.setTimerType(Qt::PreciseTimer);
@@ -103,46 +70,31 @@ PlaybackEngine::~PlaybackEngine()
     m_compositeTimer.stop();
     m_clock.stop();
 
-    // Tear down the sink on its own thread, then stop the thread and reclaim the
-    // device (safe once the thread has finished).
-    QMetaObject::invokeMethod(
-        m_device,
-        [this] {
-            if (m_sink) {
-                m_sink->stop();
-                delete m_sink;
-                m_sink = nullptr;
-            }
-        },
-        Qt::BlockingQueuedConnection);
-    m_audioThread.quit();
-    m_audioThread.wait();
-    delete m_device;
-    m_device = nullptr;
+    // Blocking, so the audio thread cannot be inside fillAudio() while the members it reads are
+    // torn down under it. The channel closes the sink and joins its thread from its own destructor.
+    m_audio.stop();
 }
 
 void PlaybackEngine::ensureAudioSink()
 {
     if (m_project)
-        m_sampleRate = m_project->sampleRate();
+        m_audio.setPreferredSampleRate(m_project->sampleRate());
+    m_sampleRate = m_audio.sampleRate();
+}
 
-    // Create the sink on the audio thread without blocking the GUI. play() only
-    // Queued-starts it afterward; a missing sink for one refill period is fine.
-    QMetaObject::invokeMethod(
-        m_device,
-        [this] {
-            m_format.setSampleRate(m_sampleRate);
-            m_format.setChannelCount(2);
-            m_format.setSampleFormat(QAudioFormat::Float);
+// The device would not take the project's rate, or the sink moved to a device that runs at a
+// different one. Everything downstream of the sink counts in output samples, so re-anchor it.
+void PlaybackEngine::onAudioSampleRateChanged()
+{
+    m_sampleRate = m_audio.sampleRate();
+    m_mixer.resetClipAudioState();
+    m_audioStreamGeneration.fetch_add(1, std::memory_order_release);
+    if (isQualityMode())
+        return;
 
-            if (!m_sink) {
-                m_sink = new QAudioSink(m_format, m_device);
-                // Keep the platform default buffer: a too-small buffer starves the
-                // pull loop and makes playback run slow. The playhead is anchored to
-                // the sink's played position, so buffer depth doesn't affect sync.
-            }
-        },
-        Qt::QueuedConnection);
+    m_clock.reset(m_playheadUs, m_sampleRate);
+    if (m_playing)
+        m_clock.start();
 }
 
 void PlaybackEngine::setProject(drift::Project *project)
@@ -319,15 +271,9 @@ void PlaybackEngine::play()
     ensureAudioSink();
     m_clock.start();
 
-    // Never block the GUI on sink I/O. start() may pull the first audio buffer,
-    // which opens/seeks media — that must stay on the audio thread only.
-    QMetaObject::invokeMethod(
-        m_device,
-        [this] {
-            if (m_sink)
-                m_sink->start(m_device);
-        },
-        Qt::QueuedConnection);
+    // Opening the device may settle on a rate the project did not ask for, which comes back as
+    // sampleRateChanged and re-anchors the clock — so this has to follow m_playing being set.
+    m_audio.start();
 
     emit playingChanged();
 
@@ -366,13 +312,7 @@ void PlaybackEngine::pause()
     m_qualityRequestUs = -1;
     m_mixer.resetClipAudioState();
     m_audioStreamGeneration.fetch_add(1, std::memory_order_release);
-    QMetaObject::invokeMethod(
-        m_device,
-        [this] {
-            if (m_sink)
-                m_sink->stop();
-        },
-        Qt::BlockingQueuedConnection);
+    m_audio.stop();
     emit playingChanged();
     emit playheadUsChanged(static_cast<quint64>(m_playheadUs));
     refreshFrame();
@@ -570,7 +510,6 @@ int PlaybackEngine::fillAudio(float *buffer, int sampleCount)
             sampleCount, buffer);
     }
     m_clock.onAudioSamplesRendered(sampleCount);
-    if (m_sink)
-        m_clock.syncPlaybackUs(static_cast<drift::TimeUs>(m_sink->processedUSecs()));
+    m_clock.syncPlaybackUs(static_cast<drift::TimeUs>(m_audio.processedUSecs()));
     return sampleCount;
 }
