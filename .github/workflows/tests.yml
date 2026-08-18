@@ -66,10 +66,14 @@ jobs:
           test -f "${GITHUB_WORKSPACE}/emoji-fonts/HarmonyOS_4.0.ttf"
           test -f "${GITHUB_WORKSPACE}/../drift-addons/staging/effects-core/effects/turbulent_displace/effect.json"
 
+      # A stalled apt mirror otherwise sits here until the 60-minute job timeout; fail in 10.
       - name: Install native build dependencies
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -y -o Acquire::Retries=3 \
             build-essential ninja-build pkg-config git xvfb ccache \
             libgl1-mesa-dev libegl1-mesa-dev libglib2.0-dev libdbus-1-dev \
             libzstd-dev libssl-dev libsoundtouch-dev \

@@ -3241,7 +3241,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+105"/>
+        <location line="+133"/>
         <source>No emoji match “%1”.</source>
         <translation type="unfinished"></translation>
     </message>

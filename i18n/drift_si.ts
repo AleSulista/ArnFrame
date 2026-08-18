@@ -3241,7 +3241,7 @@
         <translation>සොයන්න</translation>
     </message>
     <message>
-        <location line="+105"/>
+        <location line="+133"/>
         <source>No emoji match “%1”.</source>
         <translation>“%1” ට ගැලපෙන ඉමෝජි නැත.</translation>
     </message>
