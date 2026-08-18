@@ -51,10 +51,13 @@ ThemedDialog {
         { id: "portrait", category: "more", label: qsTr("Portrait"), detail: "9:16", aspect: "9:16", icon: Theme.icons.smartphone }
     ]
 
+    // shortEdge/longEdge are the two dimensions of a 16:9 frame at this quality;
+    // which one becomes width or height depends on the template's aspect.
     readonly property var qualities: [
-        { id: "4k", label: qsTr("4K") },
-        { id: "1080p", label: qsTr("1080p") },
-        { id: "720p", label: qsTr("720p") }
+        { id: "4k", label: qsTr("4K"), shortEdge: 2160, longEdge: 3840 },
+        { id: "1440p", label: qsTr("1440p"), shortEdge: 1440, longEdge: 2560 },
+        { id: "1080p", label: qsTr("1080p"), shortEdge: 1080, longEdge: 1920 },
+        { id: "720p", label: qsTr("720p"), shortEdge: 720, longEdge: 1280 }
     ]
 
     readonly property var categoryTemplates: {
@@ -74,13 +77,17 @@ ThemedDialog {
         return templates[0]
     }
 
+    readonly property var selectedQuality: {
+        for (let i = 0; i < qualities.length; ++i) {
+            if (qualities[i].id === qualityId)
+                return qualities[i]
+        }
+        return qualities[0]
+    }
+
     readonly property string aspect: selectedTemplate.aspect || "16:9"
 
-    readonly property int qualityEdge: {
-        if (qualityId === "4k") return 2160
-        if (qualityId === "720p") return 720
-        return 1080
-    }
+    readonly property int qualityEdge: selectedQuality.shortEdge
 
     readonly property int outWidth: {
         switch (aspect) {
@@ -89,27 +96,21 @@ ThemedDialog {
         case "1:1": return qualityEdge
         case "16:9":
         default:
-            if (qualityId === "4k") return 3840
-            if (qualityId === "720p") return 1280
-            return 1920
+            return selectedQuality.longEdge
         }
     }
 
     readonly property int outHeight: {
         switch (aspect) {
         case "9:16":
-            if (qualityId === "4k") return 3840
-            if (qualityId === "720p") return 1280
-            return 1920
+            return selectedQuality.longEdge
         case "4:5":
             return Math.round(outWidth * 5 / 4)
         case "1:1":
             return outWidth
         case "16:9":
         default:
-            if (qualityId === "4k") return 2160
-            if (qualityId === "720p") return 720
-            return 1080
+            return qualityEdge
         }
     }
 
@@ -148,22 +149,17 @@ ThemedDialog {
         let bestQuality = "1080p"
         let bestScore = Number.MAX_VALUE
 
-        const qualities = [
-            { id: "4k", edge: 2160 },
-            { id: "1080p", edge: 1080 },
-            { id: "720p", edge: 720 }
-        ]
-
         for (let i = 0; i < templates.length; ++i) {
             const t = templates[i]
             for (let q = 0; q < qualities.length; ++q) {
-                const edge = qualities[q].edge
+                const edge = qualities[q].shortEdge
+                const long = qualities[q].longEdge
                 let tw = 0
                 let th = 0
                 switch (t.aspect) {
                 case "9:16":
                     tw = edge
-                    th = qualities[q].id === "4k" ? 3840 : (qualities[q].id === "720p" ? 1280 : 1920)
+                    th = long
                     break
                 case "4:5":
                     tw = edge
@@ -174,8 +170,8 @@ ThemedDialog {
                     th = edge
                     break
                 default:
-                    tw = qualities[q].id === "4k" ? 3840 : (qualities[q].id === "720p" ? 1280 : 1920)
-                    th = qualities[q].id === "4k" ? 2160 : (qualities[q].id === "720p" ? 720 : 1080)
+                    tw = long
+                    th = edge
                     break
                 }
                 const score = Math.abs(tw - w) + Math.abs(th - h)

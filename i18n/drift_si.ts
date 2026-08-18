@@ -3893,9 +3893,14 @@
         <translation>සිරස් (Portrait)</translation>
     </message>
     <message>
-        <location line="+4"/>
+        <location line="+6"/>
         <source>4K</source>
         <translation>4K</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>1440p</source>
+        <translation>1440p</translation>
     </message>
     <message>
         <location line="+1"/>
@@ -3908,7 +3913,7 @@
         <translation>720p</translation>
     </message>
     <message>
-        <location line="+177"/>
+        <location line="+170"/>
         <source>Pick a platform template and quality. This updates the project video size.</source>
         <translation>වේදිකා ආකෘතියක් සහ ගුණාත්මකභාවයක් තෝරන්න. මෙමඟින් ව්‍යාපෘති වීඩියෝ ප්‍රමාණය යාවත්කාලීන වේ.</translation>
     </message>

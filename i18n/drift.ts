@@ -3893,8 +3893,13 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+4"/>
+        <location line="+6"/>
         <source>4K</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>1440p</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3908,7 +3913,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+177"/>
+        <location line="+170"/>
         <source>Pick a platform template and quality. This updates the project video size.</source>
         <translation type="unfinished"></translation>
     </message>
