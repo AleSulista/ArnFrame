@@ -41,9 +41,10 @@ public:
     // progress(fraction in [0,1], status) returns false to request cancel. status is a short
     // human-readable line for the UI (may be empty to leave the last message unchanged).
     // languageCode: ISO-ish Whisper code ("en", "si", …). Empty = auto-detect from audio.
+    // maxWordsPerCue: cap on words per subtitle cue; 0 leaves the default packing alone.
     WhisperResult transcribe(const std::vector<float> &pcm,
                              const std::function<bool(double, const QString &)> &progress,
-                             const QString &languageCode = QString());
+                             const QString &languageCode = QString(), int maxWordsPerCue = 0);
 
     WhisperTranscriber(const WhisperTranscriber &) = delete;
     WhisperTranscriber &operator=(const WhisperTranscriber &) = delete;

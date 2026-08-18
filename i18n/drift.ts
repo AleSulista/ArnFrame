@@ -471,12 +471,12 @@
     </message>
     <message>
         <location line="+133"/>
-        <location line="+8733"/>
+        <location line="+8735"/>
         <source>New project</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-8732"/>
+        <location line="-8734"/>
         <source>Open project</source>
         <translation type="unfinished"></translation>
     </message>
@@ -589,18 +589,18 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+7184"/>
+        <location line="+7186"/>
         <source>Mark work area in</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-7183"/>
-        <location line="+7197"/>
+        <location line="-7185"/>
+        <location line="+7199"/>
         <source>Mark work area out</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-7196"/>
+        <location line="-7198"/>
         <source>Go to work area in</source>
         <translation type="unfinished"></translation>
     </message>
@@ -611,12 +611,12 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+7220"/>
+        <location line="+7222"/>
         <source>Clear work area</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-7219"/>
+        <location line="-7221"/>
         <source>Loop work area playback</source>
         <translation type="unfinished"></translation>
     </message>
@@ -780,7 +780,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+12"/>
+        <location line="+13"/>
         <source>Subtitle generation already in progress</source>
         <translation type="unfinished"></translation>
     </message>
@@ -796,7 +796,7 @@
     </message>
     <message>
         <location line="+9"/>
-        <location line="+1502"/>
+        <location line="+1503"/>
         <location line="+74"/>
         <source>Starting…</source>
         <translation type="unfinished"></translation>
@@ -1114,7 +1114,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message numerus="yes">
-        <location line="-1655"/>
+        <location line="-1657"/>
         <location line="+42"/>
         <source>Imported %n subtitles</source>
         <translation type="unfinished">
@@ -1123,12 +1123,12 @@
         </translation>
     </message>
     <message>
-        <location line="+90"/>
+        <location line="+91"/>
         <source>Creating captions…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+869"/>
+        <location line="+870"/>
         <source>Cutting out subject…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2442,7 +2442,22 @@
 <context>
     <name>AudioInspector</name>
     <message>
-        <location filename="../src/qml/components/properties/AudioInspector.qml" line="+41"/>
+        <location filename="../src/qml/components/properties/AudioInspector.qml" line="+22"/>
+        <source>Recommended caption length</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>1 word per caption</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>%1 words per caption</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+26"/>
         <source>No audio</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2468,17 +2483,22 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+77"/>
+        <location line="+100"/>
         <source>Install AI engine first</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-60"/>
+        <location line="-83"/>
         <source>Auto subtitles</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+42"/>
+        <location line="+53"/>
+        <source>Shorter captions are timed by splitting each phrase evenly, so they can drift slightly out of sync with the speech.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+11"/>
         <source>Creating captions… %1%</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2488,7 +2508,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+16"/>
+        <location line="+17"/>
         <source>Download speech recognition (about 670 MB)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6342,12 +6362,12 @@ Quality: renders and shows every single frame, silently and slower than real tim
     </message>
     <message>
         <location line="+17"/>
-        <location line="+34"/>
+        <location line="+55"/>
         <source>Add auto caption</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-24"/>
+        <location line="-45"/>
         <source>Creates captions from the speech in the selected clip.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6357,7 +6377,12 @@ Quality: renders and shows every single frame, silently and slower than real tim
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+27"/>
+        <location line="+35"/>
+        <source>Shorter captions are timed by splitting each phrase evenly, so they can drift slightly out of sync with the speech.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+13"/>
         <source>Create captions from the selected clip&apos;s speech</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6367,7 +6392,7 @@ Quality: renders and shows every single frame, silently and slower than real tim
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+20"/>
+        <location line="+21"/>
         <source>Creating captions… %1%</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6394,6 +6419,21 @@ Quality: renders and shows every single frame, silently and slower than real tim
     <message>
         <location line="+3"/>
         <source>Needed for auto captions from speech</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+10"/>
+        <source>Recommended caption length</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>1 word per caption</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>%1 words per caption</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

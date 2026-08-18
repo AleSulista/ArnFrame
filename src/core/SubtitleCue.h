@@ -33,7 +33,11 @@ QString subtitleClipName(const QList<SubtitleCue> &cues);
 // export); packing then walks those words and starts a new cue when the line would exceed
 // maxLineWidth or when maxLineCount lines are already filled. A pause longer than 3s also
 // forces a cue break.
+// maxWordsPerCue caps how many words a single cue may hold; 0 or less leaves it uncapped. It
+// composes with maxLineWidth — whichever limit is reached first ends the cue — so a small cap
+// yields short cues whose boundaries are interpolated rather than measured, drifting slightly
+// from the speech in between Whisper's own segment boundaries.
 QList<SubtitleCue> packSubtitleCues(const QList<SubtitleCue> &cues, int maxLineWidth = 42,
-                                    int maxLineCount = 1);
+                                    int maxLineCount = 1, int maxWordsPerCue = 0);
 
 } // namespace drift

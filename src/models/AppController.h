@@ -394,8 +394,10 @@ public:
     Q_INVOKABLE bool importSubtitleFileIntoClip(int trackIndex, int clipIndex, const QUrl &url);
     // Export a subtitle clip's cues to a .srt file (clip-local timestamps).
     Q_INVOKABLE bool exportSubtitleFile(int trackIndex, int clipIndex, const QUrl &url);
+    // maxWordsPerCue caps words per caption; 0 keeps the recommended (character-width) packing.
     Q_INVOKABLE void generateSubtitlesForClip(int trackIndex, int clipIndex,
-                                              const QString &language = QString());
+                                              const QString &language = QString(),
+                                              int maxWordsPerCue = 0);
     Q_INVOKABLE void cancelSubtitleGeneration();
     Q_INVOKABLE QVariantList whisperLanguages();
     // points: [{x, y, include}] with x/y normalized to the source frame.

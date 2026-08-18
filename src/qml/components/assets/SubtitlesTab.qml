@@ -96,6 +96,27 @@ Item {
                 Component.onCompleted: currentIndex = 0
             }
 
+            ThemedComboBox {
+                id: captionWordsBox
+                visible: root.whisperReady
+                width: subtitleColumn.contentWidth
+                enabled: root.captionTargetReady && !EditorState.subtitleGenerating
+                textRole: "label"
+                valueRole: "words"
+                model: root.captionLengthOptions
+                Component.onCompleted: currentIndex = 0
+            }
+
+            Text {
+                visible: root.whisperReady && captionWordsBox.currentValue > 0
+                width: subtitleColumn.contentWidth
+                wrapMode: Text.WordWrap
+                text: qsTr("Shorter captions are timed by splitting each phrase evenly, so they can drift slightly out of sync with the speech.")
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+            }
+
             ThemedButton {
                 visible: root.whisperReady && !EditorState.subtitleGenerating
                 width: subtitleColumn.contentWidth
@@ -111,7 +132,8 @@ Item {
                                  ? captionLanguageBox.currentValue
                                  : ""
                     EditorState.generateSubtitlesForClip(
-                        EditorState.selectedTrack, EditorState.selectedClip, lang)
+                        EditorState.selectedTrack, EditorState.selectedClip, lang,
+                        captionWordsBox.currentValue)
                 }
             }
 
@@ -171,6 +193,16 @@ Item {
                     root.runtimeReady ? "whisper-model" : "onnxruntime")
             }
         }
+    }
+
+    // "Recommended" packs by display width like openai-whisper does; the numbered entries cap
+    // words per caption on top of that.
+    readonly property var captionLengthOptions: {
+        const options = [{ label: qsTr("Recommended caption length"), words: 0 }]
+        options.push({ label: qsTr("1 word per caption"), words: 1 })
+        for (let n = 2; n <= 8; ++n)
+            options.push({ label: qsTr("%1 words per caption").arg(n), words: n })
+        return options
     }
 
     property bool whisperReady: Addons.hasKind("whisper-model")

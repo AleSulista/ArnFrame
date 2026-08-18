@@ -26,7 +26,7 @@ Item {
         // Sweeps continuously while indeterminate.
         property real spin: 0
 
-        RotationAnimator on spin {
+        NumberAnimation on spin {
             running: root.indeterminate && root.visible
             loops: Animation.Infinite
             from: 0

@@ -137,7 +137,7 @@ void sortSubtitleCues(QList<SubtitleCue> &cues)
 }
 
 QList<SubtitleCue> packSubtitleCues(const QList<SubtitleCue> &cues, int maxLineWidth,
-                                    int maxLineCount)
+                                    int maxLineCount, int maxWordsPerCue)
 {
     if (cues.isEmpty())
         return {};
@@ -156,6 +156,7 @@ QList<SubtitleCue> packSubtitleCues(const QList<SubtitleCue> &cues, int maxLineW
     QList<TimedWord> subtitle;
     int lineLen = 0;
     int lineCount = 1;
+    int wordCount = 0;
     TimeUs lastStart = words.first().startUs;
 
     auto flush = [&]() {
@@ -173,18 +174,21 @@ QList<SubtitleCue> packSubtitleCues(const QList<SubtitleCue> &cues, int maxLineW
         subtitle.clear();
         lineLen = 0;
         lineCount = 1;
+        wordCount = 0;
     };
 
     for (TimedWord timing : words) {
         const bool longPause = timing.startUs - lastStart > kLongPauseUs;
         const bool hasRoom = lineLen + timing.word.size() <= maxLineWidth;
+        const bool wordCapHit = maxWordsPerCue > 0 && wordCount >= maxWordsPerCue;
 
-        if (lineLen > 0 && hasRoom && !longPause) {
+        if (lineLen > 0 && hasRoom && !longPause && !wordCapHit) {
             lineLen += timing.word.size();
             subtitle.append(timing);
+            ++wordCount;
         } else {
             timing.word = timing.word.trimmed();
-            if (!subtitle.isEmpty() && (longPause || lineCount >= maxLineCount)) {
+            if (!subtitle.isEmpty() && (longPause || wordCapHit || lineCount >= maxLineCount)) {
                 flush();
             } else if (lineLen > 0) {
                 ++lineCount;
@@ -192,6 +196,7 @@ QList<SubtitleCue> packSubtitleCues(const QList<SubtitleCue> &cues, int maxLineW
             }
             lineLen = timing.word.trimmed().size();
             subtitle.append(timing);
+            ++wordCount;
         }
         lastStart = timing.startUs;
     }

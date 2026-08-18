@@ -703,6 +703,20 @@ void CoreTest::subtitleCuePacking()
     const QList<drift::SubtitleCue> shortPacked = drift::packSubtitleCues(shortInput, 42, 1);
     QCOMPARE(shortPacked.size(), 1);
     QCOMPARE(shortPacked.first().text, QStringLiteral("Hi there"));
+
+    // A word cap splits further than the width alone would, and keeps the segment's outer edges.
+    const QList<drift::SubtitleCue> capped = drift::packSubtitleCues(input, 42, 1, 2);
+    QVERIFY(capped.size() > packed.size());
+    for (const drift::SubtitleCue &cue : capped) {
+        QCOMPARE(cue.text.split(QLatin1Char(' '), Qt::SkipEmptyParts).size() <= 2, true);
+        QVERIFY(cue.endUs > cue.startUs);
+    }
+    QCOMPARE(capped.first().startUs, drift::secondsToUs(0.0));
+    QCOMPARE(capped.last().endUs, drift::secondsToUs(10.0));
+
+    // A cap of 0 is the recommended packing, unchanged.
+    const QList<drift::SubtitleCue> uncapped = drift::packSubtitleCues(input, 42, 1, 0);
+    QCOMPARE(uncapped.size(), packed.size());
 }
 
 void CoreTest::srtRoundTrip()

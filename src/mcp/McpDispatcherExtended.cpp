@@ -899,7 +899,9 @@ QJsonObject McpDispatcher::applyOneExtended(const QString &tool, const QJsonObje
         if (!ref.valid())
             return err("not_found", QStringLiteral("Unknown clip"));
         const QString language = args.value(QStringLiteral("language")).toString();
-        m_controller->generateSubtitlesForClip(ref.track, ref.clip, language);
+        const int maxWords =
+            static_cast<int>(jsonNumber(args.value(QStringLiteral("max_words_per_cue")), 0.0));
+        m_controller->generateSubtitlesForClip(ref.track, ref.clip, language, maxWords);
         return ok(clipFeedback(ref, {{QStringLiteral("started"), true}}));
     }
 

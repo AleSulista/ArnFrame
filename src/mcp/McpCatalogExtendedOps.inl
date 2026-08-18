@@ -341,7 +341,8 @@
           "{started:true} immediately — poll "
           "inspect({detail:true}).subtitleGen.{active,progress,status} until active is false. Cancel "
           "with cancel_subtitle_generation.",
-          objectSchema(mergeProps({{QStringLiteral("language"), stringProp(QStringLiteral("Language id from list_whisper_languages; omitted auto-detects"))}},
+          objectSchema(mergeProps({{QStringLiteral("language"), stringProp(QStringLiteral("Language id from list_whisper_languages; omitted auto-detects"))},
+                                   {QStringLiteral("max_words_per_cue"), numberProp(QStringLiteral("Cap words per caption; omit or 0 for the recommended length. Short caps drift slightly out of sync."))}},
                                   clipRefProps())) },
         { "cancel_subtitle_generation", "subtitles", "Stop Whisper",
           "Cancel in-flight subtitle generation. Returns ok even when nothing was running; confirm "

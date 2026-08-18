@@ -16,6 +16,16 @@ Item {
     readonly property string clipKind: hasSelection ? (clipData.kind || "") : ""
     readonly property var propVolume: { "key": "volume", "label": "Volume", "def": 1.0, "decimals": 2 }
 
+    // "Recommended" packs by display width like openai-whisper does; the numbered entries cap
+    // words per caption on top of that.
+    readonly property var captionLengthOptions: {
+        const options = [{ label: qsTr("Recommended caption length"), words: 0 }]
+        options.push({ label: qsTr("1 word per caption"), words: 1 })
+        for (let n = 2; n <= 8; ++n)
+            options.push({ label: qsTr("%1 words per caption").arg(n), words: n })
+        return options
+    }
+
     height: audioTabColumn.height
     implicitHeight: audioTabColumn.height
 
@@ -164,6 +174,28 @@ Item {
             Component.onCompleted: currentIndex = 0
         }
 
+        ThemedComboBox {
+            id: subtitleWordsBox
+            visible: parent.whisperReady
+                     && (root.clipKind === "audio" || root.clipKind === "video")
+            width: parent.width
+            enabled: !EditorState.subtitleGenerating
+            textRole: "label"
+            valueRole: "words"
+            model: root.captionLengthOptions
+            Component.onCompleted: currentIndex = 0
+        }
+
+        Text {
+            visible: subtitleWordsBox.visible && subtitleWordsBox.currentValue > 0
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: qsTr("Shorter captions are timed by splitting each phrase evenly, so they can drift slightly out of sync with the speech.")
+            color: Theme.mutedForeground
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeXs
+        }
+
         ThemedButton {
             visible: parent.whisperReady
                      && (root.clipKind === "audio" || root.clipKind === "video")
@@ -177,7 +209,8 @@ Item {
                              ? subtitleLanguageBox.currentValue
                              : ""
                 EditorState.generateSubtitlesForClip(
-                    EditorState.selectedTrack, EditorState.selectedClip, lang)
+                    EditorState.selectedTrack, EditorState.selectedClip, lang,
+                    subtitleWordsBox.currentValue)
             }
         }
 
