@@ -22,6 +22,7 @@
 #include <QIcon>
 #include <QLoggingCategory>
 #include <QQmlApplicationEngine>
+#include <QQmlEngine>
 #include <QQuickWindow>
 #include <QSurfaceFormat>
 #include <QtQml/qqml.h>
@@ -101,6 +102,10 @@ int main(int argc, char *argv[])
     // for Explorer and pinned-taskbar identity.
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/app/drift.png")));
 
+    // qsTr/tr resolve when the QML engine loads, so translators must be installed first.
+    // Protocol strings under src/mcp/ are excluded from the catalog; they stay English.
+    AppController::installUiTranslators();
+
     // Registering the bundled fonts needs a QGuiApplication, and must happen before the compositor
     // thread starts touching QFontDatabase.
     reloadFontCatalog();
@@ -130,6 +135,8 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("Drift", 1, 0, "Updates", &updateChecker);
 
     QQmlApplicationEngine engine;
+    QObject::connect(&editorState, &AppController::uiLanguageChanged,
+                     &engine, &QQmlEngine::retranslate);
     engine.addImageProvider(QStringLiteral("drift"), new DriftImageProvider());
     engine.addImageProvider(QStringLiteral("segment"), new SegmentImageProvider());
     engine.addImageProvider(QStringLiteral("clippreview"), new ClipPreviewImageProvider());
