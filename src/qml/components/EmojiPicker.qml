@@ -128,6 +128,34 @@ Popup {
             clip: true
             visible: root.available && root.query.length === 0
 
+            onMovementStarted: scrollAnimation.stop()
+
+            NumberAnimation {
+                id: scrollAnimation
+                target: groupBar
+                property: "contentX"
+                duration: 250
+                easing.type: Easing.OutCubic
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                propagateComposedEvents: true
+                acceptedButtons: Qt.NoButton
+                property real targetContentX: groupBar.contentX
+                onWheel: (wheel) => {
+                    const dy = wheel.angleDelta.y
+                    const dx = wheel.angleDelta.x
+                    const delta = Math.abs(dy) > Math.abs(dx) ? dy : dx
+                    if (!scrollAnimation.running)
+                        targetContentX = groupBar.contentX
+                    targetContentX = Math.max(0, Math.min(groupBar.contentWidth - groupBar.width, targetContentX - delta))
+                    scrollAnimation.to = targetContentX
+                    scrollAnimation.restart()
+                    wheel.accepted = true
+                }
+            }
+
             Row {
                 id: groupRow
                 spacing: Theme.spacingSm
