@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import Drift
 import ".."
 
-// Transport toolbar: timecode readout, play/pause, fit/fill toggle, preview
+// Transport toolbar: timecode readout, play/pause, zoom readout, preview
 // quality, guides and fullscreen. The three groups were independently anchored
 // and overlapped at narrow preview widths. A RowLayout keeps Play centred
 // while the side groups compress instead of colliding.
@@ -13,7 +13,7 @@ Item {
 
     // Owning PreviewPanel (playing, projectFps, currentSeconds, durationSeconds,
     // previewFullscreen, formatTimecode, fullscreenRequested) and its viewport
-    // (fitMode).
+    // (userZoom, resetView).
     property var panel
     property var previewViewport
 
@@ -140,16 +140,30 @@ Item {
         Layout.alignment: Qt.AlignVCenter
         spacing: Theme.spacingLg + Theme.spacingXs
 
-        // Was plain clickable text that read as a label, with no hover,
-        // no pressed state and no explanation of the two modes.
-        ThemedToggleButton {
+        // Replaces the Fit/Fill toggle, which only stretched the letterbox
+        // rect — PreviewItem aspect-fits the frame inside it either way.
+        Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: toolbar.previewViewport.fitMode ? qsTr("Fit") : qsTr("Fill")
-            checked: !toolbar.previewViewport.fitMode
-            tooltip: toolbar.previewViewport.fitMode
-                     ? qsTr("Fit: show the whole picture. Click for Fill.")
-                     : qsTr("Fill: zoom in to cover the preview area. Click for Fit.")
-            onClicked: toolbar.previewViewport.fitMode = !toolbar.previewViewport.fitMode
+            width: 44
+            text: Math.round(toolbar.previewViewport.userZoom * 100) + "%"
+            color: Theme.mutedForeground
+            font.family: Theme.monoFontFamily
+            font.pixelSize: Theme.fontSizeXs
+            horizontalAlignment: Text.AlignHCenter
+
+            ThemedToolTip {
+                text: qsTr("Preview zoom — Ctrl+scroll over the preview to zoom, "
+                           + "middle-drag to pan. Click to reset to 100%.")
+                visible: zoomLabelMouse.containsMouse
+            }
+
+            MouseArea {
+                id: zoomLabelMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: toolbar.previewViewport.resetView()
+            }
         }
 
         Rectangle {

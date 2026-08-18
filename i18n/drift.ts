@@ -4238,7 +4238,7 @@
 <context>
     <name>PreviewPanel</name>
     <message>
-        <location filename="../src/qml/PreviewPanel.qml" line="+224"/>
+        <location filename="../src/qml/PreviewPanel.qml" line="+264"/>
         <source>Nothing to preview yet</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4311,27 +4311,12 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+15"/>
-        <source>Fit</source>
+        <location line="+23"/>
+        <source>Preview zoom — Ctrl+scroll over the preview to zoom, middle-drag to pan. Click to reset to 100%.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+0"/>
-        <source>Fill</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+3"/>
-        <source>Fit: show the whole picture. Click for Fill.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>Fill: zoom in to cover the preview area. Click for Fit.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="+21"/>
+        <location line="+31"/>
         <source>Full</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7212,7 +7197,7 @@ Quality: renders and shows every single frame, silently and slower than real tim
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+814"/>
+        <location line="+818"/>
         <source>Rename bookmark</source>
         <translation type="unfinished"></translation>
     </message>

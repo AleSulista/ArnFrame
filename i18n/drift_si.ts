@@ -4238,7 +4238,7 @@
 <context>
     <name>PreviewPanel</name>
     <message>
-        <location filename="../src/qml/PreviewPanel.qml" line="+224"/>
+        <location filename="../src/qml/PreviewPanel.qml" line="+264"/>
         <source>Nothing to preview yet</source>
         <translation>පෙරදසුන් කිරීමට කිසිවක් නැත</translation>
     </message>
@@ -4311,27 +4311,12 @@
         <translation>තත් 1ක් ඉදිරියට පනින්න · තත් 5ක් සඳහා Shift · තත් 10ක් සඳහා Ctrl</translation>
     </message>
     <message>
-        <location line="+15"/>
-        <source>Fit</source>
-        <translation>Fit (සරිලන සේ)</translation>
+        <location line="+23"/>
+        <source>Preview zoom — Ctrl+scroll over the preview to zoom, middle-drag to pan. Click to reset to 100%.</source>
+        <translation>පෙරදසුන් විශාලනය — විශාලනය කිරීමට පෙරදසුන මත Ctrl+scroll කරන්න, දසුන චලනය කිරීමට මැද බොත්තමෙන් අදින්න. 100% වෙත යළි සැකසීමට ක්ලික් කරන්න.</translation>
     </message>
     <message>
-        <location line="+0"/>
-        <source>Fill</source>
-        <translation>Fill (පුරවන සේ)</translation>
-    </message>
-    <message>
-        <location line="+3"/>
-        <source>Fit: show the whole picture. Click for Fill.</source>
-        <translation>Fit: සම්පූර්ණ පින්තූරය පෙන්වයි. Fill සඳහා ක්ලික් කරන්න.</translation>
-    </message>
-    <message>
-        <location line="+1"/>
-        <source>Fill: zoom in to cover the preview area. Click for Fit.</source>
-        <translation>Fill: පෙරදසුන් ප්‍රදේශය ආවරණය වන පරිදි විශාලනය කරයි. Fit සඳහා ක්ලික් කරන්න.</translation>
-    </message>
-    <message>
-        <location line="+21"/>
+        <location line="+31"/>
         <source>Full</source>
         <translation>සම්පූර්ණ (Full)</translation>
     </message>
@@ -7217,7 +7202,7 @@ Quality: තථ්‍ය කාලයට වඩා සෙමින්, ශබ්
         <translation>නව ට්‍රැකය</translation>
     </message>
     <message>
-        <location line="+814"/>
+        <location line="+818"/>
         <source>Rename bookmark</source>
         <translation>පොත් සලකුණේ නම වෙනස් කරන්න</translation>
     </message>

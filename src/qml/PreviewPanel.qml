@@ -67,19 +67,18 @@ PanelFrame {
                     const h = EditorState.projectHeight()
                     return (w > 0 && h > 0) ? (w / h) : (16 / 9)
                 }
-                property bool fitMode: true
                 // Crop mode pulls the canvas in so there is room around it to drag
                 // an edge outward and grow the frame.
                 property real cropZoom: EditorState.canvasCropMode ? 0.72 : 1.0
-                // Crop-mode navigation: wheel zoom about the cursor, middle-drag pan.
-                // Both reset when crop mode ends, so normal preview is never left
-                // scrolled off-centre.
+                // View navigation: wheel zoom about the cursor, middle-drag pan.
+                // Both reset when crop mode starts or ends, so neither view is
+                // ever entered already scrolled off-centre.
                 property real userZoom: 1.0
                 property real panX: 0
                 property real panY: 0
 
-                readonly property real baseWidth: fitMode ? Math.min(width, height * aspect) : width
-                readonly property real baseHeight: fitMode ? baseWidth / aspect : height
+                readonly property real baseWidth: Math.min(width, height * aspect)
+                readonly property real baseHeight: baseWidth / aspect
                 property real fitWidth: baseWidth * cropZoom * userZoom
                 property real fitHeight: baseHeight * cropZoom * userZoom
 
@@ -109,6 +108,47 @@ PanelFrame {
 
                 Behavior on cropZoom {
                     NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easingInOut }
+                }
+
+                // Zoom and pan for normal preview. Declared first so it sits
+                // under the canvas and the transform grips, and takes only the
+                // middle button, so left-drags still reach the clip handles.
+                // In crop mode CropOverlay (z: 200) has the same gestures and
+                // takes them first.
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.MiddleButton
+                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.ArrowCursor
+
+                    property real lastX: 0
+                    property real lastY: 0
+
+                    onPressed: (mouse) => {
+                        lastX = mouse.x
+                        lastY = mouse.y
+                    }
+                    onPositionChanged: (mouse) => {
+                        if (!pressed)
+                            return
+                        viewport.panX += mouse.x - lastX
+                        viewport.panY += mouse.y - lastY
+                        lastX = mouse.x
+                        lastY = mouse.y
+                    }
+
+                    // Ctrl-less scrolls are explicitly rejected so they keep
+                    // propagating: a MouseArea accepts wheel events even with
+                    // no onWheel bound.
+                    onWheel: (wheel) => {
+                        if (!(wheel.modifiers & Qt.ControlModifier)
+                                || wheel.angleDelta.y === 0) {
+                            wheel.accepted = false
+                            return
+                        }
+                        viewport.zoomAt(wheel.x, wheel.y,
+                                        wheel.angleDelta.y > 0 ? 1.15 : 1 / 1.15)
+                        wheel.accepted = true
+                    }
                 }
 
                 Rectangle {
