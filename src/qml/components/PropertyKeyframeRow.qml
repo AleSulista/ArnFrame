@@ -131,6 +131,66 @@ Column {
             EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key, mode)
     }
 
+    readonly property bool hasPrevKeyframe: {
+        if (!keyframeList || keyframeList.length === 0)
+            return false
+        const t = EditorState.playheadSeconds
+        const tolerance = 1 / 30
+        for (let i = 0; i < keyframeList.length; ++i) {
+            if (keyframeList[i].seconds < t - tolerance)
+                return true
+        }
+        return false
+    }
+
+    readonly property bool hasNextKeyframe: {
+        if (!keyframeList || keyframeList.length === 0)
+            return false
+        const t = EditorState.playheadSeconds
+        const tolerance = 1 / 30
+        for (let i = 0; i < keyframeList.length; ++i) {
+            if (keyframeList[i].seconds > t + tolerance)
+                return true
+        }
+        return false
+    }
+
+    function goToPrevKeyframe() {
+        if (!keyframeList || keyframeList.length === 0)
+            return
+        const t = EditorState.playheadSeconds
+        const tolerance = 1 / 30
+        let targetKf = null
+        for (let i = keyframeList.length - 1; i >= 0; --i) {
+            const kf = keyframeList[i]
+            if (kf.seconds < t - tolerance) {
+                targetKf = kf
+                break
+            }
+        }
+        if (targetKf) {
+            EditorState.playheadSeconds = targetKf.seconds
+        }
+    }
+
+    function goToNextKeyframe() {
+        if (!keyframeList || keyframeList.length === 0)
+            return
+        const t = EditorState.playheadSeconds
+        const tolerance = 1 / 30
+        let targetKf = null
+        for (let i = 0; i < keyframeList.length; ++i) {
+            const kf = keyframeList[i]
+            if (kf.seconds > t + tolerance) {
+                targetKf = kf
+                break
+            }
+        }
+        if (targetKf) {
+            EditorState.playheadSeconds = targetKf.seconds
+        }
+    }
+
     Connections {
         target: EditorState
         function onSelectedClipDataChanged() { root.bumpValue() }
@@ -235,26 +295,72 @@ Column {
         width: root.width
         spacing: 6
         // Width left for the editor once the key button has taken its share.
-        readonly property real editorWidth: width - keyButton.width - spacing
+        readonly property real editorWidth: width - (root.animated ? keyframeNavRow.width : singleKeyButton.width) - spacing
+
+        Row {
+            id: keyframeNavRow
+            spacing: 2
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.animated
+
+            IconButton {
+                id: prevKeyButton
+                buttonSize: 20
+                iconSize: 12
+                glyph: Theme.icons.chevronLeft
+                tooltip: qsTr("Previous keyframe")
+                enabled: root.hasPrevKeyframe
+                onClicked: {
+                    EditorState.showKeyframeGraphProperty(root.propDef.key)
+                    root.goToPrevKeyframe()
+                }
+            }
+
+            IconButton {
+                id: keyButton
+                buttonSize: 24
+                iconSize: 16
+                glyph: root.activeKey ? Theme.icons.diamondMinus : Theme.icons.diamondPlus
+                tooltip: root.activeKey
+                         ? qsTr("Remove %1's keyframe at the playhead").arg(root.propDef.label)
+                         : qsTr("Add a keyframe for %1 at the playhead").arg(root.propDef.label)
+                onClicked: {
+                    EditorState.showKeyframeGraphProperty(root.propDef.key)
+                    if (root.activeKey) {
+                        EditorState.removeClipKeyframe(
+                            EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
+                            root.activeKey.seconds)
+                    } else {
+                        root.commitValue(root.currentValue)
+                    }
+                }
+            }
+
+            IconButton {
+                id: nextKeyButton
+                buttonSize: 20
+                iconSize: 12
+                glyph: Theme.icons.chevronRight
+                tooltip: qsTr("Next keyframe")
+                enabled: root.hasNextKeyframe
+                onClicked: {
+                    EditorState.showKeyframeGraphProperty(root.propDef.key)
+                    root.goToNextKeyframe()
+                }
+            }
+        }
 
         IconButton {
-            id: keyButton
+            id: singleKeyButton
+            visible: !root.animated
             anchors.verticalCenter: parent.verticalCenter
             buttonSize: 24
             iconSize: 16
-            glyph: root.activeKey ? Theme.icons.diamondMinus : Theme.icons.diamondPlus
-            tooltip: root.activeKey
-                     ? qsTr("Remove %1's keyframe at the playhead").arg(root.propDef.label)
-                     : qsTr("Add a keyframe for %1 at the playhead").arg(root.propDef.label)
+            glyph: Theme.icons.diamondPlus
+            tooltip: qsTr("Add a keyframe for %1 at the playhead").arg(root.propDef.label)
             onClicked: {
                 EditorState.showKeyframeGraphProperty(root.propDef.key)
-                if (root.activeKey) {
-                    EditorState.removeClipKeyframe(
-                        EditorState.selectedTrack, EditorState.selectedClip, root.propDef.key,
-                        root.activeKey.seconds)
-                } else {
-                    root.commitValue(root.currentValue)
-                }
+                root.commitValue(root.currentValue)
             }
         }
 

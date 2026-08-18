@@ -763,6 +763,14 @@ Item {
                             // that curve's tangent handles.
                             TapHandler {
                                 onTapped: root.focusedProp = keyDot.modelData.prop
+                                onDoubleTapped: {
+                                    EditorState.removeClipKeyframe(
+                                        EditorState.selectedTrack,
+                                        EditorState.selectedClip,
+                                        keyDot.modelData.prop,
+                                        keyDot.modelData.seconds
+                                    )
+                                }
                             }
 
                             DragHandler {
