@@ -1334,8 +1334,12 @@ PanelFrame {
                                         property int leftClipIndex: modelData
                                         property var leftClip: root.tracks[trackRow.trackIndex].clips[leftClipIndex]
                                         property string trackType: root.tracks[trackRow.trackIndex].type
-                                        property var transitionData: EditorState.transitionBetweenClips(
-                                                                         trackRow.trackIndex, leftClipIndex)
+                                        // Reading root.tracks keeps this bound to tracksChanged; without
+                                        // that dependency the invokable is evaluated once and a transition
+                                        // added later never registers (clicking would re-add a crossfade).
+                                        property var transitionData: root.tracks[trackRow.trackIndex]
+                                            ? EditorState.transitionBetweenClips(trackRow.trackIndex, leftClipIndex)
+                                            : ({})
                                         property bool hasTransition: transitionData
                                                                        && Object.keys(transitionData).length > 0
                                         property bool transitionSelected: EditorState.selectedTransitionTrack === trackRow.trackIndex
