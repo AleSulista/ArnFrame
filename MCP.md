@@ -46,7 +46,7 @@ Pinned endpoints (`/mcp/timeline`, `/mcp/project`, …) list that toolbox’s op
 | Overlap | Off by default — place/move snap to gaps unless `set_overlap` enables overlap; the reply reports `requested` vs `placed` |
 | Export | `export_video` is async — poll `inspect().export` or `export_status`. The output path is normalised, so use the `path` echoed back |
 | Atomicity | `apply` is **not** atomic: on failure the ops before it stay applied. Check `stopped` / `failed` / `done` |
-| Undo | One batch = one undo step, except `import_media`, `save_project`, `set_overlap`, `set_theme`, `set_shortcut`, `reset_shortcuts` |
+| Undo | One batch = one undo step, except `import_media`, `save_project`, `set_overlap`, `set_theme`, `set_shortcut`, `reset_shortcuts` and the `audio` read ops |
 | Errors | `{ok:false, error:<code>, detail:<text>}` — `bad_args`, `not_found`, `type_mismatch`, `unknown_op`, `unknown_toolbox`, `wrong_endpoint`, `wrong_toolbox`, `apply_failed`, `import_failed`, `import_timeout`, `export_busy`, `export_failed`, `export_timeout`, `capture_failed`, `conflict` |
 | Change detection | Every `inspect` includes `revision`; pass `since:<revision>` to get `{unchanged:true}` when state is current |
 | Media import | Local absolute paths, `file://` URLs, or `import_media_bytes` (base64 — always pass an explicit `path`) |
@@ -80,7 +80,32 @@ All return `{started:true}` immediately. Every field below except `export` needs
 | `speed` | Speed ramps; reading custom fade curves (write them with `set_fade_curve` in `canvas`) |
 | `segmentation` | SAM-style cutout (session or one-shot) |
 | `ai` | Denoise and face detection |
+| `audio` | Waveforms, beat detection, beat-synced cuts, clip volume |
 | `ui` | Theme, shortcuts, editor preferences |
+
+### Working to the music
+
+`detect_beats` **blocks** and returns the grid — no polling.
+
+```json
+{"name": "detect_beats", "arguments": {"start": 0, "duration": 30}}
+```
+
+```json
+{"ok": true, "bpm": 128.0, "confidence": 0.81, "beatsPerBar": 4, "firstDownbeat": 2,
+ "beats": [0.31, 0.78, 1.25], "onsets": [{"at": 0.31, "s": 0.9}], "cached": false}
+```
+
+Then either drive edits from those exact times, or arm the grid and let snapping do it:
+
+| Call | Effect |
+|---|---|
+| `set_beat_layers({grid:true})` | Beats become snap targets — `place_clip`, `move_clip` and `move_to_track` now magnet to the nearest beat within 150 ms, and so do the user's own drags |
+| `split_on_beats({clip, unit:"bar"})` | Cuts the clip at every bar line. One undo step |
+| `snap_clips_to_beats({clips, unit:"beat"})` | Quantises clip starts. One undo step |
+| `bookmark_beats({unit:"bar"})` | Writes the grid into the project as markers that outlive the analysis |
+
+The analysis is **transient**: any edit that changes the mix drops it (`finishEdit` clears it when the audio fingerprint moves). `inspect({detail:true}).beats` reports `{active, analysed, bpm, confidence, rangeStart, rangeDuration, n, onsets, gridVisible, onsetsVisible, stale}` — check `stale` before trusting a grid you fetched a few ops ago, and re-run `detect_beats` when it is `true`.
 
 ## Traps
 
@@ -93,6 +118,12 @@ All return `{started:true}` immediately. Every field below except `export` needs
 - **`set_keyframe_interpolation` moves the playhead** to `at`, changing the default time of later ops in the same batch.
 - **`add_track` shifts every track index** — index 0 is the new track.
 - **`import_media_bytes` without `path`** writes to a temp dir that is deleted when the call returns, leaving a broken asset. Always pass `path`.
+- **`get_waveform` reads two different things.** With `clip` or `asset` it reads the *source file*, so clip speed, reverse and volume are not applied. Only the timeline form (`start` + `duration`, no clip or asset) is what you would actually hear.
+- **`bpm: 0` from `detect_beats` is not an error** — it means no trustworthy tempo, so `beats` is empty. The `onsets` are still valid; pass `unit:"onset"` anywhere a grid is accepted.
+- **Beat analysis dies on the next edit.** Read the whole grid out of `detect_beats` before mutating anything, or re-detect. `split_on_beats` and `snap_clips_to_beats` already snapshot it internally.
+- **`snap_clips_to_beats` may not land on the beat.** With overlap off, a clip is pushed to the next free gap. Read the `to` values back rather than assuming they equal the beat time.
+- **`split_on_beats` keeps your clip id for the *first* piece.** The other pieces are new UUIDs, returned in `clips` in timeline order.
+- **There is no track volume.** `set_volume` is per clip; mute a whole lane with `set_track({muted:true})`.
 
 ## Example
 

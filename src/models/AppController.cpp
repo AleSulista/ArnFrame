@@ -9648,6 +9648,46 @@ QVariantList reduceDensePeaks(const QVector<float> &dense, int first, int last, 
     return result;
 }
 
+// 22050 rather than the 8000 used for voice peaks: hats and cymbals, the sharpest onset cues
+// in music, live above 4 kHz.
+constexpr int kBeatAnalysisRate = 22050;
+
+// Mixes [startUs, +durUs) down to mono at kBeatAnalysisRate and runs onset/tempo detection.
+//
+// `snap` must be a copy the caller owns: this runs off the GUI thread and the mixer would
+// otherwise race the live project.
+//
+// The mix is pulled a window at a time rather than allocated whole. AudioOnsets needs the mono
+// buffer contiguous, so that one stays, but holding the interleaved stereo alongside it doubled
+// the peak for no reason — at the ten-minute ceiling MCP allows that is 106 MB of scratch to
+// produce 53 MB of mono.
+AudioBeatAnalysis runBeatAnalysis(const drift::Project &snap, drift::TimeUs startUs,
+                                  drift::TimeUs durUs, double startSeconds)
+{
+    const int frames =
+        static_cast<int>((static_cast<double>(durUs) / 1'000'000.0) * kBeatAnalysisRate);
+    if (frames <= 0)
+        return {};
+
+    AudioMixer mixer;
+    mixer.setProject(&snap);
+
+    constexpr int kWindowFrames = 1 << 18;
+    QVector<float> mono(frames, 0.0f);
+    QVector<float> window(static_cast<qsizetype>(kWindowFrames) * 2);
+    for (int done = 0; done < frames;) {
+        const int want = qMin(kWindowFrames, frames - done);
+        const drift::TimeUs at =
+            startUs + static_cast<drift::TimeUs>(done) * drift::kUsPerSecond / kBeatAnalysisRate;
+        mixer.mix(at, want, kBeatAnalysisRate, window.data());
+        for (int i = 0; i < want; ++i)
+            mono[done + i] = 0.5f * (window[i * 2] + window[i * 2 + 1]);
+        done += want;
+    }
+
+    return AudioOnsets::analyze(mono.constData(), frames, kBeatAnalysisRate, startSeconds);
+}
+
 } // namespace
 
 const MediaWaveform::Dense *AppController::densePeaksFor(const QString &path) const
@@ -9848,23 +9888,7 @@ void AppController::analyzeBeats(double startSeconds, double durSeconds)
     const QByteArray fingerprint = audioLayoutFingerprint();
     (void)QtConcurrent::run([this, snap, startUs, durUs, startSeconds, durSeconds, generation,
                              fingerprint] {
-        // 22050 rather than the 8000 used for voice peaks: hats and cymbals, the sharpest
-        // onset cues in music, live above 4 kHz.
-        const int rate = 22050;
-        const int frames = static_cast<int>((static_cast<double>(durUs) / 1'000'000.0) * rate);
-        AudioBeatAnalysis analysis;
-        if (frames > 0) {
-            QVector<float> stereo(static_cast<qsizetype>(frames) * 2, 0.0f);
-            AudioMixer mixer;
-            mixer.setProject(&snap);
-            mixer.mix(startUs, frames, rate, stereo.data());
-
-            QVector<float> mono(frames, 0.0f);
-            for (int i = 0; i < frames; ++i)
-                mono[i] = 0.5f * (stereo[i * 2] + stereo[i * 2 + 1]);
-
-            analysis = AudioOnsets::analyze(mono.constData(), frames, rate, startSeconds);
-        }
+        const AudioBeatAnalysis analysis = runBeatAnalysis(snap, startUs, durUs, startSeconds);
         QMetaObject::invokeMethod(
             this,
             [this, analysis, startSeconds, durSeconds, generation, fingerprint] {
@@ -11219,6 +11243,29 @@ QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision, bool
                      QJsonObject{{QStringLiteral("active"), reverseRendering()},
                                  {QStringLiteral("progress"), reverseRenderProgress()},
                                  {QStringLiteral("status"), reverseRenderStatus()}});
+        // Beat state without the arrays — detect_beats returns those. `stale` matters because
+        // finishEdit drops the analysis as soon as the mix changes, so a grid an agent found a
+        // few ops ago may already be gone.
+        QJsonObject beatState{
+            {QStringLiteral("active"), m_beatAnalysisRunning},
+            {QStringLiteral("analysed"), !m_beatAnalysis.isEmpty()},
+            {QStringLiteral("gridVisible"), m_beatGridVisible},
+            {QStringLiteral("onsetsVisible"), m_onsetsVisible},
+        };
+        if (!m_beatAnalysis.isEmpty()) {
+            beatState.insert(QStringLiteral("bpm"), m_beatAnalysisRaw.bpm);
+            beatState.insert(QStringLiteral("confidence"), m_beatAnalysisRaw.confidence);
+            beatState.insert(QStringLiteral("rangeStart"),
+                             m_beatAnalysis.value(QStringLiteral("rangeStart")).toDouble());
+            beatState.insert(QStringLiteral("rangeDuration"),
+                             m_beatAnalysis.value(QStringLiteral("rangeDuration")).toDouble());
+            beatState.insert(QStringLiteral("n"), static_cast<int>(m_beatAnalysisRaw.beats.size()));
+            beatState.insert(QStringLiteral("onsets"),
+                             static_cast<int>(m_beatAnalysisRaw.onsets.size()));
+            beatState.insert(QStringLiteral("stale"),
+                             m_beatAudioFingerprint != audioLayoutFingerprint());
+        }
+        extra.insert(QStringLiteral("beats"), beatState);
     }
     if (m_project.hasWorkArea()) {
         extra.insert(QStringLiteral("work_in"), workAreaInSeconds());
@@ -11346,6 +11393,509 @@ QJsonObject AppController::mcpCaptureFrame(double atSeconds, bool full)
         {QStringLiteral("data"), QString::fromLatin1(jpeg.toBase64())},
     });
     return {{QStringLiteral("content"), content}, {QStringLiteral("isError"), false}};
+}
+
+namespace {
+
+// Caps for the audio reads. The MCP transport has no chunking — textResult serialises one
+// compact JSON block and writes it whole — so every unbounded array needs a ceiling here.
+constexpr int kMcpDefaultBuckets = 400;
+constexpr int kMcpMaxBuckets = 4096;   // matches waveformPeaksRange
+constexpr double kMcpMaxWaveformSeconds = 3600.0;
+constexpr double kMcpMaxBeatSeconds = 600.0;  // bounds the windowed mix to ~53 MB of mono
+constexpr int kMcpMaxBeats = 2000;
+constexpr int kMcpMaxOnsets = 500;
+
+double round3(double v)
+{
+    return std::round(v * 1000.0) / 1000.0;
+}
+
+double round2(double v)
+{
+    return std::round(v * 100.0) / 100.0;
+}
+
+// Max-reduce raw peaks into `buckets`. Deliberately not reduceDensePeaks: that one applies a
+// dB curve and a 0.05 visibility floor, both of which are drawing decisions. An agent asking
+// whether a stretch is silent has to be able to get 0 back.
+QVector<float> reduceRawPeaks(const QVector<float> &src, int buckets)
+{
+    if (src.isEmpty() || buckets <= 0)
+        return {};
+    if (src.size() <= buckets)
+        return src;
+
+    QVector<float> out(buckets, 0.0f);
+    for (int b = 0; b < buckets; ++b) {
+        int i0 = static_cast<int>((static_cast<qint64>(b) * src.size()) / buckets);
+        int i1 = static_cast<int>((static_cast<qint64>(b + 1) * src.size()) / buckets);
+        if (i1 <= i0)
+            i1 = qMin(src.size(), i0 + 1);
+        float peak = 0.0f;
+        for (int i = i0; i < i1; ++i)
+            peak = qMax(peak, src[i]);
+        out[b] = peak;
+    }
+    return out;
+}
+
+QJsonObject peaksReply(const QVector<float> &peaks, double startSeconds, double durSeconds,
+                       const QString &source)
+{
+    using namespace drift::mcp;
+    if (peaks.isEmpty())
+        return err("not_found", QStringLiteral("No audio decoded for that range"));
+
+    QJsonArray values;
+    double maxPeak = 0.0;
+    for (float p : peaks) {
+        values.append(round3(p));
+        maxPeak = qMax(maxPeak, static_cast<double>(p));
+    }
+    return ok({
+        {QStringLiteral("source"), source},
+        {QStringLiteral("start"), round3(startSeconds)},
+        {QStringLiteral("duration"), round3(durSeconds)},
+        {QStringLiteral("buckets"), values.size()},
+        {QStringLiteral("max"), round3(maxPeak)},
+        {QStringLiteral("peaks"), values},
+    });
+}
+
+// Decodes off the GUI thread and waits, so the reply carries data on the first call. Same
+// nested-event-loop shape mcpCaptureFrame uses.
+QVector<float> blockingSourcePeaks(const QString &path, double startSeconds, double durSeconds,
+                                   int buckets)
+{
+    if (path.isEmpty() || durSeconds <= 0.0)
+        return {};
+
+    // Oversample a little before reducing so a bucket boundary cannot land on the only loud
+    // sample in its span, then clamp to the rate the block cache uses.
+    const int pps = qBound(1, static_cast<int>(std::ceil(buckets / durSeconds)) * 4, 100);
+
+    auto raw = std::make_shared<QVector<float>>();
+    QEventLoop loop;
+    (void)QtConcurrent::run([path, startSeconds, durSeconds, pps, raw, &loop]() {
+        *raw = MediaWaveform::peaksForRange(path, startSeconds, startSeconds + durSeconds, pps);
+        QMetaObject::invokeMethod(&loop, &QEventLoop::quit, Qt::QueuedConnection);
+    });
+    loop.exec();
+
+    return reduceRawPeaks(*raw, buckets);
+}
+
+} // namespace
+
+QJsonObject AppController::mcpWaveformForClip(int trackIndex, int clipIndex, int buckets) const
+{
+    using namespace drift::mcp;
+    const QList<drift::Track> &tracks = m_project.tracks();
+    if (trackIndex < 0 || trackIndex >= tracks.size())
+        return err("not_found", QStringLiteral("No such track"));
+    const drift::Track &track = tracks.at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return err("not_found", QStringLiteral("No such clip"));
+
+    const drift::Clip &clip = track.clips.at(clipIndex);
+    if (clip.path.isEmpty())
+        return err("type_mismatch", QStringLiteral("Clip has no media file (text or shape clip)"));
+
+    const double srcIn = drift::usToSeconds(clip.srcIn);
+    const double span = drift::usToSeconds(clip.srcOut - clip.srcIn);
+    if (span <= 0.0)
+        return err("type_mismatch", QStringLiteral("Clip has no source span"));
+
+    const QVector<float> peaks = blockingSourcePeaks(clip.path, srcIn, span, buckets);
+    return peaksReply(peaks, srcIn, span, QStringLiteral("clip"));
+}
+
+QJsonObject AppController::mcpWaveformForAsset(const QString &assetId, double startSeconds,
+                                               double durSeconds, int buckets) const
+{
+    using namespace drift::mcp;
+    const drift::MediaAsset *asset = m_project.asset(assetId);
+    if (!asset)
+        return err("not_found", QStringLiteral("Unknown asset"));
+    if (asset->path.isEmpty())
+        return err("type_mismatch", QStringLiteral("Asset has no file"));
+
+    const double total = drift::usToSeconds(asset->durationUs);
+    const double start = qMax(0.0, startSeconds);
+    const double span = durSeconds > 0.0 ? qMin(durSeconds, total - start) : total - start;
+    if (span <= 0.0)
+        return err("bad_args", QStringLiteral("Range is past the end of the asset"));
+    if (span > kMcpMaxWaveformSeconds) {
+        return err("bad_args", QStringLiteral("duration must be <= %1 seconds")
+                                   .arg(kMcpMaxWaveformSeconds));
+    }
+
+    const QVector<float> peaks = blockingSourcePeaks(asset->path, start, span, buckets);
+    return peaksReply(peaks, start, span, QStringLiteral("asset"));
+}
+
+QJsonObject AppController::mcpWaveformForTimeline(double startSeconds, double durSeconds,
+                                                  int buckets) const
+{
+    using namespace drift::mcp;
+    if (durSeconds <= 0.0)
+        return err("bad_args", QStringLiteral("duration must be > 0"));
+    if (durSeconds > kMcpMaxWaveformSeconds) {
+        return err("bad_args", QStringLiteral("duration must be <= %1 seconds")
+                                   .arg(kMcpMaxWaveformSeconds));
+    }
+
+    const double start = qMax(0.0, startSeconds);
+    const drift::TimeUs startUs = drift::secondsToUs(start);
+    const int rate = 8000; // envelope only; the sample rate does not change where the peaks land
+    const qint64 frames = static_cast<qint64>(durSeconds * rate);
+    if (frames <= 0)
+        return err("bad_args", QStringLiteral("duration is too short to measure"));
+
+    const drift::Project snap = m_project;
+    auto raw = std::make_shared<QVector<float>>();
+    QEventLoop loop;
+    (void)QtConcurrent::run([snap, startUs, frames, rate, buckets, raw, &loop]() {
+        AudioMixer mixer;
+        mixer.setProject(&snap);
+        const int peakBuckets = static_cast<int>(qMin<qint64>(buckets, frames));
+        *raw = MediaWaveform::mixedPeaks(
+            frames, rate, peakBuckets,
+            [&mixer, startUs, rate](float *out, qint64 frameOffset, int maxFrames) {
+                const drift::TimeUs at = startUs + frameOffset * drift::kUsPerSecond / rate;
+                mixer.mix(at, maxFrames, rate, out);
+                return maxFrames;
+            });
+        QMetaObject::invokeMethod(&loop, &QEventLoop::quit, Qt::QueuedConnection);
+    });
+    loop.exec();
+
+    // The mixer always returns samples, silent or not, so an all-zero result is a real answer
+    // here rather than the "nothing decoded" peaksReply reports for a source read.
+    if (raw->isEmpty())
+        return err("not_found", QStringLiteral("Nothing to mix in that range"));
+    return peaksReply(*raw, start, durSeconds, QStringLiteral("timeline"));
+}
+
+QJsonObject AppController::mcpBeatPayload() const
+{
+    using namespace drift::mcp;
+    if (m_beatAnalysis.isEmpty())
+        return err("not_found", QStringLiteral("No beat analysis yet — call detect_beats first"));
+
+    QJsonArray beats;
+    for (double b : m_beatAnalysisRaw.beats) {
+        if (beats.size() >= kMcpMaxBeats)
+            break;
+        beats.append(round3(b));
+    }
+
+    // Keep the strongest onsets when there are too many, then put them back in time order —
+    // a truncation by time would silently hide the whole back half of the range.
+    QList<AudioOnset> onsets = m_beatAnalysisRaw.onsets;
+    if (onsets.size() > kMcpMaxOnsets) {
+        std::partial_sort(onsets.begin(), onsets.begin() + kMcpMaxOnsets, onsets.end(),
+                          [](const AudioOnset &a, const AudioOnset &b) {
+                              return a.strength > b.strength;
+                          });
+        onsets.resize(kMcpMaxOnsets);
+        std::sort(onsets.begin(), onsets.end(),
+                  [](const AudioOnset &a, const AudioOnset &b) { return a.seconds < b.seconds; });
+    }
+    QJsonArray onsetRows;
+    for (const AudioOnset &o : std::as_const(onsets)) {
+        onsetRows.append(QJsonObject{{QStringLiteral("at"), round3(o.seconds)},
+                                     {QStringLiteral("s"), round2(o.strength)}});
+    }
+
+    return ok({
+        {QStringLiteral("start"), round3(m_beatAnalysis.value(QStringLiteral("rangeStart")).toDouble())},
+        {QStringLiteral("duration"), round3(m_beatAnalysis.value(QStringLiteral("rangeDuration")).toDouble())},
+        {QStringLiteral("bpm"), round2(m_beatAnalysisRaw.bpm)},
+        {QStringLiteral("confidence"), round2(m_beatAnalysisRaw.confidence)},
+        {QStringLiteral("beatsPerBar"), m_beatAnalysisRaw.beatsPerBar},
+        {QStringLiteral("firstDownbeat"), m_beatAnalysisRaw.firstDownbeat},
+        {QStringLiteral("beats"), beats},
+        {QStringLiteral("onsets"), onsetRows},
+        {QStringLiteral("truncated"), beats.size() < m_beatAnalysisRaw.beats.size()
+                                          || onsetRows.size() < m_beatAnalysisRaw.onsets.size()},
+        {QStringLiteral("gridVisible"), m_beatGridVisible},
+        {QStringLiteral("onsetsVisible"), m_onsetsVisible},
+    });
+}
+
+QJsonObject AppController::mcpDetectBeats(double startSeconds, double durSeconds, bool force)
+{
+    using namespace drift::mcp;
+    if (durSeconds < AudioOnsets::kMinAnalysisSec) {
+        return err("bad_args", QStringLiteral("duration must be >= %1 seconds to find a tempo")
+                                   .arg(AudioOnsets::kMinAnalysisSec));
+    }
+    if (durSeconds > kMcpMaxBeatSeconds) {
+        return err("bad_args",
+                   QStringLiteral("duration must be <= %1 seconds").arg(kMcpMaxBeatSeconds));
+    }
+
+    const double start = qMax(0.0, startSeconds);
+
+    // A cached grid is only reusable if the audio it describes has not moved since.
+    if (!force && !m_beatAnalysis.isEmpty()
+        && qFuzzyCompare(m_beatAnalysis.value(QStringLiteral("rangeStart")).toDouble() + 1.0,
+                         start + 1.0)
+        && qFuzzyCompare(m_beatAnalysis.value(QStringLiteral("rangeDuration")).toDouble() + 1.0,
+                         durSeconds + 1.0)
+        && m_beatAudioFingerprint == audioLayoutFingerprint()) {
+        QJsonObject cached = mcpBeatPayload();
+        cached.insert(QStringLiteral("cached"), true);
+        return cached;
+    }
+
+    // The editor may have started its own pass for the visible range. Two analyses fighting
+    // over one result slot would leave whichever finished second describing the other's range.
+    if (m_beatAnalysisRunning)
+        return err("conflict", QStringLiteral("A beat analysis is already running"));
+
+    const drift::TimeUs startUs = drift::secondsToUs(start);
+    const drift::TimeUs durUs = drift::secondsToUs(durSeconds);
+    const quint64 generation = ++m_beatAnalysisGeneration;
+
+    m_beatAnalysisRunning = true;
+    emit beatAnalysisChanged();
+
+    const drift::Project snap = m_project;
+    const QByteArray fingerprint = audioLayoutFingerprint();
+
+    auto analysis = std::make_shared<AudioBeatAnalysis>();
+    QEventLoop loop;
+    (void)QtConcurrent::run([snap, startUs, durUs, start, analysis, &loop]() {
+        *analysis = runBeatAnalysis(snap, startUs, durUs, start);
+        QMetaObject::invokeMethod(&loop, &QEventLoop::quit, Qt::QueuedConnection);
+    });
+    loop.exec();
+
+    // The nested loop kept the GUI live, so clearBeatAnalysis() or another pass could have run
+    // underneath us. Publishing now would resurrect a range the user already dismissed.
+    if (generation != m_beatAnalysisGeneration)
+        return err("conflict", QStringLiteral("Beat analysis was superseded"));
+
+    // applyBeatAnalysis is the shared publish path: it fills m_beatAnalysis, rebuilds the snap
+    // targets, stores the staleness fingerprint, clears the running flag and resumes any
+    // pending effect template.
+    applyBeatAnalysis(*analysis, start, durSeconds, fingerprint);
+
+    QJsonObject payload = mcpBeatPayload();
+    payload.insert(QStringLiteral("cached"), false);
+    return payload;
+}
+
+QJsonObject AppController::mcpSetBeatLayers(bool grid, bool onsets)
+{
+    using namespace drift::mcp;
+    setBeatGridVisible(grid);
+    setOnsetsVisible(onsets);
+    return ok({
+        {QStringLiteral("gridVisible"), m_beatGridVisible},
+        {QStringLiteral("onsetsVisible"), m_onsetsVisible},
+        {QStringLiteral("snapTargets"), static_cast<int>(m_beatSnapTargets.size())},
+        {QStringLiteral("snapEnabled"), m_snapEnabled},
+    });
+}
+
+QList<double> AppController::mcpBeatTimes(const QString &unit, double minStrength) const
+{
+    QList<double> times;
+    const QString u = unit.trimmed().toLower();
+
+    if (u == QLatin1String("onset")) {
+        for (const AudioOnset &o : m_beatAnalysisRaw.onsets) {
+            if (o.strength >= minStrength)
+                times.append(o.seconds);
+        }
+        return times;
+    }
+
+    const QList<double> &beats = m_beatAnalysisRaw.beats;
+    if (u == QLatin1String("bar")) {
+        const int per = qMax(1, m_beatAnalysisRaw.beatsPerBar);
+        // Count bars from the detected downbeat, not from index 0, or every bar line lands on
+        // whichever beat happened to be first in the analysed window.
+        const int first = qBound(0, m_beatAnalysisRaw.firstDownbeat, qMax(0, beats.size() - 1));
+        for (int i = first; i < beats.size(); i += per)
+            times.append(beats.at(i));
+        return times;
+    }
+
+    times = beats;
+    return times;
+}
+
+int AppController::mcpBookmarkBeats(double startSeconds, double durSeconds, const QString &unit,
+                                    double minStrength, const QString &labelPrefix)
+{
+    const QList<double> times = mcpBeatTimes(unit, minStrength);
+    if (times.isEmpty())
+        return 0;
+
+    const bool ranged = durSeconds > 0.0;
+    const double from = qMax(0.0, startSeconds);
+    const double to = from + durSeconds;
+
+    const drift::Project before = m_project;
+    QList<drift::Bookmark> marks = m_project.bookmarks();
+    int added = 0;
+    int n = 1;
+    for (double t : times) {
+        if (t < from || (ranged && t > to)) {
+            ++n;
+            continue;
+        }
+        const drift::TimeUs at = drift::secondsToUs(t);
+        // Bookmarks are snap targets themselves; stacking several inside one snap threshold
+        // would make the magnet ambiguous rather than stronger.
+        const bool crowded = std::any_of(marks.cbegin(), marks.cend(),
+                                         [at](const drift::Bookmark &b) {
+                                             return qAbs(b.timeUs - at) < drift::kSnapThresholdUs;
+                                         });
+        if (crowded) {
+            ++n;
+            continue;
+        }
+        marks.append(drift::Bookmark{at, QStringLiteral("%1 %2").arg(labelPrefix).arg(n)});
+        ++added;
+        ++n;
+    }
+    if (added == 0)
+        return 0;
+
+    std::sort(marks.begin(), marks.end(),
+              [](const drift::Bookmark &a, const drift::Bookmark &b) { return a.timeUs < b.timeUs; });
+    m_project.bookmarks() = marks;
+    pushProjectEdit(before, QStringLiteral("Bookmark beats"));
+    finishEdit(QStringLiteral("Bookmark beats"));
+    return added;
+}
+
+QJsonObject AppController::mcpSetClipVolume(int trackIndex, int clipIndex, double value,
+                                            bool atGiven, double atSeconds)
+{
+    using namespace drift::mcp;
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return err("not_found", QStringLiteral("No such track"));
+    if (clipIndex < 0 || clipIndex >= m_project.tracks().at(trackIndex).clips.size())
+        return err("not_found", QStringLiteral("No such clip"));
+
+    const double clamped = qBound(0.0, value, 2.0);
+
+    // With a time, this is unambiguously a keyframe write and setClipKeyframe already forces
+    // one there.
+    if (atGiven) {
+        setClipKeyframe(trackIndex, clipIndex, QStringLiteral("volume"), atSeconds, clamped);
+    } else {
+        // Without one it is an ordinary level change, which is the slider's contract, not the
+        // diamond's: no key on an un-animated clip, retarget the only key on a clip that has
+        // one, and on a genuinely animated clip retarget whichever key is at the playhead.
+        const drift::Project before = m_project;
+        drift::Clip &clip = m_project.tracks()[trackIndex].clips[clipIndex];
+        const drift::TimeUs relative = qMax<drift::TimeUs>(0, m_playheadUs - clip.timelineStart);
+        if (!writeClipPropValue(clip, QStringLiteral("volume"), relative, clamped,
+                                /*autoKey=*/false, /*force=*/false)) {
+            return err("bad_args",
+                       QStringLiteral("Clip volume is animated and no key sits at the playhead — "
+                                      "pass `at` to write one, or seek to an existing key"));
+        }
+        pushProjectEdit(before, QStringLiteral("Set volume"));
+        finishEdit(QStringLiteral("Set volume"));
+    }
+
+    const drift::Clip &after = m_project.tracks().at(trackIndex).clips.at(clipIndex);
+    QJsonObject reply{
+        {QStringLiteral("id"), after.id},
+        {QStringLiteral("value"), round3(clamped)},
+        {QStringLiteral("volumeKeys"), after.volume.keyframes().size()},
+    };
+    if (!qFuzzyCompare(clamped + 1.0, value + 1.0))
+        reply.insert(QStringLiteral("clamped"), true);
+    return ok(reply);
+}
+
+QJsonObject AppController::mcpAudioSummary() const
+{
+    using namespace drift::mcp;
+    QJsonArray trackRows;
+    int audioClips = 0;
+
+    const QList<drift::Track> &tracks = m_project.tracks();
+    for (int t = 0; t < tracks.size(); ++t) {
+        const drift::Track &track = tracks.at(t);
+        // Same rule the mixer applies: audio clips always, video clips unless their embedded
+        // audio is suppressed. Anything else on the timeline is silent by construction.
+        if (track.type != drift::TrackType::Audio && track.type != drift::TrackType::Video)
+            continue;
+
+        QJsonArray clipRows;
+        for (int c = 0; c < track.clips.size(); ++c) {
+            const drift::Clip &clip = track.clips.at(c);
+            const bool carries = clip.type == drift::ClipType::Audio
+                                 || (clip.type == drift::ClipType::Video
+                                     && !clip.suppressEmbeddedAudio);
+            if (!carries)
+                continue;
+
+            if (m_assetLibrary)
+                m_assetLibrary->ensureAudioPresence(clip.assetId);
+            const drift::MediaAsset *asset = m_project.asset(clip.assetId);
+
+            QJsonObject row{
+                {QStringLiteral("clip"), clip.id},
+                {QStringLiteral("start"), round3(drift::usToSeconds(clip.timelineStart))},
+                {QStringLiteral("dur"), round3(drift::usToSeconds(clip.timelineDuration))},
+                {QStringLiteral("type"), drift::clipTypeToString(clip.type)},
+                {QStringLiteral("volumeKeys"), clip.volume.keyframes().size()},
+                {QStringLiteral("audioEffects"), clip.audioEffects.size()},
+            };
+            if (clip.fadeInUs > 0)
+                row.insert(QStringLiteral("fadeIn"), round3(drift::usToSeconds(clip.fadeInUs)));
+            if (clip.fadeOutUs > 0)
+                row.insert(QStringLiteral("fadeOut"), round3(drift::usToSeconds(clip.fadeOutUs)));
+            if (asset) {
+                row.insert(QStringLiteral("hasAudio"), asset->hasAudio);
+                if (asset->sampleRate > 0)
+                    row.insert(QStringLiteral("sampleRate"), asset->sampleRate);
+                if (asset->channels > 0)
+                    row.insert(QStringLiteral("channels"), asset->channels);
+            }
+            clipRows.append(row);
+            ++audioClips;
+        }
+
+        if (clipRows.isEmpty())
+            continue;
+        trackRows.append(QJsonObject{
+            {QStringLiteral("i"), t},
+            {QStringLiteral("type"), drift::trackTypeToString(track.type)},
+            {QStringLiteral("muted"), track.muted},
+            {QStringLiteral("items"), clipRows},
+        });
+    }
+
+    QJsonObject beats{
+        {QStringLiteral("analysed"), !m_beatAnalysis.isEmpty()},
+        {QStringLiteral("gridVisible"), m_beatGridVisible},
+        {QStringLiteral("onsetsVisible"), m_onsetsVisible},
+    };
+    if (!m_beatAnalysis.isEmpty()) {
+        beats.insert(QStringLiteral("bpm"), round2(m_beatAnalysisRaw.bpm));
+        beats.insert(QStringLiteral("stale"), m_beatAudioFingerprint != audioLayoutFingerprint());
+    }
+
+    return ok({
+        {QStringLiteral("sampleRate"), m_project.sampleRate()},
+        {QStringLiteral("dur"), round3(drift::usToSeconds(m_project.durationUs()))},
+        {QStringLiteral("audioClips"), audioClips},
+        {QStringLiteral("tracks"), trackRows},
+        {QStringLiteral("beats"), beats},
+    });
 }
 
 void AppController::mcpBeginBatch()

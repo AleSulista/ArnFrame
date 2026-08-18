@@ -540,3 +540,38 @@ QVariantList MediaWaveform::voicePeaks(qint64 totalFrames, int sampleRate, int b
 
     return result;
 }
+
+QVector<float> MediaWaveform::mixedPeaks(qint64 totalFrames, int sampleRate, int buckets,
+                                         const FillChunk &fill)
+{
+    if (totalFrames <= 0 || buckets <= 0 || sampleRate <= 0 || !fill)
+        return {};
+
+    QVector<float> peaks(buckets, 0.0f);
+
+    QVector<float> chunk(static_cast<qsizetype>(kVoiceChunkFrames) * 2);
+    for (qint64 done = 0; done < totalFrames;) {
+        const int want = static_cast<int>(qMin<qint64>(kVoiceChunkFrames, totalFrames - done));
+        const int got = fill(chunk.data(), done, want);
+        if (got <= 0)
+            break;
+
+        for (int i = 0; i < got; ++i) {
+            // Loudest of the two channels, not their average: a hard-panned hit would be
+            // halved by a mono fold and read as quieter than it sounds.
+            const float amp = qMax(qAbs(chunk[i * 2]), qAbs(chunk[i * 2 + 1]));
+            const int bucket = qBound(
+                0, static_cast<int>(((done + i) * buckets) / totalFrames), buckets - 1);
+            if (amp > peaks[bucket])
+                peaks[bucket] = amp;
+        }
+        done += got;
+    }
+
+    // The mixer soft-clips at 0.95 but nothing guarantees the pull did; clamp so the contract
+    // holds for any FillChunk.
+    for (float &p : peaks)
+        p = qBound(0.0f, p, 1.0f);
+
+    return peaks;
+}

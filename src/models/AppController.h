@@ -330,6 +330,25 @@ public:
     bool mcpSetClipCanvas(int trackIndex, int clipIndex, const QVariantMap &patch);
     QJsonObject mcpCaptureFrame(double atSeconds, bool full);
     bool mcpSetWorkArea(double inSeconds, double outSeconds);
+
+    // Audio for agents. All of these block: the QML-facing waveform getters return empty on the
+    // first call and repaint on a signal, which works for a binding and not at all for a caller
+    // that gets one reply. These decode/mix inline instead, on the mcpCaptureFrame pattern.
+    QJsonObject mcpWaveformForClip(int trackIndex, int clipIndex, int buckets) const;
+    QJsonObject mcpWaveformForAsset(const QString &assetId, double startSeconds,
+                                    double durSeconds, int buckets) const;
+    QJsonObject mcpWaveformForTimeline(double startSeconds, double durSeconds, int buckets) const;
+    QJsonObject mcpDetectBeats(double startSeconds, double durSeconds, bool force);
+    QJsonObject mcpBeatPayload() const;
+    QJsonObject mcpAudioSummary() const;
+    // Grid times from the current analysis. `unit` is beat, bar or onset; `minStrength` filters
+    // onsets only. Empty when nothing has been analysed yet.
+    QList<double> mcpBeatTimes(const QString &unit, double minStrength) const;
+    int mcpBookmarkBeats(double startSeconds, double durSeconds, const QString &unit,
+                         double minStrength, const QString &labelPrefix);
+    QJsonObject mcpSetBeatLayers(bool grid, bool onsets);
+    QJsonObject mcpSetClipVolume(int trackIndex, int clipIndex, double value, bool atGiven,
+                                 double atSeconds);
     void mcpRememberExportSettings(const QVariantMap &settings);
     void mcpBeginBatch();
     void mcpEndBatch(const QString &text, bool pushUndo);

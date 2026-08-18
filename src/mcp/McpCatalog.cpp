@@ -61,6 +61,18 @@ QJsonObject animPropProp()
         "list_animated_properties returns the properties already animated on the clip."));
 }
 
+// Which grid detect_beats' result is read through. Repeated across four ops.
+QJsonObject beatUnitProp()
+{
+    return propWithDefault(
+        enumProp(QStringLiteral(
+                     "Grid to use from the last detect_beats. beat = every beat; bar = every "
+                     "beatsPerBar-th beat counted from firstDownbeat; onset = detected transients, "
+                     "which need no tempo and work when bpm is 0."),
+                 {QStringLiteral("beat"), QStringLiteral("bar"), QStringLiteral("onset")}),
+        QStringLiteral("beat"));
+}
+
 QJsonObject maskSchema()
 {
     return objectSchema({
@@ -615,7 +627,7 @@ QStringList toolboxNames()
             QStringLiteral("playback"),  QStringLiteral("text"),     QStringLiteral("effects"),
             QStringLiteral("project"),   QStringLiteral("keyframes"), QStringLiteral("speed"),
             QStringLiteral("ui"),        QStringLiteral("shapes"),   QStringLiteral("subtitles"),
-            QStringLiteral("segmentation"), QStringLiteral("ai")};
+            QStringLiteral("segmentation"), QStringLiteral("ai"),   QStringLiteral("audio")};
 }
 
 QString agentGuideText()
@@ -661,8 +673,17 @@ QString agentGuideText()
         "Segmentation, denoise, and face detection report through the app's status only; re-read\n"
         "inspect({clips:true,detail:true}) and compare to detect completion.\n"
         "\n"
+        "Working to the music (audio toolbox):\n"
+        "1. detect_beats({start, duration}) blocks and returns bpm plus exact beat and onset times.\n"
+        "2. set_beat_layers({grid:true}) turns those beats into snap targets, so place_clip,\n"
+        "   move_clip and move_to_track magnet to the nearest beat within 150 ms from then on.\n"
+        "3. split_on_beats and snap_clips_to_beats cut and quantise against the same grid;\n"
+        "   bookmark_beats writes it into the project as markers that survive re-analysis.\n"
+        "The analysis is transient: any edit that changes the mix drops it, and\n"
+        "inspect({detail:true}).beats.stale says whether what you have still describes the audio.\n"
+        "\n"
         "Toolboxes: media, timeline, canvas, playback, text, effects, project, keyframes, speed, ui, "
-        "shapes, subtitles, segmentation, ai.\n");
+        "shapes, subtitles, segmentation, ai, audio.\n");
 }
 
 QJsonObject catalogPayload()
@@ -686,6 +707,7 @@ QJsonObject catalogPayload()
         {"subtitles", "Subtitle clips, import/export, Whisper generation."},
         {"segmentation", "SAM-style cutout and mask output."},
         {"ai", "Denoise and face detection."},
+        {"audio", "Read waveforms, detect beats, and cut or quantise to them."},
     };
 
     QJsonArray toolboxes;

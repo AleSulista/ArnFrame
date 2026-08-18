@@ -24,6 +24,10 @@ struct AudioBeatAnalysis
 class AudioOnsets
 {
 public:
+    // Shorter than this and tempo is meaningless — analyze() returns bpm 0 and no beat grid.
+    // Public so callers can reject a range before paying for the mix rather than after.
+    static constexpr double kMinAnalysisSec = 4.0;
+
     // Mono PCM at `sampleRate`. Returned times are offset by `startSeconds` so they
     // land in absolute timeline space.
     static AudioBeatAnalysis analyze(const float *mono, int frameCount, int sampleRate,

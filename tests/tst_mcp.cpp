@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QObject>
+#include <QProcess>
 #include <QScopeGuard>
 #include <QSettings>
 #include <QStandardPaths>
@@ -51,6 +52,16 @@ private slots:
     void captureDoesNotInsertClip();
     void inspectRevisionUnchanged();
     void listEffectsIncludesParams();
+    void audioToolboxReturnsSchemas();
+    void waveformReturnsPeaksOnFirstCall();
+    void waveformReportsSilenceAsZero();
+    void detectBeatsRejectsShortRange();
+    void detectBeatsFindsClickTempoAndPublishes();
+    void splitOnBeatsCutsAndUndoesAsOneStep();
+    void snapClipsToBeatsRespectsMaxDistance();
+    void setVolumeRoundTrips();
+    void audioReadOpsAreNotUndoable();
+    void armedBeatGridMakesMoveClipSnap();
 };
 
 static QJsonObject rpc(const QString &method, const QJsonObject &params = {}, int id = 1)
@@ -126,7 +137,7 @@ void McpTest::catalogListsToolboxes()
     const QJsonObject cat = drift::mcp::catalogPayload();
     QVERIFY(cat.value(QStringLiteral("ok")).toBool());
     const QJsonArray boxes = cat.value(QStringLiteral("toolboxes")).toArray();
-    QCOMPARE(boxes.size(), 14);
+    QCOMPARE(boxes.size(), 15);
     QStringList names;
     for (const QJsonValue &v : boxes)
         names.append(v.toObject().value(QStringLiteral("name")).toString());
@@ -134,6 +145,7 @@ void McpTest::catalogListsToolboxes()
     QVERIFY(names.contains(QStringLiteral("timeline")));
     QVERIFY(names.contains(QStringLiteral("canvas")));
     QVERIFY(names.contains(QStringLiteral("project")));
+    QVERIFY(names.contains(QStringLiteral("audio")));
 }
 
 void McpTest::catalogOpsIncludeWhen()
@@ -608,6 +620,459 @@ void McpTest::listEffectsIncludesParams()
         }
     }
     QVERIFY(sawParams);
+}
+
+// --- audio -------------------------------------------------------------------------------
+//
+// The audio ops need real PCM, so these generate fixtures with the ffmpeg CLI the same way
+// tst_editorstate does, and skip when it is not installed.
+
+namespace {
+
+QString ffmpegPath()
+{
+    return QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+}
+
+bool runFfmpeg(const QStringList &args)
+{
+    QProcess proc;
+    proc.start(ffmpegPath(), QStringList{QStringLiteral("-y")} + args);
+    return proc.waitForFinished(60000) && proc.exitCode() == 0;
+}
+
+// Broadband noise bursts every 0.5 s — 120 BPM, and broadband so every FFT bin jumps at once,
+// which is what the spectral-flux detector keys on.
+bool writeClickTrack(const QString &path, int seconds)
+{
+    return runFfmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                      QStringLiteral("aevalsrc=0.9*random(0)*exp(-mod(t\\,0.5)*80):s=48000:d=%1")
+                          .arg(seconds),
+                      QStringLiteral("-c:a"), QStringLiteral("pcm_s16le"), path});
+}
+
+// Two seconds of tone then two of digital silence, concatenated rather than gated so the tail
+// is genuinely zero. The gain is there because ffmpeg's sine filter emits at -18 dBFS (0.125
+// linear); these peaks are linear, so without it "loud" and "quiet" would be a factor of 8
+// apart instead of the full scale the assertions read as.
+bool writeHalfSilentTone(const QString &path)
+{
+    return runFfmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                      QStringLiteral("sine=frequency=440:sample_rate=48000:duration=2"),
+                      QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                      QStringLiteral("anullsrc=r=48000:cl=mono:d=2"),
+                      QStringLiteral("-filter_complex"),
+                      QStringLiteral("[0:a]volume=8[loud];[loud][1:a]concat=n=2:v=0:a=1[out]"),
+                      QStringLiteral("-map"), QStringLiteral("[out]"), QStringLiteral("-c:a"),
+                      QStringLiteral("pcm_s16le"), path});
+}
+
+// Imports `path` and drops it on the timeline at `at`, returning the new clip's UUID.
+QString importAndPlace(drift::mcp::McpDispatcher &dispatcher, const QString &path, double at)
+{
+    const QJsonObject imported = dispatcher.applyOne(
+        QStringLiteral("import_media"),
+        {{QStringLiteral("paths"), QJsonArray{path}}});
+    if (!imported.value(QStringLiteral("ok")).toBool())
+        return {};
+
+    const QJsonArray assets = imported.value(QStringLiteral("assets")).toArray();
+    if (assets.isEmpty())
+        return {};
+    const QString assetId = assets.at(0).toObject().value(QStringLiteral("id")).toString();
+
+    const QJsonObject placed = dispatcher.applyOne(
+        QStringLiteral("place_clip"),
+        {{QStringLiteral("asset"), assetId}, {QStringLiteral("at"), at}});
+    if (!placed.value(QStringLiteral("ok")).toBool())
+        return {};
+    return placed.value(QStringLiteral("id")).toString();
+}
+
+} // namespace
+
+void McpTest::audioToolboxReturnsSchemas()
+{
+    const QJsonObject payload = drift::mcp::toolboxPayload(QStringLiteral("audio"));
+    QVERIFY(payload.value(QStringLiteral("ok")).toBool());
+    const QJsonArray tools = payload.value(QStringLiteral("tools")).toArray();
+    QCOMPARE(tools.size(), 8);
+
+    QStringList names;
+    for (const QJsonValue &v : tools) {
+        const QJsonObject tool = v.toObject();
+        names.append(tool.value(QStringLiteral("name")).toString());
+        QVERIFY(tool.contains(QStringLiteral("inputSchema")));
+    }
+    QVERIFY(names.contains(QStringLiteral("get_waveform")));
+    QVERIFY(names.contains(QStringLiteral("detect_beats")));
+    QVERIFY(names.contains(QStringLiteral("split_on_beats")));
+    QVERIFY(names.contains(QStringLiteral("snap_clips_to_beats")));
+    QVERIFY(names.contains(QStringLiteral("set_volume")));
+
+    // detect_beats is on /mcp/audio, not the homepage.
+    QCOMPARE(drift::mcp::toolboxForOp(QStringLiteral("detect_beats")), QStringLiteral("audio"));
+}
+
+// The whole reason these ops call the engine directly instead of the QML getters: those come
+// back empty the first time and repaint on a signal, which an agent never sees.
+void McpTest::waveformReturnsPeaksOnFirstCall()
+{
+    if (ffmpegPath().isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.filePath(QStringLiteral("tone.wav"));
+    QVERIFY(writeHalfSilentTone(source));
+
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QString clip = importAndPlace(dispatcher, source, 0.0);
+    QVERIFY(!clip.isEmpty());
+
+    const QJsonObject result = dispatcher.applyOne(
+        QStringLiteral("get_waveform"),
+        {{QStringLiteral("clip"), clip}, {QStringLiteral("buckets"), 64}});
+    QVERIFY2(result.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(result).toJson(QJsonDocument::Compact)));
+    QCOMPARE(result.value(QStringLiteral("source")).toString(), QStringLiteral("clip"));
+
+    const QJsonArray peaks = result.value(QStringLiteral("peaks")).toArray();
+    QCOMPARE(peaks.size(), 64);
+    for (const QJsonValue &v : peaks)
+        QVERIFY(v.toDouble() >= 0.0 && v.toDouble() <= 1.0);
+    QVERIFY2(result.value(QStringLiteral("max")).toDouble() > 0.2,
+             qPrintable(QString::number(result.value(QStringLiteral("max")).toDouble())));
+}
+
+// reduceDensePeaks floors silence at 0.05 so a quiet lane still draws; these peaks must not,
+// or "is this stretch empty" becomes unanswerable.
+void McpTest::waveformReportsSilenceAsZero()
+{
+    if (ffmpegPath().isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.filePath(QStringLiteral("half-tone.wav"));
+    QVERIFY(writeHalfSilentTone(source));
+
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+    QVERIFY(!importAndPlace(dispatcher, source, 0.0).isEmpty());
+
+    const QString assetId = state.mcpInspect(false)
+                                .value(QStringLiteral("assets")).toArray().at(0).toObject()
+                                .value(QStringLiteral("id")).toString();
+    QVERIFY(!assetId.isEmpty());
+
+    const QJsonObject loud = dispatcher.applyOne(
+        QStringLiteral("get_waveform"),
+        {{QStringLiteral("asset"), assetId}, {QStringLiteral("start"), 0.0},
+         {QStringLiteral("duration"), 1.5}, {QStringLiteral("buckets"), 16}});
+    QVERIFY2(loud.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(loud).toJson(QJsonDocument::Compact)));
+    QVERIFY2(loud.value(QStringLiteral("max")).toDouble() > 0.2,
+             qPrintable(QJsonDocument(loud).toJson(QJsonDocument::Compact)));
+
+    const QJsonObject quiet = dispatcher.applyOne(
+        QStringLiteral("get_waveform"),
+        {{QStringLiteral("asset"), assetId}, {QStringLiteral("start"), 2.5},
+         {QStringLiteral("duration"), 1.0}, {QStringLiteral("buckets"), 16}});
+    QVERIFY(quiet.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(quiet.value(QStringLiteral("max")).toDouble(), 0.0);
+}
+
+void McpTest::detectBeatsRejectsShortRange()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject tooShort = dispatcher.applyOne(
+        QStringLiteral("detect_beats"), {{QStringLiteral("duration"), 1.0}});
+    QCOMPARE(tooShort.value(QStringLiteral("ok")).toBool(), false);
+    QCOMPARE(tooShort.value(QStringLiteral("error")).toString(), QStringLiteral("bad_args"));
+
+    const QJsonObject tooLong = dispatcher.applyOne(
+        QStringLiteral("detect_beats"), {{QStringLiteral("duration"), 5000.0}});
+    QCOMPARE(tooLong.value(QStringLiteral("error")).toString(), QStringLiteral("bad_args"));
+
+    const QJsonObject missing = dispatcher.applyOne(QStringLiteral("detect_beats"), {});
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("bad_args"));
+}
+
+void McpTest::detectBeatsFindsClickTempoAndPublishes()
+{
+    if (ffmpegPath().isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.filePath(QStringLiteral("clicks.wav"));
+    QVERIFY(writeClickTrack(source, 12));
+
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+    QVERIFY(!importAndPlace(dispatcher, source, 0.0).isEmpty());
+
+    const QJsonObject beats = dispatcher.applyOne(
+        QStringLiteral("detect_beats"),
+        {{QStringLiteral("start"), 0.0}, {QStringLiteral("duration"), 10.0}});
+    QVERIFY2(beats.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(beats).toJson(QJsonDocument::Compact)));
+
+    const double bpm = beats.value(QStringLiteral("bpm")).toDouble();
+    QVERIFY2(std::abs(bpm - 120.0) < 3.0, qPrintable(QStringLiteral("bpm %1").arg(bpm)));
+    QVERIFY(!beats.value(QStringLiteral("beats")).toArray().isEmpty());
+    QVERIFY(!beats.value(QStringLiteral("onsets")).toArray().isEmpty());
+    QCOMPARE(beats.value(QStringLiteral("cached")).toBool(), false);
+
+    // The same range comes back from cache rather than re-mixing.
+    const QJsonObject again = dispatcher.applyOne(
+        QStringLiteral("detect_beats"),
+        {{QStringLiteral("start"), 0.0}, {QStringLiteral("duration"), 10.0}});
+    QCOMPARE(again.value(QStringLiteral("cached")).toBool(), true);
+
+    // And the editor sees the same analysis the agent got.
+    const QJsonObject detail = dispatcher.inspect({{QStringLiteral("detail"), true}});
+    const QJsonObject state_ = detail.value(QStringLiteral("beats")).toObject();
+    QCOMPARE(state_.value(QStringLiteral("analysed")).toBool(), true);
+    QCOMPARE(state_.value(QStringLiteral("stale")).toBool(), false);
+    QVERIFY(std::abs(state_.value(QStringLiteral("bpm")).toDouble() - bpm) < 0.5);
+
+    // Arming the layers is what turns beats into snap targets.
+    const QJsonObject layers = dispatcher.applyOne(
+        QStringLiteral("set_beat_layers"), {{QStringLiteral("grid"), true}});
+    QVERIFY(layers.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(layers.value(QStringLiteral("gridVisible")).toBool(), true);
+    QVERIFY(layers.value(QStringLiteral("snapTargets")).toInt() > 0);
+}
+
+void McpTest::splitOnBeatsCutsAndUndoesAsOneStep()
+{
+    if (ffmpegPath().isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.filePath(QStringLiteral("clicks.wav"));
+    QVERIFY(writeClickTrack(source, 12));
+
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+    const QString clip = importAndPlace(dispatcher, source, 0.0);
+    QVERIFY(!clip.isEmpty());
+
+    const QJsonObject beats = dispatcher.applyOne(
+        QStringLiteral("detect_beats"),
+        {{QStringLiteral("start"), 0.0}, {QStringLiteral("duration"), 10.0}});
+    QVERIFY(beats.value(QStringLiteral("ok")).toBool());
+    if (beats.value(QStringLiteral("beats")).toArray().isEmpty())
+        QSKIP("no tempo found in the generated click track");
+
+    const int clipsBefore = dispatcher.inspect({}).value(QStringLiteral("clips")).toInt();
+
+    const QJsonObject split = dispatcher.applyOne(
+        QStringLiteral("split_on_beats"),
+        {{QStringLiteral("clip"), clip}, {QStringLiteral("unit"), QStringLiteral("bar")}});
+    QVERIFY2(split.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(split).toJson(QJsonDocument::Compact)));
+
+    const QJsonArray produced = split.value(QStringLiteral("clips")).toArray();
+    QVERIFY(produced.size() > 1);
+    QCOMPARE(produced.at(0).toString(), clip); // the original id names the first piece
+    for (const QJsonValue &v : produced)
+        QVERIFY(state.mcpLocateClip(v.toString()).first >= 0);
+    QCOMPARE(dispatcher.inspect({}).value(QStringLiteral("clips")).toInt(),
+             clipsBefore + produced.size() - 1);
+
+    // However many cuts it made, it is one step.
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    QCOMPARE(dispatcher.inspect({}).value(QStringLiteral("clips")).toInt(), clipsBefore);
+}
+
+void McpTest::snapClipsToBeatsRespectsMaxDistance()
+{
+    if (ffmpegPath().isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.filePath(QStringLiteral("clicks.wav"));
+    QVERIFY(writeClickTrack(source, 12));
+
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+    QVERIFY(!importAndPlace(dispatcher, source, 0.0).isEmpty());
+
+    const QJsonObject beats = dispatcher.applyOne(
+        QStringLiteral("detect_beats"),
+        {{QStringLiteral("start"), 0.0}, {QStringLiteral("duration"), 10.0}});
+    QVERIFY(beats.value(QStringLiteral("ok")).toBool());
+    if (beats.value(QStringLiteral("beats")).toArray().isEmpty())
+        QSKIP("no tempo found in the generated click track");
+
+    // A title on its own lane, deliberately nowhere near a beat.
+    const QJsonObject text = dispatcher.applyOne(
+        QStringLiteral("add_text"),
+        {{QStringLiteral("text"), QStringLiteral("A")}, {QStringLiteral("at"), 20.0}});
+    QVERIFY(text.value(QStringLiteral("ok")).toBool());
+    const QString title = text.value(QStringLiteral("id")).toString();
+
+    const QJsonObject snapped = dispatcher.applyOne(
+        QStringLiteral("snap_clips_to_beats"),
+        {{QStringLiteral("clips"), QJsonArray{title}}, {QStringLiteral("max_distance"), 0.25}});
+    QVERIFY(snapped.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(snapped.value(QStringLiteral("moved")).toArray().size(), 0);
+
+    const QJsonArray skipped = snapped.value(QStringLiteral("skipped")).toArray();
+    QCOMPARE(skipped.size(), 1);
+    QCOMPARE(skipped.at(0).toObject().value(QStringLiteral("reason")).toString(),
+             QStringLiteral("too_far"));
+
+    // With a wide enough window it does move, and reports where it actually landed.
+    const QJsonObject wide = dispatcher.applyOne(
+        QStringLiteral("snap_clips_to_beats"),
+        {{QStringLiteral("clips"), QJsonArray{title}}, {QStringLiteral("max_distance"), 60.0}});
+    QVERIFY(wide.value(QStringLiteral("ok")).toBool());
+    const QJsonArray moved = wide.value(QStringLiteral("moved")).toArray();
+    QCOMPARE(moved.size(), 1);
+    QVERIFY(moved.at(0).toObject().contains(QStringLiteral("to")));
+}
+
+void McpTest::setVolumeRoundTrips()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject text = dispatcher.applyOne(
+        QStringLiteral("add_text"),
+        {{QStringLiteral("text"), QStringLiteral("A")}, {QStringLiteral("at"), 0.0}});
+    QVERIFY(text.value(QStringLiteral("ok")).toBool());
+    const QString clip = text.value(QStringLiteral("id")).toString();
+
+    const QJsonObject set = dispatcher.applyOne(
+        QStringLiteral("set_volume"),
+        {{QStringLiteral("clip"), clip}, {QStringLiteral("value"), 0.5}});
+    QVERIFY2(set.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(set).toJson(QJsonDocument::Compact)));
+    QCOMPARE(set.value(QStringLiteral("value")).toDouble(), 0.5);
+    QCOMPARE(set.value(QStringLiteral("volumeKeys")).toInt(), 1);
+
+    const QJsonObject keys = dispatcher.applyOne(
+        QStringLiteral("list_keyframes"),
+        {{QStringLiteral("clip"), clip}, {QStringLiteral("prop"), QStringLiteral("volume")}});
+    QVERIFY(keys.value(QStringLiteral("ok")).toBool());
+    const QJsonArray points = keys.value(QStringLiteral("keys")).toArray();
+    QCOMPARE(points.size(), 1);
+    QCOMPARE(points.at(0).toObject().value(QStringLiteral("value")).toDouble(), 0.5);
+
+    // Out of range is clamped to what the mixer will actually honour, and says so.
+    const QJsonObject loud = dispatcher.applyOne(
+        QStringLiteral("set_volume"),
+        {{QStringLiteral("clip"), clip}, {QStringLiteral("value"), 9.0}});
+    QCOMPARE(loud.value(QStringLiteral("value")).toDouble(), 2.0);
+    QCOMPARE(loud.value(QStringLiteral("clamped")).toBool(), true);
+}
+
+void McpTest::audioReadOpsAreNotUndoable()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject result = dispatcher.apply(
+        {{QStringLiteral("ops"),
+          QJsonArray{QJsonObject{{QStringLiteral("tool"), QStringLiteral("audio_summary")}},
+                     QJsonObject{{QStringLiteral("tool"), QStringLiteral("set_beat_layers")},
+                                 {QStringLiteral("args"),
+                                  QJsonObject{{QStringLiteral("grid"), true}}}}}}});
+    QVERIFY2(result.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(result).toJson(QJsonDocument::Compact)));
+    QVERIFY(!state.undoAvailable());
+}
+
+// The payoff of the whole toolbox: extraSnapTargets() already feeds drift::snapTime, so arming
+// the grid makes every ordinary placement op quantise without asking for it. Nothing in the
+// audio ops themselves would fail if this stopped working, so it needs its own test.
+void McpTest::armedBeatGridMakesMoveClipSnap()
+{
+    if (ffmpegPath().isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.filePath(QStringLiteral("clicks.wav"));
+    QVERIFY(writeClickTrack(source, 12));
+
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+    QVERIFY(!importAndPlace(dispatcher, source, 0.0).isEmpty());
+
+    const QJsonObject beats = dispatcher.applyOne(
+        QStringLiteral("detect_beats"),
+        {{QStringLiteral("start"), 0.0}, {QStringLiteral("duration"), 10.0}});
+    QVERIFY(beats.value(QStringLiteral("ok")).toBool());
+    const QJsonArray grid = beats.value(QStringLiteral("beats")).toArray();
+    if (grid.isEmpty())
+        QSKIP("no tempo found in the generated click track");
+
+    // Two beats, seconds apart. They have to be different targets: snapTime does not exclude the
+    // clip being moved, so aiming the armed move at where the unarmed one already parked the
+    // clip would snap it to itself at distance 0 and prove nothing.
+    //
+    // Mid-range, so neither is near the targets snapTime always has (0, the playhead, and every
+    // clip edge). The title goes on its own text track, so the music clip is not in its way.
+    double unarmedBeat = 0.0;
+    double beat = 0.0;
+    for (const QJsonValue &v : grid) {
+        const double t = v.toDouble();
+        if (unarmedBeat <= 0.0 && t > 3.0)
+            unarmedBeat = t;
+        else if (unarmedBeat > 0.0 && t > unarmedBeat + 2.0) {
+            beat = t;
+            break;
+        }
+    }
+    if (unarmedBeat <= 0.0 || beat <= 0.0)
+        QSKIP("no usable pair of beats in the analysed range");
+
+    const QJsonObject text = dispatcher.applyOne(
+        QStringLiteral("add_text"),
+        {{QStringLiteral("text"), QStringLiteral("A")}, {QStringLiteral("at"), 30.0}});
+    QVERIFY(text.value(QStringLiteral("ok")).toBool());
+    const QString title = text.value(QStringLiteral("id")).toString();
+
+    // Grid off: the clip lands exactly where it was told, 40 ms off the beat.
+    const QJsonObject unarmed = dispatcher.applyOne(
+        QStringLiteral("move_clip"),
+        {{QStringLiteral("clip"), title}, {QStringLiteral("at"), unarmedBeat + 0.04}});
+    QVERIFY(unarmed.value(QStringLiteral("ok")).toBool());
+    QVERIFY2(std::abs(unarmed.value(QStringLiteral("placed")).toDouble() - (unarmedBeat + 0.04))
+                 < 0.005,
+             qPrintable(QJsonDocument(unarmed).toJson(QJsonDocument::Compact)));
+
+    const QJsonObject layers = dispatcher.applyOne(QStringLiteral("set_beat_layers"),
+                                                   {{QStringLiteral("grid"), true}});
+    QVERIFY2(layers.value(QStringLiteral("snapTargets")).toInt() > 0,
+             qPrintable(QJsonDocument(layers).toJson(QJsonDocument::Compact)));
+
+    // Grid on: the same 40 ms miss is now pulled onto the beat.
+    const QJsonObject armed = dispatcher.applyOne(
+        QStringLiteral("move_clip"),
+        {{QStringLiteral("clip"), title}, {QStringLiteral("at"), beat + 0.04}});
+    QVERIFY(armed.value(QStringLiteral("ok")).toBool());
+    QVERIFY2(std::abs(armed.value(QStringLiteral("placed")).toDouble() - beat) < 0.005,
+             qPrintable(QStringLiteral("beat=%1 targets=%2 reply=%3")
+                            .arg(beat)
+                            .arg(layers.value(QStringLiteral("snapTargets")).toInt())
+                            .arg(QString::fromUtf8(
+                                QJsonDocument(armed).toJson(QJsonDocument::Compact)))));
 }
 
 QTEST_MAIN(McpTest)

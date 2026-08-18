@@ -47,4 +47,13 @@ public:
     // span in one call would have produced.
     static QVariantList voicePeaks(qint64 totalFrames, int sampleRate, int buckets,
                                    const FillChunk &fill);
+
+    // voicePeaks without the speech band-pass, the normalization or the display floor: plain
+    // max-abs amplitude per bucket, in [0, 1], pulled a window at a time the same way.
+    //
+    // For callers that want the signal rather than a drawing. Silence reads as a true 0 here,
+    // which is the whole point — the floor voicePeaks applies keeps a quiet passage visible in
+    // a lane, but it makes "is there anything here" unanswerable.
+    static QVector<float> mixedPeaks(qint64 totalFrames, int sampleRate, int buckets,
+                                     const FillChunk &fill);
 };

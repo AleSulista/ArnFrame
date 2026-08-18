@@ -42,7 +42,7 @@ constexpr double kMaxBpm = 200.0;
 constexpr double kPreferredBpm = 120.0;
 constexpr double kOctaveSigma = 0.9; // width of the log-normal tempo prior
 constexpr double kMinTempoConfidence = 0.25;
-constexpr double kMinAnalysisSec = 4.0; // shorter than this, tempo is meaningless
+constexpr double kMinAnalysisSec = AudioOnsets::kMinAnalysisSec;
 
 // A beat comb is scored against the ODF; each hit is smeared over this many frames
 // either side so a slightly-off grid still scores.

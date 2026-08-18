@@ -518,6 +518,10 @@ bool McpDispatcher::isUndoable(const QString &tool) const
         QStringLiteral("list_speed_curve"), QStringLiteral("get_ui_preferences"),
         QStringLiteral("list_shortcuts"), QStringLiteral("set_theme"),
         QStringLiteral("set_shortcut"), QStringLiteral("reset_shortcuts"),
+        // Audio reads, plus set_beat_layers: the layers are transient view state, not project
+        // state, so an undo step for them would revert nothing.
+        QStringLiteral("audio_summary"), QStringLiteral("get_waveform"),
+        QStringLiteral("detect_beats"), QStringLiteral("set_beat_layers"),
     };
     return !skip.contains(tool);
 }

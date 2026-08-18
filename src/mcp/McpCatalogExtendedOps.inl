@@ -522,6 +522,101 @@
           "Delete the stored face track from a clip, undoing detect_faces.",
           objectSchema(clipRefProps()), false, true },
 
+        { "audio_summary", "audio", "What carries sound",
+          "List every clip that actually reaches the mix — audio clips, plus video clips whose "
+          "embedded audio is not suppressed — with per-clip volume keyframe count, audio effect "
+          "count, fades, and the asset's sampleRate/channels/hasAudio. Cheaper and far smaller than "
+          "inspect({clips:true,detail:true}) when all you need is a range worth analysing. Also "
+          "returns beats.{analysed, bpm, stale, gridVisible, onsetsVisible}.",
+          objectSchema({}), true, false, true },
+        { "get_waveform", "audio", "See the amplitude",
+          "Amplitude peaks as an array of numbers in 0..1, one per bucket, evenly spaced across the "
+          "range. Three modes: pass clip (or track+index) for that clip's trimmed source window, "
+          "asset for a media file, or neither (with start and duration) for the MIXED TIMELINE — "
+          "every track summed with volume, fades and mutes applied. WARNING: clip and asset mode "
+          "read the source file, so clip speed, reverse and volume are NOT applied; only timeline "
+          "mode is what you would actually hear. Silence reads as a true 0, so this is usable for "
+          "finding dead air. Blocks while decoding, so the data is there on the first call.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("asset"), assetRefProp()},
+               {QStringLiteral("start"), numberProp(QStringLiteral("Range start in seconds. Timeline seconds in timeline mode, source seconds in asset mode. Ignored in clip mode, which always spans the whole trimmed clip."))},
+               {QStringLiteral("duration"), numberProp(QStringLiteral("Range length in seconds, max 3600. Required for timeline mode; in asset mode omit it for the whole file."))},
+               {QStringLiteral("buckets"), propWithDefault(integerProp(QStringLiteral("How many peaks to return, 1..4096")), 400)}},
+              clipRefProps())),
+          true, false, true },
+        { "detect_beats", "audio", "Find the tempo",
+          "Detect beats and onsets over a range of the mixed timeline. BLOCKS until done (a few "
+          "seconds for a long range) and returns bpm, confidence, beatsPerBar, firstDownbeat, "
+          "beats (absolute timeline seconds) and onsets [{at, s}] where s is 0..1 strength. "
+          "duration must be at least 4 seconds and at most 600. WARNING: bpm 0 means no trustworthy "
+          "tempo was found — the beats array is then empty, but onsets are still valid and "
+          "unit:\"onset\" works everywhere a grid is accepted. Re-running the same range returns "
+          "the cached result with cached:true unless force is set. The result is transient: any "
+          "edit that changes the mix drops it. Returns error conflict when the editor is already "
+          "analysing. Long lists are trimmed to 2000 beats / 500 strongest onsets, flagged as "
+          "truncated. Call set_beat_layers next to make these beats snap targets.",
+          objectSchema({{QStringLiteral("start"), propWithDefault(numberProp(QStringLiteral("Range start in timeline seconds")), 0)},
+                        {QStringLiteral("duration"), numberProp(QStringLiteral("Range length in seconds, 4..600"))},
+                        {QStringLiteral("force"), boolProp(QStringLiteral("Re-analyse even when this exact range is already cached"))}},
+                       {QStringLiteral("duration")}) },
+        { "set_beat_layers", "audio", "Arm beat snapping",
+          "Show or hide the detected beat grid and onset markers. SIDE EFFECT, and the reason to "
+          "call it: only visible layers become snap targets, so with grid:true every later "
+          "place_clip, move_clip and move_to_track magnets to the nearest beat within 150 ms, and "
+          "so do the user's own drags. Turn it off to place something at an exact time instead. "
+          "Onsets are thinned against beats so a dense track still leaves un-snapped positions. "
+          "Returns the resulting flags plus snapTargets and snapEnabled — snapping does nothing "
+          "when snapEnabled is false.",
+          objectSchema({{QStringLiteral("grid"), propWithDefault(boolProp(QStringLiteral("Show the beat grid")), true)},
+                        {QStringLiteral("onsets"), propWithDefault(boolProp(QStringLiteral("Show onset markers")), false)}}) },
+        { "bookmark_beats", "audio", "Beats as markers",
+          "Write the detected grid into the project as bookmarks, which persist with the project, "
+          "show in the bookmark lane, and are snap targets in their own right — this is how a grid "
+          "outlives the transient analysis. Skips any beat within 150 ms of an existing bookmark, "
+          "since stacked markers make the magnet ambiguous rather than stronger. Requires "
+          "detect_beats first. Returns {added}.",
+          objectSchema({{QStringLiteral("unit"), beatUnitProp()},
+                        {QStringLiteral("start"), propWithDefault(numberProp(QStringLiteral("Only mark from this timeline second on")), 0)},
+                        {QStringLiteral("duration"), numberProp(QStringLiteral("Only mark this many seconds; omit for the rest of the analysed range"))},
+                        {QStringLiteral("min_strength"), propWithDefault(numberProp(QStringLiteral("For unit:\"onset\" only — drop onsets weaker than this, 0..1")), 0.0)},
+                        {QStringLiteral("label"), propWithDefault(stringProp(QStringLiteral("Label prefix; each mark gets its grid number appended")), QStringLiteral("Beat"))}}) },
+        { "split_on_beats", "audio", "Cut to the beat",
+          "Split one clip at every grid time strictly inside it — the beat-cut edit. Requires "
+          "detect_beats first. Cuts run back to front so the clip id you passed stays valid "
+          "throughout; it ends up naming the FIRST piece. Returns clips (all resulting ids in "
+          "timeline order, including the original) and at (the times actually cut). One undo step "
+          "however many cuts it makes. min_gap drops cuts that would leave a sliver.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("unit"), beatUnitProp()},
+               {QStringLiteral("min_strength"), propWithDefault(numberProp(QStringLiteral("For unit:\"onset\" only — drop onsets weaker than this, 0..1")), 0.0)},
+               {QStringLiteral("min_gap"), propWithDefault(numberProp(QStringLiteral("Skip a cut that would leave a piece shorter than this many seconds")), 0.1)}},
+              clipRefProps())) },
+        { "snap_clips_to_beats", "audio", "Quantise to the grid",
+          "Move clip starts onto the nearest grid time. Requires detect_beats first. Pass clips "
+          "(a list of UUIDs) or track (every clip on that lane); clips wins when both are given. "
+          "Clips further than max_distance from any grid time are left alone and reported in "
+          "skipped. WARNING: the placed time can still differ from the beat — overlap resolution "
+          "pushes a clip to the next free gap when overlap is off — so read the `to` values back "
+          "rather than assuming. One undo step for the whole pass.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("clips"), arrayProp(stringProp(QStringLiteral("Clip UUID")), QStringLiteral("Clip UUIDs to quantise"))},
+               {QStringLiteral("unit"), beatUnitProp()},
+               {QStringLiteral("min_strength"), propWithDefault(numberProp(QStringLiteral("For unit:\"onset\" only — drop onsets weaker than this, 0..1")), 0.0)},
+               {QStringLiteral("max_distance"), propWithDefault(numberProp(QStringLiteral("Leave a clip alone when the nearest grid time is further than this many seconds")), 0.25)}},
+              {{QStringLiteral("track"), integerProp(QStringLiteral("Quantise every clip on this track index; ignored when clips is given"))}})) },
+        { "set_volume", "audio", "Clip loudness",
+          "Set a clip's volume. 1 is unity, 0 is silent, 2 is the maximum the mixer allows. "
+          "Without `at` this sets the clip's constant level; with `at` it writes a keyframe at that "
+          "TIMELINE second, which is how you ramp or duck. WARNING: once a clip has more than one "
+          "volume keyframe, a call without `at` retargets the key nearest the playhead rather than "
+          "flattening the animation — read the keys back with list_keyframes({prop:\"volume\"}). "
+          "Track-level volume does not exist; mute a whole lane with set_track instead.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("value"), numberProp(QStringLiteral("Volume, 0..2 (1 = unity)"))},
+               {QStringLiteral("at"), numberProp(QStringLiteral("Timeline seconds for a keyframe; omit to set the constant level"))}},
+              clipRefProps()),
+              {QStringLiteral("value")}) },
+
         { "set_ui_preferences", "ui", "Editor flags",
           "Set editor preferences; only supplied keys change. Note followSystem only acts when TRUE "
           "(it clears the dark-mode override); passing false does nothing — use set_theme to pin a "
