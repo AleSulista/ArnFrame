@@ -16,6 +16,7 @@
 
 #include "models/AppController.h"
 #include "models/AssetLibrary.h"
+#include "MulticamImageProvider.h"
 #include "MulticamImageStore.h"
 
 #include "core/Clip.h"
@@ -84,6 +85,7 @@ private slots:
     void multicamSwitchAudioTogglesEmbeddedAudioSuppression();
     void multicamSessionEndsWithTheProject();
     void multicamSessionPublishesADecodedTilePerAngle();
+    void multicamProviderServesTilesByAngleIdWithRevisionQuery();
     void multicamSetUpBuildsAWorkingRigFromTheBin();
 };
 
@@ -2180,6 +2182,14 @@ void EditorStateTest::multicamSwitchFillsAGapInTheProgram()
     state.project()->tracks()[0].clips[0].timelineDuration = drift::secondsToUs(3.0);
     state.project()->tracks()[0].clips[0].srcOut = drift::secondsToUs(3.0);
 
+    // The angle is laid out for the canvas the way an imported clip is: pillarboxed inside a
+    // 1920x1080 project rather than filling it edge to edge.
+    drift::Clip &angle = state.project()->tracks()[2].clips[0];
+    angle.transformX.setKeyframe(0, 240.0);
+    angle.transformY.setKeyframe(0, 0.0);
+    angle.transformW.setKeyframe(0, 1440.0);
+    angle.transformH.setKeyframe(0, 1080.0);
+
     const drift::TimeUs cutUs = frameSnapped(state.projectFps(), 5.0);
     state.setPlayheadSeconds(5.0);
     state.switchMulticamAngle(1);
@@ -2193,6 +2203,15 @@ void EditorStateTest::multicamSwitchFillsAGapInTheProgram()
     QCOMPARE(filled.timelineStart, cutUs);
     QCOMPARE(filled.timelineEnd(), drift::secondsToUs(10.0));
     QCOMPARE(filled.srcIn, drift::secondsToUs(100.0) + cutUs);
+
+    // An untouched transform track composites as the full canvas rect, so a segment left bare
+    // here would stretch every camera whose aspect is not the project's — and a rig built by
+    // setUpMulticamFromAssets starts with an empty program, which makes this the path the very
+    // first switch of every shoot takes. Nothing of its own to frame, so it takes the angle's.
+    QVERIFY(!filled.transformW.isEmpty());
+    QCOMPARE(filled.transformX.evaluateAt(0), 240.0);
+    QCOMPARE(filled.transformW.evaluateAt(0), 1440.0);
+    QCOMPARE(filled.transformH.evaluateAt(0), 1080.0);
 }
 
 void EditorStateTest::multicamRepeatedSwitchToTheSameAngleCollapsesTheCut()
@@ -2305,6 +2324,39 @@ void EditorStateTest::multicamSessionPublishesADecodedTilePerAngle()
     state.endMulticamSession();
     QVERIFY(!state.multicamActive());
     QVERIFY(MulticamImageStore::tile(0).isNull());
+}
+
+// The store test above proves the tiles get decoded; this one proves they can be fetched. QML
+// addresses a tile through the provider, and the id it arrives under is not the bare index.
+void EditorStateTest::multicamProviderServesTilesByAngleIdWithRevisionQuery()
+{
+    MulticamImageStore::clear();
+
+    QImage stored(4, 3, QImage::Format_RGB32);
+    stored.fill(Qt::green);
+    MulticamImageStore::setTile(1, stored);
+
+    MulticamImageProvider provider;
+    QSize size;
+
+    // Qt builds the provider id from everything after the authority, query included, so the
+    // ?rev= the window appends to defeat QML's URL-keyed image cache arrives glued to the angle
+    // index. Reading that as a bare integer fails and hands back a null image for every tile —
+    // a blank grid sitting on top of a decode that worked.
+    const QImage served = provider.requestImage(QStringLiteral("1?rev=7"), &size, QSize());
+    QVERIFY(!served.isNull());
+    QCOMPARE(served.size(), QSize(4, 3));
+    QCOMPARE(size, QSize(4, 3));
+
+    // Still addressable without one.
+    QCOMPARE(provider.requestImage(QStringLiteral("1"), &size, QSize()).size(), QSize(4, 3));
+
+    // An angle with nothing stored, and an id that is not an angle at all, both come back empty
+    // rather than as some other angle's picture.
+    QVERIFY(provider.requestImage(QStringLiteral("0?rev=7"), &size, QSize()).isNull());
+    QVERIFY(provider.requestImage(QStringLiteral("bogus?rev=7"), &size, QSize()).isNull());
+
+    MulticamImageStore::clear();
 }
 
 // The setup action exists so that importing footage and switching between it is the whole

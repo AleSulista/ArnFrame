@@ -317,6 +317,11 @@ void retargetClipToSource(Clip &dst, const Clip &src, TimeUs srcMediaDurationUs)
     // Landmarks and mattes are baked against the outgoing media, indexed by its source time.
     dst.faceTrackPath.clear();
     dst.faceTrackSrcOffsetUs = 0;
+    // A matte is rendered pixels, so it only describes the camera it was segmented from; kept,
+    // it would cut the new angle to the old one's silhouette. Geometric masks are treatment
+    // like the transform and the effects, and stay.
+    if (dst.mask.shape == MaskShape::Matte)
+        dst.mask = Mask();
 
     // The frame `src` is showing where dst begins — this is the whole point of the operation.
     const TimeUs srcIn = qBound(TimeUs{0}, src.timelineToSourceUs(dst.timelineStart),

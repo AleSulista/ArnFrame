@@ -4168,11 +4168,25 @@ void AppController::switchMulticamAngle(int angleIndex)
             drift::Clip tail;
             if (!drift::splitClipAtOffset(covering, tail, offset)) {
                 // Too close to an edge to cut — nothing sensible to switch.
+                setLastMessage(tr("Too close to the edge of the shot to cut here."),
+                               QStringLiteral("warning"));
                 return;
             }
             tail.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
             const QString tailLinkId = drift::assignSplitLinkIds(covering, tail);
             splitLinkedPartnerAt(m_project, covering, atUs, tailLinkId);
+            // retargetClipToSource unlinks the tail below — it is no longer the video half of
+            // the pair it was cut out of. That leaves the companion's own tail holding a link
+            // id nothing else carries, so clear it rather than let linkedPartners keep
+            // resolving it to an empty list.
+            if (!tailLinkId.isEmpty()) {
+                for (drift::Track &linked : m_project.tracks()) {
+                    for (drift::Clip &clip : linked.clips) {
+                        if (clip.linkId == tailLinkId)
+                            clip.linkId.clear();
+                    }
+                }
+            }
             programTrack.clips.insert(dstIndex + 1, tail);
             ++dstIndex;
         }
@@ -4190,6 +4204,16 @@ void AppController::switchMulticamAngle(int angleIndex)
         fresh.type = drift::ClipType::Video;
         fresh.timelineStart = atUs;
         fresh.timelineDuration = end - atUs;
+        // retargetClipToSource leaves the layout alone, because on the split path dst is an
+        // existing program clip whose framing the switch must not throw away. Here there is no
+        // such clip: an untouched transform track composites as the full canvas rect, which
+        // stretches any camera whose aspect is not the project's. Seed it from the angle, which
+        // is already laid out for this canvas — the program should show what the angle shows.
+        fresh.transformX = angleClip.transformX;
+        fresh.transformY = angleClip.transformY;
+        fresh.transformW = angleClip.transformW;
+        fresh.transformH = angleClip.transformH;
+        fresh.rotation = angleClip.rotation;
         dstIndex = sortedInsertIndex(programTrack, atUs);
         programTrack.clips.insert(dstIndex, fresh);
     }
@@ -4298,10 +4322,13 @@ void AppController::refreshMulticamTiles()
         }
 
         QMetaObject::invokeMethod(this, [this, tiles, generation]() {
-            m_multicamRefreshing = false;
-            // The playhead has moved on, or the session closed, since this was requested.
+            // The playhead has moved on, or the session closed, since this was requested. The
+            // flag belongs to whichever refresh is current now, so it is only ours to release
+            // once this decode is confirmed to be that one — clearing it first would drop the
+            // guard while a newer decode is still running, and let a third start alongside it.
             if (generation != m_multicamGeneration)
                 return;
+            m_multicamRefreshing = false;
 
             for (const auto &tile : tiles)
                 MulticamImageStore::setTile(tile.first, tile.second);

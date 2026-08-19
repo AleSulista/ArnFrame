@@ -882,6 +882,10 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Too close to the edge of the shot to cut here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Switch multicam angle</source>
         <translation type="unfinished"></translation>
     </message>

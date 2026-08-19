@@ -190,7 +190,11 @@ Window {
 
                             width: angleGrid.cellWidth
                             height: angleGrid.cellHeight
-                            color: Theme.panelBackground
+                            // Same ground as the program monitor: a tile is mostly video, and
+                            // PreserveAspectFit letterboxes every camera whose aspect is not the
+                            // cell's. Bars have to read as bars, which a light panel colour does
+                            // not — and the overlaid badge and filename are drawn white.
+                            color: Theme.overlayColor
                             radius: Theme.radiusMd
                             border.width: modelData.active ? 2 : Theme.borderWidth
                             border.color: modelData.active ? Theme.primary
@@ -219,6 +223,9 @@ Window {
                                 anchors.centerIn: parent
                                 visible: !tile.modelData.hasClip
                                 horizontalAlignment: Text.AlignHCenter
+                                // Sits on the tile's video ground, not on a panel, so it takes
+                                // the same treatment as the badge and filename above it.
+                                color: "#ffffff"
                                 text: qsTr("Nothing here")
                             }
 

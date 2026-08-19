@@ -86,6 +86,7 @@ private slots:
     void rebaseClipLayoutShiftsKeyframedPosition();
     void retargetClipToSourceKeepsPlacementAndSyncsSource();
     void retargetClipToSourceClearsPerSourceState();
+    void retargetClipToSourceKeepsAGeometricMask();
     void retargetClipToSourceShrinksWhenMediaRunsOut();
 };
 
@@ -2448,15 +2449,41 @@ void CoreTest::retargetClipToSourceClearsPerSourceState()
     program.faceTrackSrcOffsetUs = drift::secondsToUs(5.0);
     program.speedCurve.setPoints({{0.0, 1.0}, {1.0, 2.0}});
     QVERIFY(program.hasSpeedCurve());
+    // Segmented out of cam1's pixels, and indexed by cam1's source time.
+    program.mask.shape = drift::MaskShape::Matte;
+    program.mask.mattePath = QStringLiteral("/cache/cam1.matte.mp4");
+    program.mask.matteSrcOffsetUs = drift::secondsToUs(2.0);
 
     const drift::Clip angle = makeAngleClip(QStringLiteral("cam2.mp4"), 0, drift::secondsToUs(10.0), 0);
     drift::retargetClipToSource(program, angle, drift::secondsToUs(10.0));
 
-    // All three are indexed against media that is no longer under this clip.
+    // All of these are indexed against media that is no longer under this clip.
     QVERIFY(program.linkId.isEmpty());
     QVERIFY(program.faceTrackPath.isEmpty());
     QCOMPARE(program.faceTrackSrcOffsetUs, drift::TimeUs{0});
     QVERIFY(!program.hasSpeedCurve());
+    // Kept, the matte would cut cam2 to the silhouette segmented out of cam1.
+    QCOMPARE(program.mask.shape, drift::MaskShape::None);
+    QVERIFY(program.mask.mattePath.isEmpty());
+    QCOMPARE(program.mask.matteSrcOffsetUs, drift::TimeUs{0});
+}
+
+// The other half of the rule above: a mask that is a shape rather than baked pixels describes
+// the framing, not the footage, and belongs with the transform and effects that already survive.
+void CoreTest::retargetClipToSourceKeepsAGeometricMask()
+{
+    drift::Clip program = makeAngleClip(QStringLiteral("cam1.mp4"), drift::secondsToUs(1.0),
+                                        drift::secondsToUs(2.0), 0);
+    program.mask.shape = drift::MaskShape::Ellipse;
+    program.mask.x = 0.25;
+    program.mask.feather = 12.0;
+
+    const drift::Clip angle = makeAngleClip(QStringLiteral("cam2.mp4"), 0, drift::secondsToUs(10.0), 0);
+    drift::retargetClipToSource(program, angle, drift::secondsToUs(10.0));
+
+    QCOMPARE(program.mask.shape, drift::MaskShape::Ellipse);
+    QCOMPARE(program.mask.x, 0.25);
+    QCOMPARE(program.mask.feather, 12.0);
 }
 
 void CoreTest::retargetClipToSourceShrinksWhenMediaRunsOut()
