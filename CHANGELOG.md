@@ -52,11 +52,11 @@ Where two clips cut from one file overlapped, every composited frame dragged the
 
 ## ✨ Added
 
-### Feature Multicam editing
+### Feature (#62) Multicam editing
 
-Cut a multi-camera shoot by watching every camera at once. Import your cameras, open the multicam window (`Ctrl+Shift+C`, or the grid button in the header) and click **Set up from my media** — each camera goes on its own track with an empty program track above them. Then click a tile, or press its number key, to cut the program over to that camera at the playhead.
+Cut a multi-camera shoot by watching every camera at once. Stack synced cameras on their own tracks, select those clips, and open the multicam window (`Ctrl+Shift+C`, or the grid button in the header). Click a tile or press its number / numpad key to punch that camera from the playhead until the next cut. The timeline is left alone until you **Cancel**, **Save as separate tracks** (each camera keeps only the takes you chose), or **Save combined** (those takes flatten onto the topmost camera track).
 
-It is a second view of the timeline you already have, not a separate editor: the playhead, playback and undo are shared with the main window in both directions, and a switch is one ordinary, undoable edit on the program track. Cuts change the picture only by default, so a separate audio bed plays straight through them; "Switch audio too" changes that.
+An empty timeline can still click **Set up from my media** — each imported camera goes on its own track, stacked, with extras muted.
 
 ### Feature [`ba70db1`](https://github.com/CutWire-Studios/Drift/commit/ba70db1) In/Out work area and ranged export
 
