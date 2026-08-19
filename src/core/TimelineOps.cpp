@@ -289,6 +289,53 @@ bool splitClipAtOffset(Clip &head, Clip &tail, TimeUs offset)
     return true;
 }
 
+void retargetClipToSource(Clip &dst, const Clip &src, TimeUs srcMediaDurationUs)
+{
+    // Media identity.
+    dst.assetId = src.assetId;
+    dst.path = src.path;
+    dst.type = src.type;
+    dst.name = src.name;
+    dst.thumbnailPath = src.thumbnailPath;
+    dst.filmstripPath = src.filmstripPath;
+    dst.emoji = src.emoji;
+
+    // Fields that decide how timeline time maps onto source time. They have to come from the
+    // angle: reading its frames through the outgoing clip's mapping would show the wrong ones.
+    dst.speed = src.speed;
+    dst.reverse = src.reverse;
+    dst.flipH = src.flipH;
+    dst.flipV = src.flipV;
+
+    // A ramp is normalised over the clip's own source range and decides its timeline duration.
+    // dst's duration is fixed by the slot it occupies, so there is no range for a ramp to
+    // describe — carrying one over would contradict the placement being preserved.
+    dst.speedCurve = SpeedCurve();
+    // The program clip is no longer the video half of whatever pair it was in; leaving the id
+    // would have syncLinkedTiming drag the old companion around after it.
+    dst.linkId.clear();
+    // Landmarks and mattes are baked against the outgoing media, indexed by its source time.
+    dst.faceTrackPath.clear();
+    dst.faceTrackSrcOffsetUs = 0;
+
+    // The frame `src` is showing where dst begins — this is the whole point of the operation.
+    const TimeUs srcIn = qBound(TimeUs{0}, src.timelineToSourceUs(dst.timelineStart),
+                                qMax(TimeUs{0}, srcMediaDurationUs));
+    dst.srcIn = srcIn;
+
+    const TimeUs wanted = dst.sourceSpanUs();
+    const TimeUs available = qMax(TimeUs{0}, srcMediaDurationUs - srcIn);
+    const TimeUs span = qMin(wanted, available);
+    dst.srcOut = srcIn + span;
+
+    // The media ran out before the slot did; pull the timeline duration back to what is
+    // actually there rather than looping or freezing on the last frame.
+    if (span < wanted && dst.effectiveSpeed() > 0.0) {
+        dst.timelineDuration =
+            qMax(TimeUs{1}, static_cast<TimeUs>(llround(static_cast<double>(span) / dst.effectiveSpeed())));
+    }
+}
+
 bool clipsCanMerge(const Clip &left, const Clip &right)
 {
     if (left.type != right.type)

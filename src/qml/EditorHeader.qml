@@ -558,6 +558,20 @@ Rectangle {
                 }
             }
 
+            // Multicam. A separate window rather than a panel, so switching cameras never costs
+            // the editor any of the space it already has.
+            IconButton {
+                glyph: Theme.icons.grid
+                variant: "ghost"
+                tooltip: qsTr("Multicam")
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: {
+                    const win = root.Window.window
+                    if (win)
+                        win.openMulticam()
+                }
+            }
+
             // Workspace switcher. Portrait projects default to the portrait
             // arrangement, but the choice stays the user's: a tall canvas on an
             // ultrawide display is still comfortable in the landscape workspace, and

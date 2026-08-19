@@ -11,6 +11,7 @@
 #include "models/UpdateChecker.h"
 #include "ClipPreviewImageProvider.h"
 #include "DriftImageProvider.h"
+#include "MulticamImageProvider.h"
 #include "SegmentImageProvider.h"
 #include "TextStylePreviewImageProvider.h"
 #include "preview/PreviewItem.h"
@@ -170,6 +171,7 @@ int main(int argc, char *argv[])
     engine.addImageProvider(QStringLiteral("drift"), new DriftImageProvider());
     engine.addImageProvider(QStringLiteral("segment"), new SegmentImageProvider());
     engine.addImageProvider(QStringLiteral("clippreview"), new ClipPreviewImageProvider());
+    engine.addImageProvider(QStringLiteral("multicam"), new MulticamImageProvider());
     engine.addImageProvider(QStringLiteral("textstyle"), new TextStylePreviewImageProvider());
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QGuiApplication::exit(-1); }, Qt::QueuedConnection);

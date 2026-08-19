@@ -59,6 +59,16 @@ TimeUs sourceDurationForClip(const Project &project, const Clip &clip);
 // Caller assigns `tail.id`. Returns false if the offset is too close to either end.
 bool splitClipAtOffset(Clip &head, Clip &tail, TimeUs offset);
 
+// Repoint `dst` at the media `src` carries while keeping dst's timeline placement. The source
+// time is read from `src` at dst's timeline start, so the two stay in timeline sync — which is
+// what makes a multicam switch land on the frame the angle was showing at that moment.
+//
+// dst's transform, effects, fades and opacity are deliberately left alone: switching camera
+// changes which pixels arrive, not the treatment applied to them. `srcMediaDurationUs` bounds
+// the new source range; dst's timeline duration shrinks if the media runs out before its slot
+// does.
+void retargetClipToSource(Clip &dst, const Clip &src, TimeUs srcMediaDurationUs);
+
 // True when `left` ends where `right` begins, shares media + reverse/speed, and source ranges abut.
 bool clipsCanMerge(const Clip &left, const Clip &right);
 

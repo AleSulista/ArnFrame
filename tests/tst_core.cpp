@@ -84,6 +84,9 @@ private slots:
     void clipAnimationSerializationAndSample();
     void rebaseClipLayoutFreezesImplicitSize();
     void rebaseClipLayoutShiftsKeyframedPosition();
+    void retargetClipToSourceKeepsPlacementAndSyncsSource();
+    void retargetClipToSourceClearsPerSourceState();
+    void retargetClipToSourceShrinksWhenMediaRunsOut();
 };
 
 void CoreTest::timeConversion()
@@ -2376,6 +2379,101 @@ void CoreTest::rebaseClipLayoutShiftsKeyframedPosition()
     QCOMPARE(out.transformX.evaluateAt(0), -120.0);
     QCOMPARE(out.transformX.evaluateAt(drift::secondsToUs(2.0)), 680.0);
     QCOMPARE(out.transformY.evaluateAt(0), 140.0);
+}
+
+namespace {
+
+// An angle laid out on the timeline the way a synced multicam track is: the clip sits at
+// `timelineStart` and its media is already lined up there.
+drift::Clip makeAngleClip(const QString &path, drift::TimeUs timelineStart,
+                          drift::TimeUs duration, drift::TimeUs srcIn)
+{
+    drift::Clip clip;
+    clip.id = QStringLiteral("angle-") + path;
+    clip.assetId = QStringLiteral("asset-") + path;
+    clip.path = path;
+    clip.name = path;
+    clip.type = drift::ClipType::Video;
+    clip.timelineStart = timelineStart;
+    clip.timelineDuration = duration;
+    clip.srcIn = srcIn;
+    clip.srcOut = srcIn + duration;
+    return clip;
+}
+
+} // namespace
+
+void CoreTest::retargetClipToSourceKeepsPlacementAndSyncsSource()
+{
+    // Program segment occupying [4s, 7s).
+    drift::Clip program = makeAngleClip(QStringLiteral("cam1.mp4"), drift::secondsToUs(4.0),
+                                        drift::secondsToUs(3.0), drift::secondsToUs(10.0));
+    // The program clip carries a look the switch must not throw away.
+    program.opacity.setKeyframe(drift::secondsToUs(4.0), 0.5);
+    program.fadeInUs = drift::secondsToUs(0.25);
+    program.effects.append(drift::Effect{});
+
+    // The angle starts at 2s on the timeline, reading its media from 30s.
+    const drift::Clip angle = makeAngleClip(QStringLiteral("cam2.mp4"), drift::secondsToUs(2.0),
+                                            drift::secondsToUs(20.0), drift::secondsToUs(30.0));
+
+    drift::retargetClipToSource(program, angle, drift::secondsToUs(120.0));
+
+    // Placement is untouched: the switch fills the slot the program already had.
+    QCOMPARE(program.timelineStart, drift::secondsToUs(4.0));
+    QCOMPARE(program.timelineDuration, drift::secondsToUs(3.0));
+
+    // Media identity now comes from the angle.
+    QCOMPARE(program.path, QStringLiteral("cam2.mp4"));
+    QCOMPARE(program.assetId, QStringLiteral("asset-cam2.mp4"));
+
+    // The frame the angle was showing at 4s: 30s + (4s - 2s) = 32s.
+    QCOMPARE(program.srcIn, drift::secondsToUs(32.0));
+    QCOMPARE(program.srcOut, drift::secondsToUs(35.0));
+    // And that is exactly what the angle itself maps 4s to, which is the whole point.
+    QCOMPARE(program.srcIn, angle.timelineToSourceUs(drift::secondsToUs(4.0)));
+
+    // The treatment survives — switching camera changes pixels, not grade.
+    QCOMPARE(program.opacity.keyframes().size(), 1);
+    QCOMPARE(program.fadeInUs, drift::secondsToUs(0.25));
+    QCOMPARE(program.effects.size(), 1);
+}
+
+void CoreTest::retargetClipToSourceClearsPerSourceState()
+{
+    drift::Clip program = makeAngleClip(QStringLiteral("cam1.mp4"), drift::secondsToUs(1.0),
+                                        drift::secondsToUs(2.0), 0);
+    program.linkId = QStringLiteral("pair-1");
+    program.faceTrackPath = QStringLiteral("/cache/cam1.faces");
+    program.faceTrackSrcOffsetUs = drift::secondsToUs(5.0);
+    program.speedCurve.setPoints({{0.0, 1.0}, {1.0, 2.0}});
+    QVERIFY(program.hasSpeedCurve());
+
+    const drift::Clip angle = makeAngleClip(QStringLiteral("cam2.mp4"), 0, drift::secondsToUs(10.0), 0);
+    drift::retargetClipToSource(program, angle, drift::secondsToUs(10.0));
+
+    // All three are indexed against media that is no longer under this clip.
+    QVERIFY(program.linkId.isEmpty());
+    QVERIFY(program.faceTrackPath.isEmpty());
+    QCOMPARE(program.faceTrackSrcOffsetUs, drift::TimeUs{0});
+    QVERIFY(!program.hasSpeedCurve());
+}
+
+void CoreTest::retargetClipToSourceShrinksWhenMediaRunsOut()
+{
+    // A four-second slot...
+    drift::Clip program = makeAngleClip(QStringLiteral("cam1.mp4"), drift::secondsToUs(0.0),
+                                        drift::secondsToUs(4.0), 0);
+    // ...pointed at an angle whose media only has 1.5 s left from the sync point.
+    const drift::Clip angle = makeAngleClip(QStringLiteral("cam2.mp4"), 0, drift::secondsToUs(10.0),
+                                            drift::secondsToUs(8.5));
+
+    drift::retargetClipToSource(program, angle, drift::secondsToUs(10.0));
+
+    QCOMPARE(program.srcIn, drift::secondsToUs(8.5));
+    QCOMPARE(program.srcOut, drift::secondsToUs(10.0));
+    // Pulled back to what is actually there rather than freezing on the last frame.
+    QCOMPARE(program.timelineDuration, drift::secondsToUs(1.5));
 }
 
 QTEST_MAIN(CoreTest)

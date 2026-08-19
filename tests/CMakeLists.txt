@@ -11,6 +11,7 @@ qt_add_executable(tst_editorstate
     tst_editorstate.cpp
     ../src/SegmentImageStore.cpp
     ../src/ClipPreviewImageStore.cpp
+    ../src/MulticamImageStore.cpp
     ../src/models/AppController.cpp
     ../src/models/AssetLibrary.cpp
     ../src/models/TimelineModel.cpp
@@ -89,6 +90,7 @@ qt_add_executable(tst_mcp
     ../src/mcp/McpHttp.cpp
     ../src/SegmentImageStore.cpp
     ../src/ClipPreviewImageStore.cpp
+    ../src/MulticamImageStore.cpp
     ../src/models/AppController.cpp
     ../src/models/AssetLibrary.cpp
     ../src/models/TimelineModel.cpp
