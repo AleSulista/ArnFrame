@@ -14,6 +14,7 @@ QJsonArray homepageTools();
 QJsonArray toolboxDirectTools(const QString &name);
 bool isHomepageTool(const QString &name);
 bool isKnownOp(const QString &name);
+bool isReadOnlyOp(const QString &name);
 QString toolboxForOp(const QString &name);
 QString homepageHtml();
 QString agentGuideText();

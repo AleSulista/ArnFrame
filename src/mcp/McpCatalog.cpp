@@ -841,6 +841,15 @@ bool isKnownOp(const QString &name)
     return false;
 }
 
+bool isReadOnlyOp(const QString &name)
+{
+    for (const Op &op : ops()) {
+        if (name == QLatin1String(op.name))
+            return op.readOnly;
+    }
+    return false;
+}
+
 QString toolboxForOp(const QString &name)
 {
     for (const Op &op : ops()) {

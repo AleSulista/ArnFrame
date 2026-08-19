@@ -505,23 +505,19 @@ QJsonObject McpDispatcher::inspect(const QJsonObject &args) const
 
 bool McpDispatcher::isUndoable(const QString &tool) const
 {
+    if (isReadOnlyOp(tool))
+        return false;
     static const QStringList skip = {
-        QStringLiteral("import_media"), QStringLiteral("list_assets"),
-        QStringLiteral("list_effects"), QStringLiteral("list_audio_effects"),
-        QStringLiteral("list_transitions"), QStringLiteral("seek"),
+        QStringLiteral("import_media"), QStringLiteral("import_media_bytes"),
+        QStringLiteral("seek"),
         QStringLiteral("play"),         QStringLiteral("pause"),
         QStringLiteral("undo"),         QStringLiteral("redo"),
-        QStringLiteral("set_overlap"),
-        QStringLiteral("list_export_options"), QStringLiteral("export_video"),
-        QStringLiteral("export_status"), QStringLiteral("save_project"),
-        QStringLiteral("list_animated_properties"), QStringLiteral("list_keyframes"),
-        QStringLiteral("list_speed_curve"), QStringLiteral("get_ui_preferences"),
-        QStringLiteral("list_shortcuts"), QStringLiteral("set_theme"),
+        QStringLiteral("set_overlap"),  QStringLiteral("export_video"),
+        QStringLiteral("save_project"), QStringLiteral("set_theme"),
         QStringLiteral("set_shortcut"), QStringLiteral("reset_shortcuts"),
-        // Audio reads, plus set_beat_layers: the layers are transient view state, not project
-        // state, so an undo step for them would revert nothing.
-        QStringLiteral("audio_summary"), QStringLiteral("get_waveform"),
-        QStringLiteral("detect_beats"), QStringLiteral("set_beat_layers"),
+        // Transient view / session state — an undo step would revert nothing in the project.
+        QStringLiteral("set_beat_layers"), QStringLiteral("detect_beats"),
+        QStringLiteral("list_speed_curve"), QStringLiteral("list_fade_curve"),
     };
     return !skip.contains(tool);
 }

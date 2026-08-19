@@ -35,7 +35,16 @@ void writeRpcError(const QJsonValue &id, int code, const QString &message)
     writeStdout(QJsonDocument(body).toJson(QJsonDocument::Compact));
 }
 
-QByteArray postJson(quint16 port, const QString &token, const QByteArray &body, QString *error)
+int httpStatus(const QByteArray &response)
+{
+    const int nl = response.indexOf('\n');
+    const QByteArray line = nl < 0 ? response : response.left(nl);
+    const auto parts = line.split(' ');
+    return parts.size() >= 2 ? parts.at(1).toInt() : 0;
+}
+
+QByteArray postJson(quint16 port, const QString &token, const QByteArray &body, QString *error,
+                    int *statusOut)
 {
     QTcpSocket socket;
     socket.connectToHost(QStringLiteral("127.0.0.1"), port);
@@ -69,6 +78,8 @@ QByteArray postJson(quint16 port, const QString &token, const QByteArray &body, 
             *error = QStringLiteral("Empty response from Drift MCP.");
         return {};
     }
+    if (statusOut)
+        *statusOut = httpStatus(response);
     return response.mid(sep + 4);
 }
 
@@ -76,28 +87,22 @@ QByteArray readStdinMessage()
 {
     QByteArray header;
     char ch;
-    int newlines = 0;
     while (fread(&ch, 1, 1, stdin) == 1) {
         header.append(ch);
-        if (ch == '\n') {
-            ++newlines;
-            if (header.endsWith("\r\n\r\n") || newlines >= 2)
-                break;
-        } else if (ch != '\r') {
-            newlines = 0;
+        if (header.startsWith('{')) {
+            while (!header.contains('\n') && fread(&ch, 1, 1, stdin) == 1)
+                header.append(ch);
+            return header.trimmed();
         }
+        // MCP stdio is HTTP-style: headers end at a blank line. Extra headers (e.g.
+        // Content-Type) are allowed — do not stop at the second newline of a header block.
+        if (header.endsWith("\r\n\r\n") || header.endsWith("\n\n"))
+            break;
         if (header.size() > 64 * 1024)
             return {};
     }
     if (header.isEmpty())
         return {};
-
-    if (header.startsWith('{')) {
-        QByteArray rest = header;
-        while (!rest.contains('\n') && fread(&ch, 1, 1, stdin) == 1)
-            rest.append(ch);
-        return rest.trimmed();
-    }
 
     int length = 0;
     const QByteArray lower = header.toLower();
@@ -148,12 +153,24 @@ int runStdioAttach()
             continue;
         }
         QString postError;
-        const QByteArray reply = postJson(port, token, message, &postError);
-        if (reply.isEmpty()) {
+        int status = 0;
+        const QByteArray reply = postJson(port, token, message, &postError, &status);
+        if (!postError.isEmpty() && reply.isEmpty()) {
             fprintf(stderr, "%s\n", qPrintable(postError));
             writeRpcError(QJsonValue::Null, -32000, postError);
             return 3;
         }
+        if (status > 0 && (status < 200 || status >= 300)) {
+            const QString msg = QStringLiteral("Drift MCP HTTP %1").arg(status);
+            fprintf(stderr, "%s\n", qPrintable(msg));
+            writeRpcError(QJsonValue::Null, -32000, msg);
+            return 3;
+        }
+        // JSON-RPC notifications (no id) must not get a response. The HTTP server
+        // answers those with 202 and an empty body — forwarding that would break
+        // stdio clients after `notifications/initialized`.
+        if (status == 202 || reply.trimmed().isEmpty())
+            continue;
         writeStdout(reply.trimmed());
     }
     return 0;

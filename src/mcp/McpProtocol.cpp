@@ -112,6 +112,8 @@ QJsonValue handleJsonRpc(const QJsonValue &body, const QString &toolbox, const T
             if (!one.isUndefined())
                 out.append(one);
         }
+        if (out.isEmpty())
+            return QJsonValue(QJsonValue::Undefined);
         return out;
     }
     if (body.isObject())

@@ -36,10 +36,12 @@ private slots:
     void toolboxReturnsSchemas();
     void protocolInitializeAndToolsList();
     void protocolUnknownOp();
+    void protocolNotificationHasNoReply();
     void sessionFileRoundTrip();
     void sessionFileMissing();
     void serverRequiresBearerToken();
     void serverInitializeWithToken();
+    void serverNotificationReturns202();
     void applyUnknownOp();
     void applyBatchStopsAndUndoRevertsPrefix();
     void inspectIsCompact();
@@ -246,6 +248,19 @@ void McpTest::protocolInitializeAndToolsList()
     QCOMPARE(tools.size(), 5);
 }
 
+void McpTest::protocolNotificationHasNoReply()
+{
+    const QJsonObject note{
+        {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+        {QStringLiteral("method"), QStringLiteral("notifications/initialized")},
+    };
+    const QJsonValue reply = drift::mcp::handleJsonRpc(note, {}, {});
+    QVERIFY(reply.isUndefined());
+
+    const QJsonValue batch = drift::mcp::handleJsonRpc(QJsonArray{note}, {}, {});
+    QVERIFY(batch.isUndefined());
+}
+
 void McpTest::protocolUnknownOp()
 {
     bool called = false;
@@ -337,6 +352,27 @@ void McpTest::serverInitializeWithToken()
     QVERIFY(QFile::exists(dir.filePath(QStringLiteral("s.json"))));
     state.setMcpEnabled(false);
     QVERIFY(!QFile::exists(dir.filePath(QStringLiteral("s.json"))));
+    qunsetenv("DRIFT_MCP_SESSION_PATH");
+}
+
+void McpTest::serverNotificationReturns202()
+{
+    QTemporaryDir dir;
+    qputenv("DRIFT_MCP_SESSION_PATH", dir.filePath(QStringLiteral("s.json")).toUtf8());
+    AssetLibrary library;
+    AppController state(&library);
+    state.setMcpEnabled(true);
+    QVERIFY2(state.mcpRunning(), qPrintable(state.mcpError()));
+    int status = 0;
+    const QByteArray auth = "Bearer " + state.mcpToken().toUtf8();
+    const QJsonObject note{
+        {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+        {QStringLiteral("method"), QStringLiteral("notifications/initialized")},
+    };
+    httpPost(quint16(state.mcpPort()), auth, QJsonDocument(note).toJson(QJsonDocument::Compact),
+             &status);
+    QCOMPARE(status, 202);
+    state.setMcpEnabled(false);
     qunsetenv("DRIFT_MCP_SESSION_PATH");
 }
 
@@ -989,6 +1025,7 @@ void McpTest::audioReadOpsAreNotUndoable()
     const QJsonObject result = dispatcher.apply(
         {{QStringLiteral("ops"),
           QJsonArray{QJsonObject{{QStringLiteral("tool"), QStringLiteral("audio_summary")}},
+                     QJsonObject{{QStringLiteral("tool"), QStringLiteral("list_shapes")}},
                      QJsonObject{{QStringLiteral("tool"), QStringLiteral("set_beat_layers")},
                                  {QStringLiteral("args"),
                                   QJsonObject{{QStringLiteral("grid"), true}}}}}}});
