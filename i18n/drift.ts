@@ -859,10 +859,6 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Video %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Set up multicam</source>
         <translation type="unfinished"></translation>
     </message>
@@ -874,7 +870,7 @@
         </translation>
     </message>
     <message>
-        <source>Add a video track to switch angles onto.</source>
+        <source>Select at least two video clips on different tracks.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -886,7 +882,11 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Switch multicam angle</source>
+        <source>Save multicam as separate tracks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save combined multicam</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3379,15 +3379,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Program</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Switch audio too</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Off: cuts change the picture only, so a separate audio bed plays through them.</source>
+        <source>Pick the camera. Cuts stay staged until you save.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3399,11 +3391,11 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Your imported videos will go on a track each, with an empty program track above them to cut into.</source>
+        <source>Your imported videos will go on a track each, stacked so the top camera is the program.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Put each camera on its own video track. Every video track except the program becomes an angle.</source>
+        <source>Select at least two video clips on different tracks, then open Multicam again.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3420,6 +3412,10 @@
     </message>
     <message>
         <source>No clip at the current time</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Program</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3440,6 +3436,18 @@
     </message>
     <message>
         <source>Seek</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save as separate tracks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save combined</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

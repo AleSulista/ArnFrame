@@ -457,6 +457,122 @@ void shiftTrackValues(KeyframeTrack<double> &track, double delta, double implici
 
 } // namespace
 
+namespace {
+
+void mergeAdjacentMulticamCuts(QList<MulticamCut> &cuts)
+{
+    int i = 1;
+    while (i < cuts.size()) {
+        if (cuts.at(i).angle == cuts.at(i - 1).angle)
+            cuts.removeAt(i);
+        else
+            ++i;
+    }
+}
+
+int multicamCutIndexAtOrBefore(const QList<MulticamCut> &cuts, TimeUs timeUs)
+{
+    int index = 0;
+    while (index + 1 < cuts.size() && cuts.at(index + 1).timeUs <= timeUs)
+        ++index;
+    return index;
+}
+
+} // namespace
+
+MulticamSwitchResult applyMulticamSwitch(QList<MulticamCut> &cuts, TimeUs rangeStart, TimeUs rangeEnd,
+                                         int angle, TimeUs atUs, int initialAngle)
+{
+    if (rangeEnd - rangeStart < kMinClipDurationUs)
+        return MulticamSwitchResult::OutOfRange;
+    if (atUs < rangeStart || atUs >= rangeEnd)
+        return MulticamSwitchResult::OutOfRange;
+
+    if (cuts.isEmpty()) {
+        if (angle == initialAngle)
+            return MulticamSwitchResult::NoOp;
+        if (atUs == rangeStart) {
+            cuts.append(MulticamCut{rangeStart, angle});
+            return MulticamSwitchResult::Applied;
+        }
+        if (atUs - rangeStart < kMinClipDurationUs || rangeEnd - atUs < kMinClipDurationUs)
+            return MulticamSwitchResult::TooCloseToEdge;
+        cuts.append(MulticamCut{rangeStart, initialAngle});
+        cuts.append(MulticamCut{atUs, angle});
+        return MulticamSwitchResult::Applied;
+    }
+
+    const int index = multicamCutIndexAtOrBefore(cuts, atUs);
+    const TimeUs intervalStart = cuts.at(index).timeUs;
+    const TimeUs intervalEnd = index + 1 < cuts.size() ? cuts.at(index + 1).timeUs : rangeEnd;
+    if (cuts.at(index).angle == angle)
+        return MulticamSwitchResult::NoOp;
+
+    if (atUs == intervalStart) {
+        cuts[index].angle = angle;
+        mergeAdjacentMulticamCuts(cuts);
+        return MulticamSwitchResult::Applied;
+    }
+
+    if (atUs - intervalStart < kMinClipDurationUs || intervalEnd - atUs < kMinClipDurationUs)
+        return MulticamSwitchResult::TooCloseToEdge;
+
+    cuts.insert(index + 1, MulticamCut{atUs, angle});
+    mergeAdjacentMulticamCuts(cuts);
+    return MulticamSwitchResult::Applied;
+}
+
+int multicamAngleAt(const QList<MulticamCut> &cuts, TimeUs rangeStart, TimeUs rangeEnd, TimeUs timeUs,
+                    int uneditedAngle)
+{
+    if (timeUs < rangeStart || timeUs >= rangeEnd)
+        return -1;
+    if (cuts.isEmpty())
+        return uneditedAngle;
+    return cuts.at(multicamCutIndexAtOrBefore(cuts, timeUs)).angle;
+}
+
+QList<MulticamInterval> multicamIntervals(const QList<MulticamCut> &cuts, TimeUs rangeStart,
+                                          TimeUs rangeEnd, int uneditedAngle)
+{
+    QList<MulticamInterval> out;
+    if (rangeEnd <= rangeStart)
+        return out;
+    if (cuts.isEmpty()) {
+        out.append(MulticamInterval{rangeStart, rangeEnd, uneditedAngle});
+        return out;
+    }
+    for (int i = 0; i < cuts.size(); ++i) {
+        const TimeUs end = i + 1 < cuts.size() ? cuts.at(i + 1).timeUs : rangeEnd;
+        out.append(MulticamInterval{cuts.at(i).timeUs, end, cuts.at(i).angle});
+    }
+    return out;
+}
+
+bool sliceClipToTimelineRange(const Clip &src, TimeUs start, TimeUs end, Clip &out)
+{
+    const TimeUs from = qMax(start, src.timelineStart);
+    const TimeUs to = qMin(end, src.timelineEnd());
+    if (to - from < kMinClipDurationUs)
+        return false;
+
+    Clip work = src;
+    if (from > work.timelineStart) {
+        Clip tail;
+        if (!splitClipAtOffset(work, tail, from - work.timelineStart))
+            return false;
+        work = tail;
+    }
+    if (work.timelineEnd() > to) {
+        Clip discarded;
+        if (!splitClipAtOffset(work, discarded, to - work.timelineStart))
+            return false;
+    }
+
+    out = work;
+    return true;
+}
+
 void rebaseClipLayout(Project &project, int oldWidth, int oldHeight, double originX, double originY)
 {
     for (Track &track : project.tracks()) {

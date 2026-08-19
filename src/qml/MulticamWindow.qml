@@ -3,13 +3,11 @@ import QtQuick.Window
 import Drift 1.0
 import "components"
 
-// Multicam switching surface: every camera at the current time, side by side, with one click to
-// cut the program over to whichever one is worth watching.
+// Multicam punching surface: every camera at the current time, side by side. Clicks and number
+// keys recut a staged copy of the selected clips; the live timeline is untouched until Save.
 //
-// This window holds no state of its own. Every value below is a binding onto the EditorState
-// singleton the main window uses — the same object, not a copy — so the playhead, the transport
-// and the timeline stay in step in both directions without anything having to synchronise them.
-// The one edit it makes, switchMulticamAngle, goes through the shared undo stack like any other.
+// This window holds no state of its own. Playhead, transport and the staged program all bind
+// onto the EditorState singleton the main window uses.
 Window {
     id: root
 
@@ -44,18 +42,24 @@ Window {
     }
 
     function openSession() {
-        EditorState.beginMulticamSession()
+        if (!EditorState.beginMulticamSession())
+            return
         root.show()
         root.raise()
         root.requestActivate()
     }
 
+    function commitAndClose(saveFn) {
+        saveFn()
+        root.close()
+    }
+
     // Tile decoding costs a decode per angle per refresh, so it stops with the window rather
-    // than running on behind it.
+    // than running on behind it. Save already ended the session; a second call is a no-op.
     onClosing: EditorState.endMulticamSession()
 
-    // Number keys switch angles, the way a vision mixer's bus does. WindowShortcut context
-    // (the default) keeps them out of the main window, where digits mean nothing yet.
+    // Number keys and the numpad switch angles, the way a vision mixer's bus does. WindowShortcut
+    // context (the default) keeps them out of the main window, where digits mean nothing yet.
     Repeater {
         model: 9
         Item {
@@ -64,7 +68,7 @@ Window {
             width: 0
             height: 0
             Shortcut {
-                sequence: String(keyHost.index + 1)
+                sequences: [String(keyHost.index + 1), "Num+" + String(keyHost.index + 1)]
                 enabled: keyHost.index < root.angles.length
                 onActivated: EditorState.switchMulticamAngle(keyHost.index)
             }
@@ -76,61 +80,18 @@ Window {
         anchors.margins: Theme.spacingLg
         spacing: Theme.spacingLg
 
-        // ----- Header: which track is the program, which are the angles ---------------------
+        // ----- Header ------------------------------------------------------------------------
         Item {
             id: header
             width: parent.width
             height: Theme.controlHeight
 
-            Row {
+            ThemedLabel {
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: Theme.spacingLg
-
-                ThemedLabel {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Program")
-                    size: "sm"
-                }
-
-                ThemedComboBox {
-                    id: programBox
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Math.max(140, widestContentWidth)
-                    textRole: "label"
-                    valueRole: "trackIndex"
-                    // Rebuilt whenever the track list changes, so a track that has been removed
-                    // cannot linger here as a choice that no longer exists.
-                    model: {
-                        void EditorState.tracks
-                        return EditorState.multicamCandidateTracks()
-                    }
-                    onActivated: EditorState.setMulticamProgramTrack(currentValue)
-
-                    // Assigning currentIndex during a pick would fight the selection, so the
-                    // controller's value is only reasserted while the popup is closed — the same
-                    // arrangement the scrub slider below uses against the playhead.
-                    Binding on currentIndex {
-                        when: !programBox.popup.visible
-                        value: {
-                            void EditorState.multicamProgramTrack
-                            for (let i = 0; i < programBox.count; ++i) {
-                                if (programBox.valueAt(i) === EditorState.multicamProgramTrack)
-                                    return i
-                            }
-                            return -1
-                        }
-                    }
-                }
-            }
-
-            ThemedSwitch {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("Switch audio too")
-                tooltip: qsTr("Off: cuts change the picture only, so a separate audio bed plays through them.")
-                checked: EditorState.multicamSwitchAudio
-                onToggled: EditorState.multicamSwitchAudio = checked
+                text: qsTr("Pick the camera. Cuts stay staged until you save.")
+                size: "sm"
+                tone: "muted"
             }
         }
 
@@ -138,7 +99,7 @@ Window {
         Row {
             id: body
             width: parent.width
-            height: parent.height - header.height - transport.height - Theme.spacingLg * 2
+            height: parent.height - header.height - transport.height - footer.height - Theme.spacingLg * 3
             spacing: Theme.spacingLg
 
             Item {
@@ -158,8 +119,8 @@ Window {
                            ? qsTr("Ready to set up")
                            : qsTr("No angles to switch between")
                     hint: EditorState.multicamCanSetUp
-                          ? qsTr("Your imported videos will go on a track each, with an empty program track above them to cut into.")
-                          : qsTr("Put each camera on its own video track. Every video track except the program becomes an angle.")
+                          ? qsTr("Your imported videos will go on a track each, stacked so the top camera is the program.")
+                          : qsTr("Select at least two video clips on different tracks, then open Multicam again.")
                     actionText: EditorState.multicamCanSetUp ? qsTr("Set up from my media") : ""
                     actionVariant: "primary"
                     onActionTriggered: EditorState.setUpMulticamFromAssets()
@@ -214,7 +175,7 @@ Window {
                                 // revision is what makes QML fetch them again.
                                 cache: false
                                 asynchronous: true
-                                source: modelData.hasClip
+                                source: modelData.hasClip && EditorState.multicamRevision > 0
                                         ? "image://multicam/" + tile.index + "?rev=" + EditorState.multicamRevision
                                         : ""
                             }
@@ -401,21 +362,14 @@ Window {
                 }
             }
 
-            // Read-only view of the program track, so the cuts a switch just made are visible
-            // without going back to the main window. Derived from EditorState.tracks on every
-            // change — there is no copy of the timeline here.
+            // Staged program as one lane, so the punches are visible without going back to the
+            // main timeline — which still shows the uncut stack until Save.
             Item {
                 id: laneStrip
                 width: parent.width
                 height: 22
 
-                readonly property var programClips: {
-                    void EditorState.tracks
-                    const index = EditorState.multicamProgramTrack
-                    if (index < 0 || index >= EditorState.tracks.length)
-                        return []
-                    return EditorState.tracks[index].clips || []
-                }
+                readonly property var programClips: EditorState.multicamProgramClips
                 readonly property real span: Math.max(0.001, root.durationSeconds)
 
                 Rectangle {
@@ -458,6 +412,44 @@ Window {
                     height: parent.height
                     x: Math.round(laneStrip.width * (root.currentSeconds / laneStrip.span)) - 1
                     color: Theme.primary
+                }
+            }
+        }
+
+        Item {
+            id: footer
+            width: parent.width
+            height: Theme.controlHeight
+
+            ThemedButton {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("Cancel")
+                variant: "ghost"
+                onClicked: root.close()
+            }
+
+            Row {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Theme.spacingSm
+
+                ThemedButton {
+                    text: qsTr("Save as separate tracks")
+                    variant: "secondary"
+                    enabled: root.angles.length > 0
+                    onClicked: root.commitAndClose(function () {
+                        EditorState.saveMulticamAsSeparateTracks()
+                    })
+                }
+
+                ThemedButton {
+                    text: qsTr("Save combined")
+                    variant: "primary"
+                    enabled: root.angles.length > 0
+                    onClicked: root.commitAndClose(function () {
+                        EditorState.saveMulticamCombined()
+                    })
                 }
             }
         }

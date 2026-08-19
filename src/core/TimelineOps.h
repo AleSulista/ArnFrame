@@ -101,4 +101,37 @@ QString assignSplitLinkIds(Clip &head, Clip &tail);
 // simply clipped away by the compositor.
 void rebaseClipLayout(Project &project, int oldWidth, int oldHeight, double originX, double originY);
 
+// A punch on a staged multicam assignment: from `timeUs` until the next cut (or the
+// session end), this camera is the one that stays. `cuts` is empty while the session is
+// still unedited — every camera stacked, `initialAngle` showing as program.
+struct MulticamCut
+{
+    TimeUs timeUs = 0;
+    int angle = 0;
+};
+
+struct MulticamInterval
+{
+    TimeUs startUs = 0;
+    TimeUs endUs = 0;
+    int angle = 0;
+};
+
+enum class MulticamSwitchResult { Applied, NoOp, OutOfRange, TooCloseToEdge };
+
+// Punch `angle` at `atUs` inside `[rangeStart, rangeEnd)`. Empty `cuts` is the unedited
+// stack; `initialAngle` is the topmost camera, which is program until the first punch.
+MulticamSwitchResult applyMulticamSwitch(QList<MulticamCut> &cuts, TimeUs rangeStart, TimeUs rangeEnd,
+                                         int angle, TimeUs atUs, int initialAngle);
+
+int multicamAngleAt(const QList<MulticamCut> &cuts, TimeUs rangeStart, TimeUs rangeEnd, TimeUs timeUs,
+                    int uneditedAngle);
+
+QList<MulticamInterval> multicamIntervals(const QList<MulticamCut> &cuts, TimeUs rangeStart,
+                                          TimeUs rangeEnd, int uneditedAngle);
+
+// Intersection of `src` with `[start, end)`. False when that span is empty or shorter than
+// kMinClipDurationUs. `out` keeps `src`'s id; the caller mints a new one if it needs one.
+bool sliceClipToTimelineRange(const Clip &src, TimeUs start, TimeUs end, Clip &out);
+
 } // namespace drift

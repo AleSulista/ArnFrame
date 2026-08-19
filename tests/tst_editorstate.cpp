@@ -77,12 +77,11 @@ private slots:
     void replaceAssetSourceRefusesADifferentKind();
     void exportAssetImageWritesPngAndJpeg();
     void startupProjectUrlFromArguments();
-    void multicamDefaultsToTopmostVideoTrackAsProgram();
-    void multicamSwitchCutsProgramAndSyncsSource();
-    void multicamSwitchLeavesTheRestOfTheTrackAloneAndUndoes();
-    void multicamSwitchFillsAGapInTheProgram();
-    void multicamRepeatedSwitchToTheSameAngleCollapsesTheCut();
-    void multicamSwitchAudioTogglesEmbeddedAudioSuppression();
+    void multicamSessionDoesNotMutateTheProject();
+    void multicamRecutSplitsAnInterval();
+    void multicamCancelIsIdentity();
+    void multicamSaveSeparateWritesGappedClips();
+    void multicamSaveCombinedFlattensOntoTopmost();
     void multicamSessionEndsWithTheProject();
     void multicamSessionPublishesADecodedTilePerAngle();
     void multicamProviderServesTilesByAngleIdWithRevisionQuery();
@@ -2010,12 +2009,9 @@ void EditorStateTest::startupProjectUrlFromArguments()
 
 namespace {
 
-// A three-camera shoot laid out the way multicam expects: track 0 is the program, tracks 1 and
-// 2 are the angles, all sharing one timeline so they are synced by construction.
-//
-// Angle 1 reads its media from 0s, angle 2 from 100s — a big offset, so a source time taken
-// from the wrong clip is impossible to mistake for the right one.
-void appendMulticamRig(drift::Project &project)
+// Three stacked cameras, no empty program track. Camera 2's media is offset 100 s from
+// timeline zero so a source time taken from the wrong clip is impossible to mistake.
+void appendStackedCameras(drift::Project &project)
 {
     project.tracks().clear();
 
@@ -2048,26 +2044,28 @@ void appendMulticamRig(drift::Project &project)
 
     addAsset(QStringLiteral("asset-cam1"), QStringLiteral("/tmp/cam1.mp4"), 60.0);
     addAsset(QStringLiteral("asset-cam2"), QStringLiteral("/tmp/cam2.mp4"), 200.0);
+    addAsset(QStringLiteral("asset-cam3"), QStringLiteral("/tmp/cam3.mp4"), 60.0);
 
-    // Program: one 10 s clip of camera 1.
     project.tracks().append(drift::Track{.type = drift::TrackType::Video});
-    addClip(project.tracks()[0], QStringLiteral("program"), QStringLiteral("asset-cam1"),
+    addClip(project.tracks()[0], QStringLiteral("cam1"), QStringLiteral("asset-cam1"),
             QStringLiteral("/tmp/cam1.mp4"), 0.0, 10.0, 0.0);
 
-    // Angle 1: camera 1 again, same sync.
     project.tracks().append(drift::Track{.type = drift::TrackType::Video});
-    addClip(project.tracks()[1], QStringLiteral("angle1"), QStringLiteral("asset-cam1"),
-            QStringLiteral("/tmp/cam1.mp4"), 0.0, 10.0, 0.0);
-
-    // Angle 2: camera 2, whose media is offset 100 s from timeline zero.
-    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
-    addClip(project.tracks()[2], QStringLiteral("angle2"), QStringLiteral("asset-cam2"),
+    addClip(project.tracks()[1], QStringLiteral("cam2"), QStringLiteral("asset-cam2"),
             QStringLiteral("/tmp/cam2.mp4"), 0.0, 10.0, 100.0);
+
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+    addClip(project.tracks()[2], QStringLiteral("cam3"), QStringLiteral("asset-cam3"),
+            QStringLiteral("/tmp/cam3.mp4"), 0.0, 10.0, 50.0);
 }
 
-// A switch lands on a frame boundary, not on whatever decimal second the playhead happens to
-// hold — the same rounding stepFrames() applies. At 30 fps that puts "4 s" at 3'999'960 µs, so
-// the expectations below are written in frames rather than in seconds.
+void selectStackedCameras(AppController &state)
+{
+    state.selectClip(0, 0);
+    state.addToSelection(1, 0);
+    state.addToSelection(2, 0);
+}
+
 drift::TimeUs frameSnapped(int fps, double seconds)
 {
     const drift::TimeUs step = drift::frameDurationUs(fps);
@@ -2076,209 +2074,148 @@ drift::TimeUs frameSnapped(int fps, double seconds)
 
 } // namespace
 
-void EditorStateTest::multicamDefaultsToTopmostVideoTrackAsProgram()
+void EditorStateTest::multicamSessionDoesNotMutateTheProject()
 {
     AssetLibrary library;
     AppController state(&library);
-    appendMulticamRig(*state.project());
+    appendStackedCameras(*state.project());
+    selectStackedCameras(state);
 
-    // Nothing has been configured, so the defaults have to be usable on their own.
-    QCOMPARE(state.multicamProgramTrack(), 0);
-
-    const QVariantList angles = state.multicamAngles();
-    QCOMPARE(angles.size(), 2);
-    QCOMPARE(angles.at(0).toMap().value(QStringLiteral("trackIndex")).toInt(), 1);
-    QCOMPARE(angles.at(1).toMap().value(QStringLiteral("trackIndex")).toInt(), 2);
-
-    // Angle 1 is camera 1, which is what the program is showing.
+    const drift::Project before = state.project()->detachedCopy();
+    QVERIFY(state.beginMulticamSession());
+    QCOMPARE(state.multicamAngles().size(), 3);
     QCOMPARE(state.multicamActiveAngle(), 0);
 
-    // Choosing a program explicitly takes it out of the angle list.
-    state.setMulticamProgramTrack(1);
-    QCOMPARE(state.multicamProgramTrack(), 1);
-    const QVariantList reangled = state.multicamAngles();
-    QCOMPARE(reangled.size(), 2);
-    QCOMPARE(reangled.at(0).toMap().value(QStringLiteral("trackIndex")).toInt(), 0);
-    QCOMPARE(reangled.at(1).toMap().value(QStringLiteral("trackIndex")).toInt(), 2);
-}
-
-void EditorStateTest::multicamSwitchCutsProgramAndSyncsSource()
-{
-    AssetLibrary library;
-    AppController state(&library);
-    appendMulticamRig(*state.project());
-
-    const drift::TimeUs cutUs = frameSnapped(state.projectFps(), 4.0);
     state.setPlayheadSeconds(4.0);
-    state.switchMulticamAngle(1); // camera 2
+    state.switchMulticamAngle(1);
 
-    const drift::Track &program = state.project()->tracks().at(0);
-    QCOMPARE(program.clips.size(), 2);
-
-    // Head keeps camera 1 and stops at the cut.
-    QCOMPARE(program.clips.at(0).path, QStringLiteral("/tmp/cam1.mp4"));
-    QCOMPARE(program.clips.at(0).timelineStart, drift::TimeUs{0});
-    QCOMPARE(program.clips.at(0).timelineEnd(), cutUs);
-
-    // Tail is camera 2, reading from the frame angle 2 was showing at the cut: 100 s + cut.
-    const drift::Clip &tail = program.clips.at(1);
-    QCOMPARE(tail.path, QStringLiteral("/tmp/cam2.mp4"));
-    QCOMPARE(tail.assetId, QStringLiteral("asset-cam2"));
-    QCOMPARE(tail.timelineStart, cutUs);
-    QCOMPARE(tail.timelineEnd(), drift::secondsToUs(10.0));
-    QCOMPARE(tail.srcIn, drift::secondsToUs(100.0) + cutUs);
-    QCOMPARE(tail.srcOut, drift::secondsToUs(110.0));
-
-    // The angle tracks themselves are untouched: a switch reads them, it does not consume them.
+    QCOMPARE(state.multicamActiveAngle(), 1);
+    QCOMPARE(state.project()->toJson(), before.toJson());
+    QCOMPARE(state.project()->tracks().at(0).clips.size(), 1);
     QCOMPARE(state.project()->tracks().at(1).clips.size(), 1);
     QCOMPARE(state.project()->tracks().at(2).clips.size(), 1);
 
-    // And the window now reports angle 2 as the live one.
-    QCOMPARE(state.multicamActiveAngle(), 1);
+    const QVariantList lane = state.multicamProgramClips();
+    QCOMPARE(lane.size(), 2);
+    QCOMPARE(lane.at(0).toMap().value(QStringLiteral("angle")).toInt(), 0);
+    QCOMPARE(lane.at(1).toMap().value(QStringLiteral("angle")).toInt(), 1);
 }
 
-void EditorStateTest::multicamSwitchLeavesTheRestOfTheTrackAloneAndUndoes()
+void EditorStateTest::multicamRecutSplitsAnInterval()
 {
     AssetLibrary library;
     AppController state(&library);
-    appendMulticamRig(*state.project());
-
-    // A second, later program clip that the switch has no business touching.
-    drift::Clip later = state.project()->tracks().at(0).clips.at(0);
-    later.id = QStringLiteral("program-later");
-    later.timelineStart = drift::secondsToUs(20.0);
-    later.timelineDuration = drift::secondsToUs(5.0);
-    later.srcIn = drift::secondsToUs(20.0);
-    later.srcOut = drift::secondsToUs(25.0);
-    state.project()->tracks()[0].clips.append(later);
-
-    const drift::Project before = state.project()->detachedCopy();
+    appendStackedCameras(*state.project());
+    selectStackedCameras(state);
+    QVERIFY(state.beginMulticamSession());
 
     state.setPlayheadSeconds(4.0);
     state.switchMulticamAngle(1);
 
-    // The switch is bounded to the slot it landed in; the clip at 20 s is byte-identical.
-    const drift::Track &program = state.project()->tracks().at(0);
-    QCOMPARE(program.clips.size(), 3);
-    const drift::Clip &untouched = program.clips.at(2);
-    QCOMPARE(untouched.id, QStringLiteral("program-later"));
-    QCOMPARE(untouched.path, QStringLiteral("/tmp/cam1.mp4"));
-    QCOMPARE(untouched.timelineStart, drift::secondsToUs(20.0));
-    QCOMPARE(untouched.srcIn, drift::secondsToUs(20.0));
+    const QVariantList lane = state.multicamProgramClips();
+    QCOMPARE(lane.size(), 2);
+    QCOMPARE(lane.at(0).toMap().value(QStringLiteral("angle")).toInt(), 0);
+    QCOMPARE(lane.at(1).toMap().value(QStringLiteral("angle")).toInt(), 1);
 
-    // One undo puts the whole document back — the switch is a single edit, like any other.
-    QVERIFY(state.undoAvailable());
-    state.undo();
+    state.setPlayheadSeconds(2.0);
+    state.switchMulticamAngle(2);
+    const QVariantList recut = state.multicamProgramClips();
+    QCOMPARE(recut.size(), 3);
+    QCOMPARE(recut.at(0).toMap().value(QStringLiteral("angle")).toInt(), 0);
+    QCOMPARE(recut.at(1).toMap().value(QStringLiteral("angle")).toInt(), 2);
+    QCOMPARE(recut.at(2).toMap().value(QStringLiteral("angle")).toInt(), 1);
+}
+
+void EditorStateTest::multicamCancelIsIdentity()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendStackedCameras(*state.project());
+    selectStackedCameras(state);
+    const drift::Project before = state.project()->detachedCopy();
+
+    QVERIFY(state.beginMulticamSession());
+    state.setPlayheadSeconds(4.0);
+    state.switchMulticamAngle(1);
+    state.endMulticamSession();
+
+    QVERIFY(!state.multicamActive());
     QCOMPARE(state.project()->toJson(), before.toJson());
 }
 
-void EditorStateTest::multicamSwitchFillsAGapInTheProgram()
+void EditorStateTest::multicamSaveSeparateWritesGappedClips()
 {
     AssetLibrary library;
     AppController state(&library);
-    appendMulticamRig(*state.project());
-
-    // Program covers only the first 3 s, leaving [3s, 10s) empty.
-    state.project()->tracks()[0].clips[0].timelineDuration = drift::secondsToUs(3.0);
-    state.project()->tracks()[0].clips[0].srcOut = drift::secondsToUs(3.0);
-
-    // The angle is laid out for the canvas the way an imported clip is: pillarboxed inside a
-    // 1920x1080 project rather than filling it edge to edge.
-    drift::Clip &angle = state.project()->tracks()[2].clips[0];
-    angle.transformX.setKeyframe(0, 240.0);
-    angle.transformY.setKeyframe(0, 0.0);
-    angle.transformW.setKeyframe(0, 1440.0);
-    angle.transformH.setKeyframe(0, 1080.0);
-
-    const drift::TimeUs cutUs = frameSnapped(state.projectFps(), 5.0);
-    state.setPlayheadSeconds(5.0);
-    state.switchMulticamAngle(1);
-
-    const drift::Track &program = state.project()->tracks().at(0);
-    QCOMPARE(program.clips.size(), 2);
-
-    // A fresh segment running from the cut to where the angle's own clip ends.
-    const drift::Clip &filled = program.clips.at(1);
-    QCOMPARE(filled.path, QStringLiteral("/tmp/cam2.mp4"));
-    QCOMPARE(filled.timelineStart, cutUs);
-    QCOMPARE(filled.timelineEnd(), drift::secondsToUs(10.0));
-    QCOMPARE(filled.srcIn, drift::secondsToUs(100.0) + cutUs);
-
-    // An untouched transform track composites as the full canvas rect, so a segment left bare
-    // here would stretch every camera whose aspect is not the project's — and a rig built by
-    // setUpMulticamFromAssets starts with an empty program, which makes this the path the very
-    // first switch of every shoot takes. Nothing of its own to frame, so it takes the angle's.
-    QVERIFY(!filled.transformW.isEmpty());
-    QCOMPARE(filled.transformX.evaluateAt(0), 240.0);
-    QCOMPARE(filled.transformW.evaluateAt(0), 1440.0);
-    QCOMPARE(filled.transformH.evaluateAt(0), 1080.0);
-}
-
-void EditorStateTest::multicamRepeatedSwitchToTheSameAngleCollapsesTheCut()
-{
-    AssetLibrary library;
-    AppController state(&library);
-    appendMulticamRig(*state.project());
+    appendStackedCameras(*state.project());
+    selectStackedCameras(state);
+    QVERIFY(state.beginMulticamSession());
 
     const drift::TimeUs cutUs = frameSnapped(state.projectFps(), 4.0);
     state.setPlayheadSeconds(4.0);
     state.switchMulticamAngle(1);
-    QCOMPARE(state.project()->tracks().at(0).clips.size(), 2);
+    state.saveMulticamAsSeparateTracks();
 
-    // Switching to the angle that is already live would otherwise leave a seam that cuts
-    // between one camera and itself.
-    state.setPlayheadSeconds(6.0);
-    state.switchMulticamAngle(1);
+    QVERIFY(!state.multicamActive());
+    QCOMPARE(state.project()->tracks().at(0).clips.size(), 1);
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).timelineEnd(), cutUs);
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).path, QStringLiteral("/tmp/cam1.mp4"));
 
-    const drift::Track &program = state.project()->tracks().at(0);
-    QCOMPARE(program.clips.size(), 2);
-    QCOMPARE(program.clips.at(1).path, QStringLiteral("/tmp/cam2.mp4"));
-    QCOMPARE(program.clips.at(1).timelineStart, cutUs);
-    QCOMPARE(program.clips.at(1).timelineEnd(), drift::secondsToUs(10.0));
-    QCOMPARE(program.clips.at(1).srcIn, drift::secondsToUs(100.0) + cutUs);
-    QCOMPARE(program.clips.at(1).srcOut, drift::secondsToUs(110.0));
+    QCOMPARE(state.project()->tracks().at(1).clips.size(), 1);
+    const drift::Clip &cam2 = state.project()->tracks().at(1).clips.at(0);
+    QCOMPARE(cam2.timelineStart, cutUs);
+    QCOMPARE(cam2.timelineEnd(), drift::secondsToUs(10.0));
+    QCOMPARE(cam2.path, QStringLiteral("/tmp/cam2.mp4"));
+    QCOMPARE(cam2.srcIn, drift::secondsToUs(100.0) + cutUs);
+
+    QCOMPARE(state.project()->tracks().at(2).clips.size(), 0);
+
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    QCOMPARE(state.project()->tracks().at(0).clips.size(), 1);
+    QCOMPARE(state.project()->tracks().at(1).clips.size(), 1);
+    QCOMPARE(state.project()->tracks().at(2).clips.size(), 1);
 }
 
-void EditorStateTest::multicamSwitchAudioTogglesEmbeddedAudioSuppression()
+void EditorStateTest::multicamSaveCombinedFlattensOntoTopmost()
 {
     AssetLibrary library;
     AppController state(&library);
-    appendMulticamRig(*state.project());
+    appendStackedCameras(*state.project());
+    selectStackedCameras(state);
+    QVERIFY(state.beginMulticamSession());
 
-    // Default: picture only, so an audio bed under the cameras plays straight through the cut.
-    QCOMPARE(state.multicamSwitchAudio(), false);
+    const drift::TimeUs cutUs = frameSnapped(state.projectFps(), 4.0);
     state.setPlayheadSeconds(4.0);
     state.switchMulticamAngle(1);
-    QCOMPARE(state.project()->tracks().at(0).clips.at(1).suppressEmbeddedAudio, true);
+    state.saveMulticamCombined();
 
-    state.setMulticamSwitchAudio(true);
-    state.setPlayheadSeconds(7.0);
-    state.switchMulticamAngle(0); // back to camera 1, which does cut the sound now
-    const drift::Track &program = state.project()->tracks().at(0);
-    QCOMPARE(program.clips.last().path, QStringLiteral("/tmp/cam1.mp4"));
-    QCOMPARE(program.clips.last().suppressEmbeddedAudio, false);
+    QVERIFY(!state.multicamActive());
+    const drift::Track &top = state.project()->tracks().at(0);
+    QCOMPARE(top.clips.size(), 2);
+    QCOMPARE(top.clips.at(0).path, QStringLiteral("/tmp/cam1.mp4"));
+    QCOMPARE(top.clips.at(0).timelineEnd(), cutUs);
+    QCOMPARE(top.clips.at(1).path, QStringLiteral("/tmp/cam2.mp4"));
+    QCOMPARE(top.clips.at(1).timelineStart, cutUs);
+    QCOMPARE(top.clips.at(1).srcIn, drift::secondsToUs(100.0) + cutUs);
+
+    QCOMPARE(state.project()->tracks().at(1).clips.size(), 0);
+    QCOMPARE(state.project()->tracks().at(2).clips.size(), 0);
 }
 
 void EditorStateTest::multicamSessionEndsWithTheProject()
 {
     AssetLibrary library;
     AppController state(&library);
-    appendMulticamRig(*state.project());
-
-    state.setMulticamProgramTrack(2);
-    state.beginMulticamSession();
+    appendStackedCameras(*state.project());
+    selectStackedCameras(state);
+    QVERIFY(state.beginMulticamSession());
     QVERIFY(state.multicamActive());
-    QCOMPARE(state.multicamProgramTrack(), 2);
 
-    // The chosen track is an index into a document that no longer exists, so it goes with it
-    // rather than pointing at whatever happens to occupy slot 2 next.
     state.newProject();
     QVERIFY(!state.multicamActive());
-    QCOMPARE(state.multicamProgramTrack(), 0);
 }
 
-// The unit tests above exercise the edit; this one exercises the picture, which is the other
-// half of the feature — an angle grid that decodes nothing is not a multicam window.
 void EditorStateTest::multicamSessionPublishesADecodedTilePerAngle()
 {
     const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
@@ -2294,23 +2231,20 @@ void EditorStateTest::multicamSessionPublishesADecodedTilePerAngle()
 
     AssetLibrary library;
     AppController state(&library);
-    appendMulticamRig(*state.project());
-
-    // Point the rig's two angles at media that actually exists.
-    state.project()->tracks()[1].clips[0].path = camA;
-    state.project()->tracks()[2].clips[0].path = camB;
-    state.project()->tracks()[2].clips[0].srcIn = 0;
-    state.project()->tracks()[2].clips[0].srcOut = drift::secondsToUs(5.0);
+    appendStackedCameras(*state.project());
+    state.project()->tracks()[0].clips[0].path = camA;
+    state.project()->tracks()[1].clips[0].path = camB;
+    state.project()->tracks()[1].clips[0].srcIn = 0;
+    state.project()->tracks()[1].clips[0].srcOut = drift::secondsToUs(5.0);
+    selectStackedCameras(state);
 
     MulticamImageStore::clear();
     QVERIFY(MulticamImageStore::tile(0).isNull());
 
     QSignalSpy frames(&state, &AppController::multicamFramesChanged);
     state.setPlayheadSeconds(2.0);
-    state.beginMulticamSession();
+    QVERIFY(state.beginMulticamSession());
 
-    // Decoding runs off the GUI thread and posts back, so the tiles land a turn of the event
-    // loop later — the same arrangement the segmentation preview uses.
     QVERIFY(frames.wait(60000));
 
     const QImage first = MulticamImageStore::tile(0);
@@ -2319,15 +2253,11 @@ void EditorStateTest::multicamSessionPublishesADecodedTilePerAngle()
     QVERIFY(!second.isNull());
     QCOMPARE(first.size(), QSize(320, 240));
 
-    // Closing the window stops the decoding and drops the pixels rather than leaving a stale
-    // grid behind for the next time it opens.
     state.endMulticamSession();
     QVERIFY(!state.multicamActive());
     QVERIFY(MulticamImageStore::tile(0).isNull());
 }
 
-// The store test above proves the tiles get decoded; this one proves they can be fetched. QML
-// addresses a tile through the provider, and the id it arrives under is not the bare index.
 void EditorStateTest::multicamProviderServesTilesByAngleIdWithRevisionQuery()
 {
     MulticamImageStore::clear();
@@ -2339,29 +2269,18 @@ void EditorStateTest::multicamProviderServesTilesByAngleIdWithRevisionQuery()
     MulticamImageProvider provider;
     QSize size;
 
-    // Qt builds the provider id from everything after the authority, query included, so the
-    // ?rev= the window appends to defeat QML's URL-keyed image cache arrives glued to the angle
-    // index. Reading that as a bare integer fails and hands back a null image for every tile —
-    // a blank grid sitting on top of a decode that worked.
     const QImage served = provider.requestImage(QStringLiteral("1?rev=7"), &size, QSize());
     QVERIFY(!served.isNull());
     QCOMPARE(served.size(), QSize(4, 3));
     QCOMPARE(size, QSize(4, 3));
 
-    // Still addressable without one.
     QCOMPARE(provider.requestImage(QStringLiteral("1"), &size, QSize()).size(), QSize(4, 3));
-
-    // An angle with nothing stored, and an id that is not an angle at all, both come back empty
-    // rather than as some other angle's picture.
     QVERIFY(provider.requestImage(QStringLiteral("0?rev=7"), &size, QSize()).isNull());
     QVERIFY(provider.requestImage(QStringLiteral("bogus?rev=7"), &size, QSize()).isNull());
 
     MulticamImageStore::clear();
 }
 
-// The setup action exists so that importing footage and switching between it is the whole
-// workflow, with no track arranging in between — so what it produces has to be a rig the rest
-// of the feature accepts, not just some tracks.
 void EditorStateTest::multicamSetUpBuildsAWorkingRigFromTheBin()
 {
     const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
@@ -2381,44 +2300,27 @@ void EditorStateTest::multicamSetUpBuildsAWorkingRigFromTheBin()
     for (const QString &cam : cams)
         QVERIFY(importAndAwait(library, cam));
 
-    // A fresh project with footage imported and nothing on the timeline: exactly the state the
-    // window offers to fix.
     QVERIFY(state.multicamCanSetUp());
-
+    QVERIFY(state.beginMulticamSession());
     state.setUpMulticamFromAssets();
 
-    // Program on top, empty, with one camera track per import beneath it.
     const QList<drift::Track> &tracks = state.project()->tracks();
-    QCOMPARE(tracks.size(), 4);
-    QCOMPARE(tracks.at(0).type, drift::TrackType::Video);
-    QVERIFY(tracks.at(0).clips.isEmpty());
-    for (int i = 1; i <= 3; ++i) {
+    QCOMPARE(tracks.size(), 3);
+    for (int i = 0; i < 3; ++i) {
+        QCOMPARE(tracks.at(i).type, drift::TrackType::Video);
         QCOMPARE(tracks.at(i).clips.size(), 1);
         QCOMPARE(tracks.at(i).clips.at(0).timelineStart, drift::TimeUs{0});
         QVERIFY(tracks.at(i).clips.at(0).timelineDuration > 0);
     }
-
-    // One camera stays audible so the cuts have something continuous to play over.
-    QCOMPARE(tracks.at(1).muted, false);
+    QCOMPARE(tracks.at(0).muted, false);
+    QCOMPARE(tracks.at(1).muted, true);
     QCOMPARE(tracks.at(2).muted, true);
-    QCOMPARE(tracks.at(3).muted, true);
 
-    // And the rig reads back as a rig: three switchable angles against the empty program.
-    QCOMPARE(state.multicamProgramTrack(), 0);
     QCOMPARE(state.multicamAngles().size(), 3);
-    // Nothing to offer twice — the timeline is no longer empty.
     QVERIFY(!state.multicamCanSetUp());
 
-    // The first switch lays a shot into the empty program, which is the point of leaving it bare.
-    state.setPlayheadSeconds(0.0);
-    state.switchMulticamAngle(0);
-    QCOMPARE(state.project()->tracks().at(0).clips.size(), 1);
-    QCOMPARE(state.project()->tracks().at(0).clips.at(0).path, cams.at(0));
-
-    // Scaffolding is one edit, so a user who did not want it gets out with one undo.
     state.undo();
-    QCOMPARE(state.project()->tracks().at(0).clips.size(), 0);
-    state.undo();
+    QVERIFY(!state.multicamActive());
     QVERIFY(state.multicamCanSetUp());
 }
 

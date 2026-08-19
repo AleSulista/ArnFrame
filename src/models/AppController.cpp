@@ -83,6 +83,7 @@
 
 namespace {
 QHash<QString, QString> defaultShortcuts();
+int clipIndexById(const drift::Track &track, const QString &id);
 
 // Offline scans read a file end to end at their own pace. They need decode cursors of their own so
 // they never share one with timeline playback of the same media — see ClipReaderPool.
@@ -304,7 +305,23 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     connect(this, &AppController::tracksChanged, this, [this] {
         m_timelineModel.refresh();
         m_clipListModel.refresh();
-        m_playback.setProject(&m_project);
+        if (m_multicamActive && !m_multicamSnaps.isEmpty()) {
+            bool intact = true;
+            for (const MulticamAngleSnap &snap : m_multicamSnaps) {
+                if (snap.trackIndex < 0 || snap.trackIndex >= m_project.tracks().size()) {
+                    intact = false;
+                    break;
+                }
+                if (clipIndexById(m_project.tracks().at(snap.trackIndex), snap.clipId) < 0) {
+                    intact = false;
+                    break;
+                }
+            }
+            if (!intact)
+                endMulticamSession();
+        } else if (!m_multicamActive || m_multicamSnaps.isEmpty()) {
+            m_playback.setProject(&m_project);
+        }
         emit selectedTransitionDataChanged();
     });
     connect(this, &AppController::selectionChanged, this, [this] {
@@ -3810,24 +3827,13 @@ constexpr int kMulticamPlaybackIntervalMs = 83;
 // reseek the frame the preview is about to show — the same guard ClipPreviewPlayer uses.
 constexpr quint64 kMulticamStreamSalt = 0x517CC1B727220A95ull;
 
-int clipIndexCovering(const drift::Track &track, drift::TimeUs timeUs)
+int clipIndexById(const drift::Track &track, const QString &id)
 {
     for (int i = 0; i < track.clips.size(); ++i) {
-        if (track.clips.at(i).containsTime(timeUs))
+        if (track.clips.at(i).id == id)
             return i;
     }
     return -1;
-}
-
-// Where a clip laid down at `fromUs` has to stop because the next one begins.
-drift::TimeUs nextClipStartAfter(const drift::Track &track, drift::TimeUs fromUs)
-{
-    drift::TimeUs next = std::numeric_limits<drift::TimeUs>::max();
-    for (const drift::Clip &clip : track.clips) {
-        if (clip.timelineStart > fromUs)
-            next = qMin(next, clip.timelineStart);
-    }
-    return next;
 }
 
 int sortedInsertIndex(const drift::Track &track, drift::TimeUs startUs)
@@ -3838,13 +3844,96 @@ int sortedInsertIndex(const drift::Track &track, drift::TimeUs startUs)
     return index;
 }
 
+QString newClipId()
+{
+    return QUuid::createUuid().toString(QUuid::WithoutBraces);
+}
+
 } // namespace
 
-void AppController::beginMulticamSession()
+bool AppController::beginMulticamSession()
 {
     if (m_multicamActive)
-        return;
+        return true;
 
+    QList<QPair<int, int>> selected = m_selection;
+    if (selected.isEmpty() && m_selectedTrack >= 0 && m_selectedClip >= 0)
+        selected.append(qMakePair(m_selectedTrack, m_selectedClip));
+
+    QList<QPair<int, int>> videos;
+    QSet<int> usedTracks;
+    for (const QPair<int, int> &pair : selected) {
+        if (!isValidClipIndex(pair.first, pair.second))
+            continue;
+        const drift::Clip &clip = m_project.tracks().at(pair.first).clips.at(pair.second);
+        if (clip.type != drift::ClipType::Video)
+            continue;
+        if (usedTracks.contains(pair.first))
+            continue;
+        usedTracks.insert(pair.first);
+        videos.append(pair);
+    }
+    std::sort(videos.begin(), videos.end(),
+              [](const QPair<int, int> &a, const QPair<int, int> &b) { return a.first < b.first; });
+
+    if (videos.size() < 2) {
+        if (!multicamCanSetUp()) {
+            setLastMessage(tr("Select at least two video clips on different tracks."),
+                           QStringLiteral("warning"));
+            return false;
+        }
+        m_multicamActive = true;
+        if (!m_multicamTimer) {
+            m_multicamTimer = new QTimer(this);
+            m_multicamTimer->setInterval(kMulticamPlaybackIntervalMs);
+            connect(m_multicamTimer, &QTimer::timeout, this, [this] { refreshMulticamTiles(); });
+        }
+        if (m_playing)
+            m_multicamTimer->start();
+        emit multicamChanged();
+        return true;
+    }
+
+    return startMulticamPunching(videos);
+}
+
+bool AppController::startMulticamPunching(const QList<QPair<int, int>> &videoClips)
+{
+    m_multicamSnaps.clear();
+    m_multicamCuts.clear();
+    m_multicamRangeStart = std::numeric_limits<drift::TimeUs>::max();
+    m_multicamRangeEnd = 0;
+
+    for (const QPair<int, int> &pair : videoClips) {
+        if (!isValidClipIndex(pair.first, pair.second))
+            continue;
+        const drift::Clip &clip = m_project.tracks().at(pair.first).clips.at(pair.second);
+        MulticamAngleSnap snap;
+        snap.trackIndex = pair.first;
+        snap.clipId = clip.id;
+        snap.original = clip;
+        const QList<drift::ClipRef> partners = drift::linkedPartners(m_project, clip);
+        for (const drift::ClipRef &ref : partners) {
+            const drift::Clip &partner = m_project.tracks().at(ref.trackIndex).clips.at(ref.clipIndex);
+            if (partner.type != drift::ClipType::Audio)
+                continue;
+            snap.audioTrackIndex = ref.trackIndex;
+            snap.audioClipId = partner.id;
+            snap.originalAudio = partner;
+            snap.hasAudio = true;
+            break;
+        }
+        m_multicamRangeStart = qMin(m_multicamRangeStart, clip.timelineStart);
+        m_multicamRangeEnd = qMax(m_multicamRangeEnd, clip.timelineEnd());
+        m_multicamSnaps.append(snap);
+    }
+
+    if (m_multicamSnaps.size() < 2) {
+        m_multicamSnaps.clear();
+        return false;
+    }
+
+    m_multicamBase = m_project.detachedCopy();
     m_multicamActive = true;
     if (!m_multicamTimer) {
         m_multicamTimer = new QTimer(this);
@@ -3854,8 +3943,26 @@ void AppController::beginMulticamSession()
     if (m_playing)
         m_multicamTimer->start();
 
+    rebuildMulticamStaged();
     emit multicamChanged();
     refreshMulticamTiles();
+    return true;
+}
+
+void AppController::rebuildMulticamStaged()
+{
+    m_multicamStaged = m_multicamBase.detachedCopy();
+    if (!m_multicamCuts.isEmpty())
+        applyMulticamSlicesToProject(m_multicamStaged, false);
+    // Exclusive slices can land on a track that set-up muted so the stack would not roar;
+    // the program has to be audible while punching.
+    for (const MulticamAngleSnap &snap : m_multicamSnaps) {
+        if (snap.trackIndex >= 0 && snap.trackIndex < m_multicamStaged.tracks().size())
+            m_multicamStaged.tracks()[snap.trackIndex].muted = false;
+    }
+    m_playback.setProject(&m_multicamStaged);
+    if (!m_playback.isPlaying())
+        m_playback.setPlayheadUs(m_playheadUs);
 }
 
 void AppController::endMulticamSession()
@@ -3866,79 +3973,33 @@ void AppController::endMulticamSession()
     m_multicamActive = false;
     if (m_multicamTimer)
         m_multicamTimer->stop();
-    // Any decode still in flight belongs to a generation nothing will accept now. Releasing the
-    // coalescing flag here as well means reopening the window before that decode lands still
-    // gets a fresh refresh, rather than an empty grid waiting on a result that is discarded.
     ++m_multicamGeneration;
     m_multicamRefreshing = false;
     MulticamImageStore::clear();
+    m_multicamSnaps.clear();
+    m_multicamCuts.clear();
+    m_multicamBase = drift::Project();
+    m_multicamStaged = drift::Project();
+    m_playback.setProject(&m_project);
+    if (!m_playback.isPlaying())
+        m_playback.setPlayheadUs(m_playheadUs);
     ++m_multicamRevision;
-    // The chosen tracks are deliberately kept: reopening the window during the same session
-    // should come back to the setup the user had, and they cost nothing while it is closed.
     emit multicamChanged();
     emit multicamFramesChanged();
 }
 
-int AppController::multicamProgramTrack() const
-{
-    const QList<drift::Track> &tracks = m_project.tracks();
-    if (m_multicamProgramTrack >= 0 && m_multicamProgramTrack < tracks.size()
-        && tracks.at(m_multicamProgramTrack).type == drift::TrackType::Video) {
-        return m_multicamProgramTrack;
-    }
-
-    // Automatic: the topmost video track, which is the one the compositor lets win.
-    for (int i = 0; i < tracks.size(); ++i) {
-        if (tracks.at(i).type == drift::TrackType::Video)
-            return i;
-    }
-    return -1;
-}
-
-QList<int> AppController::resolvedMulticamAngleTracks() const
-{
-    const QList<drift::Track> &tracks = m_project.tracks();
-    const int program = multicamProgramTrack();
-
-    QList<int> resolved;
-    if (!m_multicamAngleTracks.isEmpty()) {
-        for (const int index : m_multicamAngleTracks) {
-            if (index < 0 || index >= tracks.size() || index == program)
-                continue;
-            if (tracks.at(index).type != drift::TrackType::Video)
-                continue;
-            if (!resolved.contains(index))
-                resolved.append(index);
-        }
-        return resolved;
-    }
-
-    for (int i = 0; i < tracks.size(); ++i) {
-        if (i == program || tracks.at(i).type != drift::TrackType::Video)
-            continue;
-        resolved.append(i);
-    }
-    return resolved;
-}
-
 QVariantList AppController::multicamAngles() const
 {
-    const QList<drift::Track> &tracks = m_project.tracks();
-    const QList<int> angleTracks = resolvedMulticamAngleTracks();
-    const int active = multicamActiveAngle();
-
     QVariantList out;
-    out.reserve(angleTracks.size());
-    for (int i = 0; i < angleTracks.size(); ++i) {
-        const int trackIndex = angleTracks.at(i);
-        const drift::Track &track = tracks.at(trackIndex);
-        const int clipIndex = clipIndexCovering(track, m_playheadUs);
-
+    out.reserve(m_multicamSnaps.size());
+    const int active = multicamActiveAngle();
+    for (int i = 0; i < m_multicamSnaps.size(); ++i) {
+        const MulticamAngleSnap &snap = m_multicamSnaps.at(i);
         out.append(QVariantMap{
-            {QStringLiteral("trackIndex"), trackIndex},
+            {QStringLiteral("trackIndex"), snap.trackIndex},
             {QStringLiteral("label"), tr("Angle %1").arg(i + 1)},
-            {QStringLiteral("clipName"), clipIndex >= 0 ? track.clips.at(clipIndex).name : QString()},
-            {QStringLiteral("hasClip"), clipIndex >= 0},
+            {QStringLiteral("clipName"), snap.original.name},
+            {QStringLiteral("hasClip"), snap.original.containsTime(m_playheadUs)},
             {QStringLiteral("active"), i == active},
         });
     }
@@ -3947,44 +4008,132 @@ QVariantList AppController::multicamAngles() const
 
 int AppController::multicamActiveAngle() const
 {
-    const int program = multicamProgramTrack();
-    if (program < 0)
+    if (m_multicamSnaps.isEmpty())
         return -1;
-
-    const drift::Track &programTrack = m_project.tracks().at(program);
-    const int programClip = clipIndexCovering(programTrack, m_playheadUs);
-    if (programClip < 0)
-        return -1;
-    const QString programPath = programTrack.clips.at(programClip).path;
-    if (programPath.isEmpty())
-        return -1;
-
-    // Matched on media rather than on any stored marker: the program clip has no memory of
-    // which angle produced it, and a project reloaded mid-edit would have lost one anyway.
-    const QList<int> angleTracks = resolvedMulticamAngleTracks();
-    for (int i = 0; i < angleTracks.size(); ++i) {
-        const drift::Track &track = m_project.tracks().at(angleTracks.at(i));
-        const int clipIndex = clipIndexCovering(track, m_playheadUs);
-        if (clipIndex >= 0 && track.clips.at(clipIndex).path == programPath)
-            return i;
-    }
-    return -1;
+    return drift::multicamAngleAt(m_multicamCuts, m_multicamRangeStart, m_multicamRangeEnd,
+                                  m_playheadUs, 0);
 }
 
-QVariantList AppController::multicamCandidateTracks() const
+QVariantList AppController::multicamProgramClips() const
 {
-    const QList<drift::Track> &tracks = m_project.tracks();
     QVariantList out;
-    for (int i = 0; i < tracks.size(); ++i) {
-        if (tracks.at(i).type != drift::TrackType::Video)
-            continue;
+    if (m_multicamSnaps.isEmpty())
+        return out;
+    const QList<drift::MulticamInterval> intervals =
+        drift::multicamIntervals(m_multicamCuts, m_multicamRangeStart, m_multicamRangeEnd, 0);
+    for (const drift::MulticamInterval &interval : intervals) {
+        QString name;
+        if (interval.angle >= 0 && interval.angle < m_multicamSnaps.size())
+            name = m_multicamSnaps.at(interval.angle).original.name;
         out.append(QVariantMap{
-            {QStringLiteral("trackIndex"), i},
-            {QStringLiteral("label"), tr("Video %1").arg(i + 1)},
-            {QStringLiteral("clipCount"), tracks.at(i).clips.size()},
+            {QStringLiteral("start"), drift::usToSeconds(interval.startUs)},
+            {QStringLiteral("duration"), drift::usToSeconds(interval.endUs - interval.startUs)},
+            {QStringLiteral("name"), name},
+            {QStringLiteral("angle"), interval.angle},
         });
     }
     return out;
+}
+
+void AppController::applyMulticamSlicesToProject(drift::Project &project, bool combined)
+{
+    struct AngleSlices {
+        QList<drift::Clip> video;
+        QList<drift::Clip> audio;
+    };
+    QList<AngleSlices> perAngle;
+    perAngle.reserve(m_multicamSnaps.size());
+
+    const QList<drift::MulticamInterval> intervals =
+        drift::multicamIntervals(m_multicamCuts, m_multicamRangeStart, m_multicamRangeEnd, 0);
+
+    for (int i = 0; i < m_multicamSnaps.size(); ++i) {
+        AngleSlices slices;
+        const MulticamAngleSnap &snap = m_multicamSnaps.at(i);
+        const bool keepUnedited = m_multicamCuts.isEmpty() && i == 0;
+        if (m_multicamCuts.isEmpty() && !combined) {
+            // Separate save of an unedited session is a no-op; combined keeps only the topmost.
+            perAngle.append(slices);
+            continue;
+        }
+        if (keepUnedited || !m_multicamCuts.isEmpty()) {
+            auto appendInterval = [&](drift::TimeUs startUs, drift::TimeUs endUs) {
+                drift::Clip video;
+                if (!drift::sliceClipToTimelineRange(snap.original, startUs, endUs, video))
+                    return;
+                video.id = newClipId();
+                video.linkId.clear();
+                if (snap.hasAudio) {
+                    drift::Clip audio;
+                    if (drift::sliceClipToTimelineRange(snap.originalAudio, startUs, endUs, audio)) {
+                        audio.id = newClipId();
+                        const QString link = newClipId();
+                        video.linkId = link;
+                        audio.linkId = link;
+                        slices.audio.append(audio);
+                    }
+                }
+                slices.video.append(video);
+            };
+            if (m_multicamCuts.isEmpty()) {
+                appendInterval(snap.original.timelineStart, snap.original.timelineEnd());
+            } else {
+                for (const drift::MulticamInterval &interval : intervals) {
+                    if (interval.angle != i)
+                        continue;
+                    appendInterval(interval.startUs, interval.endUs);
+                }
+            }
+        }
+        perAngle.append(slices);
+    }
+
+    auto replaceClip = [&project](int trackIndex, const QString &clipId, const QList<drift::Clip> &slices) {
+        if (trackIndex < 0 || trackIndex >= project.tracks().size())
+            return;
+        drift::Track &track = project.tracks()[trackIndex];
+        const int index = clipIndexById(track, clipId);
+        if (index < 0)
+            return;
+        track.clips.removeAt(index);
+        for (const drift::Clip &slice : slices) {
+            const int at = sortedInsertIndex(track, slice.timelineStart);
+            track.clips.insert(at, slice);
+        }
+    };
+
+    if (combined) {
+        QList<drift::Clip> flattened;
+        for (const AngleSlices &slices : perAngle) {
+            for (const drift::Clip &clip : slices.video)
+                flattened.append(clip);
+        }
+        std::sort(flattened.begin(), flattened.end(),
+                  [](const drift::Clip &a, const drift::Clip &b) {
+                      return a.timelineStart < b.timelineStart;
+                  });
+
+        const int topTrack = m_multicamSnaps.first().trackIndex;
+        const QString topId = m_multicamSnaps.first().clipId;
+        for (int i = 1; i < m_multicamSnaps.size(); ++i)
+            replaceClip(m_multicamSnaps.at(i).trackIndex, m_multicamSnaps.at(i).clipId, {});
+        replaceClip(topTrack, topId, flattened);
+
+        for (int i = 0; i < m_multicamSnaps.size(); ++i) {
+            const MulticamAngleSnap &snap = m_multicamSnaps.at(i);
+            if (!snap.hasAudio)
+                continue;
+            replaceClip(snap.audioTrackIndex, snap.audioClipId, perAngle.at(i).audio);
+        }
+        return;
+    }
+
+    for (int i = 0; i < m_multicamSnaps.size(); ++i) {
+        const MulticamAngleSnap &snap = m_multicamSnaps.at(i);
+        replaceClip(snap.trackIndex, snap.clipId, perAngle.at(i).video);
+        if (snap.hasAudio)
+            replaceClip(snap.audioTrackIndex, snap.audioClipId, perAngle.at(i).audio);
+    }
 }
 
 bool AppController::multicamCanSetUp() const
@@ -4006,7 +4155,6 @@ bool AppController::multicamCanSetUp() const
             ++cameras;
         }
     }
-    // One camera is a clip, not a multicam shoot.
     return cameras >= 2;
 }
 
@@ -4025,23 +4173,20 @@ void AppController::setUpMulticamFromAssets()
 
     const drift::Project before = m_project;
 
-    // The default timeline ships one empty video track, and a rig built around it would leave a
-    // stray angle with nothing in it. Only empty video tracks go; audio and text are left alone.
     for (int i = m_project.tracks().size() - 1; i >= 0; --i) {
         const drift::Track &track = m_project.tracks().at(i);
         if (track.type == drift::TrackType::Video && track.clips.isEmpty())
             m_project.tracks().removeAt(i);
     }
 
-    // One camera per track, in bin order, every one starting at zero. Starting them together is
-    // the only sync this can honestly offer — the user nudges from there.
+    QList<QPair<int, int>> added;
     for (int n = 0; n < cameras.size(); ++n) {
         const int assetIndex = cameras.at(n);
         const QVariantMap asset = m_assetLibrary->assetAt(assetIndex);
         m_assetLibrary->ensureMedia(assetIndex);
 
         drift::Clip clip;
-        clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        clip.id = newClipId();
         clip.assetId = m_assetLibrary->assetIdAt(assetIndex);
         clip.type = drift::ClipType::Video;
         clip.name = asset.value(QStringLiteral("name")).toString();
@@ -4057,20 +4202,13 @@ void AppController::setUpMulticamFromAssets()
         drift::Track track;
         track.type = drift::TrackType::Video;
         track.clips.append(clip);
-        // Every camera carries its own sound, and unmuted they would all play at once. The first
-        // one is left audible so there is a continuous soundtrack the cuts do not chop up; the
-        // user can mute it too and drop in a proper bed instead.
+        // Unmuted they would all play at once while the session is still unedited. The first
+        // camera is left audible; the rest of a shoot usually shares that bed, or the user
+        // drops in a proper one.
         track.muted = n > 0;
         m_project.tracks().append(track);
+        added.append(qMakePair(m_project.tracks().size() - 1, 0));
     }
-
-    // The program goes on top, where the compositor lets it win, and starts empty: the first
-    // switch is what lays a shot into it.
-    m_project.tracks().prepend(drift::Track{.type = drift::TrackType::Video});
-
-    // Back to automatic on both counts — the rig is exactly what the defaults describe.
-    m_multicamProgramTrack = -1;
-    m_multicamAngleTracks.clear();
 
     pushProjectEdit(before, tr("Set up multicam"));
     finishEdit(tr("Set up multicam"));
@@ -4078,48 +4216,11 @@ void AppController::setUpMulticamFromAssets()
                       "its sync, then pick a shot.",
                       nullptr, cameras.size()),
                    QStringLiteral("success"));
-    emit multicamChanged();
-    refreshMulticamTiles();
-}
 
-void AppController::setMulticamProgramTrack(int trackIndex)
-{
-    const int next = trackIndex >= 0 && trackIndex < m_project.tracks().size()
-                         && m_project.tracks().at(trackIndex).type == drift::TrackType::Video
-                     ? trackIndex
-                     : -1;
-    if (m_multicamProgramTrack == next)
-        return;
-
-    m_multicamProgramTrack = next;
-    // The automatic angle set is "everything but the program", so it has just changed too.
-    emit multicamChanged();
-    refreshMulticamTiles();
-}
-
-void AppController::setMulticamAngleTracks(const QVariantList &trackIndices)
-{
-    QList<int> next;
-    for (const QVariant &value : trackIndices) {
-        bool ok = false;
-        const int index = value.toInt(&ok);
-        if (ok && !next.contains(index))
-            next.append(index);
-    }
-    if (m_multicamAngleTracks == next)
-        return;
-
-    m_multicamAngleTracks = next;
-    emit multicamChanged();
-    refreshMulticamTiles();
-}
-
-void AppController::setMulticamSwitchAudio(bool enabled)
-{
-    if (m_multicamSwitchAudio == enabled)
-        return;
-    m_multicamSwitchAudio = enabled;
-    emit multicamChanged();
+    if (m_multicamActive)
+        startMulticamPunching(added);
+    else
+        emit multicamChanged();
 }
 
 drift::TimeUs AppController::multicamSwitchTimeUs() const
@@ -4132,113 +4233,71 @@ drift::TimeUs AppController::multicamSwitchTimeUs() const
 
 void AppController::switchMulticamAngle(int angleIndex)
 {
-    const int program = multicamProgramTrack();
-    if (program < 0) {
-        setLastMessage(tr("Add a video track to switch angles onto."), QStringLiteral("warning"));
+    if (!m_multicamActive || m_multicamSnaps.isEmpty())
         return;
-    }
-
-    const QList<int> angleTracks = resolvedMulticamAngleTracks();
-    if (angleIndex < 0 || angleIndex >= angleTracks.size())
+    if (angleIndex < 0 || angleIndex >= m_multicamSnaps.size())
         return;
-    const int angleTrackIndex = angleTracks.at(angleIndex);
 
     const drift::TimeUs atUs = multicamSwitchTimeUs();
-    const drift::Track &angleTrack = m_project.tracks().at(angleTrackIndex);
-    const int angleClipIndex = clipIndexCovering(angleTrack, atUs);
-    if (angleClipIndex < 0) {
+    const drift::MulticamSwitchResult result =
+        drift::applyMulticamSwitch(m_multicamCuts, m_multicamRangeStart, m_multicamRangeEnd,
+                                   angleIndex, atUs, 0);
+    switch (result) {
+    case drift::MulticamSwitchResult::NoOp:
+        return;
+    case drift::MulticamSwitchResult::OutOfRange:
         setLastMessage(tr("That angle has nothing at the current time."), QStringLiteral("warning"));
         return;
+    case drift::MulticamSwitchResult::TooCloseToEdge:
+        setLastMessage(tr("Too close to the edge of the shot to cut here."),
+                       QStringLiteral("warning"));
+        return;
+    case drift::MulticamSwitchResult::Applied:
+        break;
     }
-    // Copied out before the project is mutated: splitting the program can reallocate the track
-    // list, and this may be a clip on it.
-    const drift::Clip angleClip = angleTrack.clips.at(angleClipIndex);
-    const drift::TimeUs angleSourceDuration = drift::sourceDurationForClip(m_project, angleClip);
+
+    rebuildMulticamStaged();
+    emit multicamChanged();
+}
+
+void AppController::saveMulticamAsSeparateTracks()
+{
+    if (!m_multicamActive || m_multicamSnaps.isEmpty()) {
+        endMulticamSession();
+        return;
+    }
+    if (m_multicamCuts.isEmpty()) {
+        endMulticamSession();
+        return;
+    }
 
     const drift::Project before = m_project;
-    drift::Track &programTrack = m_project.tracks()[program];
+    applyMulticamSlicesToProject(m_project, false);
+    for (const MulticamAngleSnap &snap : m_multicamSnaps) {
+        if (snap.trackIndex >= 0 && snap.trackIndex < m_project.tracks().size())
+            m_project.tracks()[snap.trackIndex].muted = false;
+    }
+    endMulticamSession();
+    pushProjectEdit(before, tr("Save multicam as separate tracks"));
+    finishEdit(tr("Save multicam as separate tracks"));
+}
 
-    int dstIndex = clipIndexCovering(programTrack, atUs);
-    if (dstIndex >= 0) {
-        drift::Clip &covering = programTrack.clips[dstIndex];
-        if (covering.timelineStart < atUs) {
-            // Cut at the playhead and take the tail. Same sequence as splitClipAt, so a linked
-            // audio companion is cut alongside instead of being left spanning the new edit.
-            const drift::TimeUs offset = atUs - covering.timelineStart;
-            drift::Clip tail;
-            if (!drift::splitClipAtOffset(covering, tail, offset)) {
-                // Too close to an edge to cut — nothing sensible to switch.
-                setLastMessage(tr("Too close to the edge of the shot to cut here."),
-                               QStringLiteral("warning"));
-                return;
-            }
-            tail.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            const QString tailLinkId = drift::assignSplitLinkIds(covering, tail);
-            splitLinkedPartnerAt(m_project, covering, atUs, tailLinkId);
-            // retargetClipToSource unlinks the tail below — it is no longer the video half of
-            // the pair it was cut out of. That leaves the companion's own tail holding a link
-            // id nothing else carries, so clear it rather than let linkedPartners keep
-            // resolving it to an empty list.
-            if (!tailLinkId.isEmpty()) {
-                for (drift::Track &linked : m_project.tracks()) {
-                    for (drift::Clip &clip : linked.clips) {
-                        if (clip.linkId == tailLinkId)
-                            clip.linkId.clear();
-                    }
-                }
-            }
-            programTrack.clips.insert(dstIndex + 1, tail);
-            ++dstIndex;
-        }
-        // Otherwise the playhead is exactly on the clip's start and it is overwritten in place.
-    } else {
-        // A gap in the program: lay down a new segment bounded by whichever runs out first,
-        // the gap or the angle's own clip.
-        const drift::TimeUs end =
-            qMin(nextClipStartAfter(programTrack, atUs), angleClip.timelineEnd());
-        if (end <= atUs)
-            return;
-
-        drift::Clip fresh;
-        fresh.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        fresh.type = drift::ClipType::Video;
-        fresh.timelineStart = atUs;
-        fresh.timelineDuration = end - atUs;
-        // retargetClipToSource leaves the layout alone, because on the split path dst is an
-        // existing program clip whose framing the switch must not throw away. Here there is no
-        // such clip: an untouched transform track composites as the full canvas rect, which
-        // stretches any camera whose aspect is not the project's. Seed it from the angle, which
-        // is already laid out for this canvas — the program should show what the angle shows.
-        fresh.transformX = angleClip.transformX;
-        fresh.transformY = angleClip.transformY;
-        fresh.transformW = angleClip.transformW;
-        fresh.transformH = angleClip.transformH;
-        fresh.rotation = angleClip.rotation;
-        dstIndex = sortedInsertIndex(programTrack, atUs);
-        programTrack.clips.insert(dstIndex, fresh);
+void AppController::saveMulticamCombined()
+{
+    if (!m_multicamActive || m_multicamSnaps.isEmpty()) {
+        endMulticamSession();
+        return;
     }
 
-    drift::retargetClipToSource(programTrack.clips[dstIndex], angleClip, angleSourceDuration);
-    programTrack.clips[dstIndex].suppressEmbeddedAudio = !m_multicamSwitchAudio;
-
-    // Switching back to the angle already running leaves a cut that cuts nothing. Collapse it
-    // so repeatedly tapping the same angle does not litter the track with seams.
-    if (dstIndex + 1 < programTrack.clips.size()
-        && drift::clipsCanMerge(programTrack.clips.at(dstIndex), programTrack.clips.at(dstIndex + 1))) {
-        programTrack.clips[dstIndex] =
-            drift::mergeClips(programTrack.clips.at(dstIndex), programTrack.clips.at(dstIndex + 1));
-        programTrack.clips.removeAt(dstIndex + 1);
+    const drift::Project before = m_project;
+    applyMulticamSlicesToProject(m_project, true);
+    if (!m_multicamSnaps.isEmpty() && m_multicamSnaps.first().trackIndex >= 0
+        && m_multicamSnaps.first().trackIndex < m_project.tracks().size()) {
+        m_project.tracks()[m_multicamSnaps.first().trackIndex].muted = false;
     }
-    if (dstIndex > 0
-        && drift::clipsCanMerge(programTrack.clips.at(dstIndex - 1), programTrack.clips.at(dstIndex))) {
-        programTrack.clips[dstIndex - 1] =
-            drift::mergeClips(programTrack.clips.at(dstIndex - 1), programTrack.clips.at(dstIndex));
-        programTrack.clips.removeAt(dstIndex);
-    }
-
-    pushProjectEdit(before, tr("Switch multicam angle"));
-    finishEdit(tr("Switch multicam angle"));
-    emit multicamChanged();
+    endMulticamSession();
+    pushProjectEdit(before, tr("Save combined multicam"));
+    finishEdit(tr("Save combined multicam"));
 }
 
 void AppController::refreshMulticamTiles()
@@ -4251,8 +4310,7 @@ void AppController::refreshMulticamTiles()
     if (m_multicamRefreshing)
         return;
 
-    const QList<int> angleTracks = resolvedMulticamAngleTracks();
-    if (angleTracks.isEmpty()) {
+    if (m_multicamSnaps.isEmpty()) {
         MulticamImageStore::clear();
         ++m_multicamRevision;
         emit multicamFramesChanged();
@@ -4272,15 +4330,10 @@ void AppController::refreshMulticamTiles()
 
     QList<AngleRead> reads;
     QList<int> emptyAngles;
-    for (int i = 0; i < angleTracks.size(); ++i) {
-        const drift::Track &track = m_project.tracks().at(angleTracks.at(i));
-        const int clipIndex = clipIndexCovering(track, m_playheadUs);
-        if (clipIndex < 0) {
-            emptyAngles.append(i);
-            continue;
-        }
-        const drift::Clip &clip = track.clips.at(clipIndex);
-        if (clip.path.isEmpty() || clip.type != drift::ClipType::Video) {
+    for (int i = 0; i < m_multicamSnaps.size(); ++i) {
+        const drift::Clip &clip = m_multicamSnaps.at(i).original;
+        if (!clip.containsTime(m_playheadUs) || clip.path.isEmpty()
+            || clip.type != drift::ClipType::Video) {
             emptyAngles.append(i);
             continue;
         }
@@ -10833,10 +10886,6 @@ void AppController::resetSessionState()
     endFadeCurveSession();
     endSegmentationSession();
     endMulticamSession();
-    // Unlike the sessions above, the multicam track choice outlives its window — but it is
-    // indices into a document that is about to be replaced, so it goes with the document.
-    m_multicamProgramTrack = -1;
-    m_multicamAngleTracks.clear();
 
     m_clipboard.clear();
     // Keyed by timeline position rather than by source, so entries from the old project would be
