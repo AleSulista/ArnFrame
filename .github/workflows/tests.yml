@@ -66,6 +66,11 @@ jobs:
           test -f "${GITHUB_WORKSPACE}/emoji-fonts/HarmonyOS_4.0.ttf"
           test -f "${GITHUB_WORKSPACE}/../drift-addons/staging/effects-core/effects/turbulent_displace/effect.json"
 
+      # Drop packages.microsoft.com (microsoft-prod *and* azure-cli — the latter's filename
+      # does not match *microsoft*). The runner image adds both; we never install from them.
+      # GitHub's apt-mirrors.txt tries azure.archive then archive.ubuntu.com; both have been
+      # stalling, and the image's Acquire::Retries 10 makes a hang last until the job timeout.
+      # Replace the list with Canonical's live geo-mirrors and cap Acquire so a dead one yields.
       # A stalled apt mirror otherwise sits here until the 60-minute job timeout; fail in 10.
       # libva* are runtime, not build, deps: Qt Multimedia's FFmpeg backend reaches VA-API
       # through implib-gen stubs whose generated dlopen failure path is assert(0), so any test
@@ -76,6 +81,20 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure-cli*
+          printf '%s\n' 'Acquire::http::Timeout "10";' 'Acquire::https::Timeout "10";' \
+            'Acquire::Retries "2";' 'APT::Acquire::Retries "2";' \
+            | sudo tee /etc/apt/apt.conf.d/99-ci-timeouts >/dev/null
+          {
+            curl -fsSL --max-time 8 http://mirrors.ubuntu.com/mirrors.txt || true
+            echo "http://us.archive.ubuntu.com/ubuntu/"
+            echo "http://security.ubuntu.com/ubuntu/"
+          } | sed 's:/*$:/:' \
+            | grep -vi 'azure.archive.ubuntu.com' \
+            | grep -viE '^https?://archive\.ubuntu\.com/' \
+            | awk 'NF && !seen[$0]++' \
+            | awk '{ printf "%s\tpriority:%d\n", $0, NR }' \
+            | sudo tee /etc/apt/apt-mirrors.txt
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -y -o Acquire::Retries=3 \
             build-essential ninja-build pkg-config git xvfb ccache \

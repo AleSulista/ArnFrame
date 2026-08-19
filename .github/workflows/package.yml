@@ -62,6 +62,22 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
+          # Runner image adds packages.microsoft.com; azure-cli.list is the one *microsoft* misses.
+          # GitHub's apt-mirrors.txt tries azure.archive then archive.ubuntu.com; both stall.
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure-cli*
+          printf '%s\n' 'Acquire::http::Timeout "10";' 'Acquire::https::Timeout "10";' \
+            'Acquire::Retries "2";' 'APT::Acquire::Retries "2";' \
+            | sudo tee /etc/apt/apt.conf.d/99-ci-timeouts >/dev/null
+          {
+            curl -fsSL --max-time 8 http://mirrors.ubuntu.com/mirrors.txt || true
+            echo "http://us.archive.ubuntu.com/ubuntu/"
+            echo "http://security.ubuntu.com/ubuntu/"
+          } | sed 's:/*$:/:' \
+            | grep -vi 'azure.archive.ubuntu.com' \
+            | grep -viE '^https?://archive\.ubuntu\.com/' \
+            | awk 'NF && !seen[$0]++' \
+            | awk '{ printf "%s\tpriority:%d\n", $0, NR }' \
+            | sudo tee /etc/apt/apt-mirrors.txt
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -y -o Acquire::Retries=3 flatpak flatpak-builder appstream desktop-file-utils
           flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
@@ -116,6 +132,22 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
+          # Runner image adds packages.microsoft.com; azure-cli.list is the one *microsoft* misses.
+          # GitHub's apt-mirrors.txt tries azure.archive then archive.ubuntu.com; both stall.
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure-cli*
+          printf '%s\n' 'Acquire::http::Timeout "10";' 'Acquire::https::Timeout "10";' \
+            'Acquire::Retries "2";' 'APT::Acquire::Retries "2";' \
+            | sudo tee /etc/apt/apt.conf.d/99-ci-timeouts >/dev/null
+          {
+            curl -fsSL --max-time 8 http://mirrors.ubuntu.com/mirrors.txt || true
+            echo "http://us.archive.ubuntu.com/ubuntu/"
+            echo "http://security.ubuntu.com/ubuntu/"
+          } | sed 's:/*$:/:' \
+            | grep -vi 'azure.archive.ubuntu.com' \
+            | grep -viE '^https?://archive\.ubuntu\.com/' \
+            | awk 'NF && !seen[$0]++' \
+            | awk '{ printf "%s\tpriority:%d\n", $0, NR }' \
+            | sudo tee /etc/apt/apt-mirrors.txt
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -y -o Acquire::Retries=3 \
             build-essential ninja-build pkg-config git xvfb \
