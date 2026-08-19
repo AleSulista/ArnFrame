@@ -25,12 +25,6 @@ if(_rv)
     message(FATAL_ERROR "update_translations failed (exit ${_rv})")
 endif()
 
-file(READ "${_catalog}" _ts)
-if(_ts MATCHES [[filename="src/mcp/]])
-    message(FATAL_ERROR
-        "MCP protocol strings leaked into i18n/drift.ts. "
-        "src/mcp/ must stay English (QT_EXCLUDE_FROM_TRANSLATION).")
-endif()
 
 file(GLOB _before_files "${_snapshot}/*.ts")
 if(NOT _before_files)

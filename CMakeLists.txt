@@ -725,7 +725,10 @@ if(Qt6LinguistTools_FOUND)
             src/core/ShapeStyle.cpp
             src/core/TextStyle.cpp
             src/core/SubtitleCue.cpp
-        LUPDATE_OPTIONS -no-obsolete -locations relative
+        # -locations none: source line numbers in .ts files churn on every edit
+        # and make i18n/*.ts conflict across PRs. Translators still see context
+        # and source text; they lose jump-to-source in Qt Linguist.
+        LUPDATE_OPTIONS -no-obsolete -locations none
     )
     if(NOT TARGET update_translations AND TARGET drift_lupdate)
         add_custom_target(update_translations DEPENDS drift_lupdate)
