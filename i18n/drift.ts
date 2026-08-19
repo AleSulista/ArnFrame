@@ -4,7 +4,7 @@
 <context>
     <name>AddonManager</name>
     <message>
-        <location filename="../src/models/AddonManager.cpp" line="+273"/>
+        <location filename="../src/models/AddonManager.cpp" line="+274"/>
         <source>Automatic (recommended)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -426,7 +426,7 @@
 <context>
     <name>AppController</name>
     <message>
-        <location filename="../src/models/AppController.cpp" line="+1554"/>
+        <location filename="../src/models/AppController.cpp" line="+1579"/>
         <source>Media removed</source>
         <translation type="unfinished"></translation>
     </message>
@@ -471,12 +471,12 @@
     </message>
     <message>
         <location line="+133"/>
-        <location line="+8765"/>
+        <location line="+8817"/>
         <source>New project</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-8764"/>
+        <location line="-8816"/>
         <source>Open project</source>
         <translation type="unfinished"></translation>
     </message>
@@ -589,18 +589,18 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+7216"/>
+        <location line="+7253"/>
         <source>Mark work area in</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-7215"/>
-        <location line="+7229"/>
+        <location line="-7252"/>
+        <location line="+7266"/>
         <source>Mark work area out</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-7228"/>
+        <location line="-7265"/>
         <source>Go to work area in</source>
         <translation type="unfinished"></translation>
     </message>
@@ -611,12 +611,12 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+7252"/>
+        <location line="+7289"/>
         <source>Clear work area</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-7251"/>
+        <location line="-7288"/>
         <source>Loop work area playback</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1124,12 +1124,12 @@
         </translation>
     </message>
     <message>
-        <location line="-3151"/>
+        <location line="-3175"/>
         <source>No audio output devices were found, so playback will be silent.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+3242"/>
+        <location line="+3266"/>
         <source>Creating captions…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1736,7 +1736,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+69"/>
+        <location line="+106"/>
         <source>Add audio effect</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1937,12 +1937,12 @@
         </translation>
     </message>
     <message>
-        <location line="+1575"/>
+        <location line="+1627"/>
         <source>Exporting…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-1543"/>
+        <location line="-1595"/>
         <source>Nudge selection</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1954,12 +1954,12 @@
     <message>
         <location line="+858"/>
         <location line="+30"/>
-        <location line="+632"/>
+        <location line="+684"/>
         <source>That save location isn’t valid</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-658"/>
+        <location line="-710"/>
         <source>Already saving</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1989,7 +1989,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+255"/>
+        <location line="+270"/>
         <source>No recovery file found</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2004,7 +2004,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+229"/>
+        <location line="+266"/>
         <source>Export already in progress</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2742,22 +2742,22 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+18"/>
+        <location line="+19"/>
         <source>Open Project</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+25"/>
+        <location line="+26"/>
         <source>Save Project</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+11"/>
+        <location line="+12"/>
         <source>Save Shareable Copy</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+111"/>
+        <location line="+112"/>
         <source>Projects</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2940,36 +2940,36 @@
     <name>EffectCatalog</name>
     <message>
         <location filename="../src/engine/EffectCatalog.cpp" line="+43"/>
-        <location line="+108"/>
+        <location line="+110"/>
         <source>Color</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-108"/>
+        <location line="+109"/>
+        <source>Glitch &amp; Distortion</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-107"/>
+        <location line="+108"/>
+        <source>Retro / Analog</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="-106"/>
         <location line="+107"/>
-        <source>Glitch &amp; Distortion</source>
+        <source>Dreamy &amp; Stylish</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location line="-105"/>
         <location line="+106"/>
-        <source>Retro / Analog</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="-104"/>
-        <location line="+105"/>
-        <source>Dreamy &amp; Stylish</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location line="-103"/>
-        <location line="+104"/>
         <source>Impact</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-102"/>
+        <location line="-104"/>
         <source>Blurs &amp; Distortions</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2981,6 +2981,11 @@
     <message>
         <location line="+2"/>
         <source>Beauty &amp; Makeup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>Face Props</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3108,7 +3113,7 @@
 <context>
     <name>EffectsInspector</name>
     <message>
-        <location filename="../src/qml/components/properties/EffectsInspector.qml" line="+95"/>
+        <location filename="../src/qml/components/properties/EffectsInspector.qml" line="+115"/>
         <source>Face tracking</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3120,6 +3125,11 @@
     <message>
         <location line="+15"/>
         <source>This clip was scanned before makeup was supported. Re-detect faces to enable the Beauty effects.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+15"/>
+        <source>This clip was scanned before 3D face mesh was supported. Re-detect faces to enable the 3D Face Mesh effect.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3214,7 +3224,23 @@
     </message>
     <message>
         <location line="+34"/>
+        <location line="+38"/>
         <source>Choose %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-20"/>
+        <source>: (none)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+15"/>
+        <source>Choose file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+18"/>
+        <source>Clear</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -3577,7 +3603,7 @@
 <context>
     <name>FileDialogs</name>
     <message>
-        <location filename="../src/models/FileDialogs.cpp" line="+57"/>
+        <location filename="../src/models/FileDialogs.cpp" line="+83"/>
         <source>Untitled</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4000,7 +4026,7 @@
 <context>
     <name>Main</name>
     <message>
-        <location filename="../src/qml/Main.qml" line="+305"/>
+        <location filename="../src/qml/Main.qml" line="+314"/>
         <source>Export finished.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4486,7 +4512,7 @@ Quality: renders and shows every single frame, silently and slower than real tim
     </message>
     <message>
         <location line="+5"/>
-        <location line="+351"/>
+        <location line="+355"/>
         <location line="+3"/>
         <location line="+32"/>
         <location line="+10"/>
@@ -4495,7 +4521,7 @@ Quality: renders and shows every single frame, silently and slower than real tim
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-404"/>
+        <location line="-408"/>
         <source>project manifest is corrupt</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4545,7 +4571,7 @@ Quality: renders and shows every single frame, silently and slower than real tim
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+81"/>
+        <location line="+85"/>
         <source>cannot compress %1</source>
         <translation type="unfinished"></translation>
     </message>

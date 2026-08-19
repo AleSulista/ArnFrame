@@ -9,6 +9,7 @@
 // public API — do not include from outside src/engine.
 
 #include "GpuEffectDefinition.h"
+#include "ModelAsset.h"
 #include "core/Time.h"
 
 #include <QByteArray>
@@ -21,6 +22,7 @@
 #include <QSize>
 #include <QString>
 #include <QVariant>
+#include <QVector>
 
 #include <QThread>
 
@@ -44,6 +46,7 @@ struct GlTarget
     std::unique_ptr<QOpenGLFramebufferObject> fbo;
     int width = 0;
     int height = 0;
+    bool hasDepth = false;
 
     GlTarget() = default;
     GlTarget(GlTarget &&) noexcept = default;
@@ -54,6 +57,18 @@ struct GlTarget
     bool isValid() const { return fbo && fbo->isValid(); }
     GLuint texture() const { return fbo ? fbo->texture() : 0; }
     QSize size() const { return QSize(width, height); }
+};
+
+// GPU upload of a ModelAsset. Owned by GlRuntime::models; torn down in shutdown().
+struct GlModelGpu
+{
+    QString key; // "absolutePath:mtimeMs"
+    GLuint vao = 0;
+    GLuint vbo = 0;
+    GLuint ibo = 0;
+    QVector<GLuint> textures; // parallel to ModelAsset::images
+    std::shared_ptr<const ModelAsset> cpu;
+    size_t vramBytes = 0;
 };
 
 struct CompiledPass
@@ -86,6 +101,40 @@ public:
     std::map<QString, CompiledEffect> programs;
     std::map<QString, GLuint> staticTextures; // absolute path -> GL texture
 
+    // Face-prop GPU uploads. Bounded LRU; destroyed in shutdown() alongside staticTextures.
+    struct ModelCache
+    {
+        std::list<GlModelGpu> lru;
+        std::unordered_map<QString, std::list<GlModelGpu>::iterator> index;
+        size_t totalBytes = 0;
+        static constexpr size_t kMaxModels = 6;
+        static constexpr size_t kMaxBytes = 192ull * 1024 * 1024;
+    };
+    ModelCache models;
+
+    // Static UV sphere for head-proxy occlusion. Built once on first model3d draw.
+    struct HeadProxy
+    {
+        GLuint vao = 0;
+        GLuint vbo = 0;
+        GLuint ibo = 0;
+        int indexCount = 0;
+    };
+    HeadProxy headProxy;
+
+    // Warped MediaPipe face mesh. VBO is STREAM-updated every frame; IBO is STATIC and rebuilt
+    // when the rest-pose .bin path changes. Destroyed with the other model GL objects.
+    struct FaceMeshGpu
+    {
+        GLuint vao = 0;
+        GLuint vbo = 0;
+        GLuint ibo = 0;
+        int indexCount = 0;
+        int vertexCount = 0;
+        QString path;
+    };
+    FaceMeshGpu faceMesh;
+
     // A QOpenGLContext has thread affinity and can only be made current on the
     // thread it lives on, but GL work arrives from several threads (the
     // compositor worker, the export job, tools and tests). So the context lives
@@ -104,9 +153,10 @@ public:
     // Compiled programs are cached by key + source signature.
     CompiledEffect *compile(const QString &cacheKey, const drift::GpuEffectDefinition &gpu);
 
-    // Framebuffers are recycled by size: allocating a fresh FBO per effect per
-    // frame churns GPU memory during steady-state playback.
-    GlTarget acquireTarget(int width, int height);
+    // Framebuffers are recycled by size (and depth attachment): allocating a fresh FBO per
+    // effect per frame churns GPU memory during steady-state playback. wantDepth is only set
+    // for the model3d overlay — every other caller keeps the default.
+    GlTarget acquireTarget(int width, int height, bool wantDepth = false);
     void releaseTarget(GlTarget &&target);
 
     // glFinish then read the FBO. Apple's GL can hand toImage() a half-resolved
@@ -130,6 +180,9 @@ public:
     // Used for the compositor's own shaders, which are not package-defined.
     QOpenGLShaderProgram *builtinProgram(const QString &id, const char *vertexSource,
                                          const char *fragmentSource);
+    // `geom` may be nullptr. Cache key is `id` alone — do not reuse an id with different sources.
+    QOpenGLShaderProgram *builtinProgram(const QString &id, const char *vertexSource,
+                                         const char *fragmentSource, const char *geom);
 
     // Tear down GL objects and stop the GL thread. Called at app exit.
     void shutdown();

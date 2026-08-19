@@ -4,14 +4,16 @@
 #include <QList>
 #include <QPointF>
 #include <QString>
+#include <QVector3D>
 
 #include <memory>
 
 namespace drift {
 
-// Slices of FaceAnchors::contour. The loops a cosmetic shader needs are kept; the rest of the
-// 478-point mesh still is not, because a baked track of every vertex is an order of magnitude
-// larger again and nothing draws with it.
+// Slices of FaceAnchors::contour. The loops a cosmetic shader needs are kept as a compact
+// 128-point subset. The full 468-point mesh (no iris rings) is stored separately on
+// FaceAnchors::mesh so the 3D face-mesh effect can warp; the 10 iris-ring vertices the
+// attention head adds are still dropped, because nothing draws with them.
 //
 // Every loop is closed: the last point connects back to the first. The eyelid arcs are slices of
 // the eye rings rather than separate loops, so their points are stored once.
@@ -38,6 +40,10 @@ inline constexpr Span kEyeLeftUpper{76, 9};
 inline constexpr Span kEyeRightUpper{92, 9};
 
 } // namespace contour
+
+// MediaPipe's 468-vertex mesh without the attention-head iris rings. FaceAnchors::mesh is empty or
+// this long — never a partial set — so a sidecar can omit the blob entirely on older tracks.
+inline constexpr int kFaceMeshPoints = 468;
 
 // Everything a face shader needs, in normalized frame coordinates (0..1, top-left origin).
 struct FaceAnchors
@@ -85,6 +91,11 @@ struct FaceAnchors
     double poseOx = 0.0;    // origin (eye midpoint), width-normalized 3D
     double poseOy = 0.0;
     double poseOz = 0.0;
+
+    // Full MediaPipe face mesh, width-normalized (uv.x, uv.y*aspect, z). Same units as poseOx/Oy/Oz.
+    // Empty or exactly 468. Never partial.
+    bool hasMesh = false;
+    QList<QVector3D> mesh;
 };
 
 // MediaPipe's face mesh on ONNX Runtime: YuNet v2 finds faces, face_landmark_with_attention turns

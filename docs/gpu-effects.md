@@ -20,7 +20,7 @@ Search order: `DRIFT_EFFECTS_DIR`, `<applicationDir>/effects`, `<AppDataLocation
 |---|---|
 | `id` / `displayName` / `category` / `order` | Catalog metadata |
 | `thumbnail` | Optional image path (relative to package, or absolute). Defaults to `thumbnail.png` when that file exists |
-| `backend` | `"gpu"` |
+| `backend` | `"gpu"` or `"model3d"` |
 | `parameters[]` | User-facing uniforms — see the parameter types below |
 | `fixedParams` | Hidden uniforms (colors as `#rrggbb`, enums as strings) |
 | `requires` | `"face"` to receive the baked face anchors (see below). Any other value is a parse error |
@@ -33,11 +33,11 @@ Search order: `DRIFT_EFFECTS_DIR`, `<applicationDir>/effects`, `<AppDataLocation
 | `float` (default) | `float` | `minValue`/`maxValue`/`defaultValue`; keyframable |
 | `bool` / `boolean` | `float` (0 or 1) | Rendered as a switch; not keyframable |
 | `color` / `colour` | `vec3` | `defaultValue` is a `"#rrggbb"` string; rendered as a swatch |
+| `file` | *(not bound)* | Absolute path string; `fileFilters` for the picker. Used by `model3d` |
 
 Colour parameters bind as **`vec3`** — alpha is dropped, so declare a separate opacity float if you
 need one. Any alpha in `defaultValue` is discarded at parse time and the value is normalized to six
-digits. Colours are **not keyframable**: the whole keyframe stack is typed `double`, and packing a
-shade into one would interpolate through desaturated mud in sRGB.
+digits. Colours and file paths are **not keyframable**: the whole keyframe stack is typed `double`.
 
 Pass inputs: `source_texture` (+ optional `index`), `buffer` (+ `id`), or `texture` (+ `id`). Multiple inputs bind as `u_currentTexture` (unit 0) and `u_texture1`…  
 Pass outputs: `buffer` or `canvas`.
@@ -99,10 +99,30 @@ enough to redistribute as an addon. If that becomes a burden, the fix is an `"in
 concatenated at parse time in `loadGpuPipeline` — the program cache keys off the materialized
 source, so `GlRuntime` would need no change.
 
-**Sidecar compatibility.** Face tracks are format v2; v1 files still load, with `hasContours` and
-`hasPose` false. That is why the guard above is a pass-through rather than an error, and why the
-inspector offers a re-detect when a Beauty effect meets an older track.
+**Sidecar compatibility.** Face tracks are format v2; v1 files still load, with `hasContours`,
+`hasPose`, and `hasMesh` false. Optional v2 blobs: `"c"` (contours), `"p"` (pose), `"m"` (468×3
+mesh, uint16 packed like contours). Missing `"m"` is not an error — the 3D Face Mesh effect
+pass-throughs until the clip is re-detected. Format version stays 2; do not bump for the mesh blob.
 
 ## Special case: time_echo
 
 History frames are still decoded in `FrameCompositor`; blending runs on the GPU via `GpuEffectExecutor::blendTimeEcho` (CPU fallback if GL is unavailable).
+
+## 3D face mesh (`backend: "model3d"`)
+
+Not a fragment pipeline — there is no `.frag`. `face_mesh_3d` declares parameters only; the engine
+warps the rest-pose Surrey Face Model (`sfm_face.bin`) onto the baked 468-point track and composites
+it over the frame.
+
+- Orthographic MVP from `(faceCenter, faceRx, pose, user params, aspect)` — never a pixel size, so
+  preview at `renderScale 0.5` and export at 1.0 produce a bit-identical matrix. Depth maps as
+  `z_ndc = −z_wn / 4` so `+forward` (toward the viewer) is nearer in the GL depth buffer.
+- Lighting is **screen-space** (fixed relative to the frame) and approximate Blinn-Phong in sRGB —
+  the rest of the compositor is untagged 8-bit, so linearizing the mesh alone would look foreign.
+- Translucent fill plus a barycentric wireframe (`fillOpacity` / `wireframe` / `wireColor` /
+  `wireWidth`). Fill+wire uses a geometry shader.
+- `warpMesh` is a fixed param. The overlay writes depth (clip-z flipped so MediaPipe nearer-is-smaller
+  wins `GL_LESS`; no in-buffer blend) so the nearest surface wins. Draw is two-sided: a real frontal
+  pose has `forward.z < 0` (half-turn about X), which reverses winding versus an identity quaternion,
+  and `GL_BACK` would cull the whole face. Without `hasMesh`, the effect skips.
+- Failure mode: skip the effect, keep the frame. Empty rest-mesh path is silent.

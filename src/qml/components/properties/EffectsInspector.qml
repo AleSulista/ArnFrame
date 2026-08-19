@@ -18,7 +18,12 @@ Item {
     }
     readonly property bool hasSelection: !!clipData && Object.keys(clipData).length > 0
     readonly property string clipKind: hasSelection ? (clipData.kind || "") : ""
-    readonly property var selectedEffects: EditorState.selectedClipEffects
+    // Depend on clipDataRevision the same way clipData does: the Repeater is keyed on
+    // selectedEffects.length, so a same-length param edit would otherwise leave stale delegates.
+    readonly property var selectedEffects: {
+        void clipDataRevision
+        return EditorState.selectedClipEffects
+    }
 
     height: contentCol.height
     implicitHeight: contentCol.height
@@ -65,12 +70,27 @@ Item {
                 const data = EditorState.selectedClipData
                 return data && data.faceTrackHasContours === true
             }
+            // Same idea as contours: a pre-mesh track still drives warps and makeup, but the 3D
+            // Face Mesh effect has nothing to warp until the clip is scanned again.
+            property bool trackHasMesh: {
+                const data = EditorState.selectedClipData
+                return data && data.faceTrackHasMesh === true
+            }
             property bool usesBeautyEffect: {
                 root.clipDataRevision
                 const effects = EditorState.selectedClipEffects || []
                 for (let i = 0; i < effects.length; i++) {
                     if ((effects[i].catalogId || "").indexOf("face_") === 0
                             && beautyIds.indexOf(effects[i].catalogId) >= 0)
+                        return true
+                }
+                return false
+            }
+            property bool usesMeshEffect: {
+                root.clipDataRevision
+                const effects = EditorState.selectedClipEffects || []
+                for (let i = 0; i < effects.length; i++) {
+                    if ((effects[i].catalogId || "") === "face_mesh_3d")
                         return true
                 }
                 return false
@@ -119,6 +139,21 @@ Item {
                          && !faceSection.trackHasContours && faceSection.usesBeautyEffect
                          && !EditorState.faceDetecting
                 text: qsTr("This clip was scanned before makeup was supported. Re-detect faces to enable the Beauty effects.")
+                color: Theme.warning
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+            }
+
+            // The 3D Face Mesh effect needs the 468-vertex blob, which tracks baked by older
+            // builds do not carry. It skips drawing in that case, so without this the effect
+            // reads as broken rather than as needing one more scan.
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                visible: faceSection.faceReady && faceSection.hasTrack
+                         && !faceSection.trackHasMesh && faceSection.usesMeshEffect
+                         && !EditorState.faceDetecting
+                text: qsTr("This clip was scanned before 3D face mesh was supported. Re-detect faces to enable the 3D Face Mesh effect.")
                 color: Theme.warning
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeXs
@@ -367,6 +402,59 @@ Item {
                                     onEdited: value => EditorState.setEffectColorParam(
                                                   EditorState.selectedTrack, EditorState.selectedClip,
                                                   effectCard.index, paramRow.paramData.key, value)
+                                }
+                            }
+
+                            // File paths (face-prop .glb): basename + Choose / Clear. Not keyframed.
+                            Row {
+                                visible: paramRow.paramData.type === "file"
+                                width: parent.width
+                                spacing: 8
+                                Text {
+                                    width: parent.width - 148
+                                    elide: Text.ElideMiddle
+                                    text: {
+                                        const p = paramRow.paramData.value || ""
+                                        if (!p)
+                                            return paramRow.paramData.label + qsTr(": (none)")
+                                        const parts = String(p).split(/[/\\]/)
+                                        return parts[parts.length - 1] || p
+                                    }
+                                    color: paramRow.paramData.missing ? Theme.destructive
+                                                                     : Theme.mutedForeground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeXs
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                IconButton {
+                                    glyph: Theme.icons.folder
+                                    variant: "ghost"
+                                    buttonSize: 22
+                                    iconSize: 12
+                                    tooltip: qsTr("Choose file")
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    onClicked: {
+                                        const filters = paramRow.paramData.fileFilters || ["All files (*)"]
+                                        const url = FileDialogs.openFile(
+                                            qsTr("Choose %1").arg(paramRow.paramData.label), filters)
+                                        if (!url || url.toString() === "")
+                                            return
+                                        EditorState.setEffectStringParam(
+                                            EditorState.selectedTrack, EditorState.selectedClip,
+                                            effectCard.index, paramRow.paramData.key, url)
+                                    }
+                                }
+                                IconButton {
+                                    glyph: Theme.icons.x
+                                    variant: "ghost"
+                                    buttonSize: 22
+                                    iconSize: 12
+                                    tooltip: qsTr("Clear")
+                                    enabled: !!(paramRow.paramData.value)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    onClicked: EditorState.setEffectStringParam(
+                                                   EditorState.selectedTrack, EditorState.selectedClip,
+                                                   effectCard.index, paramRow.paramData.key, "")
                                 }
                             }
 

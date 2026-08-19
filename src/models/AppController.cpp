@@ -29,6 +29,7 @@
 #include "engine/MediaWaveform.h"
 #include "engine/FaceLandmarker.h"
 #include "engine/FaceTrack.h"
+#include "engine/ModelAsset.h"
 #include "engine/ReverseProxyCache.h"
 #include "engine/ReverseRenderer.h"
 #include "engine/Sam2Segmenter.h"
@@ -408,6 +409,25 @@ bool faceTrackHasContours(const QString &path)
         for (const drift::FaceAnchors &face : frame.faces) {
             if (face.valid)
                 return face.hasContours;
+        }
+    }
+    return false;
+}
+
+// Same shape as faceTrackHasContours: a track baked before the 468-vertex mesh existed still
+// drives warps and makeup, so it cannot be treated as missing — but the 3D face-mesh effect
+// has nothing to warp, and saying so is what stops that reading as a broken effect.
+bool faceTrackHasMesh(const QString &path)
+{
+    if (path.isEmpty())
+        return false;
+    const auto track = drift::loadFaceTrackCached(path);
+    if (!track)
+        return false;
+    for (const drift::FaceTrackFrame &frame : track->frames) {
+        for (const drift::FaceAnchors &face : frame.faces) {
+            if (face.valid)
+                return face.hasMesh;
         }
     }
     return false;
@@ -904,12 +924,10 @@ drift::KeyframeTrack<double> *keyframeTrackForProp(drift::Clip &clip, const QStr
 
     drift::Effect &effect = clip.effects[effectIndex];
 
-    // Colour params are not animatable: the track type is double all the way down. Refusing here
-    // as well as withholding the `prop` in effectToMap means a hand-edited project cannot conjure
-    // one either.
+    // Colour and file params are not animatable: the track type is double all the way down.
     if (const EffectPresetEntry *def = effectDefForId(effect.catalogId)) {
         for (const drift::EffectParamSpec &spec : def->meta.parameters) {
-            if (spec.key == paramKey && spec.isColor())
+            if (spec.key == paramKey && (spec.isColor() || spec.isFilePath()))
                 return nullptr;
         }
     }
@@ -1069,11 +1087,17 @@ QVariantMap effectToMap(const drift::Effect &effect, int effectIndex, drift::Tim
                 {QStringLiteral("type"), paramDef.typeName()},
                 {QStringLiteral("value"), value},
             };
-            // Colours carry no `prop`, which is what the keyframe strip addresses a parameter by.
-            // Withholding it makes an animated colour structurally unreachable rather than merely
-            // discouraged — the whole keyframe stack is typed double, and packing a shade into one
-            // would interpolate through desaturated mud.
-            if (!paramDef.isColor()) {
+            if (paramDef.isFilePath()) {
+                param.insert(QStringLiteral("fileFilters"), paramDef.fileFilters);
+                const QString path = value.toString();
+                param.insert(QStringLiteral("missing"),
+                             !path.isEmpty() && !QFileInfo::exists(path));
+                const QString warn = drift::modelAssetWarning(path);
+                if (!warn.isEmpty())
+                    param.insert(QStringLiteral("warning"), warn);
+            }
+            // Colours and file paths carry no `prop`: the keyframe stack is typed double.
+            if (!paramDef.isColor() && !paramDef.isFilePath()) {
                 param.insert(QStringLiteral("prop"),
                              QStringLiteral("fx.%1.%2").arg(effectIndex).arg(paramDef.key));
                 param.insert(QStringLiteral("keyframes"),
@@ -1487,6 +1511,7 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("mask"), maskToMap(clip.mask)},
         {QStringLiteral("hasFaceTrack"), !clip.faceTrackPath.isEmpty()},
         {QStringLiteral("faceTrackHasContours"), faceTrackHasContours(clip.faceTrackPath)},
+        {QStringLiteral("faceTrackHasMesh"), faceTrackHasMesh(clip.faceTrackPath)},
         {QStringLiteral("start"), drift::usToSeconds(clip.timelineStart)},
         {QStringLiteral("duration"), drift::usToSeconds(clip.timelineDuration)},
         {QStringLiteral("inPoint"), drift::usToSeconds(clip.srcIn)},
@@ -8677,6 +8702,43 @@ void AppController::setEffectColorParam(int trackIndex, int clipIndex, int effec
     finishEdit(tr("Effect updated"));
 }
 
+void AppController::setEffectStringParam(int trackIndex, int clipIndex, int effectIndex,
+                                         const QString &key, const QUrl &url)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (effectIndex < 0 || effectIndex >= clip.effects.size())
+        return;
+
+    const EffectPresetEntry *def = effectDefForId(clip.effects[effectIndex].catalogId);
+    if (!def)
+        return;
+    const auto specIt = std::find_if(def->meta.parameters.cbegin(), def->meta.parameters.cend(),
+                                     [&](const drift::EffectParamSpec &p) { return p.key == key; });
+    if (specIt == def->meta.parameters.cend() || !specIt->isFilePath())
+        return;
+
+    // Empty URL clears the path (the inspector's clear button). Anything else must resolve to a
+    // local file — portal picks and plain file:// both come through as QUrl.
+    QString path;
+    if (!url.isEmpty()) {
+        path = url.isLocalFile() ? url.toLocalFile() : url.toString(QUrl::PreferLocalFile);
+        if (path.isEmpty())
+            return;
+    }
+
+    const drift::Project before = m_project;
+    clip.effects[effectIndex].parameters.insert(key, path);
+    pushProjectEdit(before, QStringLiteral("Edit effect"));
+    finishEdit(QStringLiteral("Effect updated"));
+}
+
 QVariantList AppController::audioEffectCatalog() const
 {
     QVariantList out;
@@ -10550,6 +10612,21 @@ void AppController::remapProjectPaths(const QHash<QString, QString> &remap)
         for (drift::Clip &clip : track.clips) {
             repoint(clip.mask.mattePath);
             repoint(clip.faceTrackPath);
+            for (drift::Effect &effect : clip.effects) {
+                const EffectPresetEntry *def = effectDefForId(effect.catalogId);
+                if (!def)
+                    continue;
+                for (const drift::EffectParamSpec &spec : def->meta.parameters) {
+                    if (!spec.isFilePath())
+                        continue;
+                    auto it = effect.parameters.find(spec.key);
+                    if (it == effect.parameters.end())
+                        continue;
+                    QString path = it.value().toString();
+                    if (repoint(path))
+                        it.value() = path;
+                }
+            }
             if (repoint(clip.path)) {
                 // Cache renders keyed on the old path; AssetLibrary and
                 // restoreFilmstripsAfterLoad regenerate them for the new one.

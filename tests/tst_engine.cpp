@@ -3,6 +3,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QMatrix4x4>
 #include <QPainter>
 #include <QProcess>
 #include <QScopeGuard>
@@ -10,6 +12,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QVector3D>
+#include <QVector4D>
 #include <atomic>
 
 #include <cmath>
@@ -34,6 +38,11 @@
 #include "engine/EffectPackageLoader.h"
 #include "engine/EffectProcessor.h"
 #include "engine/FaceTrack.h"
+#include "engine/FaceMesh.h"
+#include "engine/FaceModelTransform.h"
+#include "engine/ModelAsset.h"
+#include "engine/GlModelRenderer.h"
+#include "engine/GlRuntime.h"
 #include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
 #include "engine/FrameCompositor.h"
@@ -41,7 +50,6 @@
 #include "engine/GpuEffectExecutor.h"
 #include "engine/GpuPackageParse.h"
 
-#include <QJsonDocument>
 #include "engine/MaskApplier.h"
 #include "engine/MatteWriter.h"
 #include "engine/ReverseProxyCache.h"
@@ -71,8 +79,22 @@ private slots:
     void faceTrackV2CarriesContoursAndPose();
     void faceTrackV1FileStillLoads();
     void smoothFaceTrackHandlesMissingBlocks();
+    void faceTrackV2CarriesMesh();
+    void smoothFaceTrackHandlesMissingMesh();
     void applyFaceUniformsEmitsContourArrays();
     void colorParametersParseAndResolve();
+    void modelAssetLoadsCubeGlb();
+    void modelAssetRejectsDraco();
+    void modelAssetRejectsCorrupt();
+    void faceModelMvpIsResolutionIndependent();
+    void faceModelMvpMapsUpToDecreasingNdcY();
+    void faceModelDoesNotLeakGlState();
+    void faceModelFillWireDoesNotLeakGlState();
+    void faceMesh3dEffectPackageLoads();
+    void faceMeshRestLoadsAndWarps();
+    void faceMesh3dPassThroughWithoutMesh();
+    void faceMesh3dDrawsWarpedOverlay();
+    void faceMeshParamsSkipHeadProxy();
     void beautyEffectsPassThroughWithoutContours();
     void emojiCatalogNeedsFontAddon();
     void emojiRasterisesGlyph();
@@ -377,6 +399,20 @@ drift::FaceAnchors makeFullAnchors(double shift)
     return a;
 }
 
+// Mesh is kept out of makeFullAnchors so the minute-size assertion still measures the
+// contours-and-pose sidecar, not the 468-vertex blob.
+drift::FaceAnchors makeFullAnchorsWithMesh(double shift)
+{
+    drift::FaceAnchors a = makeFullAnchors(shift);
+    a.mesh.reserve(drift::kFaceMeshPoints);
+    for (int i = 0; i < drift::kFaceMeshPoints; ++i) {
+        a.mesh.append(QVector3D(float(0.3 + shift + i * 0.001), float(0.4 + i * 0.002),
+                                float(0.01 + i * 0.0001)));
+    }
+    a.hasMesh = true;
+    return a;
+}
+
 } // namespace
 
 void EngineTest::faceTrackV2CarriesContoursAndPose()
@@ -471,13 +507,16 @@ void EngineTest::faceTrackV1FileStillLoads()
     QVERIFY(qAbs(a.faceCenter.x() - 0.25) < 1e-6);
     QVERIFY(!a.hasContours);
     QVERIFY(!a.hasPose);
+    QVERIFY(!a.hasMesh);
     QVERIFY(a.contour.isEmpty());
+    QVERIFY(a.mesh.isEmpty());
 
     // Still interpolates, so the warp effects are unaffected.
     const drift::FaceAnchors mid = loaded.sample(drift::kUsPerSecond / 60, 0);
     QVERIFY(mid.valid);
     QVERIFY(qAbs(mid.faceCenter.x() - 0.30) < 1e-4);
     QVERIFY(!mid.hasContours);
+    QVERIFY(!mid.hasMesh);
 
     // A version from the future is still refused, since we cannot guess what it holds.
     QFile future(dir.filePath(QStringLiteral("future.json")));
@@ -530,6 +569,106 @@ void EngineTest::smoothFaceTrackHandlesMissingBlocks()
 
     // The jitter is gone from the interior frames, which is what smoothing is for.
     QVERIFY(qAbs(track.frames.at(2).faces.at(0).faceCenter.x() - 0.4) < 0.015);
+}
+
+// The 468-vertex mesh is an optional v2 field: round-trip it, interpolate it, and keep older
+// sidecars (v2 without `"m"`, and v1) loading with hasMesh false rather than failing.
+void EngineTest::faceTrackV2CarriesMesh()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("mesh.json"));
+
+    drift::FaceTrack track;
+    track.fps = 30;
+    for (int i = 0; i < 2; ++i) {
+        drift::FaceTrackFrame frame;
+        frame.faces.append(makeFullAnchorsWithMesh(0.1 * i));
+        track.frames.append(frame);
+    }
+
+    QString error;
+    QVERIFY2(drift::writeFaceTrack(path, track, &error), qPrintable(error));
+    drift::FaceTrack loaded;
+    QVERIFY2(drift::readFaceTrack(path, &loaded, &error), qPrintable(error));
+
+    const drift::FaceAnchors &a = loaded.frames.at(0).faces.at(0);
+    QVERIFY(a.hasMesh);
+    QCOMPARE(a.mesh.size(), drift::kFaceMeshPoints);
+    // Same uint16 quantize as contours, so a point is good to about 6e-5.
+    for (int i = 0; i < drift::kFaceMeshPoints; ++i) {
+        QVERIFY(qAbs(a.mesh.at(i).x() - (0.3f + i * 0.001f)) < 1e-4);
+        QVERIFY(qAbs(a.mesh.at(i).y() - (0.4f + i * 0.002f)) < 1e-4);
+        QVERIFY(qAbs(a.mesh.at(i).z() - (0.01f + i * 0.0001f)) < 1e-4);
+    }
+
+    const drift::FaceAnchors mid = loaded.sample(drift::kUsPerSecond / 60, 0);
+    QVERIFY(mid.valid);
+    QVERIFY(mid.hasMesh);
+    QCOMPARE(mid.mesh.size(), drift::kFaceMeshPoints);
+    QVERIFY(qAbs(mid.mesh.at(0).x() - 0.35f) < 1e-3);
+    QVERIFY(qAbs(mid.mesh.at(0).z() - 0.01f) < 1e-3);
+
+    // A v2 sidecar baked before mesh existed is still a valid v2 file: missing "m" is not an
+    // error, it just means the 3D face-mesh effect has nothing to warp.
+    drift::FaceTrack noMesh;
+    noMesh.fps = 30;
+    drift::FaceTrackFrame noMeshFrame;
+    noMeshFrame.faces.append(makeFullAnchors(0.0));
+    noMesh.frames.append(noMeshFrame);
+    const QString noMeshPath = dir.filePath(QStringLiteral("v2-nomesh.json"));
+    QVERIFY2(drift::writeFaceTrack(noMeshPath, noMesh, &error), qPrintable(error));
+    drift::FaceTrack loadedNoMesh;
+    QVERIFY2(drift::readFaceTrack(noMeshPath, &loadedNoMesh, &error), qPrintable(error));
+    QVERIFY(!loadedNoMesh.frames.at(0).faces.at(0).hasMesh);
+    QVERIFY(loadedNoMesh.frames.at(0).faces.at(0).mesh.isEmpty());
+
+    const QByteArray v1 =
+        "{\"version\":1,\"fps\":30,\"startSrcUs\":0,\"frames\":["
+        "[[1,0.2,0.4,0.3,0.4,0.25,0.45,0.25,0.5,0.22,0.5,0.28,0.5,0.25,0.6,0.25,0.3,0.25,0.5,"
+        "0.1,0.12,0.2,0.02,0.9]]]}";
+    const QString v1Path = dir.filePath(QStringLiteral("v1-mesh.json"));
+    QFile v1File(v1Path);
+    QVERIFY(v1File.open(QIODevice::WriteOnly));
+    v1File.write(v1);
+    v1File.close();
+    drift::FaceTrack loadedV1;
+    QVERIFY2(drift::readFaceTrack(v1Path, &loadedV1, &error), qPrintable(error));
+    QVERIFY(!loadedV1.frames.at(0).faces.at(0).hasMesh);
+    QVERIFY(loadedV1.frames.at(0).faces.at(0).mesh.isEmpty());
+}
+
+// Mesh must average only across frames that have it, or a partly re-scanned clip blends a present
+// mesh with an empty neighbour and the warp jumps.
+void EngineTest::smoothFaceTrackHandlesMissingMesh()
+{
+    drift::FaceTrack track;
+    track.fps = 30;
+    for (int i = 0; i < 5; ++i) {
+        drift::FaceTrackFrame frame;
+        drift::FaceAnchors a = makeFullAnchorsWithMesh(0.0);
+        a.faceCenter = QPointF(0.4 + (i % 2 ? 0.02 : -0.02), 0.5);
+        if (i == 2) {
+            a.mesh.clear();
+            a.hasMesh = false;
+        }
+        frame.faces.append(a);
+        track.frames.append(frame);
+    }
+
+    drift::smoothFaceTrack(&track);
+
+    for (int i = 0; i < 5; ++i) {
+        const drift::FaceAnchors &a = track.frames.at(i).faces.at(0);
+        QVERIFY(a.valid);
+        if (i == 2) {
+            QVERIFY(!a.hasMesh);
+            QVERIFY(a.mesh.isEmpty());
+        } else {
+            QVERIFY(a.hasMesh);
+            QCOMPARE(a.mesh.size(), drift::kFaceMeshPoints);
+        }
+    }
 }
 
 // Contour loops travel as array uniforms rather than 256 named scalars; a v1 anchor must emit none
@@ -631,6 +770,540 @@ void EngineTest::colorParametersParseAndResolve()
     effect.parameters.insert(QStringLiteral("shade"), QStringLiteral("#123456"));
     QCOMPARE(resolvedEffectParameters(effect, *def).value(QStringLiteral("shade")).toString(),
              QStringLiteral("#123456"));
+}
+
+#ifndef DRIFT_TEST_DATA_DIR
+#define DRIFT_TEST_DATA_DIR "."
+#endif
+
+void EngineTest::modelAssetLoadsCubeGlb()
+{
+    const QString path = QStringLiteral(DRIFT_TEST_DATA_DIR "/cube.glb");
+    QVERIFY2(QFileInfo::exists(path), qPrintable(path));
+
+    QString warning;
+    const auto asset = drift::loadModelAsset(path, &warning);
+    QVERIFY2(asset, qPrintable(warning));
+    QCOMPARE(asset->vertexCount(), 8);
+    QCOMPARE(asset->indices.size(), 36);
+    // Normalised to one head-width: AABB x spans ±0.5.
+    QCOMPARE(asset->aabbMin.x(), -0.5f);
+    QCOMPARE(asset->aabbMax.x(), 0.5f);
+    QVERIFY(asset->aabbMin.y() >= -0.51f && asset->aabbMin.y() <= -0.49f);
+    QVERIFY(asset->aabbMax.y() >= 0.49f && asset->aabbMax.y() <= 0.51f);
+}
+
+void EngineTest::modelAssetRejectsDraco()
+{
+    // Minimal GLB whose JSON requires KHR_draco_mesh_compression. No mesh payload needed —
+    // the loader must refuse before touching accessors.
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString path = tmp.filePath(QStringLiteral("draco.glb"));
+
+    const QByteArray json =
+        R"({"asset":{"version":"2.0"},"extensionsRequired":["KHR_draco_mesh_compression"],)"
+        R"("buffers":[{"byteLength":0}],"scenes":[{"nodes":[]}],"scene":0})";
+    const int jsonPad = (4 - (json.size() % 4)) % 4;
+    QByteArray jsonChunk = json + QByteArray(jsonPad, ' ');
+    const quint32 total = 12 + 8 + quint32(jsonChunk.size());
+    QByteArray glb;
+    glb.append("glTF", 4);
+    auto le32 = [](quint32 v) {
+        char b[4];
+        b[0] = char(v & 0xff);
+        b[1] = char((v >> 8) & 0xff);
+        b[2] = char((v >> 16) & 0xff);
+        b[3] = char((v >> 24) & 0xff);
+        return QByteArray(b, 4);
+    };
+    glb += le32(2);
+    glb += le32(total);
+    glb += le32(quint32(jsonChunk.size()));
+    glb.append("JSON", 4);
+    glb += jsonChunk;
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write(glb);
+    f.close();
+
+    QString warning;
+    const auto asset = drift::loadModelAsset(path, &warning);
+    QVERIFY(asset == nullptr);
+    QVERIFY2(warning.contains(QStringLiteral("Draco"), Qt::CaseInsensitive), qPrintable(warning));
+}
+
+void EngineTest::modelAssetRejectsCorrupt()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString path = tmp.filePath(QStringLiteral("corrupt.glb"));
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write(QByteArray("glTF\x02\x00\x00\x00not-a-real-glb"));
+    f.close();
+
+    QString warning;
+    QVERIFY(drift::loadModelAsset(path, &warning) == nullptr);
+    QVERIFY(!warning.isEmpty());
+}
+
+void EngineTest::faceModelMvpIsResolutionIndependent()
+{
+    drift::FaceAnchors face;
+    face.valid = true;
+    face.hasPose = true;
+    face.faceCenter = QPointF(0.5, 0.5);
+    face.faceRx = 0.2;
+    face.faceRy = 0.24;
+    face.poseQx = 0.0;
+    face.poseQy = 0.0;
+    face.poseQz = 0.0;
+    face.poseQw = 1.0;
+    face.poseOx = 0.5;
+    face.poseOy = 0.5; // already width-normalized for a square frame
+    face.poseOz = 0.0;
+    face.poseScale = 0.2;
+
+    drift::FaceModelParams params;
+    params.scale = 1.0;
+
+    const double aspect = 1.0; // square
+    const QMatrix4x4 a = drift::faceModelMvp(face, params, aspect);
+    const QMatrix4x4 b = drift::faceModelMvp(face, params, aspect);
+    // Bit-identical for a fixed aspect — the WYSIWYG invariant. Pixel size never enters.
+    for (int i = 0; i < 16; ++i)
+        QCOMPARE(a.data()[i], b.data()[i]);
+
+    // Model ±0.5 x-corners at scale=1 with faceRx=0.2 → headBasis scales by 2*0.2=0.4,
+    // so model x=±0.5 maps to wn x = 0.5 ± 0.2 = 0.3 / 0.7, then NDC = 2*wn-1 = -0.4 / 0.4.
+    const QVector4D left = a * QVector4D(-0.5f, 0.f, 0.f, 1.f);
+    const QVector4D right = a * QVector4D(0.5f, 0.f, 0.f, 1.f);
+    QCOMPARE(left.x() / left.w(), float(2.0 * 0.3 - 1.0));
+    QCOMPARE(right.x() / right.w(), float(2.0 * 0.7 - 1.0));
+}
+
+void EngineTest::faceModelMvpMapsUpToDecreasingNdcY()
+{
+    drift::FaceAnchors face;
+    face.valid = true;
+    face.hasPose = true;
+    face.faceRx = 0.2;
+    face.faceRy = 0.24;
+    // Identity quaternion: right=+x, up=+y, fwd=+z in mesh space. Phase-1 pose encodes
+    // image-up as −y in uv, so for hasPose we use a quaternion that maps mesh +Y to −uv.y.
+    // With identity, mesh +Y goes to +wn.y; after wnToNdc that increases NDC y (toward the
+    // bottom of a top-left image). The fallback (no pose) basis uses up=(0,-1,0) explicitly.
+    face.hasPose = false;
+    face.faceCenter = QPointF(0.5, 0.5);
+    face.poseQw = 1.0;
+
+    drift::FaceModelParams params;
+    const double aspect = 1.0;
+    const QMatrix4x4 mvp = drift::faceModelMvp(face, params, aspect);
+    // Model "up" (+Y) must map to decreasing NDC y (toward image top / FBO v=0).
+    const QVector4D origin = mvp * QVector4D(0.f, 0.f, 0.f, 1.f);
+    const QVector4D upPt = mvp * QVector4D(0.f, 0.5f, 0.f, 1.f);
+    QVERIFY2((upPt.y() / upPt.w()) < (origin.y() / origin.w()),
+             "model +Y must map to decreasing NDC y");
+}
+
+void EngineTest::faceModelDoesNotLeakGlState()
+{
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("GPU effect executor unavailable");
+
+    const EffectPresetEntry *def = effectDefForId(QStringLiteral("face_mesh_3d"));
+    if (!def)
+        QSKIP("face_mesh_3d package missing from catalog");
+
+    QImage source(64, 64, QImage::Format_RGBA8888);
+    source.fill(QColor(100, 100, 100));
+
+    drift::FaceAnchors face = makeFullAnchorsWithMesh(0);
+    face.poseOx = 0.5;
+    face.poseOy = 0.5;
+    face.faceRx = 0.25;
+    face.faceRy = 0.3;
+
+    drift::Effect model;
+    model.catalogId = QStringLiteral("face_mesh_3d");
+    EffectProcessor::applyEffects(source, {model}, 0, {face});
+
+    // Brightness after a model3d step must still work — catches a leaked GL_DEPTH_TEST /
+    // glDepthMask that would make the fullscreen quad vanish.
+    const EffectPresetEntry *bright = effectDefForId(QStringLiteral("adjust.brightness"));
+    if (!bright)
+        QSKIP("adjust.brightness not in catalog");
+    drift::Effect brightness;
+    brightness.catalogId = bright->meta.id;
+    brightness.parameters.insert(QStringLiteral("brightness"), 0.5);
+    const QImage out = EffectProcessor::applyEffects(source, {brightness}, 0, {});
+    QVERIFY(!out.isNull());
+    QVERIFY(out.pixelColor(32, 32).red() != 100);
+}
+
+void EngineTest::faceModelFillWireDoesNotLeakGlState()
+{
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("GPU effect executor unavailable");
+
+    const EffectPresetEntry *def = effectDefForId(QStringLiteral("face_mesh_3d"));
+    if (!def)
+        QSKIP("face_mesh_3d package missing from catalog");
+
+    QImage source(64, 64, QImage::Format_RGBA8888);
+    source.fill(QColor(100, 100, 100));
+
+    drift::FaceAnchors face = makeFullAnchorsWithMesh(0);
+    face.poseOx = 0.5;
+    face.poseOy = 0.5;
+    face.faceRx = 0.25;
+    face.faceRy = 0.3;
+
+    drift::Effect model;
+    model.catalogId = QStringLiteral("face_mesh_3d");
+    model.parameters.insert(QStringLiteral("fillOpacity"), 0.4);
+    model.parameters.insert(QStringLiteral("wireframe"), 1);
+    const QImage overlay = EffectProcessor::applyEffects(source, {model}, 0, {face});
+    QVERIFY(!overlay.isNull());
+
+    const EffectPresetEntry *bright = effectDefForId(QStringLiteral("adjust.brightness"));
+    if (!bright)
+        QSKIP("adjust.brightness not in catalog");
+    drift::Effect brightness;
+    brightness.catalogId = bright->meta.id;
+    brightness.parameters.insert(QStringLiteral("brightness"), 0.5);
+    const QImage out = EffectProcessor::applyEffects(source, {brightness}, 0, {});
+    QVERIFY(!out.isNull());
+    QVERIFY(out.pixelColor(32, 32).red() != 100);
+}
+
+void EngineTest::faceMesh3dEffectPackageLoads()
+{
+    const EffectPresetEntry *def = effectDefForId(QStringLiteral("face_mesh_3d"));
+    QVERIFY2(def, "face_mesh_3d package missing from catalog");
+    QVERIFY(def->isModel3d);
+    QVERIFY(def->needsFace);
+    QVERIFY(def->fixedParams.value(QStringLiteral("warpMesh")).toDouble() > 0.5);
+    bool hasModel = false;
+    bool hasFill = false;
+    bool hasWire = false;
+    for (const drift::EffectParamSpec &spec : def->meta.parameters) {
+        if (spec.key == QLatin1String("model")) {
+            QVERIFY(spec.isFilePath());
+            QVERIFY(spec.defaultString.endsWith(QLatin1String("sfm_face.bin")));
+            QVERIFY(QFileInfo::exists(spec.defaultString));
+            hasModel = true;
+        }
+        if (spec.key == QLatin1String("fillOpacity"))
+            hasFill = true;
+        if (spec.key == QLatin1String("wireframe"))
+            hasWire = true;
+    }
+    QVERIFY(hasModel);
+    QVERIFY(hasFill);
+    QVERIFY(hasWire);
+}
+
+void EngineTest::faceMeshRestLoadsAndWarps()
+{
+    const QString bin = QDir(QString::fromUtf8(DRIFT_TEST_EFFECTS_DIR))
+                            .filePath(QStringLiteral("face_mesh_3d/sfm_face.bin"));
+    QVERIFY2(QFileInfo::exists(bin), qPrintable(bin));
+
+    const auto rest = drift::loadFaceMeshRest(bin);
+    QVERIFY2(rest, qPrintable(drift::faceMeshRestWarning(bin)));
+    QVERIFY(rest->positions.size() > 100);
+    QVERIFY(rest->indices.size() >= 3);
+    QVERIFY(rest->handles.size() >= 30);
+    // Public sfm_reference.obj is 845 verts; a mid-cheek crop was ~600–720.
+    QVERIFY2(rest->positions.size() >= 800,
+             "rest mesh should keep the whole face reference, not a cropped mask");
+    float maxAbsX = 0.f;
+    for (const QVector3D &p : rest->positions)
+        maxAbsX = qMax(maxAbsX, qAbs(p.x()));
+    QVERIFY2(maxAbsX > 0.60f,
+             "rest mesh should include the ear wrap (past the interior ±0.5 face width)");
+    bool hasRightEar = false;
+    bool hasLeftEar = false;
+    for (const drift::FaceMeshHandle &h : rest->handles) {
+        hasRightEar = hasRightEar || h.mediapipeIndex == 234;
+        hasLeftEar = hasLeftEar || h.mediapipeIndex == 454;
+    }
+    QVERIFY2(hasRightEar && hasLeftEar, "ear oval handles 234/454 missing");
+    bool hasForehead = false;
+    for (const drift::FaceMeshHandle &h : rest->handles)
+        hasForehead = hasForehead || h.mediapipeIndex == 10;
+    QVERIFY2(hasForehead, "forehead handle 10 missing");
+
+    drift::FaceAnchors face;
+    face.valid = true;
+    face.hasPose = true;
+    face.poseQw = 1.0;
+    face.faceRx = 0.1;
+    face.poseScale = 0.08;
+    face.poseOx = 0.5;
+    face.poseOy = 0.45;
+    face.poseOz = 0.01;
+    face.hasMesh = true;
+    face.mesh.resize(drift::kFaceMeshPoints);
+    const float s = float(2.0 * face.faceRx);
+    // Identity quaternion: head +X/+Y/+Z map straight into width-normalized world. Place every
+    // MediaPipe slot at the origin, then overwrite handle slots with the rest pose mapped out so
+    // the warp must reconstruct those vertices (and leave non-handles interpolated).
+    for (int i = 0; i < drift::kFaceMeshPoints; ++i)
+        face.mesh[i] = QVector3D(float(face.poseOx), float(face.poseOy), float(face.poseOz));
+    for (const drift::FaceMeshHandle &h : rest->handles) {
+        const QVector3D p = rest->positions.at(h.restVertex);
+        face.mesh[h.mediapipeIndex] =
+            QVector3D(float(face.poseOx) + p.x() * s, float(face.poseOy) + p.y() * s,
+                      float(face.poseOz) + p.z() * s);
+    }
+
+    QVector<QVector3D> pos;
+    QVector<QVector3D> nrm;
+    drift::warpFaceMesh(*rest, face, &pos, &nrm);
+    QCOMPARE(pos.size(), rest->positions.size());
+    QCOMPARE(nrm.size(), rest->positions.size());
+    for (const drift::FaceMeshHandle &h : rest->handles) {
+        const QVector3D got = pos.at(h.restVertex);
+        const QVector3D want = rest->positions.at(h.restVertex);
+        QVERIFY2((got - want).length() < 1e-4f,
+                 qPrintable(QStringLiteral("handle %1 restVertex %2 delta %3")
+                                .arg(h.mediapipeIndex)
+                                .arg(h.restVertex)
+                                .arg(double((got - want).length()))));
+    }
+
+    // SFM rest is taller than a typical tracked face. IDW-only would pin eyes/mouth and leave
+    // the hairline at rest size. Shrink every handle target by 0.7; a far vertex (max |y|)
+    // must follow that scale instead of staying put.
+    QSet<int> handleVerts;
+    for (const drift::FaceMeshHandle &h : rest->handles)
+        handleVerts.insert(h.restVertex);
+    int farIdx = 0;
+    float farAbsY = 0.f;
+    for (int i = 0; i < rest->positions.size(); ++i) {
+        if (handleVerts.contains(i))
+            continue;
+        const float ay = qAbs(rest->positions.at(i).y());
+        if (ay > farAbsY) {
+            farAbsY = ay;
+            farIdx = i;
+        }
+    }
+    QVERIFY2(farAbsY > 0.3f, "need a non-handle vertex away from the mid-face");
+    const float shrink = 0.7f;
+    for (const drift::FaceMeshHandle &h : rest->handles) {
+        const QVector3D p = rest->positions.at(h.restVertex);
+        face.mesh[h.mediapipeIndex] =
+            QVector3D(float(face.poseOx) + p.x() * s * shrink,
+                      float(face.poseOy) + p.y() * s * shrink,
+                      float(face.poseOz) + p.z() * s * shrink);
+    }
+    QVector<QVector3D> shrunk;
+    QVector<QVector3D> shrunkN;
+    drift::warpFaceMesh(*rest, face, &shrunk, &shrunkN);
+    const float restY = rest->positions.at(farIdx).y();
+    const float gotY = shrunk.at(farIdx).y();
+    QVERIFY2(qAbs(gotY - restY * shrink) < 0.08f * qAbs(restY),
+             qPrintable(QStringLiteral("far vertex y rest %1 warped %2 (expected ~%3)")
+                            .arg(restY)
+                            .arg(gotY)
+                            .arg(restY * shrink)));
+
+    // Restore 1:1 handle placement, then push every handle 0.02 along +Z in world.
+    // Head-space Z is the same axis at identity, so the warped handle vertices must
+    // move by 0.02 / s.
+    for (const drift::FaceMeshHandle &h : rest->handles) {
+        const QVector3D p = rest->positions.at(h.restVertex);
+        face.mesh[h.mediapipeIndex] =
+            QVector3D(float(face.poseOx) + p.x() * s, float(face.poseOy) + p.y() * s,
+                      float(face.poseOz) + p.z() * s);
+    }
+    const float dz = 0.02f;
+    for (const drift::FaceMeshHandle &h : rest->handles)
+        face.mesh[h.mediapipeIndex].setZ(face.mesh[h.mediapipeIndex].z() + dz);
+    QVector<QVector3D> moved;
+    QVector<QVector3D> movedN;
+    drift::warpFaceMesh(*rest, face, &moved, &movedN);
+    const float expectZ = dz / s;
+    const QVector3D sample = moved.at(rest->handles.first().restVertex)
+                             - rest->positions.at(rest->handles.first().restVertex);
+    QVERIFY2(qAbs(sample.z() - expectZ) < 1e-3f,
+             qPrintable(QStringLiteral("expected z delta %1 got %2").arg(expectZ).arg(sample.z())));
+
+    // SFM rest is closed-mouth: inner upper (MP 13) and lower (MP 14) sit on top of each other.
+    // Opening them must not IDW-average a 1-ring neighbour into the gap (a zipped cupid's bow).
+    int upperVert = -1;
+    int lowerVert = -1;
+    for (const drift::FaceMeshHandle &h : rest->handles) {
+        if (h.mediapipeIndex == 13)
+            upperVert = h.restVertex;
+        if (h.mediapipeIndex == 14)
+            lowerVert = h.restVertex;
+    }
+    QVERIFY2(upperVert >= 0 && lowerVert >= 0, "inner-lip handles 13/14 missing");
+    QVERIFY2((rest->positions.at(upperVert) - rest->positions.at(lowerVert)).length() < 0.02f,
+             "rest inner lips should be nearly coincident");
+    for (const drift::FaceMeshHandle &h : rest->handles) {
+        const QVector3D p = rest->positions.at(h.restVertex);
+        face.mesh[h.mediapipeIndex] =
+            QVector3D(float(face.poseOx) + p.x() * s, float(face.poseOy) + p.y() * s,
+                      float(face.poseOz) + p.z() * s);
+    }
+    const float open = 0.05f;
+    face.mesh[13].setY(face.mesh[13].y() + open * s);
+    face.mesh[14].setY(face.mesh[14].y() - open * s);
+    QVector<QVector3D> opened;
+    QVector<QVector3D> openedN;
+    drift::warpFaceMesh(*rest, face, &opened, &openedN);
+    int nbr = -1;
+    for (int t = 0; t + 2 < rest->indices.size(); t += 3) {
+        const int a = int(rest->indices.at(t));
+        const int b = int(rest->indices.at(t + 1));
+        const int c = int(rest->indices.at(t + 2));
+        const int tri[3] = {a, b, c};
+        bool hit = false;
+        for (int v : tri)
+            hit = hit || v == upperVert;
+        if (!hit)
+            continue;
+        for (int v : tri) {
+            if (v != upperVert && v != lowerVert) {
+                nbr = v;
+                break;
+            }
+        }
+        if (nbr >= 0)
+            break;
+    }
+    QVERIFY2(nbr >= 0, "no 1-ring neighbour of inner upper lip");
+    const float midY = 0.5f * (opened.at(upperVert).y() + opened.at(lowerVert).y());
+    QVERIFY2(qAbs(opened.at(nbr).y() - opened.at(upperVert).y())
+                 < qAbs(opened.at(nbr).y() - midY),
+             qPrintable(QStringLiteral("upper-lip neighbour y %1 mid %2 upper %3 lower %4")
+                            .arg(opened.at(nbr).y())
+                            .arg(midY)
+                            .arg(opened.at(upperVert).y())
+                            .arg(opened.at(lowerVert).y())));
+}
+
+void EngineTest::faceMesh3dPassThroughWithoutMesh()
+{
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("GPU effect executor unavailable");
+
+    const EffectPresetEntry *def = effectDefForId(QStringLiteral("face_mesh_3d"));
+    if (!def)
+        QSKIP("face_mesh_3d package missing from catalog");
+
+    QImage source(64, 64, QImage::Format_RGBA8888);
+    source.fill(QColor(80, 90, 100));
+
+    drift::FaceAnchors face;
+    face.valid = true;
+    face.hasPose = true;
+    face.faceCenter = QPointF(0.5, 0.5);
+    face.faceRx = 0.2;
+    face.poseQw = 1.0;
+    face.poseOx = 0.5;
+    face.poseOy = 0.5;
+    QVERIFY(!face.hasMesh);
+
+    drift::Effect effect;
+    effect.catalogId = QStringLiteral("face_mesh_3d");
+    const QImage out = EffectProcessor::applyEffects(source, {effect}, 0, {face});
+    QVERIFY(!out.isNull());
+    QCOMPARE(out.size(), source.size());
+    QCOMPARE(out.pixelColor(32, 32), source.pixelColor(32, 32));
+}
+
+void EngineTest::faceMesh3dDrawsWarpedOverlay()
+{
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("GPU effect executor unavailable");
+
+    const EffectPresetEntry *def = effectDefForId(QStringLiteral("face_mesh_3d"));
+    if (!def)
+        QSKIP("face_mesh_3d package missing from catalog");
+
+    const QString bin = QDir(QString::fromUtf8(DRIFT_TEST_EFFECTS_DIR))
+                            .filePath(QStringLiteral("face_mesh_3d/sfm_face.bin"));
+    const auto rest = drift::loadFaceMeshRest(bin);
+    QVERIFY(rest);
+
+    QImage source(128, 128, QImage::Format_RGBA8888);
+    source.fill(QColor(40, 40, 40));
+
+    // Identity quaternion is what the other pose tests use; it is *not* a real landmarker
+    // frontal. MediaPipe's forward = right × (forehead−chin) has z < 0 — a half-turn about X
+    // — which reverses screen winding. Back-face cull made the overlay vanish looking into
+    // the camera while a 3/4 view still showed side faces.
+    const struct {
+        double qx;
+        double qw;
+        const char *name;
+    } poses[] = {
+        {0.0, 1.0, "identity quaternion"},
+        {1.0, 0.0, "MediaPipe-like frontal (forward.z < 0)"},
+    };
+
+    for (const auto &pose : poses) {
+        drift::FaceAnchors face;
+        face.valid = true;
+        face.hasPose = true;
+        face.poseQx = pose.qx;
+        face.poseQw = pose.qw;
+        face.faceRx = 0.25;
+        face.faceRy = 0.3;
+        face.faceCenter = QPointF(0.5, 0.5);
+        face.poseOx = 0.5;
+        face.poseOy = 0.5;
+        face.poseOz = 0.0;
+        face.hasMesh = true;
+        face.mesh.resize(drift::kFaceMeshPoints);
+        const float s = float(2.0 * face.faceRx);
+        const QVector3D origin(float(face.poseOx), float(face.poseOy), float(face.poseOz));
+        const QVector3D qxyz(float(face.poseQx), float(face.poseQy), float(face.poseQz));
+        const float qw = float(face.poseQw);
+        auto rotate = [&](QVector3D p) {
+            const QVector3D t = 2.f * QVector3D::crossProduct(qxyz, p);
+            return p + qw * t + QVector3D::crossProduct(qxyz, t);
+        };
+        for (int i = 0; i < drift::kFaceMeshPoints; ++i)
+            face.mesh[i] = origin;
+        for (const drift::FaceMeshHandle &h : rest->handles) {
+            const QVector3D p = rest->positions.at(h.restVertex);
+            face.mesh[h.mediapipeIndex] = origin + rotate(p) * s;
+        }
+
+        drift::Effect effect;
+        effect.catalogId = QStringLiteral("face_mesh_3d");
+        // Head-occlusion true used to write the prop ellipsoid in front of the fitted surface
+        // and swallow the overlay. The mesh is the occluder now.
+        effect.parameters.insert(QStringLiteral("occlusion"), true);
+        const QImage out = EffectProcessor::applyEffects(source, {effect}, 0, {face});
+        QVERIFY2(!out.isNull(), pose.name);
+        QCOMPARE(out.size(), source.size());
+        QVERIFY2(out.pixelColor(64, 64) != source.pixelColor(64, 64),
+                 qPrintable(QStringLiteral("%1: centre stayed %2 (warped mesh should overlay)")
+                                .arg(QLatin1String(pose.name), out.pixelColor(64, 64).name())));
+    }
+}
+
+void EngineTest::faceMeshParamsSkipHeadProxy()
+{
+    QMap<QString, QVariant> map;
+    map.insert(QStringLiteral("warpMesh"), 1.0);
+    const drift::FaceModelParams p = drift::faceModelParamsFromMap(map);
+    QVERIFY(p.warpMesh);
+    QVERIFY(!p.occlusion);
+
+    map.insert(QStringLiteral("occlusion"), true);
+    const drift::FaceModelParams on = drift::faceModelParamsFromMap(map);
+    QVERIFY(on.occlusion); // still parsed, but the renderer ignores the ellipsoid when warping
 }
 
 // Every beauty package must pass the frame through untouched when the clip has no contours, or an
