@@ -128,7 +128,7 @@ int main(int argc, char **argv)
     QImage frame(input);
     if (frame.isNull()) {
         frame = ClipReaderPool::instance().readVideoFrame(
-            input, drift::TimeUs(seconds * drift::kUsPerSecond), 1920, 1080);
+            input, 1, drift::TimeUs(seconds * drift::kUsPerSecond), 1920, 1080);
     }
     if (frame.isNull()) {
         err << "could not read a frame from " << input << "\n";

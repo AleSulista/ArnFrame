@@ -85,6 +85,9 @@ QHash<QString, QString> defaultShortcuts();
 // they never share one with timeline playback of the same media — see ClipReaderPool.
 constexpr quint64 kSubtitleScanStreamId = 0xA5'11'5C'A4'00'00'00'01ull;
 constexpr quint64 kDenoiseScanStreamId = 0xA5'11'5C'A4'00'00'00'02ull;
+constexpr quint64 kSegmentEncodeStreamId = 0xA5'11'5C'A4'00'00'00'03ull;
+constexpr quint64 kCutoutRenderStreamId = 0xA5'11'5C'A4'00'00'00'04ull;
+constexpr quint64 kFaceDetectStreamId = 0xA5'11'5C'A4'00'00'00'05ull;
 
 QTranslator g_appTranslator;
 QTranslator g_qtTranslator;
@@ -4198,8 +4201,8 @@ void AppController::setSegmentationFrame(double seconds)
     // The encoder is the expensive half (seconds per frame on a CPU provider), so it runs off the
     // GUI thread. Decodes after this are milliseconds and stay inline.
     (void)QtConcurrent::run([this, path, sourceUs, canvasW, canvasH, generation]() {
-        const QImage frame =
-            ClipReaderPool::instance().readVideoFrame(path, sourceUs, canvasW, canvasH);
+        const QImage frame = ClipReaderPool::instance().readVideoFrame(path, kSegmentEncodeStreamId,
+                                                                       sourceUs, canvasW, canvasH);
         drift::Sam2Embedding embedding;
         if (!frame.isNull())
             embedding = drift::Sam2Segmenter::instance().encode(frame);
@@ -4492,8 +4495,8 @@ void AppController::segmentClip(int trackIndex, int clipIndex, const QVariantLis
             }
 
             const drift::TimeUs sourceUs = srcIn + drift::TimeUs(i) * step;
-            const QImage frame =
-                ClipReaderPool::instance().readVideoFrame(path, sourceUs, canvasW, canvasH);
+            const QImage frame = ClipReaderPool::instance().readVideoFrame(
+                path, kCutoutRenderStreamId, sourceUs, canvasW, canvasH);
             if (frame.isNull()) {
                 writer.abort();
                 finish(false, tr("Could not decode frame %1").arg(i), {});
@@ -4706,8 +4709,8 @@ void AppController::detectFacesForClip(int trackIndex, int clipIndex)
             }
 
             const drift::TimeUs sourceUs = srcIn + drift::TimeUs(i) * step;
-            const QImage frame =
-                ClipReaderPool::instance().readVideoFrame(path, sourceUs, canvasW, canvasH);
+            const QImage frame = ClipReaderPool::instance().readVideoFrame(
+                path, kFaceDetectStreamId, sourceUs, canvasW, canvasH);
             if (frame.isNull()) {
                 finish(false, tr("Could not decode frame %1").arg(i), {});
                 return;

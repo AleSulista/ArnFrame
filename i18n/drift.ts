@@ -426,7 +426,7 @@
 <context>
     <name>AppController</name>
     <message>
-        <location filename="../src/models/AppController.cpp" line="+1551"/>
+        <location filename="../src/models/AppController.cpp" line="+1554"/>
         <source>Media removed</source>
         <translation type="unfinished"></translation>
     </message>

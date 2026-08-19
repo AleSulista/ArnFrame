@@ -89,7 +89,7 @@ int main(int argc, char *argv[])
 
     for (int i = 0; i < frames; ++i) {
         const drift::TimeUs at = drift::secondsToUs(seconds) + drift::TimeUs(i) * step;
-        const QImage frame = ClipReaderPool::instance().readVideoFrame(path, at, 0, 0);
+        const QImage frame = ClipReaderPool::instance().readVideoFrame(path, 1, at, 0, 0);
         if (frame.isNull()) {
             err << "no frame decoded at index " << i << "\n";
             return 1;

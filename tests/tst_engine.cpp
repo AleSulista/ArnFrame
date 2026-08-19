@@ -86,6 +86,7 @@ private slots:
     void audioStreamsAreIndependentPerStreamId();
     void audioStreamResetRepositionsShortForwardSeek();
     void audioMixerOverlappingSameFileClips();
+    void videoStreamsDoNotReseekPerFrame();
     void compositorDefaultRenderStaysFullResolution();
     void compositorPreviewScaleRendersLowerResolution();
     void compositorPreviewScaleMapsProjectPixelLayout();
@@ -196,6 +197,7 @@ private:
     static QString makeRotatedHalvesVideo(QTemporaryDir &dir, int displayDegrees);
     static QString makeToneAudio(QTemporaryDir &dir);
     static QString makeSweepAudio(QTemporaryDir &dir);
+    static QString makeLongGopVideo(QTemporaryDir &dir);
 };
 
 void EngineTest::initTestCase()
@@ -709,7 +711,7 @@ void EngineTest::matteWriterRoundTripsThroughClipReader()
         // Sample the middle of each frame's interval: the boundary time can land a hair below it
         // and resolve to the previous frame.
         const drift::TimeUs us = (2 * drift::TimeUs(i) + 1) * drift::kUsPerSecond / 60;
-        const QImage frame = ClipReaderPool::instance().readVideoFrame(path, us, 0, 0);
+        const QImage frame = ClipReaderPool::instance().readVideoFrame(path, 1, us, 0, 0);
         QVERIFY2(!frame.isNull(), qPrintable(QStringLiteral("frame %1 did not decode").arg(i)));
         QCOMPARE(frame.size(), size);
 
@@ -765,7 +767,7 @@ void EngineTest::reverseRendererPlaysSourceBackwards()
     // coverOut - i frames into the proxy. Walking the proxy forwards must walk the source back.
     for (int j = 1; j <= frames; ++j) {
         const drift::TimeUs us = drift::TimeUs(j) * drift::kUsPerSecond / fps;
-        const QImage frame = ClipReaderPool::instance().readVideoFrame(proxyPath, us, 0, 0);
+        const QImage frame = ClipReaderPool::instance().readVideoFrame(proxyPath, 1, us, 0, 0);
         QVERIFY2(!frame.isNull(), qPrintable(QStringLiteral("proxy frame %1 did not decode").arg(j)));
 
         int band = -1;
@@ -1122,6 +1124,89 @@ QString EngineTest::makeToneAudio(QTemporaryDir &dir)
     if (!proc.waitForFinished(30000) || proc.exitCode() != 0)
         return {};
     return QFileInfo::exists(out) ? out : QString{};
+}
+
+// Builds a 4-second, 640x360 clip with 2-second keyframe spacing — long enough that landing on
+// the wrong side of a keyframe costs a real GOP of decoding, which a 25-frame GOP hides.
+QString EngineTest::makeLongGopVideo(QTemporaryDir &dir)
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        return {};
+
+    const QString out = dir.filePath(QStringLiteral("longgop.mp4"));
+    QStringList args{
+        QStringLiteral("-y"),
+        QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+        QStringLiteral("testsrc2=s=640x360:r=25:d=4"),
+        QStringLiteral("-c:v"), QStringLiteral("libx264"),
+        QStringLiteral("-g"), QStringLiteral("50"),
+        QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+        out,
+    };
+
+    QProcess proc;
+    proc.start(ffmpeg, args);
+    if (!proc.waitForFinished(60000) || proc.exitCode() != 0)
+        return {};
+    return QFileInfo::exists(out) ? out : QString{};
+}
+
+// Two clips cut from one file and overlapping on the timeline interleave reads at positions
+// seconds apart, once per composited frame. Sharing a decoder between them stayed visually correct
+// — the decode loop always walks forward to the frame it was asked for — but it walked most of a
+// GOP to get there, over and over: measured on this source, 8251 frames decoded and 5.3 s of wall
+// time for what takes 391 frames and 0.22 s when each clip has its own reader. That is what made
+// overlaps crawl. The comparison here is against the same interleaving across two separate files,
+// which never shared a reader and so was always fast.
+void EngineTest::videoStreamsDoNotReseekPerFrame()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeLongGopVideo(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+    const QString copy = dir.filePath(QStringLiteral("longgop-copy.mp4"));
+    QVERIFY(QFile::copy(path, copy));
+
+    constexpr int kFrames = 50;
+    constexpr drift::TimeUs kStep = 40'000;         // 25 fps
+    constexpr drift::TimeUs kSecondStart = 2'000'000; // the other clip's source range
+
+    // The preview path: NV12, which is what playback actually drives.
+    ClipReaderPool::instance().setReadAheadUs(0);
+
+    // How much decoding the same interleaving costs when the two clips are separate files and so
+    // cannot share a reader — the baseline this must match.
+    const quint64 twoFileBefore = ClipReader::videoFramesDecoded();
+    for (int i = 0; i < kFrames; ++i) {
+        QVERIFY(ClipReaderPool::instance()
+                    .readVideoFrameNv12(path, 101, drift::TimeUs(i) * kStep, 640, 360)
+                    .isValid());
+        QVERIFY(ClipReaderPool::instance()
+                    .readVideoFrameNv12(copy, 202, kSecondStart + drift::TimeUs(i) * kStep, 640, 360)
+                    .isValid());
+    }
+    const quint64 twoFileDecoded = ClipReader::videoFramesDecoded() - twoFileBefore;
+
+    // The same interleaving, both streams on one file.
+    const quint64 oneFileBefore = ClipReader::videoFramesDecoded();
+    for (int i = 0; i < kFrames; ++i) {
+        QVERIFY(ClipReaderPool::instance()
+                    .readVideoFrameNv12(path, 303, drift::TimeUs(i) * kStep, 640, 360)
+                    .isValid());
+        QVERIFY(ClipReaderPool::instance()
+                    .readVideoFrameNv12(path, 404, kSecondStart + drift::TimeUs(i) * kStep, 640, 360)
+                    .isValid());
+    }
+    const quint64 oneFileDecoded = ClipReader::videoFramesDecoded() - oneFileBefore;
+
+    // Each stream walks its own range forward, so one file now costs what two separate files cost.
+    // The margin is wide because the failure it guards against is a factor of twenty, not a few
+    // percent.
+    QVERIFY2(oneFileDecoded < twoFileDecoded * 2,
+             qPrintable(QStringLiteral("one file decoded %1 frames, two files decoded %2")
+                            .arg(oneFileDecoded).arg(twoFileDecoded)));
 }
 
 // A 440 Hz sine sounds the same wherever you start it, so it cannot show that audio came from the

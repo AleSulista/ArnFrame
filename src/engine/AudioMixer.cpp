@@ -216,7 +216,7 @@ void accumulateClipAudio(const drift::Clip &clip, const drift::Track &track, dri
     // finishes, and the next block simply builds a fresh one.
     ClipAudioState &state = *statePtr;
 
-    const quint64 streamId = AudioMixer::clipStreamId(clip.id);
+    const quint64 streamId = ClipReaderPool::streamIdForClip(clip.id);
 
     QVector<float> chunk;
     if (!clip.audioEffects.isEmpty()) {

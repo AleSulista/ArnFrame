@@ -75,6 +75,15 @@ public:
     // fast path below only honours sourceStartUs on a discontinuity it can see; a seek of the
     // timeline playhead is one it cannot.
     void invalidateAudioPosition() { m_audioPositioned = false; }
+    // How many readers on this media path divide the NV12 read-ahead budget between them. Several
+    // exist when clips cut from one file overlap; each still keeps a cache, so without this the
+    // memory ceiling would multiply by the number of them.
+    void setNv12CacheShare(int shares) { m_nv12CacheShares = qMax(1, shares); }
+
+    // Diagnostics, summed over every reader in this process. A reader asked for a position its
+    // cursor is not near has to decode its way there from the preceding keyframe, so this is what
+    // a badly shared decoder costs. Tests read the delta.
+    static quint64 videoFramesDecoded();
 
 private:
     bool ensureVideoDecoder();
@@ -183,6 +192,10 @@ private:
     // 720p clip (~83 MB) but only a handful of 4K ones.
     static constexpr qsizetype kNv12CacheByteBudget = 128 * 1024 * 1024;
     static constexpr int kMaxReadAheadFrames = 300;
+    // Floor on the history slots even when the byte budget is tighter than they are. It shrinks
+    // with the share so several readers on one path cannot each hold a full history.
+    static constexpr int kMinCachedFrames = 4;
+    int m_nv12CacheShares = 1;
 
     // Sequential audio decode state (mirrors the video fast-path): keep the
     // resampler and demux position across buffers so contiguous playback decodes

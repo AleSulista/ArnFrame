@@ -95,7 +95,7 @@ QList<ClipReaderPool::VideoRequest> collectVideoRequests(const drift::Project *p
             // than stalling the composite on a serial read later.
             if (clip.mask.shape == drift::MaskShape::Matte && !clip.mask.mattePath.isEmpty()) {
                 requests.append(ClipReaderPool::VideoRequest{
-                    clip.mask.mattePath,
+                    clip.mask.mattePath, ClipReaderPool::streamIdForClip(clip.id),
                     qMax<drift::TimeUs>(0, clip.timelineToSourceUs(timelineUs)
                                                - clip.mask.matteSrcOffsetUs),
                     maxWidth, maxHeight});
@@ -105,8 +105,9 @@ QList<ClipReaderPool::VideoRequest> collectVideoRequests(const drift::Project *p
                 continue;
 
             const drift::VideoRead read = drift::resolveVideoRead(clip, timelineUs);
-            requests.append(
-                ClipReaderPool::VideoRequest{read.path, read.sourceUs, maxWidth, maxHeight});
+            requests.append(ClipReaderPool::VideoRequest{read.path,
+                                                        ClipReaderPool::streamIdForClip(clip.id),
+                                                        read.sourceUs, maxWidth, maxHeight});
         }
     }
     return requests;
@@ -241,7 +242,8 @@ QImage decodeClipMediaFrame(const drift::Clip &clip, drift::TimeUs timelineUs, i
 
     if (clip.type == drift::ClipType::Video) {
         const drift::VideoRead read = drift::resolveVideoRead(clip, timelineUs);
-        return ClipReaderPool::instance().readVideoFrame(read.path, read.sourceUs, maxWidth, maxHeight);
+        return ClipReaderPool::instance().readVideoFrame(
+            read.path, ClipReaderPool::streamIdForClip(clip.id), read.sourceUs, maxWidth, maxHeight);
     }
 
     return {};
@@ -524,8 +526,8 @@ void fillGpuLayerPixels(GpuLayer &layer, const drift::Clip &clip, drift::TimeUs 
     const drift::Effect *timeEcho = findTimeEchoEffect(clip.effects);
     if (!timeEcho && clip.type == drift::ClipType::Video) {
         const drift::VideoRead read = drift::resolveVideoRead(clip, timelineUs);
-        const Nv12Frame nv12 =
-            ClipReaderPool::instance().readVideoFrameNv12(read.path, read.sourceUs, maxWidth, maxHeight);
+        const Nv12Frame nv12 = ClipReaderPool::instance().readVideoFrameNv12(
+            read.path, ClipReaderPool::streamIdForClip(clip.id), read.sourceUs, maxWidth, maxHeight);
         if (nv12.isValid()) {
             layer.nv12 = nv12.data;
             layer.nv12Width = nv12.width;
@@ -683,7 +685,8 @@ GpuLayer buildGpuLayer(const drift::Clip &clip, drift::TimeUs timelineUs, int pr
         const drift::TimeUs matteUs =
             clip.timelineToSourceUs(timelineUs) - clip.mask.matteSrcOffsetUs;
         const QImage matte = ClipReaderPool::instance().readVideoFrame(
-            clip.mask.mattePath, qMax<drift::TimeUs>(0, matteUs), canvasWidth, canvasHeight);
+            clip.mask.mattePath, ClipReaderPool::streamIdForClip(clip.id),
+            qMax<drift::TimeUs>(0, matteUs), canvasWidth, canvasHeight);
         // A missing matte frame must not silently blank the clip — leave the layer unmasked.
         if (!matte.isNull())
             layer.matte = matte;

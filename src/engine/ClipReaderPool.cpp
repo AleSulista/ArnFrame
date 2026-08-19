@@ -45,7 +45,7 @@ void ClipReaderPool::stopWorkerEntry(WorkerEntry &entry)
 }
 
 ClipReaderWorker *ClipReaderPool::ensureWorker(std::map<QString, std::unique_ptr<WorkerEntry>> &workers,
-                                               const QString &path, bool audioOnly)
+                                               const QString &path)
 {
     auto it = workers.find(path);
     if (it == workers.end()) {
@@ -59,8 +59,7 @@ ClipReaderWorker *ClipReaderPool::ensureWorker(std::map<QString, std::unique_ptr
         // decode methods, which run after this open on the worker's event queue —
         // so the GUI/audio threads are never stuck inside avformat_find_stream_info
         // while holding the pool mutex (multi-hour files make that open very slow).
-        QMetaObject::invokeMethod(entry->worker, "openPath", Qt::QueuedConnection, Q_ARG(QString, path),
-                                  Q_ARG(bool, audioOnly));
+        QMetaObject::invokeMethod(entry->worker, "openPath", Qt::QueuedConnection, Q_ARG(QString, path));
         it = workers.emplace(path, std::move(entry)).first;
     }
 
@@ -81,17 +80,17 @@ void ClipReaderPool::warmVideoFrames(const QList<VideoRequest> &requests)
         ClipReaderWorker *worker = nullptr;
         {
             QMutexLocker lock(&m_mutex);
-            worker = ensureWorker(m_videoWorkers, request.path, false);
+            worker = ensureWorker(m_videoWorkers, request.path);
         }
         // Prefer NV12 warm — matches the live-preview decode path.
         QMetaObject::invokeMethod(worker, "decodeVideoNv12", Qt::QueuedConnection,
-                                  Q_ARG(drift::TimeUs, request.sourceUs), Q_ARG(int, request.maxWidth),
-                                  Q_ARG(int, request.maxHeight));
+                                  Q_ARG(quint64, request.streamId), Q_ARG(drift::TimeUs, request.sourceUs),
+                                  Q_ARG(int, request.maxWidth), Q_ARG(int, request.maxHeight));
     }
 }
 
-QImage ClipReaderPool::readVideoFrame(const QString &path, drift::TimeUs sourceUs, int maxWidth,
-                                      int maxHeight)
+QImage ClipReaderPool::readVideoFrame(const QString &path, quint64 streamId, drift::TimeUs sourceUs,
+                                      int maxWidth, int maxHeight)
 {
     if (path.isEmpty())
         return {};
@@ -102,24 +101,25 @@ QImage ClipReaderPool::readVideoFrame(const QString &path, drift::TimeUs sourceU
         // blocking decode lets audio and video (different workers) decode in
         // parallel instead of serializing on this lock.
         QMutexLocker lock(&m_mutex);
-        worker = ensureWorker(m_videoWorkers, path, false);
+        worker = ensureWorker(m_videoWorkers, path);
     }
 
     QImage frame;
     QMetaObject::invokeMethod(worker, "decodeVideo", Qt::BlockingQueuedConnection, Q_RETURN_ARG(QImage, frame),
-                              Q_ARG(drift::TimeUs, sourceUs), Q_ARG(int, maxWidth), Q_ARG(int, maxHeight));
+                              Q_ARG(quint64, streamId), Q_ARG(drift::TimeUs, sourceUs),
+                              Q_ARG(int, maxWidth), Q_ARG(int, maxHeight));
 
     // Decode one frame beyond the current position while the caller composites
     // this one. The reader knows the source frame duration; the old code guessed
     // a hardcoded 1/30 s, which missed on every clip that isn't 30 fps.
-    QMetaObject::invokeMethod(worker, "prefetchNextVideo", Qt::QueuedConnection, Q_ARG(int, maxWidth),
-                              Q_ARG(int, maxHeight));
+    QMetaObject::invokeMethod(worker, "prefetchNextVideo", Qt::QueuedConnection,
+                              Q_ARG(quint64, streamId), Q_ARG(int, maxWidth), Q_ARG(int, maxHeight));
 
     return frame;
 }
 
-Nv12Frame ClipReaderPool::readVideoFrameNv12(const QString &path, drift::TimeUs sourceUs, int maxWidth,
-                                             int maxHeight)
+Nv12Frame ClipReaderPool::readVideoFrameNv12(const QString &path, quint64 streamId,
+                                             drift::TimeUs sourceUs, int maxWidth, int maxHeight)
 {
     if (path.isEmpty())
         return {};
@@ -127,15 +127,17 @@ Nv12Frame ClipReaderPool::readVideoFrameNv12(const QString &path, drift::TimeUs 
     ClipReaderWorker *worker = nullptr;
     {
         QMutexLocker lock(&m_mutex);
-        worker = ensureWorker(m_videoWorkers, path, false);
+        worker = ensureWorker(m_videoWorkers, path);
     }
 
     Nv12Frame frame;
     QMetaObject::invokeMethod(worker, "decodeVideoNv12", Qt::BlockingQueuedConnection,
-                              Q_RETURN_ARG(Nv12Frame, frame), Q_ARG(drift::TimeUs, sourceUs),
-                              Q_ARG(int, maxWidth), Q_ARG(int, maxHeight));
+                              Q_RETURN_ARG(Nv12Frame, frame), Q_ARG(quint64, streamId),
+                              Q_ARG(drift::TimeUs, sourceUs), Q_ARG(int, maxWidth),
+                              Q_ARG(int, maxHeight));
 
-    worker->requestPrefetchNv12(maxWidth, maxHeight, m_readAheadUs.load(std::memory_order_relaxed));
+    worker->requestPrefetchNv12(streamId, maxWidth, maxHeight,
+                                m_readAheadUs.load(std::memory_order_relaxed));
 
     return frame;
 }
@@ -150,7 +152,7 @@ int ClipReaderPool::readAudioInterleaved(const QString &path, quint64 streamId,
     ClipReaderWorker *worker = nullptr;
     {
         QMutexLocker lock(&m_mutex);
-        worker = ensureWorker(m_audioWorkers, path, true);
+        worker = ensureWorker(m_audioWorkers, path);
     }
 
     int written = 0;
@@ -172,7 +174,7 @@ void ClipReaderPool::retainActivePaths(const QSet<QString> &videoPaths, const QS
 {
     QMutexLocker lock(&m_mutex);
     for (const QString &path : videoPaths)
-        ensureWorker(m_videoWorkers, path, false);
+        ensureWorker(m_videoWorkers, path);
     for (const QString &path : audioPaths)
-        ensureWorker(m_audioWorkers, path, true);
+        ensureWorker(m_audioWorkers, path);
 }

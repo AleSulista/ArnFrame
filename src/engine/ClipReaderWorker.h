@@ -8,14 +8,22 @@
 #include <QImage>
 #include <QMutex>
 #include <QObject>
+#include <QSet>
 #include <QString>
 
 #include <map>
 #include <memory>
 #include <vector>
 
-// Owns a ClipReader on a dedicated thread; all decode calls are serialized here.
-// The reader keeps its own frame cache, so this class holds no cache of its own.
+// Owns the ClipReaders for one media path on a dedicated thread; all decode calls are serialized
+// here. Readers keep their own frame caches, so this class holds no cache of its own.
+//
+// There is one reader per stream id rather than one per path. A ClipReader carries a decode
+// position, and both its audio and video fast paths assume the next request continues where the
+// last one left off. Two clips cut from the same file and overlapping on the timeline break that
+// assumption: they interleave requests at positions seconds apart. On the audio side the reader
+// then served the second clip the first one's stream outright; on the video side it stayed correct
+// but paid a keyframe seek and a GOP decode per frame, for every frame of the overlap.
 class ClipReaderWorker : public QObject
 {
     Q_OBJECT
@@ -23,11 +31,11 @@ class ClipReaderWorker : public QObject
 public:
     explicit ClipReaderWorker(QObject *parent = nullptr);
 
-    // Callable from any thread. Queues one read-ahead step if none is pending;
-    // that step re-arms itself until the reader has readAheadUs of decoded source
-    // buffered. Keeping a single step in flight is what bounds a decode request's
-    // wait to one frame — a queue of them would serialize ahead of it.
-    void requestPrefetchNv12(int maxWidth, int maxHeight, drift::TimeUs readAheadUs);
+    // Callable from any thread. Queues one read-ahead step for this stream if none is pending;
+    // that step re-arms itself until the reader has readAheadUs of decoded source buffered.
+    // Keeping a single step in flight per stream is what bounds a decode request's wait to one
+    // frame — a queue of them would serialize ahead of it.
+    void requestPrefetchNv12(quint64 streamId, int maxWidth, int maxHeight, drift::TimeUs readAheadUs);
 
     // Callable from any thread. Marks every audio reader here as unpositioned, so the next decode
     // seeks to the position it is asked for instead of continuing its stream. Set as a flag rather
@@ -36,33 +44,30 @@ public:
     void requestAudioReposition() { m_audioRepositionPending.storeRelease(1); }
 
 public slots:
-    // Audio workers never touch m_reader — their readers live in m_audioReaders, one per stream —
-    // so audioOnly keeps them from holding a second, unused AVFormatContext open per media file.
-    void openPath(const QString &path, bool audioOnly);
+    void openPath(const QString &path);
     void closePath();
-    QImage decodeVideo(drift::TimeUs sourceUs, int maxWidth, int maxHeight);
-    Nv12Frame decodeVideoNv12(drift::TimeUs sourceUs, int maxWidth, int maxHeight);
-    // streamId identifies the caller's audio stream: one decode cursor per timeline clip, per
-    // preview player, per offline scan. Sharing one cursor between two consumers of the same file
-    // silently hands the second one the first one's audio, because the sequential fast path in
-    // ClipReader treats a nearby request as a continuation.
+    QImage decodeVideo(quint64 streamId, drift::TimeUs sourceUs, int maxWidth, int maxHeight);
+    Nv12Frame decodeVideoNv12(quint64 streamId, drift::TimeUs sourceUs, int maxWidth, int maxHeight);
     int decodeAudio(quint64 streamId, drift::TimeUs sourceStartUs, int sampleCount,
                     int outputSampleRate, float *interleavedStereoOut);
-    void prefetchNextVideo(int maxWidth, int maxHeight);
-    void prefetchNextVideoNv12(int maxWidth, int maxHeight, drift::TimeUs readAheadUs);
+    void prefetchNextVideo(quint64 streamId, int maxWidth, int maxHeight);
+    void prefetchNextVideoNv12(quint64 streamId, int maxWidth, int maxHeight, drift::TimeUs readAheadUs);
 
 private:
-    // Only clips overlapping right now need concurrent cursors, and that is a handful at most.
-    // Past the cap the least recently used reader is closed, which costs one seek if it comes back.
-    static constexpr size_t kMaxAudioStreams = 4;
+    // Only clips overlapping right now need concurrent readers, and that is a handful at most.
+    // Past the cap the least recently used one is closed, which costs it a seek if it comes back.
+    static constexpr size_t kMaxStreams = 4;
 
-    ClipReader *audioReaderFor(quint64 streamId);
+    // Call with m_mutex held.
+    ClipReader *readerFor(quint64 streamId);
 
-    ClipReader m_reader;
     QString m_path;
-    std::map<quint64, std::unique_ptr<ClipReader>> m_audioReaders;
-    std::vector<quint64> m_audioLru; // most recently used last
+    std::map<quint64, std::unique_ptr<ClipReader>> m_readers;
+    std::vector<quint64> m_lru; // most recently used last
     QMutex m_mutex;
-    QAtomicInt m_prefetchPending{0};
+
+    QMutex m_prefetchMutex;
+    QSet<quint64> m_prefetchPending;
+
     QAtomicInt m_audioRepositionPending{0};
 };

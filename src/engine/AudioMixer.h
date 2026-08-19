@@ -44,9 +44,6 @@ public:
                                         drift::TimeUs winStartUs, int outFrames, int sampleRate,
                                         drift::ClipAudioRetimer *retimer);
 
-    // Stream id for a clip playing on the timeline. The preview player salts this so auditioning a
-    // clip does not fight timeline playback of the same one for its cursor.
-    static quint64 clipStreamId(const QString &clipId) { return qHash(clipId); }
 
 private:
     const drift::Project *m_project = nullptr;

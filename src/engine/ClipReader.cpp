@@ -6,6 +6,7 @@
 #include <QTransform>
 #include <QtMath>
 
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -338,6 +339,15 @@ void ClipReader::applyDecodeSize(const QSize &size)
     m_nv12Cache.clear();
 }
 
+namespace {
+std::atomic<quint64> g_videoFramesDecoded{0};
+} // namespace
+
+quint64 ClipReader::videoFramesDecoded()
+{
+    return g_videoFramesDecoded.load(std::memory_order_relaxed);
+}
+
 drift::TimeUs ClipReader::frameToleranceUs() const
 {
     // Half a source frame: the nearest-frame window. The old fixed 40 ms was
@@ -428,12 +438,14 @@ int ClipReader::nv12CacheCapacity() const
     // The history slots stay reserved on top of the read-ahead: time_echo and
     // backward scrubbing read behind the playhead and must not lose their frames
     // to the buffer in front of it.
-    int capacity = kMaxCachedFrames + aheadFrames;
+    const int historyFrames = qMax(kMinCachedFrames, kMaxCachedFrames / m_nv12CacheShares);
+    int capacity = historyFrames + aheadFrames;
 
     const qsizetype frameBytes = m_nv12Cache.isEmpty() ? 0 : m_nv12Cache.constFirst().frame.data.size();
-    if (frameBytes > 0)
-        capacity = qMin<qsizetype>(capacity, qMax<qsizetype>(kMaxCachedFrames,
-                                                            kNv12CacheByteBudget / frameBytes));
+    if (frameBytes > 0) {
+        const qsizetype budget = kNv12CacheByteBudget / m_nv12CacheShares;
+        capacity = qMin<qsizetype>(capacity, qMax<qsizetype>(historyFrames, budget / frameBytes));
+    }
     return capacity;
 }
 
@@ -993,6 +1005,7 @@ bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int
 
             const drift::TimeUs ptsUs = ptsToUs(frame, timeBase);
             m_lastVideoPtsUs = ptsUs;
+            g_videoFramesDecoded.fetch_add(1, std::memory_order_relaxed);
             const drift::TimeUs delta = qAbs(ptsUs - sourceUs);
             // Keep a reference to the best frame and convert only once, after the
             // loop. Converting every frame between the keyframe and the target was
@@ -1165,6 +1178,7 @@ bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &o
 
             const drift::TimeUs ptsUs = ptsToUs(frame, timeBase);
             m_lastVideoPtsUs = ptsUs;
+            g_videoFramesDecoded.fetch_add(1, std::memory_order_relaxed);
             const drift::TimeUs delta = qAbs(ptsUs - sourceUs);
             if (delta < bestDelta) {
                 bestDelta = delta;

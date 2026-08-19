@@ -16,16 +16,20 @@ constexpr int kPositionUpdateMs = 16; // ~60 Hz, independent of decode
 constexpr int kFrameMaxWidth = 960;
 constexpr int kFrameMaxHeight = 540;
 
+// The auditioner scrubs its own range while the timeline may be playing the same clip. Salting the
+// timeline's stream id keeps the two off each other's decode cursors.
+constexpr quint64 kPreviewStreamSalt = 0x9E3779B97F4A7C15ull;
+
 } // namespace
 
-void ClipPreviewFrameWorker::decode(const QString &path, qint64 sourceUs, int maxWidth, int maxHeight,
-                                    quint64 token)
+void ClipPreviewFrameWorker::decode(const QString &path, quint64 streamId, qint64 sourceUs,
+                                    int maxWidth, int maxHeight, quint64 token)
 {
     if (token < latestToken.load(std::memory_order_acquire))
         return; // a newer position arrived while this sat in the queue
 
     const QImage image = ClipReaderPool::instance().readVideoFrame(
-        path, static_cast<drift::TimeUs>(sourceUs), maxWidth, maxHeight);
+        path, streamId, static_cast<drift::TimeUs>(sourceUs), maxWidth, maxHeight);
     if (!image.isNull())
         emit decoded(image, token);
 }
@@ -229,6 +233,7 @@ void ClipPreviewPlayer::requestFrame(drift::TimeUs position)
 {
     QString path;
     drift::TimeUs sourceUs = 0;
+    quint64 streamId = 0;
     {
         QMutexLocker lock(&m_clipMutex);
         if (m_clip.type == drift::ClipType::Audio || m_clip.path.isEmpty())
@@ -236,13 +241,15 @@ void ClipPreviewPlayer::requestFrame(drift::TimeUs position)
         const drift::VideoRead read = drift::resolveVideoRead(m_clip, position);
         path = read.path;
         sourceUs = read.sourceUs;
+        streamId = kPreviewStreamSalt ^ ClipReaderPool::streamIdForClip(m_clip.id);
     }
 
     const quint64 token = ++m_frameToken;
     m_frameWorker->latestToken.store(token, std::memory_order_release);
     QMetaObject::invokeMethod(m_frameWorker, "decode", Qt::QueuedConnection, Q_ARG(QString, path),
-                              Q_ARG(qint64, static_cast<qint64>(sourceUs)), Q_ARG(int, kFrameMaxWidth),
-                              Q_ARG(int, kFrameMaxHeight), Q_ARG(quint64, token));
+                              Q_ARG(quint64, streamId), Q_ARG(qint64, static_cast<qint64>(sourceUs)),
+                              Q_ARG(int, kFrameMaxWidth), Q_ARG(int, kFrameMaxHeight),
+                              Q_ARG(quint64, token));
 }
 
 void ClipPreviewPlayer::onDecoded(const QImage &image, quint64 token)
@@ -279,7 +286,7 @@ int ClipPreviewPlayer::fillAudio(float *buffer, int sampleCount)
     const drift::TimeUs timeUs = m_clock.produceTimeUs();
     // Salted off the timeline's id for this clip: the auditioner scrubs its own range while the
     // timeline may be playing the same file, and one decode cursor cannot serve both.
-    const quint64 streamId = AudioMixer::clipStreamId(clip.id) ^ 0x9E3779B97F4A7C15ull;
+    const quint64 streamId = kPreviewStreamSalt ^ ClipReaderPool::streamIdForClip(clip.id);
     const QVector<float> mixed =
         AudioMixer::readClipAudio(clip, streamId, timeUs, sampleCount, m_sampleRate, &m_retimer);
     const int frames = qMin(sampleCount, static_cast<int>(mixed.size() / 2));

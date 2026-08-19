@@ -27,7 +27,8 @@ public:
     std::atomic<quint64> latestToken{0};
 
 public slots:
-    void decode(const QString &path, qint64 sourceUs, int maxWidth, int maxHeight, quint64 token);
+    void decode(const QString &path, quint64 streamId, qint64 sourceUs, int maxWidth, int maxHeight,
+                quint64 token);
 
 signals:
     void decoded(const QImage &image, quint64 token);
