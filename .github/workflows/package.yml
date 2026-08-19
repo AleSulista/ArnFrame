@@ -389,18 +389,26 @@ jobs:
         env:
           QT_DEBUG_PLUGINS: "1"
         run: |
-          $plugin = "dist\bin\multimedia\ffmpegmediaplugin.dll"
-          if (-not (Test-Path $plugin)) {
+          $pluginRel = "dist\bin\multimedia\ffmpegmediaplugin.dll"
+          if (-not (Test-Path $pluginRel)) {
             Get-ChildItem dist\bin\multimedia -ErrorAction SilentlyContinue
-            throw "$plugin was not deployed; QAudioSink would have no devices at all"
+            throw "$pluginRel was not deployed; QAudioSink would have no devices at all"
           }
+          # Absolute: QPluginLoader otherwise searches libraryPaths() for this string.
+          $plugin = (Resolve-Path $pluginRel).Path
           $check = "build\Release\audiobackendcheck.exe"
           if (-not (Test-Path $check)) {
             throw "$check was not built; cannot verify the multimedia backend plugin"
           }
           Copy-Item $check dist\bin -Force
-          & dist\bin\audiobackendcheck.exe $plugin
-          $status = $LASTEXITCODE
+          # Run from the staged tree so the checker's app dir is the same as drift.exe.
+          Push-Location dist\bin
+          try {
+            & .\audiobackendcheck.exe $plugin
+            $status = $LASTEXITCODE
+          } finally {
+            Pop-Location
+          }
           Remove-Item dist\bin\audiobackendcheck.exe -Force
           if ($status -ne 0) {
             throw "the multimedia backend plugin does not load against the DLLs being shipped"

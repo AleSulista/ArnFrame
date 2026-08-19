@@ -12,6 +12,7 @@
 
 #include <QAudioDevice>
 #include <QCoreApplication>
+#include <QFileInfo>
 #include <QMediaDevices>
 #include <QPluginLoader>
 #include <QTextStream>
@@ -26,7 +27,10 @@ int main(int argc, char **argv)
 
     int status = 0;
     if (argc > 1) {
-        const QString path = QString::fromLocal8Bit(argv[1]);
+        // QPluginLoader treats a relative name as a search under libraryPaths(), not
+        // as a path from the working directory. Resolve first so `multimedia\foo.dll`
+        // from inside the staged tree (and CI's dist\bin\multimedia\...) actually load.
+        const QString path = QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteFilePath();
         QPluginLoader loader(path);
         if (loader.load()) {
             out << "plugin: loaded " << path << "\n";
