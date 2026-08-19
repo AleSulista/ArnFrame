@@ -2,17 +2,44 @@
 
 #include <QDir>
 #include <QFileDialog>
+#include <QMimeDatabase>
+#include <QMimeType>
+
+namespace {
+
+void applyFilters(QFileDialog &dialog, const QStringList &nameFilters,
+                  const QStringList &mimeTypeFilters)
+{
+    if (!mimeTypeFilters.isEmpty()) {
+        QMimeDatabase db;
+        bool allKnown = true;
+        for (const QString &mime : mimeTypeFilters) {
+            if (db.mimeTypeForName(mime).isValid())
+                continue;
+            allKnown = false;
+            break;
+        }
+        if (allKnown) {
+            dialog.setMimeTypeFilters(mimeTypeFilters);
+            return;
+        }
+    }
+    if (!nameFilters.isEmpty())
+        dialog.setNameFilters(nameFilters);
+}
+
+} // namespace
 
 FileDialogs::FileDialogs(QObject *parent) : QObject(parent) {}
 
-QUrl FileDialogs::openFile(const QString &title, const QStringList &nameFilters) const
+QUrl FileDialogs::openFile(const QString &title, const QStringList &nameFilters,
+                           const QStringList &mimeTypeFilters) const
 {
     QFileDialog dialog;
     dialog.setWindowTitle(title);
     dialog.setAcceptMode(QFileDialog::AcceptOpen);
     dialog.setFileMode(QFileDialog::ExistingFile);
-    if (!nameFilters.isEmpty())
-        dialog.setNameFilters(nameFilters);
+    applyFilters(dialog, nameFilters, mimeTypeFilters);
     if (dialog.exec() != QDialog::Accepted)
         return {};
     const QList<QUrl> urls = dialog.selectedUrls();
@@ -34,14 +61,13 @@ QList<QUrl> FileDialogs::openFiles(const QString &title, const QStringList &name
 
 QUrl FileDialogs::saveFile(const QString &title, const QStringList &nameFilters,
                            const QString &suggestedName, const QString &suffix,
-                           const QString &initialDirectory) const
+                           const QString &initialDirectory, const QStringList &mimeTypeFilters) const
 {
     QFileDialog dialog;
     dialog.setWindowTitle(title);
     dialog.setAcceptMode(QFileDialog::AcceptSave);
     dialog.setFileMode(QFileDialog::AnyFile);
-    if (!nameFilters.isEmpty())
-        dialog.setNameFilters(nameFilters);
+    applyFilters(dialog, nameFilters, mimeTypeFilters);
 
     if (!initialDirectory.isEmpty() && QDir(initialDirectory).exists())
         dialog.setDirectory(initialDirectory);

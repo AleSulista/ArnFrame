@@ -10795,6 +10795,43 @@ bool AppController::restoreLastSessionIfEnabled()
     return true;
 }
 
+QUrl AppController::startupProjectUrlFromArguments(const QStringList &args)
+{
+    for (int i = 1; i < args.size(); ++i) {
+        const QString &arg = args.at(i);
+        if (arg.isEmpty() || arg.startsWith(QLatin1Char('-')))
+            continue;
+        const QUrl url = QUrl::fromUserInput(arg, QDir::currentPath(), QUrl::AssumeLocalFile);
+        if (url.isValid())
+            return url;
+    }
+    return {};
+}
+
+void AppController::queueExternalProject(const QUrl &url)
+{
+    if (!url.isValid() || url.isEmpty())
+        return;
+    if (url == m_lastExternalProject)
+        return;
+    m_lastExternalProject = url;
+    if (m_uiReady)
+        emit externalProjectOpenRequested(url);
+    else
+        m_pendingStartupProject = url;
+}
+
+bool AppController::consumeStartupProject()
+{
+    m_uiReady = true;
+    if (!m_pendingStartupProject.isValid() || m_pendingStartupProject.isEmpty())
+        return false;
+    const QUrl url = m_pendingStartupProject;
+    m_pendingStartupProject.clear();
+    loadProject(url);
+    return true;
+}
+
 void AppController::discardUnsavedChanges()
 {
     // Don't Save before quit: clear dirty so aboutToQuit does not write a

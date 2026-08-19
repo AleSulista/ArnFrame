@@ -35,6 +35,9 @@
     <color type="primary" scheme_preference="dark">#5c3300</color>
   </branding>
   <launchable type="desktop-id">org.cutwire.Drift.desktop</launchable>
+  <provides>
+    <mediatype>application/x-drift-project</mediatype>
+  </provides>
   <developer id="org.cutwire">
     <name>CutWire Studios</name>
   </developer>

@@ -19,6 +19,8 @@
 // native platform file picker, which routes through xdg-desktop-portal.
 #include <QApplication>
 #include <QCoreApplication>
+#include <QEvent>
+#include <QFileOpenEvent>
 #include <QIcon>
 #include <QLoggingCategory>
 #include <QQmlApplicationEngine>
@@ -58,6 +60,30 @@ void applyLogLevel(bool verbose)
                                                           "*.info=false"));
     av_log_set_level(verbose ? AV_LOG_VERBOSE : AV_LOG_ERROR);
 }
+
+class FileOpenFilter : public QObject
+{
+public:
+    explicit FileOpenFilter(AppController *controller, QObject *parent = nullptr)
+        : QObject(parent)
+        , m_controller(controller)
+    {
+    }
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (event->type() == QEvent::FileOpen) {
+            const auto *open = static_cast<QFileOpenEvent *>(event);
+            m_controller->queueExternalProject(open->url());
+            return true;
+        }
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    AppController *m_controller = nullptr;
+};
 
 } // namespace
 
@@ -133,6 +159,10 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("Drift", 1, 0, "FileDialogs", &fileDialogs);
     qmlRegisterSingletonInstance("Drift", 1, 0, "Addons", &addonManager);
     qmlRegisterSingletonInstance("Drift", 1, 0, "Updates", &updateChecker);
+
+    app.installEventFilter(new FileOpenFilter(&editorState, &app));
+    editorState.queueExternalProject(
+        AppController::startupProjectUrlFromArguments(app.arguments()));
 
     QQmlApplicationEngine engine;
     QObject::connect(&editorState, &AppController::uiLanguageChanged,

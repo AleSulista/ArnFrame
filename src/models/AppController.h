@@ -19,6 +19,7 @@
 #include <QObject>
 #include <QPair>
 #include <QSet>
+#include <QStringList>
 #include <QUndoStack>
 #include <QUrl>
 #include <QVariantList>
@@ -796,6 +797,13 @@ public:
     // When reopenLastProject is on: restore recovery silently, else load lastSessionPath.
     // Returns true if a restore/load was started (caller should skip RecoveryDialog).
     Q_INVOKABLE bool restoreLastSessionIfEnabled();
+    // First non-flag positional argument as a local file URL (paths, file://, portal URIs).
+    static QUrl startupProjectUrlFromArguments(const QStringList &args);
+    // argv / QFileOpenEvent. Queued until consumeStartupProject(); after that, emits
+    // externalProjectOpenRequested so QML can confirm unsaved work.
+    void queueExternalProject(const QUrl &url);
+    // Load a queued startup document. True if a load started (skip recovery / last session).
+    Q_INVOKABLE bool consumeStartupProject();
     Q_INVOKABLE QVariantList exportPresets() const; // legacy scale ids/labels
     Q_INVOKABLE QVariantList exportScaleOptions() const;
     // Frame rate choices; the "project" entry is labelled with the current project fps.
@@ -830,6 +838,7 @@ signals:
     // editor so the user can type straight onto the canvas.
     void inlineTextEditRequested(int trackIndex, int clipIndex);
     void inlineTextEditingChanged();
+    void externalProjectOpenRequested(const QUrl &url);
     void tracksChanged();
     void playheadSecondsChanged();
     void playingChanged();
@@ -1213,6 +1222,9 @@ protected:
     QTimer *m_autosaveTimer = nullptr;
     bool m_recoveryAvailable = false;
     QVariantMap m_recoveryInfo;
+    QUrl m_pendingStartupProject;
+    QUrl m_lastExternalProject;
+    bool m_uiReady = false;
     // Launch layout picker / first-clip setup completed for this empty project.
     bool m_projectLayoutChosen = false;
 

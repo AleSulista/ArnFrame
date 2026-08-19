@@ -855,6 +855,8 @@ else()
             DESTINATION ${CMAKE_INSTALL_DATADIR}/applications COMPONENT drift)
     install(FILES flatpak/org.cutwire.Drift.metainfo.xml
             DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo COMPONENT drift)
+    install(FILES flatpak/org.cutwire.Drift.xml
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/mime/packages COMPONENT drift)
     # 1024px source is intentionally skipped: flatpak build-export rejects icons
     # larger than 512x512.
     foreach(_size 64 128 256 512)

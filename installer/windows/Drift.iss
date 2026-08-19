@@ -29,6 +29,7 @@ WizardStyle=modern
 ; Inno icon and the Apps & Features entry falls back to a generic one.
 SetupIconFile=..\..\resources\windows\drift.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
+ChangesAssociations=yes
 OutputDir=output
 OutputBaseFilename=Drift-Setup-x64
 
@@ -47,6 +48,12 @@ Source: "{#MyAppSource}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdir
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[Registry]
+Root: HKCR; Subkey: ".drift"; ValueType: string; ValueName: ""; ValueData: "CutWire.Drift.Project"; Flags: uninsdeletevalue
+Root: HKCR; Subkey: "CutWire.Drift.Project"; ValueType: string; ValueName: ""; ValueData: "Drift Project"; Flags: uninsdeletekey
+Root: HKCR; Subkey: "CutWire.Drift.Project\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName},0"
+Root: HKCR; Subkey: "CutWire.Drift.Project\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent

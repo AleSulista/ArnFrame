@@ -251,6 +251,10 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        // A document the shell asked us to open (argv / QFileOpenEvent) wins over last-session
+        // reopen and the recovery prompt.
+        if (EditorState.consumeStartupProject())
+            return
         // Opt-in: restore unsaved recovery or the last clean project silently.
         if (EditorState.restoreLastSessionIfEnabled())
             return
@@ -267,6 +271,11 @@ ApplicationWindow {
 
     Connections {
         target: EditorState
+        function onExternalProjectOpenRequested(url) {
+            editorHeader.confirmIfDirty(function () {
+                EditorState.loadProject(url)
+            })
+        }
         function onRecoveryChanged() {
             if (EditorState.reopenLastProject)
                 return

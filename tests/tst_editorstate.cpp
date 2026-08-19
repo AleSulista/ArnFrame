@@ -10,6 +10,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
+#include <QUrl>
 
 #include <QScopeGuard>
 
@@ -73,6 +74,7 @@ private slots:
     void replaceAssetSourceRebindsClipsAndClampsTrim();
     void replaceAssetSourceRefusesADifferentKind();
     void exportAssetImageWritesPngAndJpeg();
+    void startupProjectUrlFromArguments();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -1972,6 +1974,24 @@ void EditorStateTest::exportAssetImageWritesPngAndJpeg()
     QCOMPARE(written.size(), source.size());
 
     QVERIFY(!state.exportAssetImage(1, QUrl::fromLocalFile(dir.filePath(QStringLiteral("no.png")))));
+}
+
+void EditorStateTest::startupProjectUrlFromArguments()
+{
+    QCOMPARE(AppController::startupProjectUrlFromArguments({QStringLiteral("drift")}), QUrl());
+    QCOMPARE(AppController::startupProjectUrlFromArguments(
+                 {QStringLiteral("drift"), QStringLiteral("--verbose")}),
+             QUrl());
+
+    const QString spaced = QDir::temp().filePath(QStringLiteral("Untitled Project.drift"));
+    const QUrl fromPath = AppController::startupProjectUrlFromArguments(
+        {QStringLiteral("drift"), QStringLiteral("--verbose"), spaced});
+    QCOMPARE(fromPath, QUrl::fromLocalFile(spaced));
+
+    const QUrl fileUrl = QUrl::fromLocalFile(spaced);
+    const QUrl fromFileUrl = AppController::startupProjectUrlFromArguments(
+        {QStringLiteral("drift"), fileUrl.toString()});
+    QCOMPARE(fromFileUrl.toLocalFile(), spaced);
 }
 
 QTEST_MAIN(EditorStateTest)

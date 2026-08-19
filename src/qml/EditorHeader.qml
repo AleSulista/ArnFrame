@@ -14,6 +14,7 @@ Rectangle {
     property string projectName: EditorState.projectName
 
     readonly property var projectFilter: [qsTr("Drift project (*.drift)")]
+    readonly property var projectMimeTypes: ["application/x-drift-project"]
 
     // Action to run after Save or Don't Save resolves. Null when idle.
     property var _pendingAfterUnsaved: null
@@ -31,7 +32,8 @@ Rectangle {
 
     function openProject() {
         root.confirmIfDirty(function () {
-            var url = FileDialogs.openFile(qsTr("Open Project"), root.projectFilter)
+            var url = FileDialogs.openFile(qsTr("Open Project"), root.projectFilter,
+                                           root.projectMimeTypes)
             if (url != "")
                 EditorState.loadProject(url)
         })
@@ -57,7 +59,8 @@ Rectangle {
             return !EditorState.hasUnsavedChanges
         }
         var url = FileDialogs.saveFile(qsTr("Save Project"), root.projectFilter,
-                                       EditorState.projectName, "drift")
+                                       EditorState.projectName, "drift", "",
+                                       root.projectMimeTypes)
         if (url == "")
             return false
         EditorState.saveProject(url)
@@ -68,7 +71,8 @@ Rectangle {
     // the media. Always asks for a path: it is a different artefact from the working save.
     function packageProject() {
         var url = FileDialogs.saveFile(qsTr("Save Shareable Copy"), root.projectFilter,
-                                       EditorState.projectName, "drift")
+                                       EditorState.projectName, "drift", "",
+                                       root.projectMimeTypes)
         if (url != "")
             EditorState.packageProject(url)
     }
