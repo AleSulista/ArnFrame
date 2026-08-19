@@ -40,6 +40,14 @@ Clicking a transition on the timeline (or clicking away after dropping one) reve
 
 Playback was silent when the output device would not accept the project’s sample rate or format. Drift now negotiates a format the device can play, and Settings has an **Audio output** picker (closes [#54](https://github.com/CutWire-Studios/Drift/issues/54)).
 
+### Bug [`0fe7283`](https://github.com/CutWire-Studios/Drift/commit/0fe7283) Audio drifted out of sync where two clips from the same file overlap
+
+Overlapping two clips cut from one media file — splitting a clip and dragging the halves together, the usual way to hand-build a crossfade — glitched the audio through the overlap and then left the second clip’s audio offset from its picture for the rest of its length. Both clips read through a single decode cursor, so the second one was handed the first one’s audio. Each clip now decodes on its own cursor. The same fix repositions audio after a forward seek shorter than two seconds, which previously kept playing from the old spot.
+
+### Bug [`c844584`](https://github.com/CutWire-Studios/Drift/commit/c844584) Overlapping clips from the same file played back slowly
+
+Where two clips cut from one file overlapped, every composited frame dragged the shared decoder between two positions seconds apart, and it decoded its way through most of a keyframe interval each time. On a 720p source that was 5.3 seconds of decoding for 100 frames, against 0.22 seconds for the same overlap between two separate files. Overlaps now cost the same either way.
+
 ---
 
 ## ✨ Added
