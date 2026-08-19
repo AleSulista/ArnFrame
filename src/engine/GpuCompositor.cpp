@@ -574,7 +574,7 @@ QImage render(const GpuScene &scene)
 
         // The canvas holds premultiplied alpha; toImage() labels it as such and
         // the conversion un-premultiplies back to straight RGBA.
-        result = canvas.fbo->toImage(false).convertToFormat(QImage::Format_RGBA8888);
+        result = rt.readTarget(canvas);
         rt.releaseTarget(std::move(canvas));
     });
     return result;

@@ -109,6 +109,10 @@ public:
     GlTarget acquireTarget(int width, int height);
     void releaseTarget(GlTarget &&target);
 
+    // glFinish then read the FBO. Apple's GL can hand toImage() a half-resolved
+    // tile without this, so two scrubs of the same timestamp would not match.
+    QImage readTarget(const GlTarget &target);
+
     // Presentation ring. The preview's composited frame is handed to the Qt Quick
     // scene graph as a live GL texture rather than read back, so the target it
     // lives in cannot go back to the general pool while the scene graph samples

@@ -2884,7 +2884,25 @@ void EngineTest::transitionRenderingIsDeterministic()
         compositor.compositeAt(drift::secondsToUs(2.4));
         const QImage rescrubbed = compositor.compositeAt(drift::secondsToUs(1.75));
 
-        QVERIFY2(first == rescrubbed, qPrintable(kindId));
+        if (first != rescrubbed) {
+            int maxd = 255;
+            const QImage a = first.convertToFormat(QImage::Format_RGBA8888);
+            const QImage b = rescrubbed.convertToFormat(QImage::Format_RGBA8888);
+            if (a.size() == b.size()) {
+                maxd = 0;
+                for (int y = 0; y < a.height(); ++y) {
+                    const uchar *pa = a.constScanLine(y);
+                    const uchar *pb = b.constScanLine(y);
+                    const int n = a.width() * 4;
+                    for (int i = 0; i < n; ++i) {
+                        const int d = qAbs(int(pa[i]) - int(pb[i]));
+                        if (d > maxd)
+                            maxd = d;
+                    }
+                }
+            }
+            QFAIL(qPrintable(QStringLiteral("%1: max channel delta %2").arg(kindId).arg(maxd)));
+        }
     }
 }
 

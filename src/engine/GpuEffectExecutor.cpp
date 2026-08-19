@@ -104,7 +104,7 @@ QImage GpuEffectExecutor::applyChain(const QList<ChainStep> &steps, const QImage
             current = std::move(next);
         }
 
-        result = current.fbo->toImage(false).convertToFormat(QImage::Format_RGBA8888);
+        result = rt.readTarget(current);
         if (result.size() != canvasSize)
             result = result.scaled(canvasSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
 
@@ -163,7 +163,7 @@ QImage GpuEffectExecutor::apply(const QString &cacheKey, const drift::GpuEffectD
             if (canvas.isValid()) {
                 // Sources were promoted into FBOs; all samples share that Y layout.
                 // toImage(false) keeps QImage top matching the original frame top.
-                result = canvas.fbo->toImage(false).convertToFormat(QImage::Format_RGBA8888);
+                result = rt.readTarget(canvas);
                 if (result.size() != canvasSize)
                     result = result.scaled(canvasSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
                 ok = true;
@@ -258,7 +258,7 @@ QImage GpuEffectExecutor::blendTimeEcho(const QList<QImage> &framesNewestFirst, 
         }
 
         if (accumulated.isValid()) {
-            result = accumulated.fbo->toImage(false).convertToFormat(QImage::Format_RGBA8888);
+            result = rt.readTarget(accumulated);
             rt.releaseTarget(std::move(accumulated));
         }
     });

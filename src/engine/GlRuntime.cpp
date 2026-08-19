@@ -334,6 +334,15 @@ void GlRuntime::releaseTarget(GlTarget &&target)
     ++m_pooledTargets;
 }
 
+QImage GlRuntime::readTarget(const GlTarget &target)
+{
+    if (!target.isValid())
+        return {};
+    if (auto *gl = functions())
+        gl->glFinish();
+    return target.fbo->toImage(false).convertToFormat(QImage::Format_RGBA8888);
+}
+
 void GlRuntime::waitPresentFence(int slotIndex)
 {
     if (slotIndex < 0 || slotIndex >= kPresentRingSize)
