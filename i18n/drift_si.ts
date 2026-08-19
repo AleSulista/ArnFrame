@@ -4079,11 +4079,16 @@
     </message>
     <message>
         <location line="+10"/>
-        <source>Hides everything outside the shape. Feather softens its edge.</source>
-        <translation>හැඩතලයෙන් පිටත ඇති සියල්ල සඟවයි. Feather මඟින් එහි දාර මෘදු කරයි.</translation>
+        <source>Coming soon — shape masks are still under development.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+15"/>
+        <location line="+27"/>
+        <source>Shape masks are still under development</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-9"/>
         <source>None</source>
         <translation>කිසිවක් නැත</translation>
     </message>
@@ -4118,12 +4123,7 @@
         <translation>නිදහස් හැඩය (Freeform)</translation>
     </message>
     <message>
-        <location line="+3"/>
-        <source>Shape used to cut out this clip</source>
-        <translation>මෙම ක්ලිපය වෙන් කිරීමට භාවිත කළ හැඩතලය</translation>
-    </message>
-    <message>
-        <location line="+14"/>
+        <location line="+17"/>
         <source>Remove cutout</source>
         <translation>Cutout ඉවත් කරන්න</translation>
     </message>

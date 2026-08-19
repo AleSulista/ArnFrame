@@ -117,7 +117,7 @@ Item {
             visible: maskShapeBox.visible
             width: parent.width
             wrapMode: Text.WordWrap
-            text: qsTr("Hides everything outside the shape. Feather softens its edge.")
+            text: qsTr("Coming soon — shape masks are still under development.")
             color: Theme.mutedForeground
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeXs
@@ -129,6 +129,9 @@ Item {
             visible: root.clipKind !== "audio" && root.clipKind !== "text"
                      && root.clipKind !== "subtitle"
             width: parent.width
+            // Shape masks are unfinished — keep the control in the layout so
+            // the Cutouts tab still shows what is coming, but do not let it open.
+            enabled: false
             model: ["none", "rectangle", "ellipse", "star", "heart", "bars", "freeform"]
             // Human labels — the raw ids were shown to the user.
             readonly property var labels: ({
@@ -141,7 +144,7 @@ Item {
                 "freeform": qsTr("Freeform")
             })
             displayText: labels[model[currentIndex]] || model[currentIndex]
-            tooltip: qsTr("Shape used to cut out this clip")
+            tooltip: qsTr("Shape masks are still under development")
             currentIndex: Math.max(0, model.indexOf((root.clipData.mask && root.clipData.mask.shape) || "none"))
             onActivated: {
                 const mask = Object.assign({}, root.clipData.mask || {})
