@@ -67,6 +67,10 @@ jobs:
           test -f "${GITHUB_WORKSPACE}/../drift-addons/staging/effects-core/effects/turbulent_displace/effect.json"
 
       # A stalled apt mirror otherwise sits here until the 60-minute job timeout; fail in 10.
+      # libva* are runtime, not build, deps: Qt Multimedia's FFmpeg backend reaches VA-API
+      # through implib-gen stubs whose generated dlopen failure path is assert(0), so any test
+      # that constructs a QMediaDevices SIGABRTs on a runner without them rather than falling
+      # back to software decode.
       - name: Install native build dependencies
         timeout-minutes: 10
         env:
@@ -78,6 +82,7 @@ jobs:
             libgl1-mesa-dev libegl1-mesa-dev libglib2.0-dev libdbus-1-dev \
             libzstd-dev libssl-dev libsoundtouch-dev \
             libpulse-dev libasound2-dev \
+            libva2 libva-drm2 libva-x11-2 \
             libfontconfig1-dev libfreetype6-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
             libxcb1-dev libxcb-glx0-dev libxcb-keysyms1-dev libxcb-image0-dev libxcb-shm0-dev \

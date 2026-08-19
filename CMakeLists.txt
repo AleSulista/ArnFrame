@@ -17,6 +17,14 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 option(WITH_BGREMOVAL "Enable OpenCV-based background removal" OFF)
 
+# Defaults off under CI so the Translations test still compares the committed catalogs.
+if(DEFINED ENV{CI})
+    set(_drift_auto_ts OFF)
+else()
+    set(_drift_auto_ts ON)
+endif()
+option(DRIFT_AUTO_UPDATE_TRANSLATIONS "Run lupdate as part of the default build" ${_drift_auto_ts})
+
 # Fonts, stickers and the Whisper model used to be fetched or extracted here and shipped inside
 # the build tree — roughly 800 MB of assets every user paid for whether or not they used them.
 # They are now addons: signed .driftpkg archives downloaded at runtime into <AppDataLocation>/
@@ -709,6 +717,16 @@ if(Qt6LinguistTools_FOUND)
     )
     if(NOT TARGET update_translations AND TARGET drift_lupdate)
         add_custom_target(update_translations DEPENDS drift_lupdate)
+    endif()
+
+    # Qt keeps lupdate out of the default build, so a new qsTr() only reaches i18n/*.ts when
+    # someone remembers the manual target -- which is what keeps breaking the Translations test.
+    # Order it ahead of lrelease so the .qm files come from the refreshed catalogs rather than
+    # racing them. DEFER because qt_add_translations only creates these targets at the end of
+    # the directory scope. Off under CI, where the test must see the committed catalogs and not
+    # ones this build just repaired.
+    if(DRIFT_AUTO_UPDATE_TRANSLATIONS)
+        cmake_language(DEFER CALL add_dependencies ${PROJECT_NAME}_lrelease update_translations)
     endif()
 else()
     message(STATUS "Qt6 LinguistTools not found; translations will not be built.")
