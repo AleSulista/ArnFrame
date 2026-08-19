@@ -1,10 +1,5 @@
-# No trailing slash: `build/` matches a directory but not a *symlink* named build,
-# which is how a link to an out-of-tree build dir once got committed by accident.
 build
 build-*/
-# Stray tree a mis-pathed lupdate run leaves behind when the checkout path contains
-# a space (the repo lives under ".../CutWire Studios/Drift").
-/Studios/
 .cache/
 *.user
 *.user.*
