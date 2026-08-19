@@ -45,7 +45,7 @@ void ClipReaderPool::stopWorkerEntry(WorkerEntry &entry)
 }
 
 ClipReaderWorker *ClipReaderPool::ensureWorker(std::map<QString, std::unique_ptr<WorkerEntry>> &workers,
-                                               const QString &path)
+                                               const QString &path, bool audioOnly)
 {
     auto it = workers.find(path);
     if (it == workers.end()) {
@@ -59,7 +59,8 @@ ClipReaderWorker *ClipReaderPool::ensureWorker(std::map<QString, std::unique_ptr
         // decode methods, which run after this open on the worker's event queue —
         // so the GUI/audio threads are never stuck inside avformat_find_stream_info
         // while holding the pool mutex (multi-hour files make that open very slow).
-        QMetaObject::invokeMethod(entry->worker, "openPath", Qt::QueuedConnection, Q_ARG(QString, path));
+        QMetaObject::invokeMethod(entry->worker, "openPath", Qt::QueuedConnection, Q_ARG(QString, path),
+                                  Q_ARG(bool, audioOnly));
         it = workers.emplace(path, std::move(entry)).first;
     }
 
@@ -80,7 +81,7 @@ void ClipReaderPool::warmVideoFrames(const QList<VideoRequest> &requests)
         ClipReaderWorker *worker = nullptr;
         {
             QMutexLocker lock(&m_mutex);
-            worker = ensureWorker(m_videoWorkers, request.path);
+            worker = ensureWorker(m_videoWorkers, request.path, false);
         }
         // Prefer NV12 warm — matches the live-preview decode path.
         QMetaObject::invokeMethod(worker, "decodeVideoNv12", Qt::QueuedConnection,
@@ -101,7 +102,7 @@ QImage ClipReaderPool::readVideoFrame(const QString &path, drift::TimeUs sourceU
         // blocking decode lets audio and video (different workers) decode in
         // parallel instead of serializing on this lock.
         QMutexLocker lock(&m_mutex);
-        worker = ensureWorker(m_videoWorkers, path);
+        worker = ensureWorker(m_videoWorkers, path, false);
     }
 
     QImage frame;
@@ -126,7 +127,7 @@ Nv12Frame ClipReaderPool::readVideoFrameNv12(const QString &path, drift::TimeUs 
     ClipReaderWorker *worker = nullptr;
     {
         QMutexLocker lock(&m_mutex);
-        worker = ensureWorker(m_videoWorkers, path);
+        worker = ensureWorker(m_videoWorkers, path, false);
     }
 
     Nv12Frame frame;
@@ -139,7 +140,8 @@ Nv12Frame ClipReaderPool::readVideoFrameNv12(const QString &path, drift::TimeUs 
     return frame;
 }
 
-int ClipReaderPool::readAudioInterleaved(const QString &path, drift::TimeUs sourceStartUs, int sampleCount,
+int ClipReaderPool::readAudioInterleaved(const QString &path, quint64 streamId,
+                                         drift::TimeUs sourceStartUs, int sampleCount,
                                          int outputSampleRate, float *interleavedStereoOut)
 {
     if (path.isEmpty() || !interleavedStereoOut || sampleCount <= 0)
@@ -148,21 +150,29 @@ int ClipReaderPool::readAudioInterleaved(const QString &path, drift::TimeUs sour
     ClipReaderWorker *worker = nullptr;
     {
         QMutexLocker lock(&m_mutex);
-        worker = ensureWorker(m_audioWorkers, path);
+        worker = ensureWorker(m_audioWorkers, path, true);
     }
 
     int written = 0;
     QMetaObject::invokeMethod(worker, "decodeAudio", Qt::BlockingQueuedConnection, Q_RETURN_ARG(int, written),
-                              Q_ARG(drift::TimeUs, sourceStartUs), Q_ARG(int, sampleCount),
-                              Q_ARG(int, outputSampleRate), Q_ARG(float *, interleavedStereoOut));
+                              Q_ARG(quint64, streamId), Q_ARG(drift::TimeUs, sourceStartUs),
+                              Q_ARG(int, sampleCount), Q_ARG(int, outputSampleRate),
+                              Q_ARG(float *, interleavedStereoOut));
     return written;
+}
+
+void ClipReaderPool::resetAudioStreams()
+{
+    QMutexLocker lock(&m_mutex);
+    for (auto &entry : m_audioWorkers)
+        entry.second->worker->requestAudioReposition();
 }
 
 void ClipReaderPool::retainActivePaths(const QSet<QString> &videoPaths, const QSet<QString> &audioPaths)
 {
     QMutexLocker lock(&m_mutex);
     for (const QString &path : videoPaths)
-        ensureWorker(m_videoWorkers, path);
+        ensureWorker(m_videoWorkers, path, false);
     for (const QString &path : audioPaths)
-        ensureWorker(m_audioWorkers, path);
+        ensureWorker(m_audioWorkers, path, true);
 }

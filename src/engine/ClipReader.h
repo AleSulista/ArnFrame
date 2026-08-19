@@ -71,6 +71,10 @@ public:
     bool prefetchNextVideoFrameNv12(int maxWidth, int maxHeight, drift::TimeUs readAheadUs = 0);
     int readAudioInterleaved(drift::TimeUs sourceStartUs, int sampleCount, int outputSampleRate,
                              float *interleavedStereoOut);
+    // Drop the sequential audio cursor so the next read seeks to the position it is given. The
+    // fast path below only honours sourceStartUs on a discontinuity it can see; a seek of the
+    // timeline playhead is one it cannot.
+    void invalidateAudioPosition() { m_audioPositioned = false; }
 
 private:
     bool ensureVideoDecoder();

@@ -36,8 +36,17 @@ public:
     //
     // `retimer` carries the stretcher state across blocks. It must be the same one for every block
     // of a given clip, and callers must not share one between clips.
-    static QVector<float> readClipAudio(const drift::Clip &clip, drift::TimeUs winStartUs, int outFrames,
-                                        int sampleRate, drift::ClipAudioRetimer *retimer);
+    //
+    // `streamId` is the same thing one level down: the clip's own decode cursor in ClipReaderPool.
+    // It must be stable across blocks and unique per caller — two consumers reading one file
+    // through a single cursor is what desynced overlapping clips.
+    static QVector<float> readClipAudio(const drift::Clip &clip, quint64 streamId,
+                                        drift::TimeUs winStartUs, int outFrames, int sampleRate,
+                                        drift::ClipAudioRetimer *retimer);
+
+    // Stream id for a clip playing on the timeline. The preview player salts this so auditioning a
+    // clip does not fight timeline playback of the same one for its cursor.
+    static quint64 clipStreamId(const QString &clipId) { return qHash(clipId); }
 
 private:
     const drift::Project *m_project = nullptr;

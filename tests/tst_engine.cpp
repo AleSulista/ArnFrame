@@ -13,6 +13,8 @@
 #include <atomic>
 
 #include <cmath>
+#include <cstring>
+#include <utility>
 #include <random>
 
 #include "core/Clip.h"
@@ -81,6 +83,9 @@ private slots:
     void clipReaderAppliesDisplayRotation();
     void reverseProxyKeepsDisplayRotation();
     void clipReaderAudioSequential();
+    void audioStreamsAreIndependentPerStreamId();
+    void audioStreamResetRepositionsShortForwardSeek();
+    void audioMixerOverlappingSameFileClips();
     void compositorDefaultRenderStaysFullResolution();
     void compositorPreviewScaleRendersLowerResolution();
     void compositorPreviewScaleMapsProjectPixelLayout();
@@ -190,6 +195,7 @@ private:
     static QString makeColorSegmentsVideo(QTemporaryDir &dir);
     static QString makeRotatedHalvesVideo(QTemporaryDir &dir, int displayDegrees);
     static QString makeToneAudio(QTemporaryDir &dir);
+    static QString makeSweepAudio(QTemporaryDir &dir);
 };
 
 void EngineTest::initTestCase()
@@ -1116,6 +1122,229 @@ QString EngineTest::makeToneAudio(QTemporaryDir &dir)
     if (!proc.waitForFinished(30000) || proc.exitCode() != 0)
         return {};
     return QFileInfo::exists(out) ? out : QString{};
+}
+
+// A 440 Hz sine sounds the same wherever you start it, so it cannot show that audio came from the
+// wrong source position. This is a linear chirp — 200 Hz rising by 600 Hz per second — where every
+// moment has its own frequency and an offset read is measurably different from the right one.
+QString EngineTest::makeSweepAudio(QTemporaryDir &dir)
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        return {};
+
+    const QString out = dir.filePath(QStringLiteral("sweep.wav"));
+    QStringList args{
+        QStringLiteral("-y"),
+        QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+        // 0.3 amplitude so two of these summed stay under the mixer's soft-clip knee and the
+        // expected mix is a plain addition.
+        QStringLiteral("aevalsrc=0.3*sin(2*PI*(200+300*t)*t):d=6:s=48000"),
+        QStringLiteral("-c:a"), QStringLiteral("pcm_s16le"),
+        out,
+    };
+
+    QProcess proc;
+    proc.start(ffmpeg, args);
+    if (!proc.waitForFinished(30000) || proc.exitCode() != 0)
+        return {};
+    return QFileInfo::exists(out) ? out : QString{};
+}
+
+namespace {
+
+double interleavedRmsError(const QVector<float> &a, const QVector<float> &b, int fromFrame, int toFrame)
+{
+    double err = 0.0;
+    int n = 0;
+    for (int i = fromFrame * 2; i < toFrame * 2; ++i, ++n) {
+        const double d = static_cast<double>(a[i]) - b[i];
+        err += d * d;
+    }
+    return n > 0 ? std::sqrt(err / n) : 0.0;
+}
+
+} // namespace
+
+// Two consumers of one media file must not share a decode cursor. ClipReader decodes audio
+// sequentially and serves a request near its cursor as a continuation, so before stream ids the
+// second caller was handed the first caller's audio and stayed offset by the gap between them.
+void EngineTest::audioStreamsAreIndependentPerStreamId()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeSweepAudio(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    constexpr int kRate = 48000;
+    constexpr int kChunk = 1024;
+    constexpr int kChunks = 40;
+    constexpr int kTotal = kChunk * kChunks;
+    constexpr drift::TimeUs kStartA = 0;
+    // 1.5 s ahead of A: inside the reader's 2 s forward tolerance, which is exactly the window
+    // where it used to continue the other stream instead of seeking.
+    constexpr drift::TimeUs kStartB = 1'500'000;
+
+    QVector<float> refA(kTotal * 2, 0.0f);
+    QVector<float> refB(kTotal * 2, 0.0f);
+    {
+        ClipReader a;
+        QVERIFY(a.open(path));
+        QCOMPARE(a.readAudioInterleaved(kStartA, kTotal, kRate, refA.data()), kTotal);
+        ClipReader b;
+        QVERIFY(b.open(path));
+        QCOMPARE(b.readAudioInterleaved(kStartB, kTotal, kRate, refB.data()), kTotal);
+    }
+    // The chirp really does differ across that offset, so the comparison below can fail.
+    QVERIFY(interleavedRmsError(refA, refB, 0, kTotal) > 0.05);
+
+    // Interleave the two streams block by block, the way AudioMixer reads two overlapping clips.
+    QVector<float> gotA(kTotal * 2, 0.0f);
+    QVector<float> gotB(kTotal * 2, 0.0f);
+    QVector<float> chunk(kChunk * 2);
+    for (int c = 0; c < kChunks; ++c) {
+        const drift::TimeUs offsetUs =
+            static_cast<drift::TimeUs>(c) * kChunk * drift::kUsPerSecond / kRate;
+        for (auto &stream : {std::pair{quint64{7}, &gotA}, std::pair{quint64{9}, &gotB}}) {
+            const drift::TimeUs base = stream.first == 7 ? kStartA : kStartB;
+            const int n = ClipReaderPool::instance().readAudioInterleaved(
+                path, stream.first, base + offsetUs, kChunk, kRate, chunk.data());
+            QCOMPARE(n, kChunk);
+            std::memcpy(stream.second->data() + static_cast<size_t>(c) * kChunk * 2, chunk.constData(),
+                        static_cast<size_t>(kChunk) * 2 * sizeof(float));
+        }
+    }
+
+    QVERIFY2(interleavedRmsError(refA, gotA, 0, kTotal) < 0.02, "stream 7 does not match its source");
+    QVERIFY2(interleavedRmsError(refB, gotB, 0, kTotal) < 0.02, "stream 9 does not match its source");
+}
+
+// A forward seek shorter than the reader's 2 s threshold looks like ordinary playback to the
+// sequential fast path, so it used to keep streaming from the pre-seek position forever.
+void EngineTest::audioStreamResetRepositionsShortForwardSeek()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeSweepAudio(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    constexpr int kRate = 48000;
+    constexpr int kChunk = 1024;
+    constexpr quint64 kStream = 42;
+    constexpr drift::TimeUs kSeekToUs = 1'000'000; // 1 s forward: well inside the tolerance
+
+    QVector<float> chunk(kChunk * 2);
+    drift::TimeUs pos = 0;
+    for (int c = 0; c < 10; ++c) {
+        QCOMPARE(ClipReaderPool::instance().readAudioInterleaved(path, kStream, pos, kChunk, kRate,
+                                                                 chunk.data()),
+                 kChunk);
+        pos += static_cast<drift::TimeUs>(kChunk) * drift::kUsPerSecond / kRate;
+    }
+
+    ClipReaderPool::instance().resetAudioStreams();
+
+    QVector<float> got(kChunk * 2, 0.0f);
+    QCOMPARE(ClipReaderPool::instance().readAudioInterleaved(path, kStream, kSeekToUs, kChunk, kRate,
+                                                             got.data()),
+             kChunk);
+
+    QVector<float> expected(kChunk * 2, 0.0f);
+    ClipReader ref;
+    QVERIFY(ref.open(path));
+    QCOMPARE(ref.readAudioInterleaved(kSeekToUs, kChunk, kRate, expected.data()), kChunk);
+
+    QVERIFY2(interleavedRmsError(expected, got, 0, kChunk) < 0.02,
+             "audio did not reposition after the stream reset");
+}
+
+// The bug this whole change exists for: two clips cut from one file, overlapping on a track, read
+// back to back inside a single mix block. The second clip used to be served the first clip's stream
+// and stayed offset by the gap between their source positions for the rest of its length.
+void EngineTest::audioMixerOverlappingSameFileClips()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeSweepAudio(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    constexpr int kRate = 48000;
+    constexpr drift::TimeUs kClipDurUs = 2'000'000;
+    constexpr drift::TimeUs kBStartUs = 1'500'000; // 0.5 s overlap
+    constexpr drift::TimeUs kBSrcInUs = 3'000'000; // 1.5 s ahead of A at the overlap: in tolerance
+    constexpr drift::TimeUs kSpanUs = kBStartUs + kClipDurUs;
+
+    drift::Project project;
+    drift::Track track{.type = drift::TrackType::Audio};
+
+    drift::Clip a;
+    a.id = QStringLiteral("clip-a");
+    a.type = drift::ClipType::Audio;
+    a.path = path;
+    a.timelineStart = 0;
+    a.timelineDuration = kClipDurUs;
+    a.srcIn = 0;
+    a.srcOut = kClipDurUs;
+    track.clips.append(a);
+
+    drift::Clip b = a;
+    b.id = QStringLiteral("clip-b");
+    b.timelineStart = kBStartUs;
+    b.srcIn = kBSrcInUs;
+    b.srcOut = kBSrcInUs + kClipDurUs;
+    track.clips.append(b);
+
+    project.tracks().append(track);
+
+    AudioMixer mixer;
+    mixer.setProject(&project);
+
+    const int total = static_cast<int>((kSpanUs * kRate) / drift::kUsPerSecond);
+    const int clipFrames = static_cast<int>((kClipDurUs * kRate) / drift::kUsPerSecond);
+    const int bOffset = static_cast<int>((kBStartUs * kRate) / drift::kUsPerSecond);
+
+    QVector<float> mixed(total * 2, 0.0f);
+    constexpr int kBlock = 1024;
+    for (int offset = 0; offset < total; offset += kBlock) {
+        const int count = std::min(kBlock, total - offset);
+        const auto startUs =
+            static_cast<drift::TimeUs>((static_cast<int64_t>(offset) * drift::kUsPerSecond) / kRate);
+        mixer.mix(startUs, count, kRate, mixed.data() + static_cast<size_t>(offset) * 2);
+    }
+
+    // What each clip should contribute, read straight from the file on its own reader.
+    QVector<float> srcA(clipFrames * 2, 0.0f);
+    QVector<float> srcB(clipFrames * 2, 0.0f);
+    {
+        ClipReader ra;
+        QVERIFY(ra.open(path));
+        QCOMPARE(ra.readAudioInterleaved(0, clipFrames, kRate, srcA.data()), clipFrames);
+        ClipReader rb;
+        QVERIFY(rb.open(path));
+        QCOMPARE(rb.readAudioInterleaved(kBSrcInUs, clipFrames, kRate, srcB.data()), clipFrames);
+    }
+
+    // 0.3 amplitude each, so the sum never reaches the soft-clip knee and this is plain addition.
+    QVector<float> expected(total * 2, 0.0f);
+    for (int i = 0; i < clipFrames * 2; ++i) {
+        expected[i] += srcA[i];
+        expected[bOffset * 2 + i] += srcB[i];
+    }
+
+    double sumSq = 0.0;
+    for (float v : expected)
+        sumSq += static_cast<double>(v) * v;
+    QVERIFY(std::sqrt(sumSq / expected.size()) > 0.05); // audibly non-silent
+
+    // Through the overlap...
+    QVERIFY2(interleavedRmsError(expected, mixed, bOffset, clipFrames) < 0.02,
+             "overlap region does not sum the two clips");
+    // ...and the tail, where only clip B plays and the old code left it permanently offset.
+    QVERIFY2(interleavedRmsError(expected, mixed, clipFrames, total) < 0.02,
+             "clip B is out of sync after the overlap ends");
 }
 
 // Sequential small buffers must reconstruct the same signal as one contiguous
@@ -5143,7 +5372,7 @@ void EngineTest::audioFileWriterRoundTripsThroughClipReader()
     QVERIFY(!QFileInfo::exists(path + QStringLiteral(".part")));
 
     std::vector<float> read(size_t(kFrames) * 2, 0.0f);
-    const int got = ClipReaderPool::instance().readAudioInterleaved(path, 0, kFrames, kRate,
+    const int got = ClipReaderPool::instance().readAudioInterleaved(path, 1, 0, kFrames, kRate,
                                                                     read.data());
     QVERIFY2(got > kFrames / 2, qPrintable(QStringLiteral("decoded only %1 frames").arg(got)));
 

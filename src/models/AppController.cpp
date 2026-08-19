@@ -81,6 +81,11 @@
 namespace {
 QHash<QString, QString> defaultShortcuts();
 
+// Offline scans read a file end to end at their own pace. They need decode cursors of their own so
+// they never share one with timeline playback of the same media — see ClipReaderPool.
+constexpr quint64 kSubtitleScanStreamId = 0xA5'11'5C'A4'00'00'00'01ull;
+constexpr quint64 kDenoiseScanStreamId = 0xA5'11'5C'A4'00'00'00'02ull;
+
 QTranslator g_appTranslator;
 QTranslator g_qtTranslator;
 
@@ -3586,9 +3591,11 @@ void AppController::generateSubtitlesForClip(int trackIndex, int clipIndex, cons
             if (frames <= 0)
                 break;
             QVector<float> stereo(static_cast<qsizetype>(frames) * 2);
+            // Its own decode cursor: this scan walks the file at its own pace while playback may
+            // be reading the same file, and a shared cursor would corrupt both.
             const int got =
-                ClipReaderPool::instance().readAudioInterleaved(path, pos, frames, rate,
-                                                                stereo.data());
+                ClipReaderPool::instance().readAudioInterleaved(path, kSubtitleScanStreamId, pos,
+                                                                frames, rate, stereo.data());
             if (got <= 0)
                 break;
             const size_t base = mono.size();
@@ -4909,7 +4916,7 @@ bool AppController::renderDenoisedAudio(const QString &path, drift::TimeUs srcIn
         const drift::TimeUs at = srcIn + drift::TimeUs((have * drift::kUsPerSecond) / rate);
         const int want = int(std::min<int64_t>(chunkFrames, totalFrames - have));
         const int got = ClipReaderPool::instance().readAudioInterleaved(
-            path, at, want, rate, interleaved.data() + size_t(have) * 2);
+            path, kDenoiseScanStreamId, at, want, rate, interleaved.data() + size_t(have) * 2);
         if (got <= 0)
             break;
         have += got;

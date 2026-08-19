@@ -426,7 +426,7 @@
 <context>
     <name>AppController</name>
     <message>
-        <location filename="../src/models/AppController.cpp" line="+1546"/>
+        <location filename="../src/models/AppController.cpp" line="+1551"/>
         <source>Media removed</source>
         <translation>මාධ්‍ය ඉවත් කරන ලදී</translation>
     </message>
@@ -471,12 +471,12 @@
     </message>
     <message>
         <location line="+133"/>
-        <location line="+8763"/>
+        <location line="+8765"/>
         <source>New project</source>
         <translation>නව ව්‍යාපෘතිය</translation>
     </message>
     <message>
-        <location line="-8762"/>
+        <location line="-8764"/>
         <source>Open project</source>
         <translation>ව්‍යාපෘතිය විවෘත කරන්න</translation>
     </message>
@@ -589,18 +589,18 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+7214"/>
+        <location line="+7216"/>
         <source>Mark work area in</source>
         <translation>වැඩ කලාපයේ ආරම්භය සලකුණු කරන්න (In)</translation>
     </message>
     <message>
-        <location line="-7213"/>
-        <location line="+7227"/>
+        <location line="-7215"/>
+        <location line="+7229"/>
         <source>Mark work area out</source>
         <translation>වැඩ කලාපයේ අවසානය සලකුණු කරන්න (Out)</translation>
     </message>
     <message>
-        <location line="-7226"/>
+        <location line="-7228"/>
         <source>Go to work area in</source>
         <translation>වැඩ කලාපයේ ආරම්භයට යන්න</translation>
     </message>
@@ -611,12 +611,12 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+7250"/>
+        <location line="+7252"/>
         <source>Clear work area</source>
         <translation>වැඩ කලාපය හිස් කරන්න</translation>
     </message>
     <message>
-        <location line="-7249"/>
+        <location line="-7251"/>
         <source>Loop work area playback</source>
         <translation>වැඩ කලාපය ලූපයක් සේ ධාවනය කරන්න</translation>
     </message>
@@ -797,34 +797,34 @@
     </message>
     <message>
         <location line="+9"/>
-        <location line="+1503"/>
+        <location line="+1505"/>
         <location line="+74"/>
         <source>Starting…</source>
         <translation>ආරම්භ කරමින්…</translation>
     </message>
     <message>
-        <location line="-1536"/>
-        <location line="+871"/>
+        <location line="-1538"/>
+        <location line="+873"/>
         <location line="+238"/>
         <location line="+457"/>
         <source>Done</source>
         <translation>නිමයි</translation>
     </message>
     <message>
-        <location line="-1554"/>
+        <location line="-1556"/>
         <source>Getting speech recognition ready…</source>
         <translation>කථන හඳුනාගැනීම සූදානම් කරමින්…</translation>
     </message>
     <message>
         <location line="+9"/>
-        <location line="+1330"/>
+        <location line="+1332"/>
         <location line="+15"/>
         <source>Reading audio…</source>
         <translation>ශ්‍රව්‍ය කියවමින්…</translation>
     </message>
     <message>
-        <location line="-1337"/>
-        <location line="+50"/>
+        <location line="-1339"/>
+        <location line="+52"/>
         <source>Subtitle generation cancelled</source>
         <translation>උපසිරැසි ජනනය අවලංගු කෙරිණි</translation>
     </message>
@@ -1115,7 +1115,7 @@
         <translation>සූදානම්</translation>
     </message>
     <message numerus="yes">
-        <location line="-1657"/>
+        <location line="-1659"/>
         <location line="+42"/>
         <source>Imported %n subtitles</source>
         <translation>
@@ -1134,7 +1134,7 @@
         <translation>උපසිරැසි නිර්මාණය කරමින්…</translation>
     </message>
     <message>
-        <location line="+870"/>
+        <location line="+872"/>
         <source>Cutting out subject…</source>
         <translation>විෂයය වෙන් කරමින්…</translation>
     </message>

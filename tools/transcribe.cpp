@@ -49,7 +49,7 @@ int main(int argc, char *argv[])
     const int sampleRate = 16000;
     const int frames = static_cast<int>((info.durationUs * sampleRate) / drift::kUsPerSecond);
     QVector<float> stereo(static_cast<qsizetype>(frames) * 2);
-    const int got = ClipReaderPool::instance().readAudioInterleaved(path, 0, frames, sampleRate,
+    const int got = ClipReaderPool::instance().readAudioInterleaved(path, 1, 0, frames, sampleRate,
                                                                     stereo.data());
     if (got <= 0) {
         err << "no audio decoded\n";

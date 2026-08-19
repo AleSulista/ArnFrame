@@ -277,8 +277,11 @@ int ClipPreviewPlayer::fillAudio(float *buffer, int sampleCount)
     }
 
     const drift::TimeUs timeUs = m_clock.produceTimeUs();
+    // Salted off the timeline's id for this clip: the auditioner scrubs its own range while the
+    // timeline may be playing the same file, and one decode cursor cannot serve both.
+    const quint64 streamId = AudioMixer::clipStreamId(clip.id) ^ 0x9E3779B97F4A7C15ull;
     const QVector<float> mixed =
-        AudioMixer::readClipAudio(clip, timeUs, sampleCount, m_sampleRate, &m_retimer);
+        AudioMixer::readClipAudio(clip, streamId, timeUs, sampleCount, m_sampleRate, &m_retimer);
     const int frames = qMin(sampleCount, static_cast<int>(mixed.size() / 2));
     std::memcpy(buffer, mixed.constData(), static_cast<size_t>(frames) * 2 * sizeof(float));
     if (frames < sampleCount) {
