@@ -10,10 +10,12 @@ depends=(
     'qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-multimedia-ffmpeg'
     'ffmpeg' 'zstd' 'openssl' 'soundtouch'
 )
-# xorg-server-xvfb is check()-only: the compositor tests need a real OpenGL context, and Qt's
-# offscreen platform plugin cannot provide one on a builder with no /dev/dri (llvmpipe is fine,
-# it just needs an X server to hand Qt a GL visual).
-makedepends=('cmake' 'ninja' 'git' 'pkgconf' 'xorg-server-xvfb')
+# qt6-tools is LinguistTools (lupdate/lrelease): without it CMake skips qt_add_translations and
+# the binary ships English-only, then check()'s Translations test fails looking for
+# update_translations. xorg-server-xvfb is check()-only: the compositor tests need a real OpenGL
+# context, and Qt's offscreen platform plugin cannot provide one on a builder with no /dev/dri
+# (llvmpipe is fine, it just needs an X server to hand Qt a GL visual).
+makedepends=('cmake' 'ninja' 'git' 'pkgconf' 'qt6-tools' 'xorg-server-xvfb')
 # Defaults to the tagged release; CI overrides _commit (e.g. to $GITHUB_SHA)
 # to build the exact commit that triggered the workflow instead.
 _commit="${_commit:-v$pkgver}"

@@ -127,6 +127,10 @@ jobs:
 
       # cmake is deliberately not installed from apt: the runner image already carries a newer one
       # on PATH and apt's would only add ambiguity.
+      # libva* are runtime, not build, deps: Qt Multimedia's FFmpeg backend reaches VA-API
+      # through implib-gen stubs whose generated dlopen failure path is assert(0), so any test
+      # that constructs a QMediaDevices SIGABRTs on a runner without them rather than falling
+      # back to software decode.
       - name: Install native build dependencies
         timeout-minutes: 10
         env:
@@ -154,6 +158,7 @@ jobs:
             libgl1-mesa-dev libegl1-mesa-dev libglib2.0-dev libdbus-1-dev \
             libzstd-dev libssl-dev libsoundtouch-dev \
             libpulse-dev libasound2-dev \
+            libva2 libva-drm2 libva-x11-2 \
             libfontconfig1-dev libfreetype6-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libwayland-dev \
             libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
@@ -247,15 +252,21 @@ jobs:
           export EXTRA_PLATFORM_PLUGINS="libqwayland.so"
           export EXTRA_QT_MODULES="waylandcompositor"
           #
-          # The -l lines are OpenSSL: Qt's ossl TLS backend dlopens libssl/libcrypto by soname, so
-          # linuxdeploy sees no dependency to follow and the AppImage would ship with the
-          # cert-only backend — no HTTPS, which means no addon downloads.
+          # The -l lines are libraries dlopened by soname, so linuxdeploy sees no NEEDED entry
+          # to follow: OpenSSL (Qt's ossl TLS backend — without it the AppImage ships the
+          # cert-only backend and addon downloads have no HTTPS) and libva (Qt Multimedia's
+          # FFmpeg backend reaches VA-API through implib-gen stubs whose generated dlopen
+          # failure path is assert(0), so a host without libva SIGABRTs rather than falling
+          # back to software decode).
           ./linuxdeploy.AppImage --appdir AppDir --plugin qt --output appimage \
             -d flatpak/org.cutwire.Drift.desktop \
             -i flatpak/share/icons/hicolor/256x256/apps/org.cutwire.Drift.png \
             -e AppDir/usr/bin/drift \
             -l /usr/lib/x86_64-linux-gnu/libssl.so.3 \
-            -l /usr/lib/x86_64-linux-gnu/libcrypto.so.3
+            -l /usr/lib/x86_64-linux-gnu/libcrypto.so.3 \
+            -l /usr/lib/x86_64-linux-gnu/libva.so.2 \
+            -l /usr/lib/x86_64-linux-gnu/libva-drm.so.2 \
+            -l /usr/lib/x86_64-linux-gnu/libva-x11.so.2
           appimage="$(ls ./*.AppImage | grep -iv linuxdeploy | head -n 1)"
           mv "${appimage}" "dist/Drift-${{ inputs.version }}-x86_64.AppImage"
 
@@ -383,7 +394,10 @@ jobs:
             Get-ChildItem dist\bin\multimedia -ErrorAction SilentlyContinue
             throw "$plugin was not deployed; QAudioSink would have no devices at all"
           }
-          $check = (Get-ChildItem build\tools -Recurse -Filter audiobackendcheck.exe)[0].FullName
+          $check = "build\Release\audiobackendcheck.exe"
+          if (-not (Test-Path $check)) {
+            throw "$check was not built; cannot verify the multimedia backend plugin"
+          }
           Copy-Item $check dist\bin -Force
           & dist\bin\audiobackendcheck.exe $plugin
           $status = $LASTEXITCODE
