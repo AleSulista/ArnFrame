@@ -89,6 +89,35 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.3.0" date="2026-08-20">
+      <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.3.0</url>
+      <description>
+        <p>A big update with macOS support, AI agent control, new editing tools, and a batch of
+        everyday fixes.</p>
+        <ul>
+          <li>Added MCP support — you can now let AI agents like Claude Code control the editor</li>
+          <li>Improved macOS support, including a working video preview</li>
+          <li>.drift project files now open with the editor when you double-click them</li>
+          <li>Cut a multi-camera shoot by watching every camera at once and switching between them</li>
+          <li>Find scenes inside a clip and jump straight to them</li>
+          <li>New 3D Face Mesh effect that follows the face through the clip</li>
+          <li>Mark an In and Out on the timeline to play and export just that range</li>
+          <li>Export short clips as animated GIFs</li>
+          <li>A portrait layout for vertical videos, with the preview on top</li>
+          <li>Zoom and pan the preview; drag or delete keyframes on the graph</li>
+          <li>Choose 1440p when setting up a project</li>
+          <li>Windows releases include a portable zip that needs no installer</li>
+          <li>Pick a language in Settings — More languages coming soon</li>
+          <li>Choose how many words go in each auto-generated caption</li>
+          <li>Fixed lag and audio going out of sync when two clips from the same file overlap</li>
+          <li>Fixed silent playback on some Windows audio devices</li>
+          <li>Phone videos keep their portrait size instead of becoming a square</li>
+          <li>Transitions no longer reset when you click them</li>
+          <li>Scrolling over a slider no longer also scrolls the panel behind it</li>
+          <li>Starting a new project now fully clears the previous one</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.2" date="2026-08-15">
       <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.2.2</url>
       <description>
