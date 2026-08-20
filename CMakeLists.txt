@@ -486,6 +486,8 @@ qt_add_executable(drift
     src/models/AppController.h
     src/models/AppController.cpp
     src/models/EditorState.h
+    src/models/LayoutStore.h
+    src/models/LayoutStore.cpp
     src/models/FileDialogs.h
     src/models/FileDialogs.cpp
     src/models/AssetLibrary.h

@@ -12,7 +12,10 @@ ApplicationWindow {
     // Below this the split minimums cannot all be satisfied and panels overlap.
     minimumWidth: Theme.windowMinimumWidth
     minimumHeight: Theme.windowMinimumHeight
-    visible: true
+    // Shown from Component.onCompleted, once the stored geometry is in place:
+    // assigning it to a window that is already up makes it jump across the screen,
+    // and a session left maximized would flash at its windowed size first.
+    visible: false
     title: "CutWire Drift"
     color: Theme.appBackground
 
@@ -23,6 +26,9 @@ ApplicationWindow {
     property bool forceClose: false
 
     onClosing: function (close) {
+        // Before any of the branches below, so a quit that is cancelled at the
+        // unsaved prompt still records where the window was.
+        window.persistLayout()
         // Opt-in reopen: skip Save/Don't Save — dirty work is snapshotted to the
         // recovery file on aboutToQuit without overwriting the user's .drift.
         if (window.forceClose || EditorState.reopenLastProject || !EditorState.hasUnsavedChanges)
@@ -35,6 +41,186 @@ ApplicationWindow {
             window.forceClose = true
             window.close()
         })
+    }
+
+    // ── Session layout memory ───────────────────────────────────────────────────
+    // Window placement and panel proportions come back from the last session
+    // (LayoutStore / QSettings) instead of resetting to the defaults every launch.
+    // App-wide, not per-project: the layout follows the display the user is at.
+
+    // The rect to reopen at. Sampled only while the window is ordinary-sized, so
+    // maximizing or going fullscreen never overwrites what a restore should return
+    // to — which is also what "restore down" means to the window manager.
+    property rect windowedGeometry: Qt.rect(0, 0, 0, 0)
+
+    // Platforms report the new size before the new visibility when a window is
+    // maximized, so sampling on the geometry change itself would record the
+    // maximized rect as the windowed one. Letting it settle sidesteps the race, and
+    // keeps a drag-resize from writing on every frame.
+    Timer {
+        id: geometrySettleTimer
+        interval: 250
+        onTriggered: {
+            // Tested by exclusion rather than against Window.Windowed: a window shown
+            // via `visible = true` can report AutomaticVisibility, and that is an
+            // ordinary window — it is only the three modes below that are not.
+            const mode = window.visibility
+            if (mode !== Window.Maximized && mode !== Window.FullScreen
+                    && mode !== Window.Minimized && !window.previewFullscreen)
+                window.windowedGeometry = Qt.rect(window.x, window.y, window.width, window.height)
+            window.persistWindowState()
+        }
+    }
+
+    onXChanged: geometrySettleTimer.restart()
+    onYChanged: geometrySettleTimer.restart()
+    onWidthChanged: geometrySettleTimer.restart()
+    onHeightChanged: geometrySettleTimer.restart()
+
+    function restoreWindowGeometry() {
+        const geometry = LayoutMemory.savedWindowGeometry(window.minimumWidth, window.minimumHeight)
+        // Null rect: nothing stored, or the monitor it was stored on is gone. Either
+        // way the window keeps the declared defaults above.
+        if (geometry.width <= 0 || geometry.height <= 0)
+            return
+        window.x = geometry.x
+        window.y = geometry.y
+        window.width = geometry.width
+        window.height = geometry.height
+        window.windowedGeometry = geometry
+    }
+
+    function showRestored() {
+        // Assigning visibility shows the window too, so a session that was left
+        // maximized never appears at its windowed size on the way there.
+        if (LayoutMemory.savedWindowMaximized())
+            window.visibility = Window.Maximized
+        else
+            window.visible = true
+        // A launch nobody resizes never emits a geometry change, so the sampler that
+        // hangs off those signals would never run and the session would save nothing.
+        geometrySettleTimer.restart()
+    }
+
+    // Which of the two reopen modes the window is currently in, or -1 while it is in
+    // a state that says nothing about it. Fullscreen is a mode the user toggles into,
+    // not a size to reopen at, so it answers for what was underneath it; minimized
+    // answers for nothing at all and leaves the stored choice alone.
+    function restoreModeIsMaximized() {
+        switch (window.visibility) {
+        case Window.Maximized:
+            return 1
+        case Window.Windowed:
+        case Window.AutomaticVisibility:
+            return 0
+        case Window.FullScreen:
+            return window._preFullscreenVisibility === Window.Maximized ? 1 : 0
+        default:
+            return -1
+        }
+    }
+
+    // Written as the values settle rather than only on the way out: a session that
+    // ends in a crash, a SIGTERM from the session manager, or a force quit never runs
+    // a teardown handler, and losing the layout to that is exactly the annoyance this
+    // is here to remove.
+    function persistWindowState() {
+        const maximized = window.restoreModeIsMaximized()
+        if (maximized < 0)
+            return
+        LayoutMemory.saveWindowState(window.windowedGeometry, maximized === 1)
+    }
+
+    function persistLayout() {
+        window.persistWindowState()
+        window.capturePanelFractions()
+        for (const key in window.panelFractions)
+            LayoutMemory.setPanelFraction(key, window.panelFractions[key])
+    }
+
+    // Panel sizes are kept as a fraction of the split they sit in rather than a pixel
+    // width, so a layout dragged out on a 4K display still reads on a laptop screen.
+    // Keyed by workspace, because portrait and landscape are different arrangements
+    // and each deserves to remember its own.
+    property var panelFractions: ({})
+    // Nothing is captured until the stored layout has been applied, or the defaults
+    // from the first layout pass would immediately overwrite it.
+    property bool panelLayoutRestored: false
+
+    Timer {
+        id: panelSettleTimer
+        interval: 250
+        onTriggered: {
+            window.capturePanelFractions()
+            for (const key in window.panelFractions)
+                LayoutMemory.setPanelFraction(key, window.panelFractions[key])
+        }
+    }
+
+    function schedulePanelCapture() {
+        if (!window.panelLayoutRestored || workspaceApplyTimer.running)
+            return
+        panelSettleTimer.restart()
+    }
+
+    function capturePanelFractions() {
+        // Fullscreen collapses every panel around the preview; those sizes are a mode,
+        // not a layout, and must not be written over the user's arrangement.
+        if (window.previewFullscreen)
+            return
+        const prefix = window.workspaceLayout + "/"
+        if (outerSplit.height > 0 && innerSplit.height > 0)
+            window.panelFractions[prefix + "editorRow"] = innerSplit.height / outerSplit.height
+        if (innerSplit.width > 0) {
+            window.panelFractions[prefix + "assets"] = assetsPanel.width / innerSplit.width
+            window.panelFractions[prefix + "properties"] = propertiesPanel.width / innerSplit.width
+        }
+        // Landscape hands the preview the slack in its row (fillWidth), so it has no
+        // width of its own to remember there.
+        if (window.portraitWorkspace && rootSplit.width > 0)
+            window.panelFractions[prefix + "preview"] = previewPanel.width / rootSplit.width
+    }
+
+    // Writing an attached SplitView size drops the default binding behind it — which
+    // is the point: from here on the panel keeps the size the user chose, exactly as
+    // it does after a handle drag.
+    function applySavedPanelSizes() {
+        const prefix = window.workspaceLayout + "/"
+        const editorRow = LayoutMemory.panelFraction(prefix + "editorRow", 0)
+        if (editorRow > 0 && outerSplit.height > 0)
+            innerSplit.SplitView.preferredHeight = outerSplit.height * editorRow
+        const assets = LayoutMemory.panelFraction(prefix + "assets", 0)
+        if (assets > 0 && innerSplit.width > 0)
+            assetsPanel.SplitView.preferredWidth = innerSplit.width * assets
+        const properties = LayoutMemory.panelFraction(prefix + "properties", 0)
+        if (properties > 0 && innerSplit.width > 0)
+            propertiesPanel.SplitView.preferredWidth = innerSplit.width * properties
+        if (window.portraitWorkspace) {
+            const preview = LayoutMemory.panelFraction(prefix + "preview", 0)
+            if (preview > 0 && rootSplit.width > 0)
+                previewPanel.SplitView.preferredWidth = rootSplit.width * preview
+        }
+    }
+
+    // Every extent is 0 on the first layout pass, and a fraction of 0 is 0 — so the
+    // restore waits for real sizes rather than running at Component.onCompleted.
+    function restorePanelSizesWhenReady() {
+        if (window.panelLayoutRestored)
+            return
+        if (rootSplit.width <= 0 || outerSplit.height <= 0 || innerSplit.width <= 0)
+            return
+        window.applySavedPanelSizes()
+        window.panelLayoutRestored = true
+    }
+
+    // A workspace flip moves the preview between splits, so the panels around it are
+    // still resizing on the frame the flip lands. Reapplying immediately would divide
+    // by stale extents; waiting lets the new arrangement settle first, and capture is
+    // suppressed until it has (schedulePanelCapture checks this timer).
+    Timer {
+        id: workspaceApplyTimer
+        interval: 100
+        onTriggered: window.applySavedPanelSizes()
     }
 
     // Fullscreen preview: the window goes fullscreen *and* every panel around the
@@ -72,7 +258,15 @@ ApplicationWindow {
                                               : (EditorState.projectPortrait ? "portrait" : "landscape")
     readonly property bool portraitWorkspace: workspaceLayout === "portrait"
 
-    onPortraitWorkspaceChanged: rootSplit.relocatePreview()
+    onPortraitWorkspaceChanged: {
+        rootSplit.relocatePreview()
+        // The two workspaces remember their own proportions, so the flip pulls in the
+        // other one's — and any capture already in flight belongs to the old layout.
+        if (window.panelLayoutRestored) {
+            panelSettleTimer.stop()
+            workspaceApplyTimer.restart()
+        }
+    }
 
     function configureAndAddAsset(assetIndex, runner) {
         if (!EditorState.shouldConfigureProjectForAsset(assetIndex)) {
@@ -262,6 +456,14 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        window.restoreWindowGeometry()
+        window.beginStartupProject()
+        // Last: the window is placed by now, and the startup flow keeps the ordering
+        // it had when the window was shown at the end of completion.
+        window.showRestored()
+    }
+
+    function beginStartupProject() {
         // A document the shell asked us to open (argv / QFileOpenEvent) wins over last-session
         // reopen and the recovery prompt.
         if (EditorState.consumeStartupProject())
@@ -276,6 +478,9 @@ ApplicationWindow {
     }
 
     onVisibilityChanged: {
+        // Maximizing does not have to change the window size (a window already filling
+        // the work area does not), so the geometry sampler alone can miss the switch.
+        window.persistWindowState()
         if (visible && EditorState.recoveryAvailable && !EditorState.reopenLastProject)
             recoveryOpenTimer.start()
     }
@@ -527,6 +732,11 @@ ApplicationWindow {
                 // relocatePreview() is a no-op when nothing has to move.
                 Component.onCompleted: relocatePreview()
 
+                // The stored panel sizes need real extents to be fractions of, and
+                // these are 0 until the first layout pass lands.
+                onWidthChanged: window.restorePanelSizesWhenReady()
+                onHeightChanged: window.restorePanelSizesWhenReady()
+
                 SplitView {
                     id: outerSplit
                     SplitView.fillWidth: true
@@ -541,6 +751,8 @@ ApplicationWindow {
                     // confined to its column. SplitView drops hidden items from the
                     // layout, so this hands the window to the preview.
                     visible: !(window.previewFullscreen && window.portraitWorkspace)
+
+                    onHeightChanged: window.restorePanelSizesWhenReady()
 
                     SplitView {
                         id: innerSplit
@@ -566,6 +778,14 @@ ApplicationWindow {
 
                         handle: PanelSplitHandle { view: innerSplit }
 
+                        onWidthChanged: window.restorePanelSizesWhenReady()
+                        // This split's share of the vertical one is the timeline's
+                        // height, seen from the other side.
+                        onHeightChanged: {
+                            window.restorePanelSizesWhenReady()
+                            window.schedulePanelCapture()
+                        }
+
                         AssetsPanel {
                             id: assetsPanel
                             visible: !window.previewFullscreen
@@ -580,6 +800,7 @@ ApplicationWindow {
                             // Cap mins to available width so 200+320+240 never exceeds a
                             // zero/partial first layout pass (Qt asserts max < min).
                             SplitView.minimumWidth: Math.min(200, Math.max(0, innerSplit.width * 0.2))
+                            onWidthChanged: window.schedulePanelCapture()
                         }
 
                         // Declared in its landscape slot; rootSplit.relocatePreview()
@@ -604,6 +825,7 @@ ApplicationWindow {
                             SplitView.minimumWidth: window.portraitWorkspace
                                                     ? Math.min(260, Math.max(0, rootSplit.width * 0.2))
                                                     : Math.min(320, Math.max(0, innerSplit.width * 0.3))
+                            onWidthChanged: window.schedulePanelCapture()
                         }
 
                         PropertiesPanel {
@@ -613,6 +835,7 @@ ApplicationWindow {
                             SplitView.minimumWidth: Math.min(240, Math.max(0, innerSplit.width * 0.2))
                             // Empty-state browse CTAs jump the assets panel to the
                             // matching library tab.
+                            onWidthChanged: window.schedulePanelCapture()
                             onBrowseEffectsRequested: assetsPanel.showTab("effects")
                             onBrowseAudioEffectsRequested: assetsPanel.showTab("sounds")
                         }

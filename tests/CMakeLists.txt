@@ -52,6 +52,17 @@ target_include_directories(tst_playback PRIVATE ../src)
 target_link_libraries(tst_playback PRIVATE Qt6::Test Qt6::Multimedia driftcore)
 add_test(NAME Playback COMMAND tst_playback)
 
+qt_add_executable(tst_layoutstore tst_layoutstore.cpp ../src/models/LayoutStore.cpp)
+target_include_directories(tst_layoutstore PRIVATE ../src)
+# Qt6::Gui for QScreen: restoring a window means checking it against the displays
+# that are actually attached now.
+target_link_libraries(tst_layoutstore PRIVATE Qt6::Test Qt6::Gui)
+add_test(NAME LayoutStore COMMAND tst_layoutstore)
+# Screen-dependent assertions, and saveWindowState deliberately drops the window
+# position under Wayland (the compositor owns it there). Pin the platform so the
+# test means the same thing on a dev machine as it does headless in CI.
+set_tests_properties(LayoutStore PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 qt_add_executable(tst_addonpackage tst_addonpackage.cpp)
 target_include_directories(tst_addonpackage PRIVATE ../src)
 target_link_libraries(tst_addonpackage PRIVATE Qt6::Test driftengine)
