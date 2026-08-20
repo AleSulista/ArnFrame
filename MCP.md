@@ -61,6 +61,7 @@ All return `{started:true}` immediately. Every field below except `export` needs
 | `package_project` | `package.{active, progress}` |
 | `generate_subtitles` | `subtitleGen.{active, progress, status}` |
 | `set_clip_reverse` (video) | `reverseRender.{active, progress, status}` |
+| `detect_scenes` | `sceneDetect.{active, progress, status, clip, scenes}` |
 | `run_segmentation`, `segment_clip`, `apply_denoise`, `detect_faces` | No progress field — re-read `inspect({clips:true, detail:true})` and compare |
 
 ## Toolbox reference
@@ -81,6 +82,7 @@ All return `{started:true}` immediately. Every field below except `export` needs
 | `segmentation` | SAM-style cutout (session or one-shot) |
 | `ai` | Denoise and face detection |
 | `audio` | Waveforms, beat detection, beat-synced cuts, clip volume |
+| `scene` | Shot detection, what is in each shot, scene-synced cuts |
 | `ui` | Theme, shortcuts, editor preferences |
 
 ### Working to the music
@@ -106,6 +108,40 @@ Then either drive edits from those exact times, or arm the grid and let snapping
 | `bookmark_beats({unit:"bar"})` | Writes the grid into the project as markers that outlive the analysis |
 
 The analysis is **transient**: any edit that changes the mix drops it (`finishEdit` clears it when the audio fingerprint moves). `inspect({detail:true}).beats` reports `{active, analysed, bpm, confidence, rangeStart, rangeDuration, n, onsets, gridVisible, onsetsVisible, stale}` — check `stale` before trusting a grid you fetched a few ops ago, and re-run `detect_beats` when it is `true`.
+
+### Understanding the footage
+
+`capture` shows one composited frame. The `scene` toolbox instead builds a **structured index
+of the source material**: where every shot begins, how active each one is, and — with the
+object add-on — what is in it.
+
+`detect_scenes` is **async**. Poll `inspect({detail:true}).sceneDetect` until `active` is false.
+
+```json
+{"name": "detect_scenes", "arguments": {"clip": "…uuid…", "with_objects": true}}
+```
+
+A clip already scanned at the same settings returns `{"cached": true}` and is ready at once.
+
+| Call | Effect |
+|---|---|
+| `describe_clip()` | One-call impression: shot count, shortest/longest, mean score, top shots, and labels ranked by **screen time** |
+| `list_scenes({sort:"score"})` | Every shot, with `timeline_start`/`timeline_end` already mapped through trim, speed and reverse |
+| `find_scenes({label:"person"})` | Searches **every scanned clip** on the timeline, best first — this is how you gather material |
+| `split_on_scenes({clip})` | Cuts at every boundary. One undo step |
+| `bookmark_scenes({clip})` | Marks the boundaries instead of cutting |
+
+Times come back twice. `start`/`end` are seconds into the **source file**; `timeline_start`/
+`timeline_end` are the same moments on the **timeline**. Act on the timeline pair — the mapping
+through trim, speed and reverse is already done for you.
+
+Unlike beats, this analysis is **not transient**. It describes the source file and is cached
+against that file's timestamp, so it survives edits, undo and reload. Re-trimming a clip changes
+the scanned range, so that does scan afresh.
+
+`with_objects` needs the `object-model` add-on. Call `ai_capabilities` to see what is installed
+and what each piece unlocks; nothing in MCP installs add-ons, so report the missing one to the
+user rather than retrying.
 
 ## Traps
 

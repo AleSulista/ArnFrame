@@ -91,6 +91,7 @@ private:
     QJsonObject opClearSpeedCurve(const QJsonObject &args);
     QJsonObject opSplitOnBeats(const QJsonObject &args);
     QJsonObject opSnapClipsToBeats(const QJsonObject &args);
+    QJsonObject opSplitOnScenes(const QJsonObject &args);
     QJsonObject opGetUiPreferences() const;
     QJsonObject opSetTheme(const QJsonObject &args);
     QJsonObject opListShortcuts() const;

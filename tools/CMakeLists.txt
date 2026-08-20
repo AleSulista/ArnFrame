@@ -44,6 +44,11 @@ target_include_directories(segment PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(segment PRIVATE Qt6::Core Qt6::Gui driftengine driftcore)
 drift_bundle_onnxruntime(segment)
 
+add_executable(scenedetect scenedetect.cpp)
+target_include_directories(scenedetect PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(scenedetect PRIVATE Qt6::Core Qt6::Gui driftengine driftcore)
+drift_bundle_onnxruntime(scenedetect)
+
 add_executable(facedetect facedetect.cpp)
 target_include_directories(facedetect PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(facedetect PRIVATE Qt6::Core Qt6::Gui driftengine driftcore)

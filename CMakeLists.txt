@@ -353,6 +353,10 @@ add_library(driftengine STATIC
     src/engine/WaveformBlockCache.cpp
     src/engine/AudioOnsets.h
     src/engine/AudioOnsets.cpp
+    src/engine/SceneDetect.h
+    src/engine/SceneDetect.cpp
+    src/engine/ObjectDetector.h
+    src/engine/ObjectDetector.cpp
     src/engine/Exporter.h
     src/engine/Exporter.cpp
     src/engine/ClipReader.h
@@ -600,6 +604,7 @@ qt_add_qml_module(drift
         src/qml/components/properties/MasksInspector.qml
         src/qml/components/properties/EffectsInspector.qml
         src/qml/components/assets/TextAssetsTab.qml
+        src/qml/components/assets/ScenesTab.qml
         src/qml/components/assets/SubtitlesTab.qml
         src/qml/components/assets/StickersTab.qml
         src/qml/components/assets/ShapesTab.qml

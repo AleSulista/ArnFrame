@@ -3,6 +3,7 @@
 #include "core/Project.h"
 #include "core/Time.h"
 #include "engine/AudioOnsets.h"
+#include "engine/SceneDetect.h"
 #include "engine/FilmstripTileCache.h"
 #include "engine/MediaWaveform.h"
 #include "engine/WaveformBlockCache.h"
@@ -165,6 +166,16 @@ class AppController : public QObject
     Q_PROPERTY(bool faceDetecting READ faceDetecting NOTIFY faceDetectingChanged)
     Q_PROPERTY(double faceDetectProgress READ faceDetectProgress NOTIFY faceDetectProgressChanged)
     Q_PROPERTY(QString faceDetectStatus READ faceDetectStatus NOTIFY faceDetectStatusChanged)
+    // Detected shots for the clip named by sceneClipId. Analysis state, not project state:
+    // it describes the source media, so it is cached on disk rather than saved (see
+    // engine/SceneDetect.h) and is never pushed through the undo stack.
+    Q_PROPERTY(QVariantList scenes READ scenes NOTIFY scenesChanged)
+    Q_PROPERTY(QString sceneClipId READ sceneClipId NOTIFY scenesChanged)
+    // Source file the live analysis describes, so the panel can ask for thumbnails.
+    Q_PROPERTY(QString sceneClipPath READ sceneClipPath NOTIFY scenesChanged)
+    Q_PROPERTY(bool sceneDetecting READ sceneDetecting NOTIFY sceneDetectingChanged)
+    Q_PROPERTY(double sceneDetectProgress READ sceneDetectProgress NOTIFY sceneDetectProgressChanged)
+    Q_PROPERTY(QString sceneDetectStatus READ sceneDetectStatus NOTIFY sceneDetectStatusChanged)
     Q_PROPERTY(int selectedTrack READ selectedTrack NOTIFY selectionChanged)
     Q_PROPERTY(int selectedClip READ selectedClip NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList selection READ selection NOTIFY selectionChanged)
@@ -275,6 +286,12 @@ public:
     bool faceDetecting() const { return m_faceDetecting; }
     double faceDetectProgress() const { return m_faceDetectProgress; }
     QString faceDetectStatus() const { return m_faceDetectStatus; }
+    QVariantList scenes() const { return m_scenes; }
+    QString sceneClipId() const { return m_sceneClipId; }
+    QString sceneClipPath() const { return m_sceneClipPath; }
+    bool sceneDetecting() const { return m_sceneDetecting; }
+    double sceneDetectProgress() const { return m_sceneDetectProgress; }
+    QString sceneDetectStatus() const { return m_sceneDetectStatus; }
     int selectedTrack() const { return m_selectedTrack; }
     int selectedClip() const { return m_selectedClip; }
     QVariantList selection() const;
@@ -354,6 +371,23 @@ public:
     // Grid times from the current analysis. `unit` is beat, bar or onset; `minStrength` filters
     // onsets only. Empty when nothing has been analysed yet.
     QList<double> mcpBeatTimes(const QString &unit, double minStrength) const;
+    // --- scene toolbox ---
+    QJsonObject mcpDetectScenes(int trackIndex, int clipIndex, double threshold, double minScene,
+                                bool withObjects);
+    // The live analysis, filtered and shaped for MCP. Times are reported in both source and
+    // timeline space so an agent never has to redo the trim/speed/reverse mapping itself.
+    QJsonObject mcpListScenes(const QString &label, double minScore, const QString &sort,
+                              int limit) const;
+    QJsonObject mcpDescribeClip(int topCount) const;
+    QJsonObject mcpFindScenes(const QString &label, double minScore, int trackIndex,
+                              int limit) const;
+    // Timeline seconds of every detected boundary inside the clip that was analysed.
+    QList<double> mcpSceneCutTimes(double minScore, const QString &label) const;
+    int mcpBookmarkScenes(double minScore, const QString &label, const QString &labelPrefix);
+    // Which model addons are installed, so an agent can say what to install rather than
+    // retrying blindly.
+    QJsonObject mcpAiCapabilities() const;
+
     int mcpBookmarkBeats(double startSeconds, double durSeconds, const QString &unit,
                          double minStrength, const QString &labelPrefix);
     QJsonObject mcpSetBeatLayers(bool grid, bool onsets);
@@ -482,6 +516,24 @@ public:
     Q_INVOKABLE void cancelFaceDetection();
     Q_INVOKABLE void clearFaceTrack(int trackIndex, int clipIndex);
     Q_INVOKABLE bool faceDetectionAvailable();
+
+    // Finds the shot boundaries in a clip's source range. Runs off the GUI thread; the
+    // result lands in `scenes` and in the on-disk cache, never in the project. A cached
+    // analysis for the same clip and settings is published immediately without rescanning.
+    // minSceneSeconds <= 0 means "leave the engine default alone".
+    Q_INVOKABLE void detectScenesForClip(int trackIndex, int clipIndex, bool withObjects,
+                                         double minSceneSeconds = 0.0);
+    Q_INVOKABLE void cancelSceneDetection();
+    // Whether the optional object-labelling pass can run. False until the object-model
+    // addon is installed, which is what the panel's toggle is gated on.
+    Q_INVOKABLE bool objectDetectionAvailable() const;
+    Q_INVOKABLE void clearScenes();
+    // Move the playhead to a detected scene. Scenes are in source time; this maps back
+    // through the clip's trim and speed to reach the right timeline position.
+    Q_INVOKABLE void seekToScene(int sceneIndex);
+    // Sensitivity, persisted in QSettings so a scan does not forget it between sessions.
+    Q_INVOKABLE double sceneThreshold() const;
+    Q_INVOKABLE void setSceneThreshold(double threshold);
     // shapeKind/shapeId is a catalog id from builtinShapes(), which is not always a ShapeKind name:
     // "circle" and "ellipse" are the same kind with different default aspects.
     Q_INVOKABLE void addShapeClip(const QString &shapeKind, double atSeconds);
@@ -900,6 +952,11 @@ signals:
     void faceDetectProgressChanged();
     void faceDetectStatusChanged();
     void faceDetectionFinished(bool ok, const QString &message);
+    void scenesChanged();
+    void sceneDetectingChanged();
+    void sceneDetectProgressChanged();
+    void sceneDetectStatusChanged();
+    void sceneDetectionFinished(bool ok, const QString &message);
     void selectionChanged();
     void editCapabilitiesChanged();
     void selectedClipDataChanged();
@@ -987,6 +1044,13 @@ protected:
     void runSegmentationSeed(int generation);
     void finalizeFaceDetection(const QString &clipId, const QString &trackPath,
                                drift::TimeUs srcOffsetUs);
+    // The one place a scan request is built, so the GUI and MCP paths cannot disagree about
+    // the settings — and therefore about the cache key derived from them.
+    drift::SceneDetectRequest sceneRequestFor(const drift::Clip &clip, bool withObjects,
+                                              double minSceneSeconds) const;
+    // Publishes a finished scene analysis into m_scenes, shaped for QML.
+    void applySceneAnalysis(const drift::SceneAnalysis &analysis, const QString &clipId,
+                            const QString &clipPath);
     void finalizeSegmentation(const QString &clipId, const QString &mattePath,
                               drift::TimeUs matteSrcOffsetUs, const QString &outputMode);
     void finalizeGeneratedSubtitles(drift::TimeUs timelineStart, drift::TimeUs timelineDuration,
@@ -1144,6 +1208,16 @@ protected:
     double m_faceDetectProgress = 0.0;
     QString m_faceDetectStatus;
     QAtomicInt m_faceDetectCancel = 0;
+    // Scene detection. Only one clip's analysis is live at a time — the panel shows the
+    // selected clip — so this needs no cache of its own beyond the on-disk one.
+    QVariantList m_scenes;
+    QString m_sceneClipId;
+    QString m_sceneClipPath;
+    bool m_sceneDetecting = false;
+    double m_sceneDetectProgress = 0.0;
+    QString m_sceneDetectStatus;
+    QAtomicInt m_sceneDetectCancel = 0;
+    quint64 m_sceneGeneration = 0;
     bool m_segSessionActive = false;
     bool m_segForTemplate = false;
     bool m_segEncoding = false;

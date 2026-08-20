@@ -33,6 +33,8 @@
 #include "engine/audio/ClipAudioRetimer.h"
 #include "engine/AudioFileWriter.h"
 #include "engine/AudioOnsets.h"
+#include "engine/ObjectDetector.h"
+#include "engine/SceneDetect.h"
 #include "engine/DeepFilterDenoiser.h"
 #include "engine/EffectCatalog.h"
 #include "engine/EffectPackageLoader.h"
@@ -208,6 +210,17 @@ private slots:
     void audioEffectRackParameterChangeIsContinuous();
     void onsetsDetectClickTrackTempo();
     void onsetsIgnoreSilence();
+
+    void sceneCutsFindIsolatedSpikes();
+    void sceneCutsSuppressNeighbours();
+    void sceneCutsFallBackToAdaptiveThreshold();
+    void sceneCutsKeepWorkingFixedThreshold();
+    void sceneCutsHandleDegenerateInput();
+    void sceneCutsRejectNoiseAndGrain();
+    void scenesPartitionTheRange();
+    void sceneLoudnessRanksAcrossTheClip();
+    void yoloxDecodeAppliesGridAndStride();
+    void objectNmsIsPerClass();
     void denoiseAuxiliaryConstantsRoundTrip();
     void denoisePreservesLengthAndSilence();
     void denoiseRemovesBroadbandNoise();
@@ -6202,6 +6215,357 @@ void EngineTest::onsetsIgnoreSilence()
         blip[size_t(i + 1000)] = 0.8f;
     const AudioBeatAnalysis b = AudioOnsets::analyze(blip.data(), int(blip.size()), kRate, 0.0);
     QCOMPARE(b.bpm, 0.0);
+}
+
+// --- scene detection --------------------------------------------------------
+// The cut policy is a pure function of the difference signal, so these drive it with
+// synthetic signals rather than decoding anything.
+
+namespace {
+
+// A flat signal at `floorValue` with spikes of `spikeValue` at the given indices.
+QList<double> diffSignal(int length, double floorValue, const QList<int> &spikes,
+                         double spikeValue)
+{
+    QList<double> diffs(length, floorValue);
+    for (int i : spikes) {
+        if (i >= 0 && i < length)
+            diffs[i] = spikeValue;
+    }
+    return diffs;
+}
+
+} // namespace
+
+void EngineTest::sceneCutsFindIsolatedSpikes()
+{
+    const QList<int> expected{100, 400, 900};
+    const QList<double> diffs = diffSignal(1200, 3.0, expected, 90.0);
+
+    double used = 0.0;
+    bool adaptive = true;
+    const QList<int> cuts = drift::resolveCuts(diffs, 27.0, 15, true, 4.0, &used, &adaptive);
+
+    QCOMPARE(cuts, expected);
+    // Well clear of the fixed threshold, so the fallback must not have been consulted.
+    QCOMPARE(adaptive, false);
+    QCOMPARE(used, 27.0);
+}
+
+void EngineTest::sceneCutsSuppressNeighbours()
+{
+    // A dissolve smears one transition over several frames. Only the strongest may survive.
+    QList<double> diffs(600, 2.0);
+    diffs[300] = 40.0;
+    diffs[303] = 95.0; // the true centre
+    diffs[306] = 55.0;
+
+    const QList<int> cuts = drift::resolveCuts(diffs, 27.0, 15, false);
+    QCOMPARE(cuts, QList<int>{303});
+
+    // With a gap shorter than the spread, all three are legitimately distinct cuts.
+    const QList<int> narrow = drift::resolveCuts(diffs, 27.0, 2, false);
+    QCOMPARE(narrow, (QList<int>{300, 303, 306}));
+}
+
+void EngineTest::sceneCutsFallBackToAdaptiveThreshold()
+{
+    // Graded footage: the whole signal sits far below 27, which is the case the reference
+    // Python implementation gets wrong. The spikes are still obvious relative to the noise.
+    const QList<int> expected{200, 700, 1500};
+    const QList<double> diffs = diffSignal(2000, 1.0, expected, 12.0);
+
+    QCOMPARE(drift::resolveCuts(diffs, 27.0, 15, false), QList<int>{});
+
+    double used = 0.0;
+    bool adaptive = false;
+    const QList<int> cuts = drift::resolveCuts(diffs, 27.0, 15, true, 4.0, &used, &adaptive);
+
+    QCOMPARE(cuts, expected);
+    QCOMPARE(adaptive, true);
+    QVERIFY(used < 27.0);
+    QVERIFY(used > 1.0);
+}
+
+void EngineTest::sceneCutsKeepWorkingFixedThreshold()
+{
+    // A threshold that is finding plenty must never be second-guessed, even though the
+    // adaptive one would find more: promoting noise to cuts is the worse failure.
+    QList<int> spikes;
+    for (int i = 100; i < 2000; i += 100)
+        spikes.append(i);
+    const QList<double> diffs = diffSignal(2000, 4.0, spikes, 80.0);
+
+    double used = 0.0;
+    bool adaptive = true;
+    const QList<int> cuts = drift::resolveCuts(diffs, 27.0, 15, true, 4.0, &used, &adaptive);
+
+    QCOMPARE(cuts, spikes);
+    QCOMPARE(adaptive, false);
+    QCOMPARE(used, 27.0);
+}
+
+void EngineTest::sceneCutsHandleDegenerateInput()
+{
+    QVERIFY(drift::resolveCuts({}, 27.0, 15, true).isEmpty());
+
+    // Pure noise below the threshold, and too short for the fallback to be trusted.
+    const QList<double> quiet(50, 1.0);
+    QVERIFY(drift::resolveCuts(quiet, 27.0, 15, true).isEmpty());
+
+    // A dead-flat signal has a MAD of zero; the median ratio guard must stop that from
+    // turning every sample into a cut.
+    const QList<double> flat(2000, 5.0);
+    QVERIFY(drift::resolveCuts(flat, 27.0, 15, true).isEmpty());
+
+    QCOMPARE(drift::medianOf({}), 0.0);
+    QCOMPARE(drift::medianOf({4.0}), 4.0);
+    QCOMPARE(drift::medianOf({1.0, 2.0, 3.0, 4.0}), 2.5);
+    QCOMPARE(drift::medianOf({9.0, 1.0, 5.0}), 5.0);
+}
+
+void EngineTest::sceneCutsRejectNoiseAndGrain()
+{
+    std::mt19937 rng(1234);
+
+    // A locked-off shot with sensor noise and no cuts at all. The statistics on their own
+    // would put the threshold at roughly median + 4*0.3, i.e. inside the grain; the
+    // absolute floor is what keeps this empty.
+    {
+        std::normal_distribution<double> noise(1.0, 0.3);
+        QList<double> diffs;
+        diffs.reserve(2000);
+        for (int i = 0; i < 2000; ++i)
+            diffs.append(std::abs(noise(rng)));
+
+        QVERIFY(drift::resolveCuts(diffs, 27.0, 15, true).isEmpty());
+    }
+
+    // Grainy handheld footage: every frame already differs a lot and the spread is narrow,
+    // so the derived threshold clears the absolute floor easily. The median ratio is what
+    // rejects it — without that guard most frames would register as cuts.
+    {
+        std::normal_distribution<double> grain(10.0, 0.4);
+        QList<double> diffs;
+        diffs.reserve(2000);
+        for (int i = 0; i < 2000; ++i)
+            diffs.append(grain(rng));
+
+        QVERIFY(drift::resolveCuts(diffs, 27.0, 15, true).isEmpty());
+    }
+
+    // Same grainy footage, but with genuine cuts standing well clear of it. Those must
+    // still be found by the fixed threshold, with no help from the fallback.
+    {
+        std::normal_distribution<double> grain(10.0, 0.4);
+        QList<double> diffs;
+        diffs.reserve(2000);
+        for (int i = 0; i < 2000; ++i)
+            diffs.append(grain(rng));
+        const QList<int> expected{300, 800, 1600};
+        for (int i : expected)
+            diffs[i] = 70.0;
+
+        bool adaptive = true;
+        const QList<int> cuts = drift::resolveCuts(diffs, 27.0, 15, true, 4.0, nullptr, &adaptive);
+        QCOMPARE(cuts, expected);
+        QCOMPARE(adaptive, false);
+    }
+}
+
+void EngineTest::scenesPartitionTheRange()
+{
+    constexpr drift::TimeUs kIn = 2 * drift::kUsPerSecond;
+    constexpr drift::TimeUs kOut = 12 * drift::kUsPerSecond;
+
+    // 500 samples across a 10 s range: one sample every 20 ms.
+    constexpr double kStep = 20.0 * drift::kUsPerMs;
+
+    const QList<drift::Scene> scenes = drift::scenesFromCuts({100, 250, 400}, kStep, kIn, kOut);
+    QCOMPARE(scenes.size(), 4);
+
+    // Gapless, ascending, and covering exactly the requested range.
+    QCOMPARE(scenes.first().sourceIn, kIn);
+    QCOMPARE(scenes.last().sourceOut, kOut);
+    for (int i = 0; i < scenes.size(); ++i) {
+        QVERIFY(scenes.at(i).sourceOut > scenes.at(i).sourceIn);
+        const drift::Scene &s = scenes.at(i);
+        QVERIFY(s.thumbnailUs >= s.sourceIn && s.thumbnailUs < s.sourceOut);
+        if (i > 0)
+            QCOMPARE(scenes.at(i - 1).sourceOut, s.sourceIn);
+    }
+
+    // Boundaries land exactly on the sampled instants, with no accumulated drift.
+    QCOMPARE(scenes.at(1).sourceIn, kIn + drift::TimeUs(100 * kStep));
+    QCOMPARE(scenes.at(2).sourceIn, kIn + drift::TimeUs(250 * kStep));
+    QCOMPARE(scenes.at(3).sourceIn, kIn + drift::TimeUs(400 * kStep));
+
+    // A single-shot clip is one scene, not an empty result.
+    const QList<drift::Scene> single = drift::scenesFromCuts({}, kStep, kIn, kOut);
+    QCOMPARE(single.size(), 1);
+    QCOMPARE(single.first().sourceIn, kIn);
+    QCOMPARE(single.first().sourceOut, kOut);
+
+    // Cuts outside the sampled range cannot produce empty or inverted scenes.
+    const QList<drift::Scene> clamped = drift::scenesFromCuts({0, 250, 500, 900}, kStep, kIn, kOut);
+    for (const drift::Scene &s : clamped)
+        QVERIFY(s.sourceOut > s.sourceIn);
+    QCOMPARE(clamped.first().sourceIn, kIn);
+    QCOMPARE(clamped.last().sourceOut, kOut);
+
+    // An empty or inverted range yields nothing at all.
+    QVERIFY(drift::scenesFromCuts({}, kStep, kOut, kIn).isEmpty());
+    QVERIFY(drift::scenesFromCuts({}, kStep, kIn, kIn).isEmpty());
+}
+
+void EngineTest::sceneLoudnessRanksAcrossTheClip()
+{
+    QCOMPARE(drift::percentileOf({}, 0.5), 0.0);
+    QCOMPARE(drift::percentileOf({7.0}, 0.9), 7.0);
+    QCOMPARE(drift::percentileOf({0.0, 10.0}, 0.5), 5.0);
+    QCOMPARE(drift::percentileOf({4.0, 1.0, 3.0, 2.0}, 0.0), 1.0);
+    QCOMPARE(drift::percentileOf({4.0, 1.0, 3.0, 2.0}, 1.0), 4.0);
+
+    // Ranking is monotonic in the input and spans the full range.
+    const QList<double> ranked = drift::normaliseByPercentileRange({-40.0, -6.0, -38.0, -10.0});
+    QCOMPARE(ranked.size(), 4);
+    for (double v : ranked)
+        QVERIFY(v >= 0.0 && v <= 1.0);
+    QVERIFY(ranked.at(0) < ranked.at(2)); // -40 quieter than -38
+    QVERIFY(ranked.at(2) < ranked.at(3)); // -38 quieter than -10
+    QVERIFY(ranked.at(3) < ranked.at(1)); // -10 quieter than -6
+
+    // One extreme outlier must not flatten the scenes that matter. At a realistic scene
+    // count the 90th percentile sits inside the bulk, so the outlier stops influencing the
+    // scale at all — which is the whole reason for preferring percentiles to min/max.
+    QList<double> withOutlier;
+    for (int i = 0; i < 20; ++i)
+        withOutlier.append(-30.0 + i * 0.25); // a tight cluster from -30 to -25.25
+    withOutlier.append(0.0);                  // one music sting, far above everything else
+
+    const QList<double> spread = drift::normaliseByPercentileRange(withOutlier);
+    QCOMPARE(spread.size(), 21);
+    QCOMPARE(spread.last(), 1.0);
+
+    // The cluster keeps most of the 0..1 range to discriminate within.
+    QVERIFY(spread.at(19) - spread.at(0) > 0.9);
+
+    // Min/max scaling on the same input would squeeze that cluster into a sliver.
+    const double minMaxSpread = (withOutlier.at(19) - withOutlier.at(0))
+                                / (withOutlier.last() - withOutlier.at(0));
+    QVERIFY(minMaxSpread < 0.2);
+
+    // Nothing to rank when every value is the same.
+    for (double v : drift::normaliseByPercentileRange({5.0, 5.0, 5.0, 5.0}))
+        QCOMPARE(v, 0.0);
+    QVERIFY(drift::normaliseByPercentileRange({}).isEmpty());
+
+    // Per-second loudness: one second of full-scale square wave is 0 dBFS, silence floors.
+    constexpr int kRate = 16000;
+    std::vector<float> pcm(size_t(kRate) * 3, 0.0f);
+    for (int i = 0; i < kRate; ++i)
+        pcm[size_t(kRate) + i] = (i % 2) ? 1.0f : -1.0f; // the middle second only
+
+    const QList<double> dbfs = drift::perSecondLoudness(pcm.data(), int(pcm.size()), kRate);
+    QCOMPARE(dbfs.size(), 3);
+    QCOMPARE(dbfs.at(0), drift::kSilenceDbfs);
+    QVERIFY(std::abs(dbfs.at(1)) < 0.01);
+    QCOMPARE(dbfs.at(2), drift::kSilenceDbfs);
+
+    QVERIFY(drift::perSecondLoudness(nullptr, 100, kRate).isEmpty());
+    QVERIFY(drift::perSecondLoudness(pcm.data(), 0, kRate).isEmpty());
+}
+
+void EngineTest::yoloxDecodeAppliesGridAndStride()
+{
+    // YOLOX's published export does not bake the grid decode in, so the raw cx/cy are offsets
+    // within a cell and w/h are log-scale. Verified against yolox_tiny.onnx, whose raw output
+    // spans roughly -2..2 rather than the 0..416 an already-decoded model would give.
+    constexpr int kInput = 416;
+    constexpr int kClasses = 80;
+    constexpr int kStride = 5 + kClasses;
+    // 52^2 + 26^2 + 13^2, the strides 8/16/32 grids.
+    constexpr int kAnchors = 2704 + 676 + 169;
+
+    std::vector<float> raw(size_t(kAnchors) * kStride, 0.0f);
+
+    auto put = [&](int anchor, float cx, float cy, float w, float h, float obj, int cls) {
+        float *row = raw.data() + size_t(anchor) * kStride;
+        row[0] = cx; row[1] = cy; row[2] = w; row[3] = h; row[4] = obj;
+        row[5 + cls] = 1.0f;
+    };
+
+    // Anchor 0 is grid (0,0) at stride 8; a centre offset of 0.5 lands at 4 px.
+    put(0, 0.5f, 0.5f, 0.0f, 0.0f, 0.9f, 0);
+    // Anchor 53 is grid (1,1) at stride 8 (row-major, x fastest across 52 columns).
+    put(53, 0.0f, 0.0f, 0.0f, 0.0f, 0.9f, 1);
+    // First anchor of the stride-32 grid: grid (0,0), so the centre is at 16 px.
+    put(2704 + 676, 0.5f, 0.5f, 0.0f, 0.0f, 0.9f, 2);
+
+    const QStringList names{QStringLiteral("person"), QStringLiteral("bicycle"),
+                            QStringLiteral("car")};
+    const QList<drift::Detection> dets =
+        drift::decodeYoloxOutput(raw.data(), kAnchors, kClasses, kInput, 0.3, names);
+    QCOMPARE(dets.size(), 3);
+
+    // exp(0) * stride is the box size, centred on the decoded point.
+    QCOMPARE(dets.at(0).label, QStringLiteral("person"));
+    QVERIFY(std::abs(dets.at(0).box.center().x() - 4.0) < 1e-6);
+    QVERIFY(std::abs(dets.at(0).box.center().y() - 4.0) < 1e-6);
+    QVERIFY(std::abs(dets.at(0).box.width() - 8.0) < 1e-6);
+
+    QCOMPARE(dets.at(1).label, QStringLiteral("bicycle"));
+    QVERIFY(std::abs(dets.at(1).box.center().x() - 8.0) < 1e-6);
+    QVERIFY(std::abs(dets.at(1).box.center().y() - 8.0) < 1e-6);
+
+    QCOMPARE(dets.at(2).label, QStringLiteral("car"));
+    QVERIFY(std::abs(dets.at(2).box.center().x() - 16.0) < 1e-6);
+    QVERIFY(std::abs(dets.at(2).box.width() - 32.0) < 1e-6);
+
+    // Confidence is objectness times class score, so a confident box of an unconfident class
+    // is dropped.
+    std::vector<float> weak(size_t(kAnchors) * kStride, 0.0f);
+    float *row = weak.data();
+    row[0] = 0.5f; row[1] = 0.5f; row[4] = 0.9f; row[5] = 0.2f; // 0.9 * 0.2 = 0.18
+    QVERIFY(drift::decodeYoloxOutput(weak.data(), kAnchors, kClasses, kInput, 0.3, names).isEmpty());
+
+    // Degenerate input must not read past the buffer.
+    QVERIFY(drift::decodeYoloxOutput(nullptr, kAnchors, kClasses, kInput, 0.3, names).isEmpty());
+    QVERIFY(drift::decodeYoloxOutput(raw.data(), 0, kClasses, kInput, 0.3, names).isEmpty());
+
+    // The letterbox scales to fit and pads bottom-right, so the ratio is the limiting axis.
+    QCOMPARE(drift::letterboxRatio(832, 416, 416), 0.5);
+    QCOMPARE(drift::letterboxRatio(416, 832, 416), 0.5);
+    QCOMPARE(drift::letterboxRatio(0, 100, 416), 0.0);
+}
+
+void EngineTest::objectNmsIsPerClass()
+{
+    auto make = [](double x, double y, int cls, double score) {
+        drift::Detection d;
+        d.box = QRectF(x, y, 100, 100);
+        d.classId = cls;
+        d.score = score;
+        return d;
+    };
+
+    // Two heavily overlapping boxes of the same class are one object: only the stronger stays.
+    const QList<drift::Detection> same =
+        drift::nonMaximumSuppression({make(0, 0, 0, 0.9), make(10, 10, 0, 0.7)}, 0.45);
+    QCOMPARE(same.size(), 1);
+    QCOMPARE(same.first().score, 0.9);
+
+    // The same overlap across two classes is a person in front of a car — both survive.
+    const QList<drift::Detection> different =
+        drift::nonMaximumSuppression({make(0, 0, 0, 0.9), make(10, 10, 1, 0.7)}, 0.45);
+    QCOMPARE(different.size(), 2);
+
+    // Boxes that barely touch are separate objects even within one class.
+    const QList<drift::Detection> apart =
+        drift::nonMaximumSuppression({make(0, 0, 0, 0.9), make(95, 95, 0, 0.7)}, 0.45);
+    QCOMPARE(apart.size(), 2);
+
+    QVERIFY(drift::nonMaximumSuppression({}, 0.45).isEmpty());
 }
 
 QTEST_MAIN(EngineTest)

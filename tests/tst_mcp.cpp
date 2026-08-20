@@ -20,6 +20,7 @@
 #include "mcp/McpDispatcher.h"
 #include "mcp/McpProtocol.h"
 #include "mcp/McpSession.h"
+#include "engine/ObjectDetector.h"
 #include "models/AppController.h"
 #include "models/AssetLibrary.h"
 
@@ -29,6 +30,10 @@ class McpTest : public QObject
 
 private slots:
     void catalogListsToolboxes();
+    void sceneToolboxExposesSchemas();
+    void sceneOpsRequireAnalysisFirst();
+    void sceneWorkflowEndToEnd();
+    void aiCapabilitiesReportsMissingModels();
     void catalogOpsIncludeWhen();
     void toolboxDescriptionsIncludeWhen();
     void toolboxAnnotationsPresent();
@@ -139,7 +144,7 @@ void McpTest::catalogListsToolboxes()
     const QJsonObject cat = drift::mcp::catalogPayload();
     QVERIFY(cat.value(QStringLiteral("ok")).toBool());
     const QJsonArray boxes = cat.value(QStringLiteral("toolboxes")).toArray();
-    QCOMPARE(boxes.size(), 15);
+    QCOMPARE(boxes.size(), 16);
     QStringList names;
     for (const QJsonValue &v : boxes)
         names.append(v.toObject().value(QStringLiteral("name")).toString());
@@ -148,6 +153,7 @@ void McpTest::catalogListsToolboxes()
     QVERIFY(names.contains(QStringLiteral("canvas")));
     QVERIFY(names.contains(QStringLiteral("project")));
     QVERIFY(names.contains(QStringLiteral("audio")));
+    QVERIFY(names.contains(QStringLiteral("scene")));
 }
 
 void McpTest::catalogOpsIncludeWhen()
@@ -1110,6 +1116,242 @@ void McpTest::armedBeatGridMakesMoveClipSnap()
                             .arg(layers.value(QStringLiteral("snapTargets")).toInt())
                             .arg(QString::fromUtf8(
                                 QJsonDocument(armed).toJson(QJsonDocument::Compact)))));
+}
+
+// --- scene toolbox ----------------------------------------------------------
+
+void McpTest::sceneToolboxExposesSchemas()
+{
+    const QJsonObject box = drift::mcp::toolboxPayload(QStringLiteral("scene"));
+    QVERIFY(box.value(QStringLiteral("ok")).toBool());
+
+    QStringList names;
+    for (const QJsonValue &v : box.value(QStringLiteral("tools")).toArray())
+        names.append(v.toObject().value(QStringLiteral("name")).toString());
+
+    for (const char *expected : {"detect_scenes", "list_scenes", "describe_clip", "find_scenes",
+                                 "split_on_scenes", "bookmark_scenes"}) {
+        QVERIFY2(names.contains(QLatin1String(expected)), expected);
+    }
+
+    // ai_capabilities belongs to the ai toolbox, not scene.
+    const QJsonObject ai = drift::mcp::toolboxPayload(QStringLiteral("ai"));
+    QStringList aiNames;
+    for (const QJsonValue &v : ai.value(QStringLiteral("tools")).toArray())
+        aiNames.append(v.toObject().value(QStringLiteral("name")).toString());
+    QVERIFY(aiNames.contains(QStringLiteral("ai_capabilities")));
+}
+
+void McpTest::sceneOpsRequireAnalysisFirst()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    // Reading before scanning must say so, rather than returning an empty success that an
+    // agent would read as "this clip has no scenes".
+    for (const char *tool : {"list_scenes", "describe_clip"}) {
+        const QJsonObject result = dispatcher.applyOne(QLatin1String(tool), {});
+        QCOMPARE(result.value(QStringLiteral("ok")).toBool(), false);
+        QCOMPARE(result.value(QStringLiteral("error")).toString(), QStringLiteral("not_found"));
+    }
+
+    // find_scenes searches the cache rather than the live analysis, so an empty timeline is a
+    // legitimate empty result, not an error.
+    const QJsonObject found = dispatcher.applyOne(QStringLiteral("find_scenes"), {});
+    QVERIFY(found.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(found.value(QStringLiteral("n")).toInt(), 0);
+
+    // Scene detection on a text clip is a bad request, not a crash.
+    state.addTextClip(QStringLiteral("Hello"), 0.0);
+    const QString id =
+        state.mcpCompactClip(state.selectedTrack(), state.selectedClip())
+            .value(QStringLiteral("id")).toString();
+    const QJsonObject onText = dispatcher.applyOne(
+        QStringLiteral("detect_scenes"), QJsonObject{{QStringLiteral("clip"), id}});
+    QCOMPARE(onText.value(QStringLiteral("ok")).toBool(), false);
+    QCOMPARE(onText.value(QStringLiteral("error")).toString(), QStringLiteral("bad_args"));
+}
+
+void McpTest::sceneWorkflowEndToEnd()
+{
+    const QString ffmpeg = ffmpegPath();
+    if (ffmpeg.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    // Four visually distinct three-second shots, so the cuts are at 3, 6 and 9 seconds.
+    QStringList parts;
+    for (int i = 0; i < 4; ++i) {
+        const QString part = dir.filePath(QStringLiteral("part%1.mp4").arg(i));
+        QProcess proc;
+        proc.start(ffmpeg, {QStringLiteral("-y"),
+                            QStringLiteral("-f"), QStringLiteral("lavfi"),
+                            QStringLiteral("-i"),
+                            QStringLiteral("testsrc2=size=320x180:rate=30:duration=3"),
+                            QStringLiteral("-filter:v"),
+                            QStringLiteral("hue=h=%1").arg(i * 90),
+                            QStringLiteral("-c:v"), QStringLiteral("libx264"),
+                            QStringLiteral("-preset"), QStringLiteral("ultrafast"),
+                            QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"), part});
+        QVERIFY(proc.waitForFinished(120000) && proc.exitCode() == 0);
+        parts.append(part);
+    }
+
+    const QString listFile = dir.filePath(QStringLiteral("list.txt"));
+    {
+        QFile f(listFile);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        for (const QString &part : parts)
+            f.write(QStringLiteral("file '%1'\n").arg(part).toUtf8());
+    }
+    const QString source = dir.filePath(QStringLiteral("cuts.mp4"));
+    {
+        QProcess proc;
+        proc.start(ffmpeg, {QStringLiteral("-y"), QStringLiteral("-f"), QStringLiteral("concat"),
+                            QStringLiteral("-safe"), QStringLiteral("0"),
+                            QStringLiteral("-i"), listFile,
+                            QStringLiteral("-c"), QStringLiteral("copy"), source});
+        QVERIFY(proc.waitForFinished(120000) && proc.exitCode() == 0);
+    }
+
+    AssetLibrary library;
+    AppController state(&library);
+
+    drift::Project &project = *state.project();
+    drift::Track track{.type = drift::TrackType::Video};
+    drift::Clip clip;
+    clip.id = QStringLiteral("scene-clip");
+    clip.type = drift::ClipType::Video;
+    clip.path = source;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(12.0);
+    clip.srcIn = 0;
+    clip.srcOut = drift::secondsToUs(12.0);
+    track.clips.append(clip);
+    project.tracks().clear();
+    project.tracks().append(track);
+
+    drift::mcp::McpDispatcher dispatcher(&state);
+    const QJsonObject clipRef{{QStringLiteral("clip"), QStringLiteral("scene-clip")}};
+
+    QSignalSpy finished(&state, &AppController::sceneDetectionFinished);
+    const QJsonObject started = dispatcher.applyOne(QStringLiteral("detect_scenes"), clipRef);
+    QVERIFY2(started.value(QStringLiteral("ok")).toBool(),
+             qPrintable(started.value(QStringLiteral("detail")).toString()));
+
+    // Either it started asynchronously, or a previous run left a usable cache entry.
+    if (!started.value(QStringLiteral("cached")).toBool()) {
+        QVERIFY(started.value(QStringLiteral("started")).toBool());
+        QVERIFY2(finished.wait(180000), "scene detection did not finish");
+        QVERIFY2(finished.at(0).at(0).toBool(), qPrintable(finished.at(0).at(1).toString()));
+    }
+
+    // The async job is advertised where the catalog says it is.
+    const QJsonObject inspect = dispatcher.inspect(
+        QJsonObject{{QStringLiteral("detail"), true}});
+    const QJsonObject sceneState =
+        inspect.value(QStringLiteral("sceneDetect")).toObject();
+    QCOMPARE(sceneState.value(QStringLiteral("active")).toBool(), false);
+    QCOMPARE(sceneState.value(QStringLiteral("clip")).toString(), QStringLiteral("scene-clip"));
+
+    const QJsonObject listed = dispatcher.applyOne(QStringLiteral("list_scenes"), {});
+    QVERIFY(listed.value(QStringLiteral("ok")).toBool());
+    const QJsonArray scenes = listed.value(QStringLiteral("scenes")).toArray();
+    QCOMPARE(scenes.size(), 4);
+
+    // Boundaries land on the real cuts, and the timeline mapping is filled in.
+    const double expected[] = {0.0, 3.0, 6.0, 9.0};
+    for (int i = 0; i < scenes.size(); ++i) {
+        const QJsonObject scene = scenes.at(i).toObject();
+        QVERIFY2(std::abs(scene.value(QStringLiteral("start")).toDouble() - expected[i]) < 0.1,
+                 qPrintable(QStringLiteral("scene %1 starts at %2")
+                                .arg(i)
+                                .arg(scene.value(QStringLiteral("start")).toDouble())));
+        // This clip is untrimmed and unretimed, so source and timeline times coincide.
+        QVERIFY(std::abs(scene.value(QStringLiteral("timeline_start")).toDouble()
+                         - scene.value(QStringLiteral("start")).toDouble())
+                < 0.01);
+    }
+
+    // Asking for labels without the model must fail with a message naming what to install,
+    // so an agent can relay it instead of retrying. The dispatcher resolves the clip before
+    // the op sees with_objects, which is why this needs a real clip rather than an empty ref.
+    if (!drift::ObjectDetector::modelPresent()) {
+        QJsonObject labelled = clipRef;
+        labelled.insert(QStringLiteral("with_objects"), true);
+        const QJsonObject refused = dispatcher.applyOne(QStringLiteral("detect_scenes"), labelled);
+        QCOMPARE(refused.value(QStringLiteral("ok")).toBool(), false);
+        QVERIFY2(refused.value(QStringLiteral("detail")).toString().contains(
+                     QStringLiteral("object-model")),
+                 qPrintable(refused.value(QStringLiteral("detail")).toString()));
+    }
+
+    // describe_clip summarises the same analysis in one call.
+    const QJsonObject described = dispatcher.applyOne(QStringLiteral("describe_clip"), {});
+    QVERIFY(described.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(described.value(QStringLiteral("scenes")).toInt(), 4);
+    QCOMPARE(described.value(QStringLiteral("cuts")).toInt(), 3);
+    QCOMPARE(described.value(QStringLiteral("objects_scanned")).toBool(), false);
+
+    // find_scenes reaches the same clip through the on-disk cache.
+    const QJsonObject found = dispatcher.applyOne(QStringLiteral("find_scenes"), {});
+    QVERIFY(found.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(found.value(QStringLiteral("n")).toInt(), 4);
+
+    // bookmark_scenes marks the three interior boundaries, not the clip's own start.
+    const QJsonObject marked = dispatcher.applyOne(QStringLiteral("bookmark_scenes"), clipRef);
+    QVERIFY(marked.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(marked.value(QStringLiteral("added")).toInt(), 3);
+
+    // split_on_scenes: the id passed in still names the first piece, and however many cuts it
+    // made it collapses into a single undo step.
+    const QJsonObject split = dispatcher.applyOne(QStringLiteral("split_on_scenes"), clipRef);
+    QVERIFY2(split.value(QStringLiteral("ok")).toBool(),
+             qPrintable(split.value(QStringLiteral("detail")).toString()));
+    QCOMPARE(split.value(QStringLiteral("clips")).toArray().size(), 4);
+    QCOMPARE(split.value(QStringLiteral("clips")).toArray().at(0).toString(),
+             QStringLiteral("scene-clip"));
+    QCOMPARE(project.tracks().at(0).clips.size(), 4);
+
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    QCOMPARE(project.tracks().at(0).clips.size(), 1);
+}
+
+void McpTest::aiCapabilitiesReportsMissingModels()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject result = dispatcher.applyOne(QStringLiteral("ai_capabilities"), {});
+    QVERIFY(result.value(QStringLiteral("ok")).toBool());
+
+    const QJsonArray models = result.value(QStringLiteral("models")).toArray();
+    QVERIFY(models.size() >= 5);
+
+    bool sawObjectModel = false;
+    for (const QJsonValue &v : models) {
+        const QJsonObject model = v.toObject();
+        QVERIFY(model.contains(QStringLiteral("installed")));
+        QVERIFY(!model.value(QStringLiteral("unlocks")).toString().isEmpty());
+        if (model.value(QStringLiteral("kind")).toString() == QLatin1String("object-model")) {
+            sawObjectModel = true;
+            // Whether it is installed depends on the machine, so assert the report agrees
+            // with reality rather than baking in either answer — claiming a capability that
+            // then fails is the bug this op exists to prevent.
+            QCOMPARE(model.value(QStringLiteral("installed")).toBool(),
+                     drift::ObjectDetector::modelPresent());
+        }
+    }
+    QVERIFY(sawObjectModel);
+
+    // The runtime matters as much as the models: a model with nothing to execute it is not a
+    // capability, so the report must name one either way.
+    QVERIFY(!result.value(QStringLiteral("runtime")).toString().isEmpty());
 }
 
 QTEST_MAIN(McpTest)
