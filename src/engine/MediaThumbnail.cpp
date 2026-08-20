@@ -280,13 +280,13 @@ QString MediaThumbnail::generate(const QString &sourcePath, const QString &kind)
     if (kind == QStringLiteral("image")) {
         QImageReader reader(absolutePath);
         reader.setAutoTransform(true);
+        // Decode at thumbnail resolution to avoid full-resolution image allocations.
+        QSize size = reader.size();
+        size.scale(kThumbnailMaxEdge, kThumbnailMaxEdge, Qt::KeepAspectRatio);
+        reader.setScaledSize(size);
         QImage image = reader.read();
         if (image.isNull())
             return {};
-        if (image.width() > kThumbnailMaxEdge || image.height() > kThumbnailMaxEdge) {
-            image = image.scaled(kThumbnailMaxEdge, kThumbnailMaxEdge,
-                                 Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        }
         if (!image.save(outPath, "JPG", 85))
             return {};
         return outPath;
