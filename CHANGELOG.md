@@ -52,11 +52,27 @@ Where two clips cut from one file overlapped, every composited frame dragged the
 
 ## ✨ Added
 
+### Feature (#64) Scene detection
+
+Find where the picture cuts inside a clip. Select a video clip, open the **Scenes** tab in the assets panel and click **Find scenes**: Drift scans the clip for shot boundaries and lists every shot, either in timeline order or ranked by movement and loudness. Click a shot to jump to it, and use the sensitivity slider if it cuts too eagerly or not enough. With the **Scene Labels** add-on installed from Extras, **Identify objects** also labels each shot with what is in it. A scan is cached against the source file, so it survives edits, undo and reload — re-trimming the clip rescans the new range.
+
+Agents get the same index over MCP through a new `scene` toolbox — `describe_clip`, `list_scenes`, `find_scenes` (across every scanned clip), `split_on_scenes` and `bookmark_scenes`, with times reported both in the source file and on the timeline. See [MCP.md](MCP.md).
+
+### Feature (#63) 3D face mesh
+
+A new **3D Face Mesh** effect fits a 3D head mesh to the tracked face and draws it over the frame, following head pose through the clip: translucent fill, a coloured wireframe, and scale / offset / rotation and lighting controls. Face detection now bakes the full 468-point mesh into the face track, and clips detected before this update need re-detecting for the effect to draw.
+
+It is also the groundwork for face props — the effect loads its model from a file, and `.glb` prop packs can be installed as `face-props` add-ons. No prop pack ships yet.
+
 ### Feature (#62) Multicam editing
 
 Cut a multi-camera shoot by watching every camera at once. Stack synced cameras on their own tracks, select those clips, and open the multicam window (`Ctrl+Shift+C`, or the grid button in the header). Click a tile or press its number / numpad key to punch that camera from the playhead until the next cut. The timeline is left alone until you **Cancel**, **Save as separate tracks** (each camera keeps only the takes you chose), or **Save combined** (those takes flatten onto the topmost camera track).
 
 An empty timeline can still click **Set up from my media** — each imported camera goes on its own track, stacked, with extras muted.
+
+### Feature [`51b02be`](https://github.com/CutWire-Studios/Drift/commit/51b02be) Open `.drift` projects from the file manager
+
+Project files are registered with the desktop on all three platforms — the Windows installer, a Linux MIME type and `.desktop` entry, and macOS document types — so double-clicking a `.drift` file opens it in Drift. Passing a project path on the command line works too, and open / save dialogs now filter by the project type.
 
 ### Feature [`ba70db1`](https://github.com/CutWire-Studios/Drift/commit/ba70db1) In/Out work area and ranged export
 
