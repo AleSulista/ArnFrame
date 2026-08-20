@@ -488,6 +488,8 @@ jobs:
 
       # Signing and notarisation happen only when the secrets are set. Without them — a fork, or
       # any run that cannot see repository secrets — the image is still built and ad-hoc signed.
+      # A Developer ID / notary failure must not kill the job either: Apple Silicon still needs a
+      # signed binary to launch, so the fallback is the same ad-hoc image a fork would have shipped.
       - name: Build disk image
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
@@ -500,9 +502,21 @@ jobs:
           NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
           NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
         run: |
-          ARGS=(--build-dir build-macos --skip-build)
+          package_adhoc() {
+            scripts/package-macos.sh --build-dir build-macos --skip-build
+          }
 
-          if [ -n "$MACOS_CERTIFICATE" ]; then
+          if [ -z "$MACOS_CERTIFICATE" ]; then
+            package_adhoc
+            exit 0
+          fi
+
+          # Drop -e for the signed attempt: a codesign / notarytool failure must not abort the
+          # step. The subshell keeps -e so the first failure there is the status we inspect.
+          set +e
+          (
+            set -euo pipefail
+            ARGS=(--build-dir build-macos --skip-build)
             KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
             KEYCHAIN_PWD="$(uuidgen)"
             echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
@@ -526,9 +540,16 @@ jobs:
             elif [ -n "$NOTARY_APPLE_ID" ]; then
               ARGS+=(--notarize)
             fi
-          fi
 
-          scripts/package-macos.sh "${ARGS[@]}"
+            scripts/package-macos.sh "${ARGS[@]}"
+          )
+          signed_status=$?
+          set -euo pipefail
+
+          if [ "$signed_status" -ne 0 ]; then
+            echo "::warning::Developer ID signing or notarisation failed; packaging an ad-hoc image instead."
+            package_adhoc
+          fi
 
       - name: Clean up signing material
         if: always()
