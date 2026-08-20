@@ -59,6 +59,16 @@ TimeUs sourceDurationForClip(const Project &project, const Clip &clip);
 // Caller assigns `tail.id`. Returns false if the offset is too close to either end.
 bool splitClipAtOffset(Clip &head, Clip &tail, TimeUs offset);
 
+// Repoint `dst` at the media `src` carries while keeping dst's timeline placement. The source
+// time is read from `src` at dst's timeline start, so the two stay in timeline sync — which is
+// what makes a multicam switch land on the frame the angle was showing at that moment.
+//
+// dst's transform, effects, fades and opacity are deliberately left alone: switching camera
+// changes which pixels arrive, not the treatment applied to them. `srcMediaDurationUs` bounds
+// the new source range; dst's timeline duration shrinks if the media runs out before its slot
+// does.
+void retargetClipToSource(Clip &dst, const Clip &src, TimeUs srcMediaDurationUs);
+
 // True when `left` ends where `right` begins, shares media + reverse/speed, and source ranges abut.
 bool clipsCanMerge(const Clip &left, const Clip &right);
 
@@ -90,5 +100,38 @@ QString assignSplitLinkIds(Clip &head, Clip &tail);
 // Clips are left visually stationary; whatever falls outside the new canvas is
 // simply clipped away by the compositor.
 void rebaseClipLayout(Project &project, int oldWidth, int oldHeight, double originX, double originY);
+
+// A punch on a staged multicam assignment: from `timeUs` until the next cut (or the
+// session end), this camera is the one that stays. `cuts` is empty while the session is
+// still unedited — every camera stacked, `initialAngle` showing as program.
+struct MulticamCut
+{
+    TimeUs timeUs = 0;
+    int angle = 0;
+};
+
+struct MulticamInterval
+{
+    TimeUs startUs = 0;
+    TimeUs endUs = 0;
+    int angle = 0;
+};
+
+enum class MulticamSwitchResult { Applied, NoOp, OutOfRange, TooCloseToEdge };
+
+// Punch `angle` at `atUs` inside `[rangeStart, rangeEnd)`. Empty `cuts` is the unedited
+// stack; `initialAngle` is the topmost camera, which is program until the first punch.
+MulticamSwitchResult applyMulticamSwitch(QList<MulticamCut> &cuts, TimeUs rangeStart, TimeUs rangeEnd,
+                                         int angle, TimeUs atUs, int initialAngle);
+
+int multicamAngleAt(const QList<MulticamCut> &cuts, TimeUs rangeStart, TimeUs rangeEnd, TimeUs timeUs,
+                    int uneditedAngle);
+
+QList<MulticamInterval> multicamIntervals(const QList<MulticamCut> &cuts, TimeUs rangeStart,
+                                          TimeUs rangeEnd, int uneditedAngle);
+
+// Intersection of `src` with `[start, end)`. False when that span is empty or shorter than
+// kMinClipDurationUs. `out` keeps `src`'s id; the caller mints a new one if it needs one.
+bool sliceClipToTimelineRange(const Clip &src, TimeUs start, TimeUs end, Clip &out);
 
 } // namespace drift

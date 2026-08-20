@@ -847,8 +847,47 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Multicam window</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Creating captions…</source>
         <translation>උපසිරැසි නිර්මාණය කරමින්…</translation>
+    </message>
+    <message>
+        <source>Angle %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Set up multicam</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>Multicam ready: %n camera(s) lined up at the start. Drag a clip to adjust its sync, then pick a shot.</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Select at least two video clips on different tracks.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>That angle has nothing at the current time.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Too close to the edge of the shot to cut here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save multicam as separate tracks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save combined multicam</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Cutting out subject…</source>
@@ -2201,6 +2240,10 @@
         <translation>නිර්යාත කිරීම දැනටමත් සිදුවෙමින් පවතී</translation>
     </message>
     <message>
+        <source>Multicam</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Workspace: portrait</source>
         <translation>වැඩබිම: සිරස් (portrait)</translation>
     </message>
@@ -3327,6 +3370,85 @@
     <message>
         <source>Reopen the project once they finish installing.</source>
         <translation>ඒවා ස්ථාපනය අවසන් වූ පසු ව්‍යාපෘතිය නැවත විවෘත කරන්න.</translation>
+    </message>
+</context>
+<context>
+    <name>MulticamWindow</name>
+    <message>
+        <source>Multicam</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pick the camera. Cuts stay staged until you save.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ready to set up</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No angles to switch between</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Your imported videos will go on a track each, stacked so the top camera is the program.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select at least two video clips on different tracks, then open Multicam again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Set up from my media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nothing here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Switch the program to %1 (key %2)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No clip at the current time</source>
+        <translation type="unfinished">වත්මන් වේලාවේ ක්ලිපයක් නැත</translation>
+    </message>
+    <message>
+        <source>Program</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Previous frame</source>
+        <translation type="unfinished">පෙර රාමුව</translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation type="unfinished">විරාමය</translation>
+    </message>
+    <message>
+        <source>Play</source>
+        <translation type="unfinished">ධාවනය කරන්න</translation>
+    </message>
+    <message>
+        <source>Next frame</source>
+        <translation type="unfinished">ඊළඟ රාමුව</translation>
+    </message>
+    <message>
+        <source>Seek</source>
+        <translation type="unfinished">සොයන්න (Seek)</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">අවලංගු කරන්න</translation>
+    </message>
+    <message>
+        <source>Save as separate tracks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save combined</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

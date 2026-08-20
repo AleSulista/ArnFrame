@@ -163,6 +163,11 @@ ApplicationWindow {
         }
     }
 
+    // Another view of the same timeline rather than an editor of its own — see MulticamWindow.
+    MulticamWindow {
+        id: multicamWindow
+    }
+
     DenoiseWindow {
         id: denoiseWindow
     }
@@ -190,6 +195,12 @@ ApplicationWindow {
 
     function openFadeCurve(track, clip) {
         fadeCurveWindow.openFor(track, clip)
+    }
+
+    // Opened from the header and from the "multicam" shortcut. Unlike the windows above it is
+    // not bound to one clip, so it survives any edit and only closes when the document does.
+    function openMulticam() {
+        multicamWindow.openSession()
     }
 
     // Opened from the header, and from every empty state that a missing addon causes.
@@ -289,11 +300,18 @@ ApplicationWindow {
         // Each of these edits one clip of the project that was just discarded, so there is
         // nothing left for them to act on. The C++ sessions are already torn down; onClosing
         // calls the same end*Session() again, which no-ops.
+        // Multicam addresses tracks by index, so it has nothing to act on either once the
+        // document behind those indices is gone.
         function onProjectReset() {
             segmentationWindow.close()
             denoiseWindow.close()
             speedCurveWindow.close()
             fadeCurveWindow.close()
+            multicamWindow.close()
+        }
+
+        function onOpenMulticamWindowRequested() {
+            multicamWindow.openSession()
         }
 
         function onProjectLayoutChosenChanged() {

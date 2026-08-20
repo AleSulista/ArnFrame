@@ -289,6 +289,58 @@ bool splitClipAtOffset(Clip &head, Clip &tail, TimeUs offset)
     return true;
 }
 
+void retargetClipToSource(Clip &dst, const Clip &src, TimeUs srcMediaDurationUs)
+{
+    // Media identity.
+    dst.assetId = src.assetId;
+    dst.path = src.path;
+    dst.type = src.type;
+    dst.name = src.name;
+    dst.thumbnailPath = src.thumbnailPath;
+    dst.filmstripPath = src.filmstripPath;
+    dst.emoji = src.emoji;
+
+    // Fields that decide how timeline time maps onto source time. They have to come from the
+    // angle: reading its frames through the outgoing clip's mapping would show the wrong ones.
+    dst.speed = src.speed;
+    dst.reverse = src.reverse;
+    dst.flipH = src.flipH;
+    dst.flipV = src.flipV;
+
+    // A ramp is normalised over the clip's own source range and decides its timeline duration.
+    // dst's duration is fixed by the slot it occupies, so there is no range for a ramp to
+    // describe — carrying one over would contradict the placement being preserved.
+    dst.speedCurve = SpeedCurve();
+    // The program clip is no longer the video half of whatever pair it was in; leaving the id
+    // would have syncLinkedTiming drag the old companion around after it.
+    dst.linkId.clear();
+    // Landmarks and mattes are baked against the outgoing media, indexed by its source time.
+    dst.faceTrackPath.clear();
+    dst.faceTrackSrcOffsetUs = 0;
+    // A matte is rendered pixels, so it only describes the camera it was segmented from; kept,
+    // it would cut the new angle to the old one's silhouette. Geometric masks are treatment
+    // like the transform and the effects, and stay.
+    if (dst.mask.shape == MaskShape::Matte)
+        dst.mask = Mask();
+
+    // The frame `src` is showing where dst begins — this is the whole point of the operation.
+    const TimeUs srcIn = qBound(TimeUs{0}, src.timelineToSourceUs(dst.timelineStart),
+                                qMax(TimeUs{0}, srcMediaDurationUs));
+    dst.srcIn = srcIn;
+
+    const TimeUs wanted = dst.sourceSpanUs();
+    const TimeUs available = qMax(TimeUs{0}, srcMediaDurationUs - srcIn);
+    const TimeUs span = qMin(wanted, available);
+    dst.srcOut = srcIn + span;
+
+    // The media ran out before the slot did; pull the timeline duration back to what is
+    // actually there rather than looping or freezing on the last frame.
+    if (span < wanted && dst.effectiveSpeed() > 0.0) {
+        dst.timelineDuration =
+            qMax(TimeUs{1}, static_cast<TimeUs>(llround(static_cast<double>(span) / dst.effectiveSpeed())));
+    }
+}
+
 bool clipsCanMerge(const Clip &left, const Clip &right)
 {
     if (left.type != right.type)
@@ -404,6 +456,122 @@ void shiftTrackValues(KeyframeTrack<double> &track, double delta, double implici
 }
 
 } // namespace
+
+namespace {
+
+void mergeAdjacentMulticamCuts(QList<MulticamCut> &cuts)
+{
+    int i = 1;
+    while (i < cuts.size()) {
+        if (cuts.at(i).angle == cuts.at(i - 1).angle)
+            cuts.removeAt(i);
+        else
+            ++i;
+    }
+}
+
+int multicamCutIndexAtOrBefore(const QList<MulticamCut> &cuts, TimeUs timeUs)
+{
+    int index = 0;
+    while (index + 1 < cuts.size() && cuts.at(index + 1).timeUs <= timeUs)
+        ++index;
+    return index;
+}
+
+} // namespace
+
+MulticamSwitchResult applyMulticamSwitch(QList<MulticamCut> &cuts, TimeUs rangeStart, TimeUs rangeEnd,
+                                         int angle, TimeUs atUs, int initialAngle)
+{
+    if (rangeEnd - rangeStart < kMinClipDurationUs)
+        return MulticamSwitchResult::OutOfRange;
+    if (atUs < rangeStart || atUs >= rangeEnd)
+        return MulticamSwitchResult::OutOfRange;
+
+    if (cuts.isEmpty()) {
+        if (angle == initialAngle)
+            return MulticamSwitchResult::NoOp;
+        if (atUs == rangeStart) {
+            cuts.append(MulticamCut{rangeStart, angle});
+            return MulticamSwitchResult::Applied;
+        }
+        if (atUs - rangeStart < kMinClipDurationUs || rangeEnd - atUs < kMinClipDurationUs)
+            return MulticamSwitchResult::TooCloseToEdge;
+        cuts.append(MulticamCut{rangeStart, initialAngle});
+        cuts.append(MulticamCut{atUs, angle});
+        return MulticamSwitchResult::Applied;
+    }
+
+    const int index = multicamCutIndexAtOrBefore(cuts, atUs);
+    const TimeUs intervalStart = cuts.at(index).timeUs;
+    const TimeUs intervalEnd = index + 1 < cuts.size() ? cuts.at(index + 1).timeUs : rangeEnd;
+    if (cuts.at(index).angle == angle)
+        return MulticamSwitchResult::NoOp;
+
+    if (atUs == intervalStart) {
+        cuts[index].angle = angle;
+        mergeAdjacentMulticamCuts(cuts);
+        return MulticamSwitchResult::Applied;
+    }
+
+    if (atUs - intervalStart < kMinClipDurationUs || intervalEnd - atUs < kMinClipDurationUs)
+        return MulticamSwitchResult::TooCloseToEdge;
+
+    cuts.insert(index + 1, MulticamCut{atUs, angle});
+    mergeAdjacentMulticamCuts(cuts);
+    return MulticamSwitchResult::Applied;
+}
+
+int multicamAngleAt(const QList<MulticamCut> &cuts, TimeUs rangeStart, TimeUs rangeEnd, TimeUs timeUs,
+                    int uneditedAngle)
+{
+    if (timeUs < rangeStart || timeUs >= rangeEnd)
+        return -1;
+    if (cuts.isEmpty())
+        return uneditedAngle;
+    return cuts.at(multicamCutIndexAtOrBefore(cuts, timeUs)).angle;
+}
+
+QList<MulticamInterval> multicamIntervals(const QList<MulticamCut> &cuts, TimeUs rangeStart,
+                                          TimeUs rangeEnd, int uneditedAngle)
+{
+    QList<MulticamInterval> out;
+    if (rangeEnd <= rangeStart)
+        return out;
+    if (cuts.isEmpty()) {
+        out.append(MulticamInterval{rangeStart, rangeEnd, uneditedAngle});
+        return out;
+    }
+    for (int i = 0; i < cuts.size(); ++i) {
+        const TimeUs end = i + 1 < cuts.size() ? cuts.at(i + 1).timeUs : rangeEnd;
+        out.append(MulticamInterval{cuts.at(i).timeUs, end, cuts.at(i).angle});
+    }
+    return out;
+}
+
+bool sliceClipToTimelineRange(const Clip &src, TimeUs start, TimeUs end, Clip &out)
+{
+    const TimeUs from = qMax(start, src.timelineStart);
+    const TimeUs to = qMin(end, src.timelineEnd());
+    if (to - from < kMinClipDurationUs)
+        return false;
+
+    Clip work = src;
+    if (from > work.timelineStart) {
+        Clip tail;
+        if (!splitClipAtOffset(work, tail, from - work.timelineStart))
+            return false;
+        work = tail;
+    }
+    if (work.timelineEnd() > to) {
+        Clip discarded;
+        if (!splitClipAtOffset(work, discarded, to - work.timelineStart))
+            return false;
+    }
+
+    out = work;
+    return true;
+}
 
 void rebaseClipLayout(Project &project, int oldWidth, int oldHeight, double originX, double originY)
 {

@@ -11,6 +11,11 @@ qt_add_executable(tst_editorstate
     tst_editorstate.cpp
     ../src/SegmentImageStore.cpp
     ../src/ClipPreviewImageStore.cpp
+    ../src/MulticamImageStore.cpp
+    # The provider, not just the store: the id QML addresses a tile by is parsed here, and a
+    # store test cannot see that half. Costs a Qt6::Quick link, but needs no QML engine —
+    # requestImage is called directly.
+    ../src/MulticamImageProvider.cpp
     ../src/models/AppController.cpp
     ../src/models/AssetLibrary.cpp
     ../src/models/TimelineModel.cpp
@@ -30,7 +35,7 @@ qt_add_executable(tst_editorstate
     ../src/mcp/McpStdio.cpp
 )
 target_include_directories(tst_editorstate PRIVATE ../src)
-target_link_libraries(tst_editorstate PRIVATE Qt6::Test Qt6::Gui Qt6::Multimedia Qt6::Concurrent Qt6::Network driftcore driftengine)
+target_link_libraries(tst_editorstate PRIVATE Qt6::Test Qt6::Gui Qt6::Quick Qt6::Multimedia Qt6::Concurrent Qt6::Network driftcore driftengine)
 target_compile_definitions(tst_editorstate PRIVATE
     DRIFT_TEST_DENOISE_MODEL_DIR="${CMAKE_SOURCE_DIR}/models/deepfilternet3"
     DRIFT_VERSION="${PROJECT_VERSION}")
@@ -89,6 +94,7 @@ qt_add_executable(tst_mcp
     ../src/mcp/McpHttp.cpp
     ../src/SegmentImageStore.cpp
     ../src/ClipPreviewImageStore.cpp
+    ../src/MulticamImageStore.cpp
     ../src/models/AppController.cpp
     ../src/models/AssetLibrary.cpp
     ../src/models/TimelineModel.cpp

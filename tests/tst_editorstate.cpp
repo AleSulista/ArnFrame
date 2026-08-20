@@ -16,6 +16,8 @@
 
 #include "models/AppController.h"
 #include "models/AssetLibrary.h"
+#include "MulticamImageProvider.h"
+#include "MulticamImageStore.h"
 
 #include "core/Clip.h"
 #include "core/Project.h"
@@ -75,6 +77,15 @@ private slots:
     void replaceAssetSourceRefusesADifferentKind();
     void exportAssetImageWritesPngAndJpeg();
     void startupProjectUrlFromArguments();
+    void multicamSessionDoesNotMutateTheProject();
+    void multicamRecutSplitsAnInterval();
+    void multicamCancelIsIdentity();
+    void multicamSaveSeparateWritesGappedClips();
+    void multicamSaveCombinedFlattensOntoTopmost();
+    void multicamSessionEndsWithTheProject();
+    void multicamSessionPublishesADecodedTilePerAngle();
+    void multicamProviderServesTilesByAngleIdWithRevisionQuery();
+    void multicamSetUpBuildsAWorkingRigFromTheBin();
 };
 
 void EditorStateTest::snapTimeEnabled()
@@ -1992,6 +2003,325 @@ void EditorStateTest::startupProjectUrlFromArguments()
     const QUrl fromFileUrl = AppController::startupProjectUrlFromArguments(
         {QStringLiteral("drift"), fileUrl.toString()});
     QCOMPARE(fromFileUrl.toLocalFile(), spaced);
+}
+
+// --- Multicam ------------------------------------------------------------------------------
+
+namespace {
+
+// Three stacked cameras, no empty program track. Camera 2's media is offset 100 s from
+// timeline zero so a source time taken from the wrong clip is impossible to mistake.
+void appendStackedCameras(drift::Project &project)
+{
+    project.tracks().clear();
+
+    auto addAsset = [&project](const QString &id, const QString &path, double durationSeconds) {
+        drift::MediaAsset asset;
+        asset.id = id;
+        asset.path = path;
+        asset.name = id;
+        asset.kind = drift::MediaKind::Video;
+        asset.durationUs = drift::secondsToUs(durationSeconds);
+        project.assets().insert(asset.id, asset);
+        project.assetOrder().append(asset.id);
+    };
+
+    auto addClip = [](drift::Track &track, const QString &id, const QString &assetId,
+                      const QString &path, double startSeconds, double durationSeconds,
+                      double srcInSeconds) {
+        drift::Clip clip;
+        clip.id = id;
+        clip.assetId = assetId;
+        clip.path = path;
+        clip.name = id;
+        clip.type = drift::ClipType::Video;
+        clip.timelineStart = drift::secondsToUs(startSeconds);
+        clip.timelineDuration = drift::secondsToUs(durationSeconds);
+        clip.srcIn = drift::secondsToUs(srcInSeconds);
+        clip.srcOut = drift::secondsToUs(srcInSeconds + durationSeconds);
+        track.clips.append(clip);
+    };
+
+    addAsset(QStringLiteral("asset-cam1"), QStringLiteral("/tmp/cam1.mp4"), 60.0);
+    addAsset(QStringLiteral("asset-cam2"), QStringLiteral("/tmp/cam2.mp4"), 200.0);
+    addAsset(QStringLiteral("asset-cam3"), QStringLiteral("/tmp/cam3.mp4"), 60.0);
+
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+    addClip(project.tracks()[0], QStringLiteral("cam1"), QStringLiteral("asset-cam1"),
+            QStringLiteral("/tmp/cam1.mp4"), 0.0, 10.0, 0.0);
+
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+    addClip(project.tracks()[1], QStringLiteral("cam2"), QStringLiteral("asset-cam2"),
+            QStringLiteral("/tmp/cam2.mp4"), 0.0, 10.0, 100.0);
+
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+    addClip(project.tracks()[2], QStringLiteral("cam3"), QStringLiteral("asset-cam3"),
+            QStringLiteral("/tmp/cam3.mp4"), 0.0, 10.0, 50.0);
+}
+
+void selectStackedCameras(AppController &state)
+{
+    state.selectClip(0, 0);
+    state.addToSelection(1, 0);
+    state.addToSelection(2, 0);
+}
+
+drift::TimeUs frameSnapped(int fps, double seconds)
+{
+    const drift::TimeUs step = drift::frameDurationUs(fps);
+    return ((drift::secondsToUs(seconds) + step / 2) / step) * step;
+}
+
+} // namespace
+
+void EditorStateTest::multicamSessionDoesNotMutateTheProject()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendStackedCameras(*state.project());
+    selectStackedCameras(state);
+
+    const drift::Project before = state.project()->detachedCopy();
+    QVERIFY(state.beginMulticamSession());
+    QCOMPARE(state.multicamAngles().size(), 3);
+    QCOMPARE(state.multicamActiveAngle(), 0);
+
+    state.setPlayheadSeconds(4.0);
+    state.switchMulticamAngle(1);
+
+    QCOMPARE(state.multicamActiveAngle(), 1);
+    QCOMPARE(state.project()->toJson(), before.toJson());
+    QCOMPARE(state.project()->tracks().at(0).clips.size(), 1);
+    QCOMPARE(state.project()->tracks().at(1).clips.size(), 1);
+    QCOMPARE(state.project()->tracks().at(2).clips.size(), 1);
+
+    const QVariantList lane = state.multicamProgramClips();
+    QCOMPARE(lane.size(), 2);
+    QCOMPARE(lane.at(0).toMap().value(QStringLiteral("angle")).toInt(), 0);
+    QCOMPARE(lane.at(1).toMap().value(QStringLiteral("angle")).toInt(), 1);
+}
+
+void EditorStateTest::multicamRecutSplitsAnInterval()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendStackedCameras(*state.project());
+    selectStackedCameras(state);
+    QVERIFY(state.beginMulticamSession());
+
+    state.setPlayheadSeconds(4.0);
+    state.switchMulticamAngle(1);
+
+    const QVariantList lane = state.multicamProgramClips();
+    QCOMPARE(lane.size(), 2);
+    QCOMPARE(lane.at(0).toMap().value(QStringLiteral("angle")).toInt(), 0);
+    QCOMPARE(lane.at(1).toMap().value(QStringLiteral("angle")).toInt(), 1);
+
+    state.setPlayheadSeconds(2.0);
+    state.switchMulticamAngle(2);
+    const QVariantList recut = state.multicamProgramClips();
+    QCOMPARE(recut.size(), 3);
+    QCOMPARE(recut.at(0).toMap().value(QStringLiteral("angle")).toInt(), 0);
+    QCOMPARE(recut.at(1).toMap().value(QStringLiteral("angle")).toInt(), 2);
+    QCOMPARE(recut.at(2).toMap().value(QStringLiteral("angle")).toInt(), 1);
+}
+
+void EditorStateTest::multicamCancelIsIdentity()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendStackedCameras(*state.project());
+    selectStackedCameras(state);
+    const drift::Project before = state.project()->detachedCopy();
+
+    QVERIFY(state.beginMulticamSession());
+    state.setPlayheadSeconds(4.0);
+    state.switchMulticamAngle(1);
+    state.endMulticamSession();
+
+    QVERIFY(!state.multicamActive());
+    QCOMPARE(state.project()->toJson(), before.toJson());
+}
+
+void EditorStateTest::multicamSaveSeparateWritesGappedClips()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendStackedCameras(*state.project());
+    selectStackedCameras(state);
+    QVERIFY(state.beginMulticamSession());
+
+    const drift::TimeUs cutUs = frameSnapped(state.projectFps(), 4.0);
+    state.setPlayheadSeconds(4.0);
+    state.switchMulticamAngle(1);
+    state.saveMulticamAsSeparateTracks();
+
+    QVERIFY(!state.multicamActive());
+    QCOMPARE(state.project()->tracks().at(0).clips.size(), 1);
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).timelineEnd(), cutUs);
+    QCOMPARE(state.project()->tracks().at(0).clips.at(0).path, QStringLiteral("/tmp/cam1.mp4"));
+
+    QCOMPARE(state.project()->tracks().at(1).clips.size(), 1);
+    const drift::Clip &cam2 = state.project()->tracks().at(1).clips.at(0);
+    QCOMPARE(cam2.timelineStart, cutUs);
+    QCOMPARE(cam2.timelineEnd(), drift::secondsToUs(10.0));
+    QCOMPARE(cam2.path, QStringLiteral("/tmp/cam2.mp4"));
+    QCOMPARE(cam2.srcIn, drift::secondsToUs(100.0) + cutUs);
+
+    QCOMPARE(state.project()->tracks().at(2).clips.size(), 0);
+
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    QCOMPARE(state.project()->tracks().at(0).clips.size(), 1);
+    QCOMPARE(state.project()->tracks().at(1).clips.size(), 1);
+    QCOMPARE(state.project()->tracks().at(2).clips.size(), 1);
+}
+
+void EditorStateTest::multicamSaveCombinedFlattensOntoTopmost()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendStackedCameras(*state.project());
+    selectStackedCameras(state);
+    QVERIFY(state.beginMulticamSession());
+
+    const drift::TimeUs cutUs = frameSnapped(state.projectFps(), 4.0);
+    state.setPlayheadSeconds(4.0);
+    state.switchMulticamAngle(1);
+    state.saveMulticamCombined();
+
+    QVERIFY(!state.multicamActive());
+    const drift::Track &top = state.project()->tracks().at(0);
+    QCOMPARE(top.clips.size(), 2);
+    QCOMPARE(top.clips.at(0).path, QStringLiteral("/tmp/cam1.mp4"));
+    QCOMPARE(top.clips.at(0).timelineEnd(), cutUs);
+    QCOMPARE(top.clips.at(1).path, QStringLiteral("/tmp/cam2.mp4"));
+    QCOMPARE(top.clips.at(1).timelineStart, cutUs);
+    QCOMPARE(top.clips.at(1).srcIn, drift::secondsToUs(100.0) + cutUs);
+
+    QCOMPARE(state.project()->tracks().at(1).clips.size(), 0);
+    QCOMPARE(state.project()->tracks().at(2).clips.size(), 0);
+}
+
+void EditorStateTest::multicamSessionEndsWithTheProject()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    appendStackedCameras(*state.project());
+    selectStackedCameras(state);
+    QVERIFY(state.beginMulticamSession());
+    QVERIFY(state.multicamActive());
+
+    state.newProject();
+    QVERIFY(!state.multicamActive());
+}
+
+void EditorStateTest::multicamSessionPublishesADecodedTilePerAngle()
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        QSKIP("ffmpeg not available to generate test clips");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString camA = dir.filePath(QStringLiteral("camA.mp4"));
+    const QString camB = dir.filePath(QStringLiteral("camB.mp4"));
+    QVERIFY(renderTestVideo(ffmpeg, camA, 5));
+    QVERIFY(renderTestVideo(ffmpeg, camB, 5));
+
+    AssetLibrary library;
+    AppController state(&library);
+    appendStackedCameras(*state.project());
+    state.project()->tracks()[0].clips[0].path = camA;
+    state.project()->tracks()[1].clips[0].path = camB;
+    state.project()->tracks()[1].clips[0].srcIn = 0;
+    state.project()->tracks()[1].clips[0].srcOut = drift::secondsToUs(5.0);
+    selectStackedCameras(state);
+
+    MulticamImageStore::clear();
+    QVERIFY(MulticamImageStore::tile(0).isNull());
+
+    QSignalSpy frames(&state, &AppController::multicamFramesChanged);
+    state.setPlayheadSeconds(2.0);
+    QVERIFY(state.beginMulticamSession());
+
+    QVERIFY(frames.wait(60000));
+
+    const QImage first = MulticamImageStore::tile(0);
+    const QImage second = MulticamImageStore::tile(1);
+    QVERIFY(!first.isNull());
+    QVERIFY(!second.isNull());
+    QCOMPARE(first.size(), QSize(320, 240));
+
+    state.endMulticamSession();
+    QVERIFY(!state.multicamActive());
+    QVERIFY(MulticamImageStore::tile(0).isNull());
+}
+
+void EditorStateTest::multicamProviderServesTilesByAngleIdWithRevisionQuery()
+{
+    MulticamImageStore::clear();
+
+    QImage stored(4, 3, QImage::Format_RGB32);
+    stored.fill(Qt::green);
+    MulticamImageStore::setTile(1, stored);
+
+    MulticamImageProvider provider;
+    QSize size;
+
+    const QImage served = provider.requestImage(QStringLiteral("1?rev=7"), &size, QSize());
+    QVERIFY(!served.isNull());
+    QCOMPARE(served.size(), QSize(4, 3));
+    QCOMPARE(size, QSize(4, 3));
+
+    QCOMPARE(provider.requestImage(QStringLiteral("1"), &size, QSize()).size(), QSize(4, 3));
+    QVERIFY(provider.requestImage(QStringLiteral("0?rev=7"), &size, QSize()).isNull());
+    QVERIFY(provider.requestImage(QStringLiteral("bogus?rev=7"), &size, QSize()).isNull());
+
+    MulticamImageStore::clear();
+}
+
+void EditorStateTest::multicamSetUpBuildsAWorkingRigFromTheBin()
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        QSKIP("ffmpeg not available to generate test clips");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QStringList cams = {dir.filePath(QStringLiteral("cam1.mp4")),
+                              dir.filePath(QStringLiteral("cam2.mp4")),
+                              dir.filePath(QStringLiteral("cam3.mp4"))};
+    for (const QString &cam : cams)
+        QVERIFY(renderTestVideo(ffmpeg, cam, 4));
+
+    AssetLibrary library;
+    AppController state(&library);
+    for (const QString &cam : cams)
+        QVERIFY(importAndAwait(library, cam));
+
+    QVERIFY(state.multicamCanSetUp());
+    QVERIFY(state.beginMulticamSession());
+    state.setUpMulticamFromAssets();
+
+    const QList<drift::Track> &tracks = state.project()->tracks();
+    QCOMPARE(tracks.size(), 3);
+    for (int i = 0; i < 3; ++i) {
+        QCOMPARE(tracks.at(i).type, drift::TrackType::Video);
+        QCOMPARE(tracks.at(i).clips.size(), 1);
+        QCOMPARE(tracks.at(i).clips.at(0).timelineStart, drift::TimeUs{0});
+        QVERIFY(tracks.at(i).clips.at(0).timelineDuration > 0);
+    }
+    QCOMPARE(tracks.at(0).muted, false);
+    QCOMPARE(tracks.at(1).muted, true);
+    QCOMPARE(tracks.at(2).muted, true);
+
+    QCOMPARE(state.multicamAngles().size(), 3);
+    QVERIFY(!state.multicamCanSetUp());
+
+    state.undo();
+    QVERIFY(!state.multicamActive());
+    QVERIFY(state.multicamCanSetUp());
 }
 
 QTEST_MAIN(EditorStateTest)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Project.h"
+#include "core/TimelineOps.h"
 #include "core/Time.h"
 #include "engine/AudioOnsets.h"
 #include "engine/FilmstripTileCache.h"
@@ -140,6 +141,22 @@ class AppController : public QObject
     Q_PROPERTY(int segmentRevision READ segmentRevision NOTIFY segmentSessionChanged)
     Q_PROPERTY(QVariantList segmentPoints READ segmentPoints NOTIFY segmentSessionChanged)
     Q_PROPERTY(QSize segmentFrameSize READ segmentFrameSize NOTIFY segmentSessionChanged)
+    // Multicam punching session. The live project is not touched until Save; switches rewrite a
+    // staged copy that playback is pointed at so the program monitor shows the mix.
+    Q_PROPERTY(bool multicamActive READ multicamActive NOTIFY multicamChanged)
+    // One entry per selected camera: {trackIndex, label, clipName, hasClip, active}.
+    Q_PROPERTY(QVariantList multicamAngles READ multicamAngles NOTIFY multicamChanged)
+    // Index into multicamAngles assigned at the playhead; -1 outside the session range.
+    Q_PROPERTY(int multicamActiveAngle READ multicamActiveAngle NOTIFY multicamChanged)
+    // Bumped whenever a fresh set of tiles lands; QML appends it as ?rev= to defeat the
+    // URL-keyed image cache, the same way the segmentation window does.
+    Q_PROPERTY(int multicamRevision READ multicamRevision NOTIFY multicamFramesChanged)
+    // Staged program as a single lane: {start, duration, name, angle}. Empty before a session
+    // has cameras.
+    Q_PROPERTY(QVariantList multicamProgramClips READ multicamProgramClips NOTIFY multicamChanged)
+    // There is enough imported video to build a rig from, and no visual clips that building one
+    // would disturb. Drives the window's "set this up for me" offer.
+    Q_PROPERTY(bool multicamCanSetUp READ multicamCanSetUp NOTIFY multicamChanged)
     Q_PROPERTY(bool speedCurveSessionActive READ speedCurveSessionActive NOTIFY speedCurveSessionChanged)
     Q_PROPERTY(QVariantList speedCurvePoints READ speedCurvePoints NOTIFY speedCurveChanged)
     Q_PROPERTY(int speedCurveRevision READ speedCurveRevision NOTIFY speedCurveFrameChanged)
@@ -424,6 +441,25 @@ public:
                                               bool forTemplate = false);
     Q_INVOKABLE void endSegmentationSession();
     void openSegmentationForTemplate(int trackIndex, int clipIndex);
+
+    // Starts a punching session from the current video selection (two or more clips on
+    // distinct tracks). Returns false when there is nothing to punch and no empty-timeline
+    // setup to offer; the window should stay closed.
+    Q_INVOKABLE bool beginMulticamSession();
+    Q_INVOKABLE void endMulticamSession();
+    bool multicamActive() const { return m_multicamActive; }
+    QVariantList multicamAngles() const;
+    int multicamActiveAngle() const;
+    int multicamRevision() const { return m_multicamRevision; }
+    QVariantList multicamProgramClips() const;
+    bool multicamCanSetUp() const;
+    // One video track per imported camera, stacked from the top, extras muted. One undoable
+    // edit; if a session is already open it then snapshots those clips as the cameras.
+    Q_INVOKABLE void setUpMulticamFromAssets();
+    // Punch `angleIndex` at the playhead on the staged copy. The live project is untouched.
+    Q_INVOKABLE void switchMulticamAngle(int angleIndex);
+    Q_INVOKABLE void saveMulticamAsSeparateTracks();
+    Q_INVOKABLE void saveMulticamCombined();
 
     // Speed-curve editing session driving SpeedCurveWindow. The curve is held here as a
     // candidate and auditioned through a private single-clip player; the project is not touched
@@ -887,6 +923,10 @@ signals:
     void segmentSessionChanged();
     void openSegmentationWindowRequested(int trackIndex, int clipIndex, double startSeconds,
                                          double durationSeconds);
+    void multicamChanged();
+    void multicamFramesChanged();
+    // Raised by the "multicam" shortcut/action. QML owns the window, as with the file actions.
+    void openMulticamWindowRequested();
     void speedCurveSessionChanged();
     void speedCurveChanged();
     void speedCurveFrameChanged();
@@ -983,6 +1023,15 @@ protected:
     void rebuildBeatSnapTargets();
     // Beat onsets plus project bookmarks — anything clips should magnet to when snap is on.
     QList<drift::TimeUs> extraSnapTargets() const;
+    // Decodes one frame per angle at the playhead and publishes them to MulticamImageStore.
+    // Coalesces: a refresh requested while one is in flight is dropped, not queued.
+    void refreshMulticamTiles();
+    // Playhead rounded to the project's frame grid — a switch must land on a frame boundary,
+    // the same rule stepFrames() follows.
+    drift::TimeUs multicamSwitchTimeUs() const;
+    bool startMulticamPunching(const QList<QPair<int, int>> &videoClips);
+    void rebuildMulticamStaged();
+    void applyMulticamSlicesToProject(drift::Project &project, bool combined);
     void refreshSegmentationPreview();
     void runSegmentationSeed(int generation);
     void finalizeFaceDetection(const QString &clipId, const QString &trackPath,
@@ -1107,6 +1156,33 @@ protected:
     int m_speedCurveClipIndex = -1;
     int m_speedCurveRevision = 0;
     bool m_speedCurveActive = false;
+
+    struct MulticamAngleSnap {
+        int trackIndex = -1;
+        QString clipId;
+        drift::Clip original;
+        int audioTrackIndex = -1;
+        QString audioClipId;
+        drift::Clip originalAudio;
+        bool hasAudio = false;
+    };
+
+    // Multicam punching session. `m_project` stays the stacked originals until Save.
+    bool m_multicamActive = false;
+    QList<MulticamAngleSnap> m_multicamSnaps;
+    drift::TimeUs m_multicamRangeStart = 0;
+    drift::TimeUs m_multicamRangeEnd = 0;
+    QList<drift::MulticamCut> m_multicamCuts;
+    drift::Project m_multicamBase;
+    drift::Project m_multicamStaged;
+    int m_multicamRevision = 0;
+    // A refresh already running. Tiles are dropped rather than queued while it is set, so a
+    // machine that cannot keep up falls behind in frame rate instead of in wall-clock time.
+    bool m_multicamRefreshing = false;
+    int m_multicamGeneration = 0; // bumped per refresh; stale decodes are dropped
+    // Drives tile refreshes during playback only; scrubbing and paused edits refresh directly
+    // off the signal that caused them.
+    QTimer *m_multicamTimer = nullptr;
 
     bool m_fadeCurveActive = false;
     int m_fadeCurveTrack = -1;
