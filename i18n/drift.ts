@@ -898,6 +898,29 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Already looking for scenes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a video clip to find scenes in</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>Found %n scene(s)</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Looking for scenes…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scene detection cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Removing noise…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3918,6 +3941,37 @@ Quality: renders and shows every single frame, silently and slower than real tim
     </message>
 </context>
 <context>
+    <name>QObject</name>
+    <message>
+        <source>Measuring loudness…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Identifying objects in scene %1 of %2…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nothing to scan in this clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not open the media file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This file has no video to scan</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not decode frame %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scanning frame %1 of %2…</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>RecentProjectsPopup</name>
     <message>
         <source>Remove from recents</source>
@@ -4155,6 +4209,97 @@ Quality: renders and shows every single frame, silently and slower than real tim
     </message>
     <message>
         <source>No frames could be decoded from this clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ScenesTab</name>
+    <message>
+        <source>Finds where the picture cuts in the selected video clip, and ranks each shot by movement and loudness. Click a shot to jump to it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Find scenes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scan the selected clip for shot boundaries</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a video clip first</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Identify objects</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Also label each shot with what is in it. Slower.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Needs the Scene Labels add-on — install it from Extras</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sensitivity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scene detection sensitivity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Most active first</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>In order</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Switch between timeline order and activity ranking</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 scenes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>These scenes are from another clip. Select it again, or run Find scenes on the current one.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No scenes yet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No video clip selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Run Find scenes to split this clip into its shots.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a video clip on the timeline to scan it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scene %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 – %2  ·  %3s</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

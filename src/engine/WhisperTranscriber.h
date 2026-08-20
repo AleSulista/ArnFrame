@@ -28,6 +28,11 @@ class WhisperTranscriber
 public:
     static WhisperTranscriber &instance();
 
+    // Whether the model files are on disk. Cheap — it only looks for them, where available()
+    // goes on to load three quarters of a gigabyte of ONNX sessions. Use this to report or
+    // gate on availability; use available() when about to transcribe.
+    static bool modelPresent();
+
     // Resolves the model directory and loads the sessions on first use. False if the models
     // are missing or failed to load (see lastError()).
     bool available();

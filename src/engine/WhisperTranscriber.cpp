@@ -749,6 +749,11 @@ WhisperTranscriber &WhisperTranscriber::instance()
     return s;
 }
 
+bool WhisperTranscriber::modelPresent()
+{
+    return !resolveWhisperModelDir().isEmpty();
+}
+
 bool WhisperTranscriber::available()
 {
     return d->ensureLoaded();

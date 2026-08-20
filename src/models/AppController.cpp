@@ -24,6 +24,8 @@
 #include "engine/MediaThumbnail.h"
 #include "engine/AudioFileWriter.h"
 #include "engine/DeepFilterDenoiser.h"
+#include "engine/ObjectDetector.h"
+#include "engine/OrtRuntime.h"
 #include "engine/MatteWriter.h"
 #include "engine/AudioOnsets.h"
 #include "engine/MediaWaveform.h"
@@ -5462,6 +5464,234 @@ void AppController::finalizeFaceDetection(const QString &clipId, const QString &
     pushProjectEdit(before, tr("Detect Faces"));
     finishEdit(tr("Detect Faces"));
     selectClip(trackIndex, clipIndex);
+}
+
+// --- scene detection --------------------------------------------------------
+
+double AppController::sceneThreshold() const
+{
+    return QSettings()
+        .value(QStringLiteral("scenes/threshold"), drift::SceneDetectOptions{}.threshold)
+        .toDouble();
+}
+
+void AppController::setSceneThreshold(double threshold)
+{
+    QSettings().setValue(QStringLiteral("scenes/threshold"), qBound(4.0, threshold, 100.0));
+}
+
+void AppController::cancelSceneDetection()
+{
+    m_sceneDetectCancel.storeRelaxed(1);
+}
+
+bool AppController::objectDetectionAvailable() const
+{
+    return drift::ObjectDetector::modelPresent();
+}
+
+void AppController::clearScenes()
+{
+    if (m_scenes.isEmpty() && m_sceneClipId.isEmpty())
+        return;
+    m_scenes.clear();
+    m_sceneClipId.clear();
+    m_sceneClipPath.clear();
+    emit scenesChanged();
+}
+
+void AppController::seekToScene(int sceneIndex)
+{
+    if (sceneIndex < 0 || sceneIndex >= m_scenes.size())
+        return;
+
+    // Resolved by id, not index: the analysis outlives any number of timeline edits.
+    for (const drift::Track &track : m_project.tracks()) {
+        for (const drift::Clip &clip : track.clips) {
+            if (clip.id != m_sceneClipId)
+                continue;
+
+            const QVariantMap scene = m_scenes.at(sceneIndex).toMap();
+            const drift::TimeUs sourceUs =
+                drift::secondsToUs(scene.value(QStringLiteral("sourceStart")).toDouble());
+            // Scenes are in source time. Speed and reverse mean the clip's own mapping is the
+            // only thing that knows where that lands on the timeline.
+            const drift::TimeUs span = clip.sourceSpanUs();
+            if (span <= 0)
+                return;
+            const double through = double(sourceUs - clip.srcIn) / double(span);
+            const drift::TimeUs at =
+                clip.timelineStart
+                + drift::TimeUs(qBound(0.0, through, 1.0) * double(clip.timelineDuration));
+            setPlayheadUs(clip.reverse ? clip.timelineStart + clip.timelineDuration
+                                             - (at - clip.timelineStart)
+                                       : at);
+            return;
+        }
+    }
+}
+
+void AppController::applySceneAnalysis(const drift::SceneAnalysis &analysis, const QString &clipId,
+                                      const QString &clipPath)
+{
+    QVariantList rows;
+    rows.reserve(analysis.scenes.size());
+    for (int i = 0; i < analysis.scenes.size(); ++i) {
+        const drift::Scene &scene = analysis.scenes.at(i);
+        rows.append(QVariantMap{
+            {QStringLiteral("index"), i},
+            {QStringLiteral("sourceStart"), drift::usToSeconds(scene.sourceIn)},
+            {QStringLiteral("sourceEnd"), drift::usToSeconds(scene.sourceOut)},
+            {QStringLiteral("duration"), drift::usToSeconds(scene.duration())},
+            {QStringLiteral("thumbnailSeconds"), drift::usToSeconds(scene.thumbnailUs)},
+            {QStringLiteral("motion"), scene.motion},
+            {QStringLiteral("loudness"), scene.loudness},
+            {QStringLiteral("objects"), scene.objects},
+            {QStringLiteral("score"), scene.score},
+            {QStringLiteral("labels"), scene.labels},
+        });
+    }
+
+    m_scenes = rows;
+    m_sceneClipId = clipId;
+    m_sceneClipPath = clipPath;
+    emit scenesChanged();
+}
+
+drift::SceneDetectRequest AppController::sceneRequestFor(const drift::Clip &clip,
+                                                         bool withObjects,
+                                                         double minSceneSeconds) const
+{
+    drift::SceneDetectRequest request;
+    request.path = clip.path;
+    request.sourceIn = clip.srcIn;
+    request.sourceOut = clip.srcOut;
+    request.options.threshold = sceneThreshold();
+    request.options.detectObjects = withObjects && objectDetectionAvailable();
+    if (minSceneSeconds > 0.0)
+        request.options.minSceneSeconds = minSceneSeconds;
+    return request;
+}
+
+void AppController::detectScenesForClip(int trackIndex, int clipIndex, bool withObjects,
+                                        double minSceneSeconds)
+{
+    if (m_sceneDetecting) {
+        setLastMessage(tr("Already looking for scenes"), QStringLiteral("warning"));
+        return;
+    }
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Clip clip = track.clips.at(clipIndex);
+    if (clip.type != drift::ClipType::Video) {
+        setLastMessage(tr("Select a video clip to find scenes in"), QStringLiteral("warning"));
+        return;
+    }
+    if (clip.path.isEmpty() || clip.srcOut <= clip.srcIn) {
+        setLastMessage(tr("Clip has no video to scan"), QStringLiteral("warning"));
+        return;
+    }
+
+    const drift::SceneDetectRequest request =
+        sceneRequestFor(clip, withObjects, minSceneSeconds);
+
+    // A cached analysis is the common case once a clip has been scanned, and it costs a file
+    // read rather than a decode pass — so it is worth checking before disturbing playback.
+    drift::SceneAnalysis cached;
+    if (drift::loadCachedAnalysis(request, &cached)
+        && (!withObjects || cached.objectsScanned)) {
+        applySceneAnalysis(cached, clip.id, clip.path);
+        setLastMessage(tr("Found %n scene(s)", nullptr, int(cached.scenes.size())));
+        emit sceneDetectionFinished(true, QString());
+        return;
+    }
+
+    // Same reason as the export, segmentation and face jobs: playback would drive the decode
+    // pool from a second thread while this job walks it frame by frame.
+    setPlaying(false);
+
+    m_sceneDetectCancel.storeRelaxed(0);
+    m_sceneDetectProgress = 0.0;
+    emit sceneDetectProgressChanged();
+    m_sceneDetectStatus = tr("Getting ready…");
+    emit sceneDetectStatusChanged();
+    m_sceneDetecting = true;
+    emit sceneDetectingChanged();
+    setLastMessage(tr("Looking for scenes…"));
+
+    // Resolved by id at the end rather than by index: the timeline can be edited while the
+    // job runs, and a stale index would attach the analysis to the wrong clip.
+    const QString clipId = clip.id;
+    const QString clipPath = clip.path;
+    const quint64 generation = ++m_sceneGeneration;
+
+    (void)QtConcurrent::run([this, request, clipId, clipPath, generation]() {
+        auto setProgress = [this, generation](double fraction, const QString &status) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, fraction, status, generation]() {
+                    if (generation != m_sceneGeneration)
+                        return;
+                    m_sceneDetectProgress = fraction;
+                    emit sceneDetectProgressChanged();
+                    if (!status.isEmpty() && status != m_sceneDetectStatus) {
+                        m_sceneDetectStatus = status;
+                        emit sceneDetectStatusChanged();
+                    }
+                },
+                Qt::QueuedConnection);
+        };
+
+        auto finish = [this, clipId, clipPath, generation](bool ok, const QString &message,
+                                                          const drift::SceneAnalysis &analysis) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, ok, message, analysis, clipId, clipPath, generation]() {
+                    if (generation != m_sceneGeneration)
+                        return; // superseded by a newer scan; this result is for nobody
+                    m_sceneDetecting = false;
+                    emit sceneDetectingChanged();
+                    m_sceneDetectProgress = ok ? 1.0 : 0.0;
+                    emit sceneDetectProgressChanged();
+                    m_sceneDetectStatus = ok ? tr("Done") : message;
+                    emit sceneDetectStatusChanged();
+                    if (!ok) {
+                        if (!message.isEmpty())
+                            setLastMessage(message, QStringLiteral("error"));
+                        emit sceneDetectionFinished(false, message);
+                        return;
+                    }
+                    applySceneAnalysis(analysis, clipId, clipPath);
+                    setLastMessage(tr("Found %n scene(s)", nullptr, int(analysis.scenes.size())));
+                    emit sceneDetectionFinished(true, QString());
+                },
+                Qt::QueuedConnection);
+        };
+
+        QString error;
+        const drift::SceneAnalysis analysis = drift::detectScenes(
+            request,
+            [&](double fraction, const QString &status) {
+                if (m_sceneDetectCancel.loadRelaxed() != 0)
+                    return false;
+                setProgress(fraction, status);
+                return true;
+            },
+            &error);
+
+        if (analysis.isEmpty()) {
+            const bool cancelled = m_sceneDetectCancel.loadRelaxed() != 0;
+            finish(false, cancelled ? tr("Scene detection cancelled") : error, {});
+            return;
+        }
+
+        drift::storeCachedAnalysis(request, analysis);
+        finish(true, QString(), analysis);
+    });
 }
 
 void AppController::finalizeSegmentation(const QString &clipId, const QString &mattePath,
@@ -12077,6 +12307,15 @@ QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision, bool
                      QJsonObject{{QStringLiteral("active"), reverseRendering()},
                                  {QStringLiteral("progress"), reverseRenderProgress()},
                                  {QStringLiteral("status"), reverseRenderStatus()}});
+        // Scene state without the rows — list_scenes returns those. There is deliberately no
+        // `stale` flag as there is for beats: this analysis describes the source file, not the
+        // mix, so edits do not invalidate it.
+        extra.insert(QStringLiteral("sceneDetect"),
+                     QJsonObject{{QStringLiteral("active"), m_sceneDetecting},
+                                 {QStringLiteral("progress"), m_sceneDetectProgress},
+                                 {QStringLiteral("status"), m_sceneDetectStatus},
+                                 {QStringLiteral("clip"), m_sceneClipId},
+                                 {QStringLiteral("scenes"), int(m_scenes.size())}});
         // Beat state without the arrays — detect_beats returns those. `stale` matters because
         // finishEdit drops the analysis as soon as the mix changes, so a grid an agent found a
         // few ops ago may already be gone.
@@ -12608,6 +12847,420 @@ int AppController::mcpBookmarkBeats(double startSeconds, double durSeconds, cons
     pushProjectEdit(before, QStringLiteral("Bookmark beats"));
     finishEdit(QStringLiteral("Bookmark beats"));
     return added;
+}
+
+// --- scene toolbox ----------------------------------------------------------
+
+namespace {
+
+// Map a moment in a clip's source to where it lands on the timeline, through trim, speed
+// and reverse. Agents act in timeline seconds, so every scene time is reported both ways
+// rather than leaving this mapping for the caller to rediscover.
+double sceneSourceToTimeline(const drift::Clip &clip, double sourceSeconds)
+{
+    const drift::TimeUs span = clip.sourceSpanUs();
+    if (span <= 0)
+        return drift::usToSeconds(clip.timelineStart);
+
+    const double through =
+        qBound(0.0, double(drift::secondsToUs(sourceSeconds) - clip.srcIn) / double(span), 1.0);
+    const double offset = (clip.reverse ? 1.0 - through : through)
+                          * drift::usToSeconds(clip.timelineDuration);
+    return drift::usToSeconds(clip.timelineStart) + offset;
+}
+
+bool sceneMatches(const QVariantMap &scene, const QString &label, double minScore)
+{
+    if (scene.value(QStringLiteral("score")).toDouble() < minScore)
+        return false;
+    if (label.isEmpty())
+        return true;
+    return scene.value(QStringLiteral("labels")).toStringList().contains(label,
+                                                                        Qt::CaseInsensitive);
+}
+
+} // namespace
+
+QJsonObject AppController::mcpDetectScenes(int trackIndex, int clipIndex, double threshold,
+                                           double minScene, bool withObjects)
+{
+    using namespace drift::mcp;
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return err("not_found", QStringLiteral("No such track"));
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return err("not_found", QStringLiteral("No such clip"));
+
+    const drift::Clip &clip = track.clips.at(clipIndex);
+    if (clip.type != drift::ClipType::Video)
+        return err("bad_args", QStringLiteral("Scene detection needs a video clip"));
+    if (clip.path.isEmpty() || clip.srcOut <= clip.srcIn)
+        return err("bad_args", QStringLiteral("That clip has no video to scan"));
+    if (withObjects && !objectDetectionAvailable()) {
+        return err("not_found",
+                   QStringLiteral("Object labelling needs the object-model addon — ask the user "
+                                  "to install it from Extras"));
+    }
+    if (m_sceneDetecting)
+        return err("conflict", QStringLiteral("A scene scan is already running"));
+
+    if (threshold > 0.0)
+        setSceneThreshold(threshold);
+
+    const drift::SceneDetectRequest request = sceneRequestFor(clip, withObjects, minScene);
+
+    // Report a cache hit synchronously: an agent that would otherwise poll for an async job
+    // can carry straight on to list_scenes.
+    drift::SceneAnalysis cached;
+    if (drift::loadCachedAnalysis(request, &cached) && (!withObjects || cached.objectsScanned)) {
+        applySceneAnalysis(cached, clip.id, clip.path);
+        return ok({{QStringLiteral("cached"), true},
+                   {QStringLiteral("clip"), clip.id},
+                   {QStringLiteral("scenes"), int(cached.scenes.size())},
+                   {QStringLiteral("cuts"), int(cached.cuts.size())}});
+    }
+
+    detectScenesForClip(trackIndex, clipIndex, withObjects, minScene);
+    return ok({{QStringLiteral("started"), true}, {QStringLiteral("clip"), clip.id}});
+}
+
+QJsonObject AppController::mcpListScenes(const QString &label, double minScore,
+                                         const QString &sort, int limit) const
+{
+    using namespace drift::mcp;
+    if (m_scenes.isEmpty())
+        return err("not_found", QStringLiteral("No scene analysis yet — call detect_scenes first"));
+
+    const drift::Clip *clip = nullptr;
+    for (const drift::Track &track : m_project.tracks()) {
+        for (const drift::Clip &candidate : track.clips) {
+            if (candidate.id == m_sceneClipId) {
+                clip = &candidate;
+                break;
+            }
+        }
+    }
+    if (!clip)
+        return err("not_found", QStringLiteral("The analysed clip is no longer on the timeline"));
+
+    QList<QVariantMap> rows;
+    for (const QVariant &value : m_scenes) {
+        const QVariantMap scene = value.toMap();
+        if (sceneMatches(scene, label, minScore))
+            rows.append(scene);
+    }
+
+    if (sort.compare(QLatin1String("score"), Qt::CaseInsensitive) == 0) {
+        std::sort(rows.begin(), rows.end(), [](const QVariantMap &a, const QVariantMap &b) {
+            return a.value(QStringLiteral("score")).toDouble()
+                   > b.value(QStringLiteral("score")).toDouble();
+        });
+    }
+
+    QJsonArray out;
+    for (const QVariantMap &scene : std::as_const(rows)) {
+        if (limit > 0 && out.size() >= limit)
+            break;
+        const double sourceStart = scene.value(QStringLiteral("sourceStart")).toDouble();
+        const double sourceEnd = scene.value(QStringLiteral("sourceEnd")).toDouble();
+        QJsonArray labels;
+        for (const QString &name : scene.value(QStringLiteral("labels")).toStringList())
+            labels.append(name);
+        out.append(QJsonObject{
+            {QStringLiteral("index"), scene.value(QStringLiteral("index")).toInt()},
+            {QStringLiteral("start"), sourceStart},
+            {QStringLiteral("end"), sourceEnd},
+            {QStringLiteral("duration"), scene.value(QStringLiteral("duration")).toDouble()},
+            {QStringLiteral("timeline_start"), sceneSourceToTimeline(*clip, sourceStart)},
+            {QStringLiteral("timeline_end"), sceneSourceToTimeline(*clip, sourceEnd)},
+            {QStringLiteral("motion"), scene.value(QStringLiteral("motion")).toDouble()},
+            {QStringLiteral("loudness"), scene.value(QStringLiteral("loudness")).toDouble()},
+            {QStringLiteral("objects"), scene.value(QStringLiteral("objects")).toDouble()},
+            {QStringLiteral("score"), scene.value(QStringLiteral("score")).toDouble()},
+            {QStringLiteral("labels"), labels},
+        });
+    }
+
+    return ok({{QStringLiteral("clip"), m_sceneClipId},
+               {QStringLiteral("scenes"), out},
+               {QStringLiteral("n"), out.size()},
+               {QStringLiteral("total"), int(m_scenes.size())}});
+}
+
+QJsonObject AppController::mcpDescribeClip(int topCount) const
+{
+    using namespace drift::mcp;
+    if (m_scenes.isEmpty())
+        return err("not_found", QStringLiteral("No scene analysis yet — call detect_scenes first"));
+
+    double shortest = std::numeric_limits<double>::max();
+    double longest = 0.0;
+    double totalScore = 0.0;
+    double totalDuration = 0.0;
+
+    // Screen time per object class, which is the figure that says what a clip is actually
+    // *of* — a label on one brief shot means much less than one spanning half the footage.
+    QHash<QString, int> labelScenes;
+    QHash<QString, double> labelSeconds;
+
+    for (const QVariant &value : m_scenes) {
+        const QVariantMap scene = value.toMap();
+        const double duration = scene.value(QStringLiteral("duration")).toDouble();
+        shortest = qMin(shortest, duration);
+        longest = qMax(longest, duration);
+        totalScore += scene.value(QStringLiteral("score")).toDouble();
+        totalDuration += duration;
+        for (const QString &name : scene.value(QStringLiteral("labels")).toStringList()) {
+            labelScenes[name] += 1;
+            labelSeconds[name] += duration;
+        }
+    }
+
+    QList<QString> names = labelScenes.keys();
+    std::sort(names.begin(), names.end(), [&labelSeconds](const QString &a, const QString &b) {
+        return labelSeconds.value(a) > labelSeconds.value(b);
+    });
+    QJsonArray labels;
+    for (const QString &name : std::as_const(names)) {
+        labels.append(QJsonObject{{QStringLiteral("name"), name},
+                                  {QStringLiteral("scenes"), labelScenes.value(name)},
+                                  {QStringLiteral("seconds"), labelSeconds.value(name)}});
+    }
+
+    QList<QVariantMap> ranked;
+    for (const QVariant &value : m_scenes)
+        ranked.append(value.toMap());
+    std::sort(ranked.begin(), ranked.end(), [](const QVariantMap &a, const QVariantMap &b) {
+        return a.value(QStringLiteral("score")).toDouble()
+               > b.value(QStringLiteral("score")).toDouble();
+    });
+
+    QJsonArray top;
+    for (const QVariantMap &scene : std::as_const(ranked)) {
+        if (top.size() >= qMax(0, topCount))
+            break;
+        top.append(QJsonObject{
+            {QStringLiteral("index"), scene.value(QStringLiteral("index")).toInt()},
+            {QStringLiteral("start"), scene.value(QStringLiteral("sourceStart")).toDouble()},
+            {QStringLiteral("duration"), scene.value(QStringLiteral("duration")).toDouble()},
+            {QStringLiteral("score"), scene.value(QStringLiteral("score")).toDouble()},
+        });
+    }
+
+    bool objectsScanned = false;
+    for (const QVariant &value : m_scenes) {
+        if (!value.toMap().value(QStringLiteral("labels")).toStringList().isEmpty()) {
+            objectsScanned = true;
+            break;
+        }
+    }
+
+    return ok({{QStringLiteral("clip"), m_sceneClipId},
+               {QStringLiteral("duration"), totalDuration},
+               {QStringLiteral("scenes"), int(m_scenes.size())},
+               {QStringLiteral("cuts"), int(m_scenes.size()) - 1},
+               {QStringLiteral("shortest"), m_scenes.isEmpty() ? 0.0 : shortest},
+               {QStringLiteral("longest"), longest},
+               {QStringLiteral("mean_score"), m_scenes.isEmpty() ? 0.0 : totalScore / m_scenes.size()},
+               {QStringLiteral("objects_scanned"), objectsScanned},
+               {QStringLiteral("labels"), labels},
+               {QStringLiteral("top"), top}});
+}
+
+QJsonObject AppController::mcpFindScenes(const QString &label, double minScore, int trackIndex,
+                                         int limit) const
+{
+    using namespace drift::mcp;
+
+    struct Hit
+    {
+        QString clipId;
+        int index = 0;
+        double start = 0.0;
+        double end = 0.0;
+        double timelineStart = 0.0;
+        double timelineEnd = 0.0;
+        double score = 0.0;
+        QStringList labels;
+    };
+
+    QList<Hit> hits;
+    QJsonArray unscanned;
+
+    for (int t = 0; t < m_project.tracks().size(); ++t) {
+        if (trackIndex >= 0 && t != trackIndex)
+            continue;
+        for (const drift::Clip &clip : m_project.tracks().at(t).clips) {
+            if (clip.type != drift::ClipType::Video || clip.path.isEmpty())
+                continue;
+
+            // Read from the on-disk cache rather than the live analysis: only one clip's
+            // scenes are live at a time, and the point of this op is to search them all.
+            // Labelled and unlabelled scans are cached separately, so look for both rather
+            // than reporting a clip as unscanned because only the labelled pass exists.
+            drift::SceneAnalysis analysis;
+            if (!drift::loadCachedAnalysis(sceneRequestFor(clip, true, 0.0), &analysis)
+                && !drift::loadCachedAnalysis(sceneRequestFor(clip, false, 0.0), &analysis)) {
+                unscanned.append(clip.id);
+                continue;
+            }
+
+            for (int i = 0; i < analysis.scenes.size(); ++i) {
+                const drift::Scene &scene = analysis.scenes.at(i);
+                if (scene.score < minScore)
+                    continue;
+                if (!label.isEmpty() && !scene.labels.contains(label, Qt::CaseInsensitive))
+                    continue;
+
+                Hit hit;
+                hit.clipId = clip.id;
+                hit.index = i;
+                hit.start = drift::usToSeconds(scene.sourceIn);
+                hit.end = drift::usToSeconds(scene.sourceOut);
+                hit.timelineStart = sceneSourceToTimeline(clip, hit.start);
+                hit.timelineEnd = sceneSourceToTimeline(clip, hit.end);
+                hit.score = scene.score;
+                hit.labels = scene.labels;
+                hits.append(hit);
+            }
+        }
+    }
+
+    std::sort(hits.begin(), hits.end(),
+              [](const Hit &a, const Hit &b) { return a.score > b.score; });
+
+    QJsonArray out;
+    for (const Hit &hit : std::as_const(hits)) {
+        if (limit > 0 && out.size() >= limit)
+            break;
+        QJsonArray labels;
+        for (const QString &name : hit.labels)
+            labels.append(name);
+        out.append(QJsonObject{{QStringLiteral("clip"), hit.clipId},
+                               {QStringLiteral("index"), hit.index},
+                               {QStringLiteral("start"), hit.start},
+                               {QStringLiteral("end"), hit.end},
+                               {QStringLiteral("timeline_start"), hit.timelineStart},
+                               {QStringLiteral("timeline_end"), hit.timelineEnd},
+                               {QStringLiteral("score"), hit.score},
+                               {QStringLiteral("labels"), labels}});
+    }
+
+    return ok({{QStringLiteral("scenes"), out},
+               {QStringLiteral("n"), out.size()},
+               {QStringLiteral("unscanned"), unscanned}});
+}
+
+QList<double> AppController::mcpSceneCutTimes(double minScore, const QString &label) const
+{
+    if (m_scenes.isEmpty())
+        return {};
+
+    const drift::Clip *clip = nullptr;
+    for (const drift::Track &track : m_project.tracks()) {
+        for (const drift::Clip &candidate : track.clips) {
+            if (candidate.id == m_sceneClipId) {
+                clip = &candidate;
+                break;
+            }
+        }
+    }
+    if (!clip)
+        return {};
+
+    QList<double> times;
+    for (const QVariant &value : m_scenes) {
+        const QVariantMap scene = value.toMap();
+        // Scene 0 opens at the clip's own start, which is not a cut.
+        if (scene.value(QStringLiteral("index")).toInt() == 0)
+            continue;
+        if (!sceneMatches(scene, label, minScore))
+            continue;
+        times.append(
+            sceneSourceToTimeline(*clip, scene.value(QStringLiteral("sourceStart")).toDouble()));
+    }
+    // Reverse playback maps later source times to earlier timeline ones.
+    std::sort(times.begin(), times.end());
+    return times;
+}
+
+int AppController::mcpBookmarkScenes(double minScore, const QString &label,
+                                     const QString &labelPrefix)
+{
+    const QList<double> times = mcpSceneCutTimes(minScore, label);
+    if (times.isEmpty())
+        return 0;
+
+    const drift::Project before = m_project;
+    QList<drift::Bookmark> marks = m_project.bookmarks();
+    int added = 0;
+    int n = 1;
+    for (double t : times) {
+        const drift::TimeUs at = drift::secondsToUs(t);
+        // Same reasoning as bookmark_beats: bookmarks are snap targets, and stacking several
+        // inside one snap threshold makes the magnet ambiguous rather than stronger.
+        const bool crowded =
+            std::any_of(marks.cbegin(), marks.cend(), [at](const drift::Bookmark &b) {
+                return qAbs(b.timeUs - at) < drift::kSnapThresholdUs;
+            });
+        if (crowded) {
+            ++n;
+            continue;
+        }
+        marks.append(drift::Bookmark{at, QStringLiteral("%1 %2").arg(labelPrefix).arg(n)});
+        ++added;
+        ++n;
+    }
+    if (added == 0)
+        return 0;
+
+    std::sort(marks.begin(), marks.end(),
+              [](const drift::Bookmark &a, const drift::Bookmark &b) { return a.timeUs < b.timeUs; });
+    m_project.bookmarks() = marks;
+    pushProjectEdit(before, QStringLiteral("Bookmark scenes"));
+    finishEdit(QStringLiteral("Bookmark scenes"));
+    return added;
+}
+
+QJsonObject AppController::mcpAiCapabilities() const
+{
+    using namespace drift::mcp;
+
+    struct Capability
+    {
+        const char *kind;
+        bool installed;
+        const char *unlocks;
+    };
+
+    const Capability capabilities[] = {
+        {"whisper-model", drift::WhisperTranscriber::modelPresent(),
+         "generate_subtitles — speech to timed captions"},
+        {"sam2-model", drift::Sam2Segmenter::modelPresent(),
+         "subject cutout and mask generation"},
+        {"face-model", drift::FaceLandmarker::modelPresent(),
+         "face tracking and the face warp effects"},
+        {"denoise-model", drift::DeepFilterDenoiser::modelPresent(),
+         "background noise removal from audio"},
+        {"object-model", objectDetectionAvailable(),
+         "detect_scenes({with_objects:true}) — labels each shot with what is in it"},
+    };
+
+    QJsonArray models;
+    for (const Capability &capability : capabilities) {
+        models.append(QJsonObject{{QStringLiteral("kind"), QLatin1String(capability.kind)},
+                                  {QStringLiteral("installed"), capability.installed},
+                                  {QStringLiteral("unlocks"), QLatin1String(capability.unlocks)}});
+    }
+
+    // A model is useless without a runtime to execute it, so report that too rather than
+    // letting an agent conclude a feature is available when nothing can run it.
+    const QString variant = drift::ort::activeVariant();
+    return ok({{QStringLiteral("models"), models},
+               {QStringLiteral("runtime"), variant.isEmpty() ? QStringLiteral("none") : variant},
+               {QStringLiteral("hint"),
+                QStringLiteral("Missing pieces install from the Extras / Addon Manager in the "
+                               "app; there is no MCP op that installs them.")}});
 }
 
 QJsonObject AppController::mcpSetClipVolume(int trackIndex, int clipIndex, double value,

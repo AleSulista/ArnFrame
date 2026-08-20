@@ -627,7 +627,8 @@ QStringList toolboxNames()
             QStringLiteral("playback"),  QStringLiteral("text"),     QStringLiteral("effects"),
             QStringLiteral("project"),   QStringLiteral("keyframes"), QStringLiteral("speed"),
             QStringLiteral("ui"),        QStringLiteral("shapes"),   QStringLiteral("subtitles"),
-            QStringLiteral("segmentation"), QStringLiteral("ai"),   QStringLiteral("audio")};
+            QStringLiteral("segmentation"), QStringLiteral("ai"),   QStringLiteral("audio"),
+            QStringLiteral("scene")};
 }
 
 QString agentGuideText()
@@ -669,6 +670,7 @@ QString agentGuideText()
         "- export_video      -> export.{active,progress}      (or export_status)\n"
         "- package_project   -> package.{active,progress}\n"
         "- generate_subtitles-> subtitleGen.{active,progress,status}\n"
+        "- detect_scenes     -> sceneDetect.{active,progress,status}\n"
         "- set_clip_reverse  -> reverseRender.{active,progress,status}\n"
         "Segmentation, denoise, and face detection report through the app's status only; re-read\n"
         "inspect({clips:true,detail:true}) and compare to detect completion.\n"
@@ -682,8 +684,22 @@ QString agentGuideText()
         "The analysis is transient: any edit that changes the mix drops it, and\n"
         "inspect({detail:true}).beats.stale says whether what you have still describes the audio.\n"
         "\n"
+        "Understanding the footage (scene toolbox):\n"
+        "1. detect_scenes({clip, with_objects:true}) starts a scan; poll\n"
+        "   inspect({detail:true}).sceneDetect until active is false. A clip already scanned at\n"
+        "   the same settings comes back {cached:true} straight away.\n"
+        "2. describe_clip gives the one-call impression — shot count, pacing, what is in it.\n"
+        "   list_scenes gives every shot, with timeline_start/timeline_end already mapped through\n"
+        "   trim, speed and reverse so you can act on them directly.\n"
+        "3. find_scenes({label}) searches EVERY scanned clip on the timeline, which is how you\n"
+        "   gather material rather than inspect one clip at a time.\n"
+        "4. split_on_scenes cuts a clip at its boundaries; bookmark_scenes marks them instead.\n"
+        "Unlike beats this analysis is NOT transient: it describes the source file and is cached\n"
+        "against that file's timestamp, so it survives edits, undo and reload. with_objects needs\n"
+        "the object-model addon — ai_capabilities reports what is installed.\n"
+        "\n"
         "Toolboxes: media, timeline, canvas, playback, text, effects, project, keyframes, speed, ui, "
-        "shapes, subtitles, segmentation, ai, audio.\n");
+        "shapes, subtitles, segmentation, ai, audio, scene.\n");
 }
 
 QJsonObject catalogPayload()
@@ -706,8 +722,9 @@ QJsonObject catalogPayload()
         {"shapes", "Builtin shapes, stickers, emoji, fonts."},
         {"subtitles", "Subtitle clips, import/export, Whisper generation."},
         {"segmentation", "SAM-style cutout and mask output."},
-        {"ai", "Denoise and face detection."},
+        {"ai", "Denoise, face detection, and which model add-ons are installed."},
         {"audio", "Read waveforms, detect beats, and cut or quantise to them."},
+        {"scene", "Detect shots, read what is in them, and cut or assemble against them."},
     };
 
     QJsonArray toolboxes;

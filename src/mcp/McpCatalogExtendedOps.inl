@@ -508,6 +508,13 @@
         { "cancel_denoise", "ai", "Cancel denoise",
           "Cancel an in-flight denoise. Returns ok even when nothing was running.",
           objectSchema({}) },
+        { "ai_capabilities", "ai", "What models are installed",
+          "Which optional model add-ons are present and what each unlocks, plus the active ONNX "
+          "Runtime. Call this before an op that needs a model, or after one fails, so you can "
+          "tell the user exactly what to install instead of retrying. Returns "
+          "{models:[{kind, installed, unlocks}], runtime, hint}. Nothing here installs anything "
+          "— that is done from Extras in the app.",
+          objectSchema({}), true, false, true },
         { "face_detection_status", "ai", "Face track availability",
           "Returns {available}. Check this before detect_faces — the model ships separately.",
           objectSchema({}), true, false, true },
@@ -617,6 +624,77 @@
                {QStringLiteral("at"), numberProp(QStringLiteral("Timeline seconds for a keyframe; omit to set the constant level"))}},
               clipRefProps()),
               {QStringLiteral("value")}) },
+
+        // --- scene ---
+        { "detect_scenes", "scene", "Find the shots in a clip",
+          "Scan a video clip for shot boundaries and rank each shot by how much is happening. "
+          "ASYNC: returns {started:true} immediately — poll inspect({detail:true}).sceneDetect "
+          "{active, progress, status} until active is false, then read the result with "
+          "list_scenes or describe_clip. Returns {cached:true} instead when this clip and these "
+          "settings were already scanned, in which case the result is ready at once.\n"
+          "Unlike detect_beats, the analysis does NOT go stale on edits: it describes the source "
+          "file, is cached against that file's timestamp, and survives edits, undo and reload. "
+          "Re-trimming the clip does change the scanned range, so that scans afresh.\n"
+          "with_objects needs the object-model addon; without it the op fails with a message "
+          "naming what to install.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("threshold"), propWithDefault(numberProp(QStringLiteral("Sensitivity, 4..100 on a mean-HSV-delta scale. Lower finds more cuts. The engine still falls back to an adaptive threshold when this one finds implausibly little on flat or graded footage")), 27.0)},
+               {QStringLiteral("min_scene"), propWithDefault(numberProp(QStringLiteral("Shortest shot to emit, in seconds")), 0.5)},
+               {QStringLiteral("with_objects"), propWithDefault(boolProp(QStringLiteral("Also label each shot with the objects in it. Slower; needs the object-model addon")), false)}},
+              clipRefProps())) },
+        { "list_scenes", "scene", "Read the detected shots",
+          "The shots found by detect_scenes, as {scenes:[{index, start, end, duration, "
+          "timeline_start, timeline_end, motion, loudness, objects, score, labels}]}. start/end "
+          "are seconds into the SOURCE file; timeline_start/timeline_end are the same moments on "
+          "the timeline, already mapped through the clip's trim, speed and reverse — use those to "
+          "seek or cut. score is 0..1 and combines motion, loudness and objects.\n"
+          "Requires detect_scenes first; fails not_found otherwise.",
+          objectSchema({{QStringLiteral("label"), stringProp(QStringLiteral("Keep only shots containing this object class (needs with_objects)"))},
+                        {QStringLiteral("min_score"), propWithDefault(numberProp(QStringLiteral("Drop shots scoring below this, 0..1")), 0.0)},
+                        {QStringLiteral("sort"), propWithDefault(enumProp(QStringLiteral("time = in order; score = most active first"), {QStringLiteral("time"), QStringLiteral("score")}), QStringLiteral("time"))},
+                        {QStringLiteral("limit"), propWithDefault(integerProp(QStringLiteral("Return at most this many shots")), 200)}}),
+          true, false, true },
+        { "describe_clip", "scene", "What is this footage",
+          "One-call summary of the analysed clip, for forming an impression without walking every "
+          "shot. Returns {clip, duration, scenes (count), cuts, shortest, longest, mean_score, "
+          "detector, adaptive (whether the fallback threshold was used), objects_scanned, "
+          "labels:[{name, scenes, seconds}] and top:[the highest-scoring shots]}. labels is empty "
+          "unless detect_scenes ran with_objects.\n"
+          "Requires detect_scenes first; fails not_found otherwise.",
+          objectSchema({{QStringLiteral("top"), propWithDefault(integerProp(QStringLiteral("How many of the highest-scoring shots to include")), 5)}}),
+          true, false, true },
+        { "find_scenes", "scene", "Search shots across the timeline",
+          "Search every clip that has a cached analysis, not just the one last scanned — the op "
+          "for gathering material: \"every shot with a person in it, best first\". Returns "
+          "{scenes:[{clip, index, start, end, timeline_start, timeline_end, score, labels}]} "
+          "sorted by score descending.\n"
+          "Only clips already scanned by detect_scenes are searched; unscanned clips are listed "
+          "in unscanned:[clip ids] so you know what you are missing.",
+          objectSchema({{QStringLiteral("label"), stringProp(QStringLiteral("Keep only shots containing this object class"))},
+                        {QStringLiteral("min_score"), propWithDefault(numberProp(QStringLiteral("Drop shots scoring below this, 0..1")), 0.0)},
+                        {QStringLiteral("track"), integerProp(QStringLiteral("Restrict to clips on this track index"))},
+                        {QStringLiteral("limit"), propWithDefault(integerProp(QStringLiteral("Return at most this many shots")), 50)}}),
+          true, false, true },
+        { "split_on_scenes", "scene", "Cut at every shot boundary",
+          "Split one clip at every detected shot boundary strictly inside it. Requires "
+          "detect_scenes on that clip first. Cuts run back to front so the clip id you passed "
+          "stays valid throughout; it ends up naming the FIRST piece. Returns clips (all "
+          "resulting ids in timeline order, including the original) and at (the timeline times "
+          "actually cut). One undo step however many cuts it makes. min_gap drops cuts that would "
+          "leave a sliver.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("min_gap"), propWithDefault(numberProp(QStringLiteral("Skip a cut that would leave a piece shorter than this many seconds")), 0.1)},
+               {QStringLiteral("min_score"), propWithDefault(numberProp(QStringLiteral("Only cut at boundaries opening a shot that scores at least this")), 0.0)}},
+              clipRefProps())) },
+        { "bookmark_scenes", "scene", "Mark the shots",
+          "Write the detected shot boundaries into the project as bookmarks, which survive "
+          "re-analysis and show on the timeline ruler. Requires detect_scenes first. Returns "
+          "{added, at:[timeline seconds]}. One undo step.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("min_score"), propWithDefault(numberProp(QStringLiteral("Only mark boundaries opening a shot that scores at least this")), 0.0)},
+               {QStringLiteral("label"), stringProp(QStringLiteral("Only mark shots containing this object class"))},
+               {QStringLiteral("prefix"), propWithDefault(stringProp(QStringLiteral("Bookmark label prefix; the shot number is appended")), QStringLiteral("Scene"))}},
+              clipRefProps())) },
 
         { "set_ui_preferences", "ui", "Editor flags",
           "Set editor preferences; only supplied keys change. Note followSystem only acts when TRUE "
