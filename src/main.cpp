@@ -30,6 +30,7 @@
 #include <QQuickWindow>
 #include <QSurfaceFormat>
 #include <QtQml/qqml.h>
+#include <QFile>
 
 extern "C" {
 #include <libavutil/log.h>
@@ -93,6 +94,21 @@ int main(int argc, char *argv[])
 {
     applyLogLevel(verboseLoggingRequested(argc, argv));
 
+#ifdef Q_OS_LINUX
+    // NVIDIA proprietary driver on Wayland lacks EGL_EXT_platform_xcb support,
+    // causing QEGLPlatformContext::Failed to create context: 3009.
+    // Force XCB + GLX to work around this Qt/NVIDIA bug.
+    // If removed, it would break the app for most (if not all) users on Wayland with a Nvidia GPU
+    bool isWayland = qgetenv("XDG_SESSION_TYPE") == "wayland";
+    bool hasNvidiaDriver = QFile::exists("/proc/driver/nvidia/version");
+    bool hasNvidiaDevice = QFile::exists("/dev/nvidiactl");
+    
+    if (isWayland && hasNvidiaDriver && hasNvidiaDevice) {
+        qputenv("QT_QPA_PLATFORM", "xcb");
+        qputenv("QT_XCB_GL_INTEGRATION", "xcb_glx");
+    }
+#endif
+    
     for (int i = 1; i < argc; ++i) {
         if (qstrcmp(argv[i], "--mcp-stdio") == 0) {
             QCoreApplication app(argc, argv);
