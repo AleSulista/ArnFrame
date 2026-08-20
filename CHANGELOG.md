@@ -84,7 +84,7 @@ The export dialog has a GIF mode (no audio). Mark a work area for a short loop, 
 
 ### Feature [`ea5929b`](https://github.com/CutWire-Studios/Drift/commit/ea5929b) macOS support
 
-The build produces a `Drift.app` bundle, `scripts/package-macos.sh` writes a signed and notarised `.dmg`, and CI publishes an Apple Silicon disk image alongside the other platforms. See the [macOS section of the README](README.md#macos) for prerequisites and known limits.
+The build produces a `Drift.app` bundle, `scripts/package-macos.sh` writes a signed and notarised `.dmg`, and CI publishes an Apple Silicon disk image alongside the other platforms. See the [macOS section of the building docs](docs/BUILDING.md#macos) for prerequisites and known limits.
 
 ### Feature [`7daea92`](https://github.com/CutWire-Studios/Drift/commit/7daea92) Portable Windows build
 
@@ -96,7 +96,7 @@ A vertical panel layout for 9:16 projects: preview on top, media and inspector b
 
 ### Feature [`3a0e1be`](https://github.com/CutWire-Studios/Drift/commit/3a0e1be) Built-in MCP server for local agents
 
-An opt-in localhost MCP server lets Cursor, Claude Code, and similar agents inspect and edit the open project (timeline, effects, keyframes, speed, export, audio / beat tools, and more). Enable it in **Settings → Agent access**. See [MCP.md](MCP.md) (closes [#47](https://github.com/CutWire-Studios/Drift/issues/47)).
+An opt-in localhost MCP server lets Cursor, Claude Code, and similar agents inspect and edit the open project (timeline, effects, keyframes, speed, export, audio / beat tools, and more). Enable it in **Settings → Agent access**. See [MCP.md](docs/MCP.md) (closes [#47](https://github.com/CutWire-Studios/Drift/issues/47)).
 
 ### Feature [`efac334`](https://github.com/CutWire-Studios/Drift/commit/efac334) / [`d56b166`](https://github.com/CutWire-Studios/Drift/commit/d56b166) Multilingual UI
 
