@@ -171,6 +171,19 @@ QCursor timelineTrimCursor(int side, int heightPx)
 
 AppController::~AppController()
 {
+    // Tile decode captures `this` and posts back to the GUI thread. Finish that
+    // work, and point playback at m_project, before members start disappearing.
+    // Otherwise a worker that outlives the controller — typical in the
+    // EditorState tests, which open a session and then let the object fall out
+    // of scope — calls into freed memory.
+    if (m_multicamTimer)
+        m_multicamTimer->stop();
+    const bool hadMulticamSession = m_multicamActive;
+    m_multicamActive = false;
+    waitForMulticamRefresh();
+    if (hadMulticamSession)
+        m_playback.setProject(&m_project);
+
     if (m_mcp)
         m_mcp->stop();
     // ~QUndoStack clears the stack, which emits indexChanged into the lambda
@@ -3967,6 +3980,14 @@ void AppController::rebuildMulticamStaged()
         m_playback.setPlayheadUs(m_playheadUs);
 }
 
+void AppController::waitForMulticamRefresh()
+{
+    ++m_multicamGeneration;
+    m_multicamRefreshing = false;
+    if (m_multicamRefreshFuture.isRunning())
+        m_multicamRefreshFuture.waitForFinished();
+}
+
 void AppController::endMulticamSession()
 {
     if (!m_multicamActive)
@@ -3975,16 +3996,17 @@ void AppController::endMulticamSession()
     m_multicamActive = false;
     if (m_multicamTimer)
         m_multicamTimer->stop();
-    ++m_multicamGeneration;
-    m_multicamRefreshing = false;
+    waitForMulticamRefresh();
     MulticamImageStore::clear();
     m_multicamSnaps.clear();
     m_multicamCuts.clear();
-    m_multicamBase = drift::Project();
-    m_multicamStaged = drift::Project();
+    // Playback holds a bare pointer into the staged tree; switch it back before
+    // that project is replaced, otherwise the compositor may still be reading it.
     m_playback.setProject(&m_project);
     if (!m_playback.isPlaying())
         m_playback.setPlayheadUs(m_playheadUs);
+    m_multicamBase = drift::Project();
+    m_multicamStaged = drift::Project();
     ++m_multicamRevision;
     emit multicamChanged();
     emit multicamFramesChanged();
@@ -4363,7 +4385,7 @@ void AppController::refreshMulticamTiles()
     m_multicamRefreshing = true;
     const int generation = ++m_multicamGeneration;
 
-    (void)QtConcurrent::run([this, reads, requests, maxWidth, maxHeight, generation]() {
+    m_multicamRefreshFuture = QtConcurrent::run([this, reads, requests, maxWidth, maxHeight, generation]() {
         // Kicks every angle off on its own per-path worker thread, so the reads below hit each
         // reader's cache instead of decoding one camera after another.
         ClipReaderPool::instance().warmVideoFrames(requests);

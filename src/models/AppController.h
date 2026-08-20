@@ -15,6 +15,7 @@
 #include "models/AssetLibrary.h"
 
 #include <QAtomicInt>
+#include <QFuture>
 #include <QHash>
 #include <QJsonObject>
 #include <QMediaDevices>
@@ -1083,6 +1084,9 @@ protected:
     // Decodes one frame per angle at the playhead and publishes them to MulticamImageStore.
     // Coalesces: a refresh requested while one is in flight is dropped, not queued.
     void refreshMulticamTiles();
+    // Drops in-flight tile decodes. The worker captures `this`, so teardown has to wait
+    // for it before AppController members disappear.
+    void waitForMulticamRefresh();
     // Playhead rounded to the project's frame grid — a switch must land on a frame boundary,
     // the same rule stepFrames() follows.
     drift::TimeUs multicamSwitchTimeUs() const;
@@ -1171,11 +1175,13 @@ protected:
     AssetLibrary *m_assetLibrary = nullptr;
     TimelineModel m_timelineModel;
     ClipListModel m_clipListModel;
-    // m_project must outlive m_playback: the playback engine's compositor thread
-    // holds a bare pointer to it and may still be mid-composite at teardown.
-    // Members are destroyed in reverse declaration order, so the project is
-    // declared first and torn down last.
+    // These trees must outlive m_playback: the compositor thread holds a bare
+    // pointer into whichever one is live and may still be mid-composite at
+    // teardown. During a multicam session that is m_multicamStaged, otherwise
+    // m_project. Members are destroyed in reverse declaration order.
     drift::Project m_project;
+    drift::Project m_multicamBase;
+    drift::Project m_multicamStaged;
     PlaybackEngine m_playback;
     // Only for its audioOutputsChanged signal — the sinks resolve devices themselves.
     QMediaDevices m_mediaDevices;
@@ -1237,13 +1243,12 @@ protected:
     drift::TimeUs m_multicamRangeStart = 0;
     drift::TimeUs m_multicamRangeEnd = 0;
     QList<drift::MulticamCut> m_multicamCuts;
-    drift::Project m_multicamBase;
-    drift::Project m_multicamStaged;
     int m_multicamRevision = 0;
     // A refresh already running. Tiles are dropped rather than queued while it is set, so a
     // machine that cannot keep up falls behind in frame rate instead of in wall-clock time.
     bool m_multicamRefreshing = false;
     int m_multicamGeneration = 0; // bumped per refresh; stale decodes are dropped
+    QFuture<void> m_multicamRefreshFuture;
     // Drives tile refreshes during playback only; scrubbing and paused edits refresh directly
     // off the signal that caused them.
     QTimer *m_multicamTimer = nullptr;
