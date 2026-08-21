@@ -635,6 +635,10 @@ public:
     Q_INVOKABLE void duplicateSelectedClip();
     Q_INVOKABLE void moveClip(int trackIndex, int clipIndex, double newStart);
     Q_INVOKABLE void moveClipToTrack(int trackIndex, int clipIndex, int newTrackIndex, double newStart);
+    // Shifts every clip on `trackIndex` starting at/after `gapStartSeconds` left by the
+    // width of the gap immediately following that position, closing it. Linked partner
+    // clips on other tracks (e.g. a companion audio clip) follow along to stay in sync.
+    Q_INVOKABLE void closeGap(int trackIndex, double gapStartSeconds);
     Q_INVOKABLE void alignSelectedClipLeft();
     Q_INVOKABLE void alignSelectedClipRight();
     Q_INVOKABLE void splitSelectedClipLeft();

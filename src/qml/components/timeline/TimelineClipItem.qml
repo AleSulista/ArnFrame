@@ -591,6 +591,17 @@ Item {
                 onTriggered: EditorState.splitAtPlayhead()
             }
             ThemedMenuItem {
+                text: qsTr("Split item at current time")
+                icon.name: Theme.icons.scissors
+                // Scoped to just this clip (and its linked partner, e.g. companion
+                // audio) — splitAtPlayhead() above cuts every clip under the playhead
+                // across every track, which is surprising when picked from one clip's menu.
+                visible: EditorState.playheadSeconds > clipItem.clipData.start
+                        && EditorState.playheadSeconds < clipItem.clipData.start + clipItem.clipData.duration
+                onTriggered: EditorState.splitClipAt(clipItem.trackIndex, clipItem.clipIndex,
+                                                     EditorState.playheadSeconds)
+            }
+            ThemedMenuItem {
                 text: qsTr("Separate audio")
                 icon.name: Theme.icons.audioLines
                 // CapCut: only offer extract when the clip still has embedded audio.

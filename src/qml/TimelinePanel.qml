@@ -402,6 +402,25 @@ PanelFrame {
         return -1
     }
 
+    // Empty stretches on a track, sorted left-to-right. Gaps are never stored — they're
+    // just whatever time isn't covered by a clip — so this recomputes them from the
+    // current clip list on every call rather than caching anything.
+    function gapsForTrack(trackIndex) {
+        if (trackIndex < 0 || trackIndex >= tracks.length)
+            return []
+        const sorted = tracks[trackIndex].clips.slice().sort(function (a, b) {
+            return a.start - b.start
+        })
+        const gaps = []
+        for (var i = 0; i < sorted.length - 1; i++) {
+            const gapStart = sorted[i].start + sorted[i].duration
+            const gapEnd = sorted[i + 1].start
+            if (gapEnd > gapStart)
+                gaps.push({ start: gapStart, end: gapEnd })
+        }
+        return gaps
+    }
+
     function timelineHasClips() {
         for (var i = 0; i < tracks.length; i++) {
             if (tracks[i].clips.length > 0)
@@ -1323,6 +1342,45 @@ PanelFrame {
                                         panel: root
                                         timelineColumn: trackColumn
                                         trackIndex: trackRow.trackIndex
+                                    }
+                                }
+
+                                // Right-click a gap to ripple everything after it (and any
+                                // linked partner clips on other tracks) left to close it.
+                                Repeater {
+                                    model: root.gapsForTrack(trackRow.trackIndex)
+                                    delegate: Item {
+                                        id: gapItem
+                                        required property var modelData
+                                        x: modelData.start * root.pxPerSecond
+                                        width: (modelData.end - modelData.start) * root.pxPerSecond
+                                        height: trackRow.height
+                                        z: 1
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            visible: gapMouse.containsMouse
+                                            color: Qt.rgba(Theme.panelAccent.r, Theme.panelAccent.g,
+                                                           Theme.panelAccent.b, 0.35)
+                                        }
+
+                                        MouseArea {
+                                            id: gapMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            acceptedButtons: Qt.RightButton
+                                            onPressed: gapContextMenu.popup()
+
+                                            ThemedContextMenu {
+                                                id: gapContextMenu
+                                                ThemedMenuItem {
+                                                    text: qsTr("Close Gap")
+                                                    icon.name: Theme.icons.chevronsRightLeft
+                                                    onTriggered: EditorState.closeGap(trackRow.trackIndex,
+                                                                                      gapItem.modelData.start)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
 

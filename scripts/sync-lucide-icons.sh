@@ -27,6 +27,8 @@ icons=(
   message-square moon sun grid-3x3 list arrow-down-a-z grip-vertical
   # Fit timeline in view (manual zoom calibration)
   chevrons-left-right-ellipsis
+  # Close a timeline gap (arrows collapsing toward each other)
+  chevrons-right-left
   save arrow-right-to-line arrow-left-to-line tags blend option square-dashed puzzle info
   # Project bundle: package/properties entries in the project menu
   package file-text
