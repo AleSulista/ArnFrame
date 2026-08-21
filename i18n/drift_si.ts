@@ -1595,6 +1595,10 @@
         <source>Export complete</source>
         <translation>නිර්යාත කිරීම සම්පූර්ණයි</translation>
     </message>
+    <message>
+        <source>Close gap</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>AssetCategoryChips</name>
@@ -5990,6 +5994,10 @@ Quality: තථ්‍ය කාලයට වඩා සෙමින්, ශබ්
         <source>Drag to trim the end</source>
         <translation>අවසානය කප්පාදු කිරීමට අදින්න</translation>
     </message>
+    <message>
+        <source>Split item at current time</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>TimelinePanel</name>
@@ -6056,6 +6064,10 @@ Quality: තථ්‍ය කාලයට වඩා සෙමින්, ශබ්
     <message>
         <source>Clip name</source>
         <translation>ක්ලිප් නම</translation>
+    </message>
+    <message>
+        <source>Close Gap</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

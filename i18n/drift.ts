@@ -1595,6 +1595,10 @@
         <source>Export complete</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Close gap</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>AssetCategoryChips</name>
@@ -5985,6 +5989,10 @@ Quality: renders and shows every single frame, silently and slower than real tim
         <source>Drag to trim the end</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Split item at current time</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>TimelinePanel</name>
@@ -6050,6 +6058,10 @@ Quality: renders and shows every single frame, silently and slower than real tim
     </message>
     <message>
         <source>Clip name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close Gap</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

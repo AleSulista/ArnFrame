@@ -2906,6 +2906,49 @@ void AppController::moveClip(int trackIndex, int clipIndex, double newStart)
     finishEdit(tr("Clip moved"));
 }
 
+void AppController::closeGap(int trackIndex, double gapStartSeconds)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    const drift::TimeUs gapStartUs = drift::secondsToUs(gapStartSeconds);
+
+    bool foundNext = false;
+    drift::TimeUs nextStart = 0;
+    for (const drift::Clip &clip : track.clips) {
+        if (clip.timelineStart < gapStartUs)
+            continue;
+        if (!foundNext || clip.timelineStart < nextStart) {
+            nextStart = clip.timelineStart;
+            foundNext = true;
+        }
+    }
+    if (!foundNext)
+        return;
+
+    const drift::TimeUs gapLength = nextStart - gapStartUs;
+    if (gapLength <= 0)
+        return;
+
+    const drift::Project before = m_project;
+    QSet<QString> movedIds;
+    for (drift::Clip &clip : track.clips) {
+        if (clip.timelineStart < gapStartUs)
+            continue;
+        clip.timelineStart -= gapLength;
+        movedIds.insert(clip.id);
+    }
+    for (const drift::Clip &clip : track.clips) {
+        if (!movedIds.contains(clip.id))
+            continue;
+        syncLinkedPartnersFrom(m_project, clip, movedIds);
+    }
+
+    pushProjectEdit(before, tr("Close gap"));
+    finishEdit(tr("Close gap"));
+}
+
 void AppController::splitAtPlayhead()
 {
     const drift::Project before = m_project;
