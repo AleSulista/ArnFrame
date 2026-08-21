@@ -55,6 +55,408 @@ Item {
         return n
     }
 
+    Component {
+        id: gridDelegate
+        Column {
+            width: visible ? Theme.assetCardWidth : 0
+            spacing: 4
+            visible: root.assetMatches(name, kind)
+
+            required property int index
+            required property string name
+            required property string kind
+            required property string duration
+            required property double durationSeconds
+            required property string path
+            required property string thumbnailPath
+            required property string filmstripPath
+
+            property int assetIndex: index
+
+            // Lift on grab: dims and grows slightly, so the card reads as
+            // picked up rather than just sitting there while a ghost moves.
+            opacity: assetDrag.active ? 0.85 : 1
+            scale: assetDrag.active ? 1.04 : 1.0
+
+            Behavior on opacity {
+                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+            }
+            Behavior on scale {
+                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+            }
+
+            Drag.active: assetDrag.active
+            Drag.dragType: Drag.Automatic
+            Drag.supportedActions: Qt.CopyAction
+            Drag.keys: ["text/plain"]
+            Drag.mimeData: { "text/plain": assetIndex.toString() }
+            // Default hotspot is (0,0) at the card top-left; Wayland
+            // compositors (notably Mutter) then deliver drop Y far from
+            // the grab point. Center on the thumbnail like effect cards.
+            Drag.hotSpot.x: width / 2
+            Drag.hotSpot.y: Theme.assetCardWidth * 9 / 32
+
+            // Grid cards had neither hover feedback nor a pointing
+            // cursor, while the list rows had both.
+            HoverHandler {
+                id: cardHover
+                cursorShape: Qt.PointingHandCursor
+            }
+
+            ThemedToolTip {
+                text: name
+                visible: cardHover.hovered
+            }
+
+            Rectangle {
+                width: Theme.assetCardWidth
+                height: Theme.assetCardWidth * 9 / 16
+                radius: Theme.radiusSm
+                color: Theme.panelAccent
+                clip: true
+                border.width: cardHover.hovered ? Theme.borderWidth : 0
+                border.color: Theme.primary
+                scale: cardHover.hovered ? 1.03 : 1.0
+
+                Behavior on scale {
+                    NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                }
+                Behavior on border.width {
+                    NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                }
+
+                // Placeholder while the thumbnail decodes. The
+                // card used to sit empty, indistinguishable from
+                // a failed load.
+                SkeletonBox {
+                    anchors.fill: parent
+                    radius: parent.radius
+                    visible: thumbnailPath.length > 0
+                                && gridThumb.status === Image.Loading
+                }
+
+                Image {
+                    id: gridThumb
+                    anchors.fill: parent
+                    visible: thumbnailPath.length > 0 && status === Image.Ready
+                    source: thumbnailPath.length > 0 ? EditorState.imageUrl(thumbnailPath) : ""
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    // Fades in rather than popping at full opacity.
+                    opacity: status === Image.Ready ? 1 : 0
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
+                    }
+                }
+
+                IconGlyph {
+                    anchors.centerIn: parent
+                    // Also covers Image.Error, so a missing
+                    // thumbnail file falls back to the kind icon
+                    // instead of staying blank forever.
+                    visible: thumbnailPath.length === 0
+                                || gridThumb.status === Image.Error
+                    glyph: kind === "audio" ? Theme.icons.music
+                            : kind === "image" ? Theme.icons.image
+                            : Theme.icons.film
+                    iconSize: Theme.spacing3xl
+                    iconColor: Theme.mutedForeground
+                }
+
+                // Reading the replacement off disk is the one wait in the swap with
+                // nothing on screen to show for it. Scrims this card only, so the rest of
+                // the bin stays usable.
+                Rectangle {
+                    id: gridBusy
+                    // Above the duration badge, which is a later sibling.
+                    z: 1
+                    anchors.fill: parent
+                    radius: parent.radius
+                    color: Theme.scrimStrong
+                    readonly property bool busy:
+                        EditorState.replacingAssetId.length > 0
+                        && EditorState.replacingAssetId === AssetLibrary.assetIdAt(assetIndex)
+                    visible: opacity > 0
+                    opacity: busy ? 1 : 0
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                    }
+
+                    // Swallows taps and drags while the swap is in flight, so the card
+                    // cannot be added to the timeline against media that is changing.
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: gridBusy.busy
+                        acceptedButtons: Qt.AllButtons
+                    }
+
+                    CircularProgress {
+                        anchors.centerIn: parent
+                        indeterminate: true
+                        size: Theme.spacing3xl
+                        progressColor: Theme.onMedia
+                    }
+                }
+
+                Rectangle {
+                    visible: duration.length > 0
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.margins: Theme.spacingSm
+                    color: Theme.scrimStrong
+                    radius: Theme.radiusXs
+                    width: durationLabel.implicitWidth + Theme.spacingLg
+                    height: durationLabel.implicitHeight + Theme.spacingSm
+                    Text {
+                        id: durationLabel
+                        anchors.centerIn: parent
+                        text: duration
+                        color: Theme.onMedia
+                        font.pixelSize: Theme.fontSizeXs
+                        font.family: Theme.fontFamily
+                    }
+                }
+
+                // Both handlers live on this child, not on the Column
+                // that owns the Drag attached property. With them on the
+                // Column, QDrag::exec() ungrabs the very item Drag.active
+                // is attached to, the handler deactivates inside
+                // setActive(true), and the `Drag.active: assetDrag.active`
+                // binding re-enters it — "Binding loop detected for
+                // property active", and the drag dies mid-flight.
+                // EffectBrowser and ShapesTab already nest them this way.
+                TapHandler {
+                    // Unguarded, the tap competes with the drag for the
+                    // grab and fires an add on release after a drag.
+                    enabled: !assetDrag.active
+                    onTapped: root.addRequested(assetIndex)
+                }
+                DragHandler {
+                    id: assetDrag
+                    // Without target: null the handler moves the card itself,
+                    // clobbering the Grid positioner's x/y.
+                    target: null
+                    acceptedButtons: Qt.LeftButton
+                    onActiveChanged: {
+                        if (active) {
+                            EditorState.draggingAssetIndex = assetIndex
+                        } else {
+                            Qt.callLater(function() {
+                                if (!assetDrag.active)
+                                    EditorState.draggingAssetIndex = -1
+                            })
+                        }
+                    }
+                }
+                TapHandler {
+                    acceptedButtons: Qt.RightButton
+                    onTapped: cardMenu.popup()
+                }
+
+                ThemedContextMenu {
+                    id: cardMenu
+
+                    ThemedMenuItem {
+                        text: qsTr("Rename…")
+                        icon.name: Theme.icons.pencil
+                        onTriggered: root.renameRequested(assetIndex)
+                    }
+                    ThemedMenuItem {
+                        text: qsTr("Replace media…")
+                        icon.name: Theme.icons.refresh
+                        onTriggered: root.replaceRequested(assetIndex)
+                    }
+                    ThemedMenuItem {
+                        text: qsTr("Export image…")
+                        icon.name: Theme.icons.save
+                        visible: kind === "image"
+                        onTriggered: root.exportRequested(assetIndex)
+                    }
+                    ThemedMenuItem {
+                        text: qsTr("Remove from project")
+                        icon.name: Theme.icons.trash
+                        onTriggered: root.removeRequested(assetIndex)
+                    }
+                }
+            }
+
+            Text {
+                width: parent.width
+                text: name
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeCard
+                elide: Text.ElideRight
+            }
+        }
+    }
+
+    Component {
+        id: listDelegate
+        Rectangle {
+            id: listRow
+            width: listColumn.width
+            height: visible ? 48 : 0
+            radius: Theme.radiusSm
+            color: rowMouse.containsMouse ? Theme.popoverHover : Theme.panelAccent
+            visible: root.assetMatches(name, kind)
+
+            Behavior on color {
+                ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+            }
+
+            required property int index
+            required property string name
+            required property string kind
+            required property string duration
+            required property string thumbnailPath
+
+            property int assetIndex: index
+            readonly property bool replaceBusy:
+                EditorState.replacingAssetId.length > 0
+                && EditorState.replacingAssetId === AssetLibrary.assetIdAt(assetIndex)
+
+            Row {
+                id: listRowContent
+                anchors.fill: parent
+                anchors.margins: Theme.spacingLg
+                spacing: Theme.spacingLg + Theme.spacingXs
+
+                Rectangle {
+                    id: listThumbFrame
+                    width: 56
+                    height: 32
+                    radius: Theme.radiusSm
+                    color: Theme.panelBackground
+                    clip: true
+
+                    SkeletonBox {
+                        anchors.fill: parent
+                        radius: parent.radius
+                        visible: thumbnailPath.length > 0
+                                    && listThumb.status === Image.Loading
+                    }
+
+                    Image {
+                        id: listThumb
+                        anchors.fill: parent
+                        visible: thumbnailPath.length > 0 && status === Image.Ready
+                        source: thumbnailPath.length > 0 ? EditorState.imageUrl(thumbnailPath) : ""
+                        fillMode: Image.PreserveAspectFit
+                        // Was missing, so list thumbnails decoded
+                        // on the UI thread and stalled scrolling.
+                        asynchronous: true
+                    }
+
+                    IconGlyph {
+                        anchors.centerIn: parent
+                        visible: thumbnailPath.length === 0
+                                    || listThumb.status === Image.Error
+                        glyph: kind === "audio" ? Theme.icons.music : Theme.icons.film
+                        iconSize: Theme.iconSizeBase
+                        iconColor: Theme.mutedForeground
+                    }
+
+                    // Same busy treatment as the grid card, scaled to the row thumbnail.
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: parent.radius
+                        color: Theme.scrimStrong
+                        visible: opacity > 0
+                        opacity: replaceBusy ? 1 : 0
+
+                        Behavior on opacity {
+                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                        }
+
+                        CircularProgress {
+                            anchors.centerIn: parent
+                            indeterminate: true
+                            size: Theme.iconSizeBase
+                            strokeWidth: 2
+                            progressColor: Theme.onMedia
+                        }
+                    }
+                }
+
+                Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    // Derived from the actual thumbnail width
+                    // rather than a magic constant.
+                    width: parent.width - listThumbFrame.width - listRowContent.spacing
+                    Text {
+                        text: name
+                        color: Theme.panelForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSm
+                        elide: Text.ElideRight
+                        width: parent.width
+                    }
+                    Text {
+                        text: kind + (duration.length > 0 ? " · " + duration : "")
+                        color: Theme.mutedForeground
+                        font.pixelSize: Theme.fontSizeXs
+                        font.family: Theme.fontFamily
+                        // Was unbounded, so it overflowed the row
+                        // at narrow panel widths.
+                        elide: Text.ElideRight
+                        width: parent.width
+                    }
+                }
+            }
+
+            ThemedToolTip {
+                text: name
+                visible: rowMouse.containsMouse
+            }
+
+            MouseArea {
+                id: rowMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                // Adding to the timeline mid-swap would bind a clip to media that is
+                // about to change under it; the right-click menu goes with it.
+                enabled: !replaceBusy
+                cursorShape: Qt.PointingHandCursor
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: (mouse) => {
+                    if (mouse.button === Qt.RightButton)
+                        rowMenu.popup()
+                    else
+                        root.addRequested(assetIndex)
+                }
+            }
+
+            ThemedContextMenu {
+                id: rowMenu
+
+                ThemedMenuItem {
+                    text: qsTr("Rename…")
+                    icon.name: Theme.icons.pencil
+                    onTriggered: root.renameRequested(assetIndex)
+                }
+                ThemedMenuItem {
+                    text: qsTr("Replace media…")
+                    icon.name: Theme.icons.refresh
+                    onTriggered: root.replaceRequested(assetIndex)
+                }
+                ThemedMenuItem {
+                    text: qsTr("Export image…")
+                    icon.name: Theme.icons.save
+                    visible: kind === "image"
+                    onTriggered: root.exportRequested(assetIndex)
+                }
+                ThemedMenuItem {
+                    text: qsTr("Remove from project")
+                    icon.name: Theme.icons.trash
+                    onTriggered: root.removeRequested(assetIndex)
+                }
+            }
+        }
+    }
+
     // First-run screen for a project with no media. This area used to
     // render as a blank rectangle, with no hint that the panel accepts
     // drops or that an Import button exists.
@@ -91,439 +493,48 @@ Item {
         hint: qsTr("Try a different name.")
     }
 
-    Flickable {
-        id: flick
-        visible: AssetLibrary.count > 0 && root.matchCount > 0
+    GridView {
+        id: grid
+        visible: root.gridMode && AssetLibrary.count > 0
+        
         anchors.top: search.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
+        
+        
+        anchors.margins: Theme.pagePadding
         anchors.topMargin: Theme.spacingMd
-        contentHeight: root.gridMode ? grid.height + Theme.spacing3xl
-                                     : listColumn.height + Theme.spacing3xl
+        anchors.rightMargin: Theme.pagePadding - Theme.assetCardGap
+
+        cellWidth: Theme.assetCardWidth + Theme.assetCardGap
+        cellHeight: (Theme.assetCardWidth * 9 / 16) + Theme.spacing3xl + Theme.assetCardGap
+
         clip: true
         ScrollBar.vertical: AppScrollBar { }
 
-        Grid {
-            id: grid
-            visible: root.gridMode
-            x: Theme.pagePadding
-            y: Theme.pagePadding
-            width: flick.width - Theme.pagePadding * 2
-            columns: Math.max(1, Math.floor((width + Theme.assetCardGap) / (Theme.assetCardWidth + Theme.assetCardGap)))
-            columnSpacing: Theme.assetCardGap
-            rowSpacing: Theme.assetCardGap
+        model: AssetLibrary
+        delegate: gridDelegate
+    }
 
-            Repeater {
-                model: AssetLibrary
-                delegate: Column {
-                    width: visible ? Theme.assetCardWidth : 0
-                    spacing: 4
-                    visible: root.assetMatches(name, kind)
+    ListView {
+        id: listColumn
+        visible: !root.gridMode && AssetLibrary.count > 0
 
-                    required property int index
-                    required property string name
-                    required property string kind
-                    required property string duration
-                    required property double durationSeconds
-                    required property string path
-                    required property string thumbnailPath
-                    required property string filmstripPath
+        anchors.top: search.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
 
-                    property int assetIndex: index
+        anchors.margins: Theme.pagePadding
+        anchors.topMargin: Theme.spacingMd
 
-                    // Lift on grab: dims and grows slightly, so the card reads as
-                    // picked up rather than just sitting there while a ghost moves.
-                    opacity: assetDrag.active ? 0.85 : 1
-                    scale: assetDrag.active ? 1.04 : 1.0
+        spacing: Theme.spacingMd
 
-                    Behavior on opacity {
-                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                    }
-                    Behavior on scale {
-                        NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                    }
+        clip: true
+        ScrollBar.vertical: AppScrollBar { }
 
-                    Drag.active: assetDrag.active
-                    Drag.dragType: Drag.Automatic
-                    Drag.supportedActions: Qt.CopyAction
-                    Drag.keys: ["text/plain"]
-                    Drag.mimeData: { "text/plain": assetIndex.toString() }
-                    // Default hotspot is (0,0) at the card top-left; Wayland
-                    // compositors (notably Mutter) then deliver drop Y far from
-                    // the grab point. Center on the thumbnail like effect cards.
-                    Drag.hotSpot.x: width / 2
-                    Drag.hotSpot.y: Theme.assetCardWidth * 9 / 32
-
-                    // Grid cards had neither hover feedback nor a pointing
-                    // cursor, while the list rows had both.
-                    HoverHandler {
-                        id: cardHover
-                        cursorShape: Qt.PointingHandCursor
-                    }
-
-                    ThemedToolTip {
-                        text: name
-                        visible: cardHover.hovered
-                    }
-
-                    Rectangle {
-                        width: Theme.assetCardWidth
-                        height: Theme.assetCardWidth * 9 / 16
-                        radius: Theme.radiusSm
-                        color: Theme.panelAccent
-                        clip: true
-                        border.width: cardHover.hovered ? Theme.borderWidth : 0
-                        border.color: Theme.primary
-                        scale: cardHover.hovered ? 1.03 : 1.0
-
-                        Behavior on scale {
-                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                        }
-                        Behavior on border.width {
-                            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                        }
-
-                        // Placeholder while the thumbnail decodes. The
-                        // card used to sit empty, indistinguishable from
-                        // a failed load.
-                        SkeletonBox {
-                            anchors.fill: parent
-                            radius: parent.radius
-                            visible: thumbnailPath.length > 0
-                                     && gridThumb.status === Image.Loading
-                        }
-
-                        Image {
-                            id: gridThumb
-                            anchors.fill: parent
-                            visible: thumbnailPath.length > 0 && status === Image.Ready
-                            source: thumbnailPath.length > 0 ? EditorState.imageUrl(thumbnailPath) : ""
-                            fillMode: Image.PreserveAspectFit
-                            asynchronous: true
-                            // Fades in rather than popping at full opacity.
-                            opacity: status === Image.Ready ? 1 : 0
-
-                            Behavior on opacity {
-                                NumberAnimation { duration: Theme.durationBase; easing.type: Theme.easing }
-                            }
-                        }
-
-                        IconGlyph {
-                            anchors.centerIn: parent
-                            // Also covers Image.Error, so a missing
-                            // thumbnail file falls back to the kind icon
-                            // instead of staying blank forever.
-                            visible: thumbnailPath.length === 0
-                                     || gridThumb.status === Image.Error
-                            glyph: kind === "audio" ? Theme.icons.music
-                                 : kind === "image" ? Theme.icons.image
-                                 : Theme.icons.film
-                            iconSize: Theme.spacing3xl
-                            iconColor: Theme.mutedForeground
-                        }
-
-                        // Reading the replacement off disk is the one wait in the swap with
-                        // nothing on screen to show for it. Scrims this card only, so the rest of
-                        // the bin stays usable.
-                        Rectangle {
-                            id: gridBusy
-                            // Above the duration badge, which is a later sibling.
-                            z: 1
-                            anchors.fill: parent
-                            radius: parent.radius
-                            color: Theme.scrimStrong
-                            readonly property bool busy:
-                                EditorState.replacingAssetId.length > 0
-                                && EditorState.replacingAssetId === AssetLibrary.assetIdAt(assetIndex)
-                            visible: opacity > 0
-                            opacity: busy ? 1 : 0
-
-                            Behavior on opacity {
-                                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                            }
-
-                            // Swallows taps and drags while the swap is in flight, so the card
-                            // cannot be added to the timeline against media that is changing.
-                            MouseArea {
-                                anchors.fill: parent
-                                enabled: gridBusy.busy
-                                acceptedButtons: Qt.AllButtons
-                            }
-
-                            CircularProgress {
-                                anchors.centerIn: parent
-                                indeterminate: true
-                                size: Theme.spacing3xl
-                                progressColor: Theme.onMedia
-                            }
-                        }
-
-                        Rectangle {
-                            visible: duration.length > 0
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            anchors.margins: Theme.spacingSm
-                            color: Theme.scrimStrong
-                            radius: Theme.radiusXs
-                            width: durationLabel.implicitWidth + Theme.spacingLg
-                            height: durationLabel.implicitHeight + Theme.spacingSm
-                            Text {
-                                id: durationLabel
-                                anchors.centerIn: parent
-                                text: duration
-                                color: Theme.onMedia
-                                font.pixelSize: Theme.fontSizeXs
-                                font.family: Theme.fontFamily
-                            }
-                        }
-
-                        // Both handlers live on this child, not on the Column
-                        // that owns the Drag attached property. With them on the
-                        // Column, QDrag::exec() ungrabs the very item Drag.active
-                        // is attached to, the handler deactivates inside
-                        // setActive(true), and the `Drag.active: assetDrag.active`
-                        // binding re-enters it — "Binding loop detected for
-                        // property active", and the drag dies mid-flight.
-                        // EffectBrowser and ShapesTab already nest them this way.
-                        TapHandler {
-                            // Unguarded, the tap competes with the drag for the
-                            // grab and fires an add on release after a drag.
-                            enabled: !assetDrag.active
-                            onTapped: root.addRequested(assetIndex)
-                        }
-                        DragHandler {
-                            id: assetDrag
-                            // Without target: null the handler moves the card itself,
-                            // clobbering the Grid positioner's x/y.
-                            target: null
-                            acceptedButtons: Qt.LeftButton
-                            onActiveChanged: {
-                                if (active) {
-                                    EditorState.draggingAssetIndex = assetIndex
-                                } else {
-                                    Qt.callLater(function() {
-                                        if (!assetDrag.active)
-                                            EditorState.draggingAssetIndex = -1
-                                    })
-                                }
-                            }
-                        }
-                        TapHandler {
-                            acceptedButtons: Qt.RightButton
-                            onTapped: cardMenu.popup()
-                        }
-
-                        ThemedContextMenu {
-                            id: cardMenu
-
-                            ThemedMenuItem {
-                                text: qsTr("Rename…")
-                                icon.name: Theme.icons.pencil
-                                onTriggered: root.renameRequested(assetIndex)
-                            }
-                            ThemedMenuItem {
-                                text: qsTr("Replace media…")
-                                icon.name: Theme.icons.refresh
-                                onTriggered: root.replaceRequested(assetIndex)
-                            }
-                            ThemedMenuItem {
-                                text: qsTr("Export image…")
-                                icon.name: Theme.icons.save
-                                visible: kind === "image"
-                                onTriggered: root.exportRequested(assetIndex)
-                            }
-                            ThemedMenuItem {
-                                text: qsTr("Remove from project")
-                                icon.name: Theme.icons.trash
-                                onTriggered: root.removeRequested(assetIndex)
-                            }
-                        }
-                    }
-
-                    Text {
-                        width: parent.width
-                        text: name
-                        color: Theme.mutedForeground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeCard
-                        elide: Text.ElideRight
-                    }
-                }
-            }
-        }
-
-        Column {
-            id: listColumn
-            visible: !root.gridMode
-            x: Theme.pagePadding
-            y: Theme.pagePadding
-            width: flick.width - Theme.pagePadding * 2
-            spacing: Theme.spacingMd
-
-            Repeater {
-                model: AssetLibrary
-                delegate: Rectangle {
-                    id: listRow
-                    width: listColumn.width
-                    height: visible ? 48 : 0
-                    radius: Theme.radiusSm
-                    color: rowMouse.containsMouse ? Theme.popoverHover : Theme.panelAccent
-                    visible: root.assetMatches(name, kind)
-
-                    Behavior on color {
-                        ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                    }
-
-                    required property int index
-                    required property string name
-                    required property string kind
-                    required property string duration
-                    required property string thumbnailPath
-
-                    property int assetIndex: index
-                    readonly property bool replaceBusy:
-                        EditorState.replacingAssetId.length > 0
-                        && EditorState.replacingAssetId === AssetLibrary.assetIdAt(assetIndex)
-
-                    Row {
-                        id: listRowContent
-                        anchors.fill: parent
-                        anchors.margins: Theme.spacingLg
-                        spacing: Theme.spacingLg + Theme.spacingXs
-
-                        Rectangle {
-                            id: listThumbFrame
-                            width: 56
-                            height: 32
-                            radius: Theme.radiusSm
-                            color: Theme.panelBackground
-                            clip: true
-
-                            SkeletonBox {
-                                anchors.fill: parent
-                                radius: parent.radius
-                                visible: thumbnailPath.length > 0
-                                         && listThumb.status === Image.Loading
-                            }
-
-                            Image {
-                                id: listThumb
-                                anchors.fill: parent
-                                visible: thumbnailPath.length > 0 && status === Image.Ready
-                                source: thumbnailPath.length > 0 ? EditorState.imageUrl(thumbnailPath) : ""
-                                fillMode: Image.PreserveAspectFit
-                                // Was missing, so list thumbnails decoded
-                                // on the UI thread and stalled scrolling.
-                                asynchronous: true
-                            }
-
-                            IconGlyph {
-                                anchors.centerIn: parent
-                                visible: thumbnailPath.length === 0
-                                         || listThumb.status === Image.Error
-                                glyph: kind === "audio" ? Theme.icons.music : Theme.icons.film
-                                iconSize: Theme.iconSizeBase
-                                iconColor: Theme.mutedForeground
-                            }
-
-                            // Same busy treatment as the grid card, scaled to the row thumbnail.
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: parent.radius
-                                color: Theme.scrimStrong
-                                visible: opacity > 0
-                                opacity: replaceBusy ? 1 : 0
-
-                                Behavior on opacity {
-                                    NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
-                                }
-
-                                CircularProgress {
-                                    anchors.centerIn: parent
-                                    indeterminate: true
-                                    size: Theme.iconSizeBase
-                                    strokeWidth: 2
-                                    progressColor: Theme.onMedia
-                                }
-                            }
-                        }
-
-                        Column {
-                            anchors.verticalCenter: parent.verticalCenter
-                            // Derived from the actual thumbnail width
-                            // rather than a magic constant.
-                            width: parent.width - listThumbFrame.width - listRowContent.spacing
-                            Text {
-                                text: name
-                                color: Theme.panelForeground
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSm
-                                elide: Text.ElideRight
-                                width: parent.width
-                            }
-                            Text {
-                                text: kind + (duration.length > 0 ? " · " + duration : "")
-                                color: Theme.mutedForeground
-                                font.pixelSize: Theme.fontSizeXs
-                                font.family: Theme.fontFamily
-                                // Was unbounded, so it overflowed the row
-                                // at narrow panel widths.
-                                elide: Text.ElideRight
-                                width: parent.width
-                            }
-                        }
-                    }
-
-                    ThemedToolTip {
-                        text: name
-                        visible: rowMouse.containsMouse
-                    }
-
-                    MouseArea {
-                        id: rowMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        // Adding to the timeline mid-swap would bind a clip to media that is
-                        // about to change under it; the right-click menu goes with it.
-                        enabled: !replaceBusy
-                        cursorShape: Qt.PointingHandCursor
-                        acceptedButtons: Qt.LeftButton | Qt.RightButton
-                        onClicked: (mouse) => {
-                            if (mouse.button === Qt.RightButton)
-                                rowMenu.popup()
-                            else
-                                root.addRequested(assetIndex)
-                        }
-                    }
-
-                    ThemedContextMenu {
-                        id: rowMenu
-
-                        ThemedMenuItem {
-                            text: qsTr("Rename…")
-                            icon.name: Theme.icons.pencil
-                            onTriggered: root.renameRequested(assetIndex)
-                        }
-                        ThemedMenuItem {
-                            text: qsTr("Replace media…")
-                            icon.name: Theme.icons.refresh
-                            onTriggered: root.replaceRequested(assetIndex)
-                        }
-                        ThemedMenuItem {
-                            text: qsTr("Export image…")
-                            icon.name: Theme.icons.save
-                            visible: kind === "image"
-                            onTriggered: root.exportRequested(assetIndex)
-                        }
-                        ThemedMenuItem {
-                            text: qsTr("Remove from project")
-                            icon.name: Theme.icons.trash
-                            onTriggered: root.removeRequested(assetIndex)
-                        }
-                    }
-                }
-            }
-        }
+        model: AssetLibrary
+        delegate: listDelegate
     }
 }
