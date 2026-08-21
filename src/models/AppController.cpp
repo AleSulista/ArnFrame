@@ -2911,6 +2911,10 @@ void AppController::closeGap(int trackIndex, double gapStartSeconds)
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
         return;
 
+    // Snapshot before taking any non-const reference into m_project: QList is
+    // copy-on-write, and a reference grabbed first mutates the buffer the copy
+    // still shares, leaving `before` already rippled and undo a no-op.
+    const drift::Project before = m_project;
     drift::Track &track = m_project.tracks()[trackIndex];
     const drift::TimeUs gapStartUs = drift::secondsToUs(gapStartSeconds);
 
@@ -2931,7 +2935,6 @@ void AppController::closeGap(int trackIndex, double gapStartSeconds)
     if (gapLength <= 0)
         return;
 
-    const drift::Project before = m_project;
     QSet<QString> movedIds;
     for (drift::Clip &clip : track.clips) {
         if (clip.timelineStart < gapStartUs)

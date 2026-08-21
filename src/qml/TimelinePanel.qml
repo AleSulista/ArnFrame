@@ -1375,7 +1375,7 @@ PanelFrame {
                                                 id: gapContextMenu
                                                 ThemedMenuItem {
                                                     text: qsTr("Close Gap")
-                                                    icon.name: Theme.icons.chevronsLeft
+                                                    icon.name: Theme.icons.chevronsRightLeft
                                                     onTriggered: EditorState.closeGap(trackRow.trackIndex,
                                                                                       gapItem.modelData.start)
                                                 }
