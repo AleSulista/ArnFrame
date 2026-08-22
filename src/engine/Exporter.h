@@ -64,7 +64,9 @@ public:
     static const QList<ExportScalePreset> &scalePresets();
     static const ExportScalePreset *scalePresetById(const QString &id);
 
-    // HandBrake-like catalogs; `available` reflects runtime libav encoder presence.
+    // HandBrake-like catalogs; `available` is libav encoder presence, and for hardware
+    // entries also a successful device probe. Hardware backends that cannot exist on
+    // this OS are omitted from the list; videoCodecById still returns them.
     static QVariantList videoCodecs();
     static QVariantList audioCodecs();
     static QVariantMap videoCodecById(const QString &id);

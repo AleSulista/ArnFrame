@@ -173,12 +173,7 @@ QJsonObject exportSettingsProps()
                                           {QStringLiteral("crf"), QStringLiteral("bitrate")})},
         {QStringLiteral("crf"), integerProp(QStringLiteral("Quality when rate is crf (lower is better)"))},
         {QStringLiteral("bitrate"), integerProp(QStringLiteral("Video kbps when rate is bitrate"))},
-        {QStringLiteral("preset"), enumProp(QStringLiteral("Encoder speed/quality preset. Defaults to the codec's own default, usually medium."),
-                                            {QStringLiteral("ultrafast"), QStringLiteral("superfast"),
-                                             QStringLiteral("veryfast"), QStringLiteral("faster"),
-                                             QStringLiteral("fast"), QStringLiteral("medium"),
-                                             QStringLiteral("slow"), QStringLiteral("slower"),
-                                             QStringLiteral("veryslow")})},
+        {QStringLiteral("preset"), stringProp(QStringLiteral("Encoder speed/quality preset. Defaults to the codec's own default (medium for x264, p4 for NVENC)."))},
         {QStringLiteral("audio_bitrate"), integerProp(QStringLiteral("Audio kbps"))},
         {QStringLiteral("audio_only"), boolProp(QStringLiteral("Encode audio only. Forced off when gif is true."))},
         {QStringLiteral("gif"), boolProp(QStringLiteral("Encode animated GIF. Forces audio_only off and, when no fps is given, 15fps."))},
@@ -465,7 +460,7 @@ const QList<Op> &ops()
         { "list_export_options", "project", "See codecs, scales, and fps choices",
           "Returns {scales:[{id,w,h}], fps:[{id}], video:[{id,label}], audio:[{id,label}], gif, folder} "
           "— only codecs available on this machine are listed. Does not list rate or preset values; "
-          "those enums are in the export_video schema.",
+          "those live in the export_video schema.",
           objectSchema({}), true, false, true },
         { "export_video", "project", "Render the timeline to a file",
           "Start an async encode and return immediately with {started, path, busy}. Poll "

@@ -6,7 +6,9 @@
 #include "core/Time.h"
 
 #include <QFile>
+#include <QHash>
 #include <QImage>
+#include <QMutex>
 
 #include <climits>
 #include <cmath>
@@ -18,8 +20,11 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/dict.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/log.h>
 #include <libavutil/opt.h>
+#include <libavutil/pixdesc.h>
 #include <libavutil/rational.h>
 #include <libswscale/swscale.h>
 
@@ -76,6 +81,8 @@ namespace {
 
 enum class RateMode { Crf, Bitrate, Lossless };
 
+enum class HwBackend { None, Nvenc, Qsv, Amf, Vaapi, VideoToolbox };
+
 struct VideoCodecDef {
     const char *id;
     const char *label;
@@ -89,6 +96,7 @@ struct VideoCodecDef {
     int defaultCrf;
     // "mp4" | "webm" | "mkv" preferred when paired with a friendly audio codec.
     const char *preferredContainer;
+    HwBackend hw = HwBackend::None;
 };
 
 struct AudioCodecDef {
@@ -112,20 +120,66 @@ const char *const kDnxhd[] = {"dnxhd", nullptr};
 const char *const kProres[] = {"prores_ks", "prores", nullptr};
 const char *const kLibtheora[] = {"libtheora", nullptr};
 
+const char *const kH264Nvenc[] = {"h264_nvenc", nullptr};
+const char *const kHevcNvenc[] = {"hevc_nvenc", nullptr};
+const char *const kAv1Nvenc[] = {"av1_nvenc", nullptr};
+const char *const kH264Qsv[] = {"h264_qsv", nullptr};
+const char *const kHevcQsv[] = {"hevc_qsv", nullptr};
+const char *const kAv1Qsv[] = {"av1_qsv", nullptr};
+const char *const kH264Amf[] = {"h264_amf", nullptr};
+const char *const kHevcAmf[] = {"hevc_amf", nullptr};
+const char *const kAv1Amf[] = {"av1_amf", nullptr};
+const char *const kH264Vaapi[] = {"h264_vaapi", nullptr};
+const char *const kHevcVaapi[] = {"hevc_vaapi", nullptr};
+const char *const kAv1Vaapi[] = {"av1_vaapi", nullptr};
+const char *const kH264Vt[] = {"h264_videotoolbox", nullptr};
+const char *const kHevcVt[] = {"hevc_videotoolbox", nullptr};
+
 const char *const kX264Presets[] = {"ultrafast", "superfast", "veryfast", "faster", "fast",
                                     "medium",    "slow",      "slower",   "veryslow", nullptr};
 const char *const kSvtPresets[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", nullptr};
 const char *const kVp9CpuUsed[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", nullptr};
+const char *const kNvencPresets[] = {"p1", "p2", "p3", "p4", "p5", "p6", "p7", nullptr};
+const char *const kQsvPresets[] = {"veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow", nullptr};
+const char *const kAmfQuality[] = {"speed", "balanced", "quality", nullptr};
 
 const VideoCodecDef kVideoCodecs[] = {
     {"av1_svt", "AV1 (SVT)", kLibSvtAv1, AV_PIX_FMT_YUV420P, RateMode::Crf, true, kSvtPresets, "6", 35, "mp4"},
+    {"av1_nvenc", "AV1 (NVIDIA)", kAv1Nvenc, AV_PIX_FMT_NV12, RateMode::Crf, true, kNvencPresets, "p4", 30, "mp4",
+     HwBackend::Nvenc},
+    {"av1_qsv", "AV1 (Intel)", kAv1Qsv, AV_PIX_FMT_NV12, RateMode::Crf, true, kQsvPresets, "medium", 30, "mp4",
+     HwBackend::Qsv},
+    {"av1_amf", "AV1 (AMD)", kAv1Amf, AV_PIX_FMT_NV12, RateMode::Crf, true, kAmfQuality, "balanced", 30, "mp4",
+     HwBackend::Amf},
+    {"av1_vaapi", "AV1 (VAAPI)", kAv1Vaapi, AV_PIX_FMT_NV12, RateMode::Crf, false, nullptr, nullptr, 30, "mp4",
+     HwBackend::Vaapi},
     {"av1_svt_10", "AV1 10-bit (SVT)", kLibSvtAv1, AV_PIX_FMT_YUV420P10LE, RateMode::Crf, true, kSvtPresets, "6", 35,
      "mkv"},
     {"ffv1", "FFV1", kFfv1, AV_PIX_FMT_YUV444P, RateMode::Lossless, false, nullptr, nullptr, 0, "mkv"},
     {"h264", "H.264 (x264)", kLibx264, AV_PIX_FMT_YUV420P, RateMode::Crf, true, kX264Presets, "medium", 18, "mp4"},
+    {"h264_nvenc", "H.264 (NVIDIA)", kH264Nvenc, AV_PIX_FMT_NV12, RateMode::Crf, true, kNvencPresets, "p4", 23, "mp4",
+     HwBackend::Nvenc},
+    {"h264_qsv", "H.264 (Intel)", kH264Qsv, AV_PIX_FMT_NV12, RateMode::Crf, true, kQsvPresets, "medium", 23, "mp4",
+     HwBackend::Qsv},
+    {"h264_amf", "H.264 (AMD)", kH264Amf, AV_PIX_FMT_NV12, RateMode::Crf, true, kAmfQuality, "balanced", 23, "mp4",
+     HwBackend::Amf},
+    {"h264_vaapi", "H.264 (VAAPI)", kH264Vaapi, AV_PIX_FMT_NV12, RateMode::Crf, false, nullptr, nullptr, 23, "mp4",
+     HwBackend::Vaapi},
+    {"h264_videotoolbox", "H.264 (VideoToolbox)", kH264Vt, AV_PIX_FMT_NV12, RateMode::Crf, false, nullptr, nullptr, 23,
+     "mp4", HwBackend::VideoToolbox},
     {"h264_10", "H.264 10-bit (x264)", kLibx264, AV_PIX_FMT_YUV420P10LE, RateMode::Crf, true, kX264Presets, "medium",
      18, "mkv"},
     {"h265", "H.265 (x265)", kLibx265, AV_PIX_FMT_YUV420P, RateMode::Crf, true, kX264Presets, "medium", 28, "mp4"},
+    {"h265_nvenc", "H.265 (NVIDIA)", kHevcNvenc, AV_PIX_FMT_NV12, RateMode::Crf, true, kNvencPresets, "p4", 28, "mp4",
+     HwBackend::Nvenc},
+    {"h265_qsv", "H.265 (Intel)", kHevcQsv, AV_PIX_FMT_NV12, RateMode::Crf, true, kQsvPresets, "medium", 28, "mp4",
+     HwBackend::Qsv},
+    {"h265_amf", "H.265 (AMD)", kHevcAmf, AV_PIX_FMT_NV12, RateMode::Crf, true, kAmfQuality, "balanced", 28, "mp4",
+     HwBackend::Amf},
+    {"h265_vaapi", "H.265 (VAAPI)", kHevcVaapi, AV_PIX_FMT_NV12, RateMode::Crf, false, nullptr, nullptr, 28, "mp4",
+     HwBackend::Vaapi},
+    {"h265_videotoolbox", "H.265 (VideoToolbox)", kHevcVt, AV_PIX_FMT_NV12, RateMode::Crf, false, nullptr, nullptr, 28,
+     "mp4", HwBackend::VideoToolbox},
     {"h265_10", "H.265 10-bit (x265)", kLibx265, AV_PIX_FMT_YUV420P10LE, RateMode::Crf, true, kX264Presets, "medium",
      28, "mkv"},
     {"h265_12", "H.265 12-bit (x265)", kLibx265, AV_PIX_FMT_YUV420P12LE, RateMode::Crf, true, kX264Presets, "medium",
@@ -165,6 +219,153 @@ const AVCodec *findEncoder(const char *const *names)
     return nullptr;
 }
 
+AVHWDeviceType hwDeviceType(HwBackend hw)
+{
+    switch (hw) {
+    case HwBackend::Nvenc:
+        return AV_HWDEVICE_TYPE_CUDA;
+    case HwBackend::Qsv:
+        return AV_HWDEVICE_TYPE_QSV;
+    case HwBackend::Amf:
+        return AV_HWDEVICE_TYPE_D3D11VA;
+    case HwBackend::Vaapi:
+        return AV_HWDEVICE_TYPE_VAAPI;
+    case HwBackend::VideoToolbox:
+        return AV_HWDEVICE_TYPE_VIDEOTOOLBOX;
+    case HwBackend::None:
+        break;
+    }
+    return AV_HWDEVICE_TYPE_NONE;
+}
+
+bool hwBackendOnThisOs(HwBackend hw)
+{
+    if (hw == HwBackend::None)
+        return true;
+#if defined(Q_OS_MACOS)
+    return hw == HwBackend::VideoToolbox;
+#elif defined(Q_OS_WIN)
+    return hw == HwBackend::Nvenc || hw == HwBackend::Qsv || hw == HwBackend::Amf;
+#else
+    return hw == HwBackend::Nvenc || hw == HwBackend::Qsv || hw == HwBackend::Vaapi;
+#endif
+}
+
+const char *hwVendorName(HwBackend hw)
+{
+    switch (hw) {
+    case HwBackend::Nvenc:
+        return "NVIDIA";
+    case HwBackend::Qsv:
+        return "Intel";
+    case HwBackend::Amf:
+        return "AMD";
+    case HwBackend::Vaapi:
+        return "VAAPI";
+    case HwBackend::VideoToolbox:
+        return "VideoToolbox";
+    case HwBackend::None:
+        break;
+    }
+    return "";
+}
+
+const char *hwCodecFamilyName(const char *id)
+{
+    if (std::strncmp(id, "h265", 4) == 0)
+        return "H.265";
+    if (std::strncmp(id, "av1", 3) == 0)
+        return "AV1";
+    return "H.264";
+}
+
+QString hwEncoderLabel(const VideoCodecDef &def)
+{
+    return QStringLiteral("%1 %2").arg(QLatin1String(hwVendorName(def.hw)),
+                                       QLatin1String(hwCodecFamilyName(def.id)));
+}
+
+bool hwDeviceAvailable(AVHWDeviceType type)
+{
+    if (type == AV_HWDEVICE_TYPE_NONE)
+        return false;
+    static QMutex mutex;
+    static QHash<int, bool> cache;
+    QMutexLocker lock(&mutex);
+    const auto it = cache.constFind(static_cast<int>(type));
+    if (it != cache.cend())
+        return it.value();
+
+    AVBufferRef *ctx = nullptr;
+    const int previousLog = av_log_get_level();
+    av_log_set_level(AV_LOG_QUIET);
+    const int err = av_hwdevice_ctx_create(&ctx, type, nullptr, nullptr, 0);
+    av_log_set_level(previousLog);
+    if (ctx)
+        av_buffer_unref(&ctx);
+    const bool ok = err >= 0;
+    cache.insert(static_cast<int>(type), ok);
+    return ok;
+}
+
+bool isHardwarePixelFormat(AVPixelFormat fmt)
+{
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(fmt);
+    return desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL);
+}
+
+AVPixelFormat pickEncodePixFmt(const AVCodec *codec, HwBackend hw, AVPixelFormat softwarePixFmt)
+{
+    if (hw == HwBackend::None || !codec)
+        return softwarePixFmt;
+
+    const void *configs = nullptr;
+    if (avcodec_get_supported_config(nullptr, codec, AV_CODEC_CONFIG_PIX_FORMAT, 0, &configs, nullptr) >= 0
+        && configs) {
+        const auto *fmts = static_cast<const AVPixelFormat *>(configs);
+        for (const AVPixelFormat *p = fmts; *p != AV_PIX_FMT_NONE; ++p) {
+            if (*p == softwarePixFmt)
+                return softwarePixFmt;
+        }
+    }
+
+    const AVHWDeviceType type = hwDeviceType(hw);
+    for (int i = 0;; ++i) {
+        const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
+        if (!config)
+            break;
+        if ((config->methods
+             & (AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX | AV_CODEC_HW_CONFIG_METHOD_HW_FRAMES_CTX))
+            && config->device_type == type && config->pix_fmt != AV_PIX_FMT_NONE)
+            return config->pix_fmt;
+    }
+    return softwarePixFmt;
+}
+
+bool setupHwFrames(AVCodecContext *vctx, AVBufferRef *deviceCtx, AVPixelFormat hwPixFmt, int w, int h,
+                   QString *error)
+{
+    AVBufferRef *framesRef = av_hwframe_ctx_alloc(deviceCtx);
+    if (!framesRef) {
+        *error = QStringLiteral("Could not allocate hardware frames");
+        return false;
+    }
+    auto *frames = reinterpret_cast<AVHWFramesContext *>(framesRef->data);
+    frames->format = hwPixFmt;
+    frames->sw_format = AV_PIX_FMT_NV12;
+    frames->width = w;
+    frames->height = h;
+    if (hwPixFmt == AV_PIX_FMT_VAAPI || hwPixFmt == AV_PIX_FMT_QSV)
+        frames->initial_pool_size = 20;
+    if (av_hwframe_ctx_init(framesRef) < 0) {
+        av_buffer_unref(&framesRef);
+        *error = QStringLiteral("Could not initialize hardware frames");
+        return false;
+    }
+    vctx->hw_frames_ctx = framesRef;
+    return true;
+}
+
 const VideoCodecDef *findVideoDef(const QString &id)
 {
     for (const VideoCodecDef &def : kVideoCodecs) {
@@ -194,10 +395,16 @@ QStringList presetsToList(const char *const *presets)
 QVariantMap videoDefToMap(const VideoCodecDef &def)
 {
     const AVCodec *enc = findEncoder(def.encoderNames);
+    bool available = enc != nullptr;
+    if (def.hw != HwBackend::None)
+        available = available && hwBackendOnThisOs(def.hw) && hwDeviceAvailable(hwDeviceType(def.hw));
+
     QVariantMap m;
     m.insert(QStringLiteral("id"), QString::fromUtf8(def.id));
     m.insert(QStringLiteral("label"), QString::fromUtf8(def.label));
-    m.insert(QStringLiteral("available"), enc != nullptr);
+    m.insert(QStringLiteral("available"), available);
+    m.insert(QStringLiteral("hardware"), def.hw != HwBackend::None);
+    m.insert(QStringLiteral("encoderName"), enc ? QString::fromUtf8(enc->name) : QString());
     m.insert(QStringLiteral("supportsCrf"), def.rateMode == RateMode::Crf);
     m.insert(QStringLiteral("supportsBitrate"), def.rateMode != RateMode::Lossless);
     m.insert(QStringLiteral("lossless"), def.rateMode == RateMode::Lossless);
@@ -333,20 +540,83 @@ void fillAudioFrame(AVFrame *frame, AVSampleFormat fmt, const float *interleaved
     }
 }
 
+void applyHwRateControl(AVCodecContext *vctx, const VideoCodecDef &def, const ExportSettings &settings)
+{
+    const bool useCrf = settings.rateControl == QLatin1String("crf") && def.rateMode == RateMode::Crf;
+    const int crf = settings.crf;
+    AVCodecContext *const ctx = vctx;
+    void *const priv = ctx->priv_data;
+
+    if (useCrf) {
+        ctx->bit_rate = 0;
+        switch (def.hw) {
+        case HwBackend::Nvenc:
+            av_opt_set(priv, "rc", "vbr", 0);
+            av_opt_set_int(priv, "cq", crf, 0);
+            break;
+        case HwBackend::Qsv:
+            ctx->global_quality = crf;
+            break;
+        case HwBackend::Amf:
+            av_opt_set(priv, "rc", "cqp", 0);
+            av_opt_set_int(priv, "qp_i", crf, 0);
+            av_opt_set_int(priv, "qp_p", crf, 0);
+            av_opt_set_int(priv, "qp_b", crf, 0);
+            break;
+        case HwBackend::Vaapi:
+            av_opt_set(priv, "rc_mode", "CQP", 0);
+            av_opt_set_int(priv, "qp", crf, 0);
+            ctx->global_quality = crf;
+            break;
+        case HwBackend::VideoToolbox:
+            ctx->flags |= AV_CODEC_FLAG_QSCALE;
+#ifndef FF_QP2LAMBDA
+            ctx->global_quality = crf * 118;
+#else
+            ctx->global_quality = crf * FF_QP2LAMBDA;
+#endif
+            break;
+        case HwBackend::None:
+            break;
+        }
+        return;
+    }
+
+    ctx->bit_rate = static_cast<int64_t>(qMax(100, settings.videoBitrateKbps)) * 1000;
+    switch (def.hw) {
+    case HwBackend::Nvenc:
+        av_opt_set(priv, "rc", "vbr", 0);
+        break;
+    case HwBackend::Amf:
+        av_opt_set(priv, "rc", "vbr_peak", 0);
+        break;
+    case HwBackend::Vaapi:
+        av_opt_set(priv, "rc_mode", "VBR", 0);
+        break;
+    case HwBackend::Qsv:
+    case HwBackend::VideoToolbox:
+    case HwBackend::None:
+        break;
+    }
+}
+
 void applyVideoRateControl(AVCodecContext *vctx, const VideoCodecDef &def, const ExportSettings &settings)
 {
+    if (def.rateMode == RateMode::Lossless)
+        return;
+    if (def.hw != HwBackend::None) {
+        applyHwRateControl(vctx, def, settings);
+        return;
+    }
+
     const QString id = QString::fromUtf8(def.id);
     const bool useCrf = settings.rateControl == QLatin1String("crf") && def.rateMode == RateMode::Crf;
     const bool useBitrate =
         settings.rateControl == QLatin1String("bitrate") && def.rateMode != RateMode::Lossless;
 
-    if (def.rateMode == RateMode::Lossless)
-        return;
-
     if (useCrf) {
         const int crf = settings.crf;
         if (id.startsWith(QLatin1String("av1"))) {
-            // SVT-AV1 uses crf via private option; also set bit_rate 0.
             vctx->bit_rate = 0;
             av_opt_set_int(vctx->priv_data, "crf", crf, 0);
         } else if (id.startsWith(QLatin1String("vp8")) || id.startsWith(QLatin1String("vp9"))) {
@@ -354,7 +624,6 @@ void applyVideoRateControl(AVCodecContext *vctx, const VideoCodecDef &def, const
             av_opt_set_int(vctx->priv_data, "crf", crf, 0);
             av_opt_set_int(vctx->priv_data, "b", 0, 0);
         } else {
-            // x264 / x265
             vctx->bit_rate = 0;
             av_opt_set(vctx->priv_data, "crf", QByteArray::number(crf).constData(), 0);
         }
@@ -368,11 +637,25 @@ void applyVideoRateControl(AVCodecContext *vctx, const VideoCodecDef &def, const
 
 void applyVideoPreset(AVCodecContext *vctx, const VideoCodecDef &def, const ExportSettings &settings)
 {
+    if (def.hw == HwBackend::VideoToolbox && vctx->priv_data)
+        av_opt_set_int(vctx->priv_data, "allow_sw", 0, 0);
+
     if (!def.supportsPreset || !vctx->priv_data)
         return;
     QByteArray preset = settings.videoPreset.toUtf8();
     if (preset.isEmpty() && def.defaultPreset)
         preset = def.defaultPreset;
+
+    if (def.hw == HwBackend::Amf) {
+        av_opt_set(vctx->priv_data, "quality", preset.constData(), 0);
+        return;
+    }
+    if (def.hw == HwBackend::Nvenc || def.hw == HwBackend::Qsv) {
+        av_opt_set(vctx->priv_data, "preset", preset.constData(), 0);
+        return;
+    }
+    if (def.hw != HwBackend::None)
+        return;
 
     const QString id = QString::fromUtf8(def.id);
     if (id.startsWith(QLatin1String("vp8")) || id.startsWith(QLatin1String("vp9"))) {
@@ -381,7 +664,6 @@ void applyVideoPreset(AVCodecContext *vctx, const VideoCodecDef &def, const Expo
         return;
     }
     if (id.startsWith(QLatin1String("av1"))) {
-        // SVT-AV1 preset is an integer 0–12.
         av_opt_set(vctx->priv_data, "preset", preset.constData(), 0);
         return;
     }
@@ -998,8 +1280,11 @@ const ExportScalePreset *Exporter::scalePresetById(const QString &id)
 QVariantList Exporter::videoCodecs()
 {
     QVariantList out;
-    for (const VideoCodecDef &def : kVideoCodecs)
+    for (const VideoCodecDef &def : kVideoCodecs) {
+        if (!hwBackendOnThisOs(def.hw))
+            continue;
         out.append(videoDefToMap(def));
+    }
     return out;
 }
 
@@ -1323,9 +1608,20 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
 
     const AVCodec *vcodec = findEncoder(vdef->encoderNames);
     const AVCodec *acodec = findEncoder(adef->encoderNames);
-    if (!vcodec || !acodec) {
+    if (vdef->hw != HwBackend::None && !hwBackendOnThisOs(vdef->hw)) {
         if (errorOut)
-            *errorOut = QStringLiteral("Selected encoder is not available");
+            *errorOut = QStringLiteral("The %1 encoder is not available on this platform.")
+                            .arg(hwEncoderLabel(*vdef));
+        return false;
+    }
+    if (!vcodec || !acodec) {
+        if (errorOut) {
+            if (vdef->hw != HwBackend::None && !vcodec)
+                *errorOut = QStringLiteral("The %1 encoder is not available in this FFmpeg build.")
+                                .arg(hwEncoderLabel(*vdef));
+            else
+                *errorOut = QStringLiteral("Selected encoder is not available");
+        }
         return false;
     }
 
@@ -1362,8 +1658,10 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
     AVStream *vstream = nullptr;
     AVStream *astream = nullptr;
     AVFrame *vframe = nullptr;
+    AVFrame *hwframe = nullptr;
     AVFrame *aframe = nullptr;
     AVPacket *pkt = nullptr;
+    AVBufferRef *hwDeviceCtx = nullptr;
     SwsContext *sws = nullptr;
     bool ok = false;
     bool cancelled = false;
@@ -1407,20 +1705,39 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
 
         vctx->width = outW;
         vctx->height = outH;
-        vctx->pix_fmt = vdef->pixFmt;
+        vctx->pix_fmt = pickEncodePixFmt(vcodec, vdef->hw, vdef->pixFmt);
         vctx->time_base = frameTb;
         vctx->framerate = frameRate;
         vctx->gop_size = qMax(1, static_cast<int>(std::llround(fpsValue * 2.0)));
-        vctx->max_b_frames = 2;
+        const bool vtH264 =
+            vdef->hw == HwBackend::VideoToolbox && std::strncmp(vdef->id, "h264", 4) == 0;
+        vctx->max_b_frames = (vdef->hw == HwBackend::Vaapi || vtH264) ? 0 : 2;
+        if (vdef->hw != HwBackend::None) {
+            if (std::strncmp(vdef->id, "h264", 4) == 0)
+                vctx->profile = AV_PROFILE_H264_HIGH;
+            else if (std::strncmp(vdef->id, "h265", 4) == 0)
+                vctx->profile = AV_PROFILE_HEVC_MAIN;
+        }
         applySdrBt709Tags(vctx);
         if (fmt->oformat->flags & AVFMT_GLOBALHEADER)
             vctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
+        if (vdef->hw != HwBackend::None) {
+            const AVHWDeviceType type = hwDeviceType(vdef->hw);
+            if (av_hwdevice_ctx_create(&hwDeviceCtx, type, nullptr, nullptr, 0) < 0) {
+                error = QStringLiteral("Could not create the %1 encoder device.")
+                            .arg(QLatin1String(hwVendorName(vdef->hw)));
+                goto cleanup;
+            }
+            vctx->hw_device_ctx = av_buffer_ref(hwDeviceCtx);
+            if (isHardwarePixelFormat(vctx->pix_fmt)
+                && !setupHwFrames(vctx, hwDeviceCtx, vctx->pix_fmt, outW, outH, &error))
+                goto cleanup;
+        }
+
         applyVideoRateControl(vctx, *vdef, settings);
         applyVideoPreset(vctx, *vdef, settings);
 
-        // Some encoders (esp. hardware fallbacks) may not accept the preferred
-        // pix_fmt; fall back to the first supported format if open fails later.
         const AVSampleFormat audioFmt = pickSampleFmt(acodec);
         actx->sample_fmt = audioFmt;
         actx->sample_rate = sampleRate;
@@ -1432,7 +1749,12 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
             actx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
         if (avcodec_open2(vctx, vcodec, nullptr) < 0) {
-            error = QStringLiteral("Could not open the video encoder");
+            error = vdef->hw != HwBackend::None
+                        ? QStringLiteral(
+                              "Could not open the %1 encoder. Check that the GPU driver supports this "
+                              "resolution.")
+                              .arg(hwEncoderLabel(*vdef))
+                        : QStringLiteral("Could not open the video encoder");
             goto cleanup;
         }
         if (avcodec_open2(actx, acodec, nullptr) < 0) {
@@ -1447,6 +1769,9 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
 
         const int frameSize = actx->frame_size > 0 ? actx->frame_size : 1024;
         const AVPixelFormat outPixFmt = vctx->pix_fmt;
+        const AVPixelFormat swPixFmt =
+            isHardwarePixelFormat(outPixFmt) ? AV_PIX_FMT_NV12 : outPixFmt;
+        const bool hwUpload = isHardwarePixelFormat(outPixFmt);
 
         if (!(fmt->oformat->flags & AVFMT_NOFILE)) {
             if (avio_open(&fmt->pb, outUtf8.constData(), AVIO_FLAG_WRITE) < 0) {
@@ -1463,7 +1788,7 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
 
         // Lanczos when down/upscaling; bicubic is enough for a pure format convert.
         const int swsFlags = (projW != outW || projH != outH) ? SWS_LANCZOS : SWS_BICUBIC;
-        sws = sws_getContext(projW, projH, AV_PIX_FMT_RGBA, outW, outH, outPixFmt, swsFlags, nullptr,
+        sws = sws_getContext(projW, projH, AV_PIX_FMT_RGBA, outW, outH, swPixFmt, swsFlags, nullptr,
                              nullptr, nullptr);
         if (!sws) {
             error = QStringLiteral("Could not create the scaler");
@@ -1477,12 +1802,14 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
         pkt = av_packet_alloc();
         vframe = av_frame_alloc();
         aframe = av_frame_alloc();
-        if (!pkt || !vframe || !aframe) {
+        if (hwUpload)
+            hwframe = av_frame_alloc();
+        if (!pkt || !vframe || !aframe || (hwUpload && !hwframe)) {
             error = QStringLiteral("Out of memory");
             goto cleanup;
         }
 
-        vframe->format = outPixFmt;
+        vframe->format = swPixFmt;
         vframe->width = outW;
         vframe->height = outH;
         if (av_frame_get_buffer(vframe, 32) < 0) {
@@ -1568,7 +1895,22 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
             }
             applySdrBt709Tags(vframe);
             vframe->pts = i;
-            if (!encodeWriteFrame(fmt, vctx, vstream, vframe, pkt, &error))
+            AVFrame *encodeFrame = vframe;
+            if (hwUpload) {
+                av_frame_unref(hwframe);
+                if (av_hwframe_get_buffer(vctx->hw_frames_ctx, hwframe, 0) < 0) {
+                    error = QStringLiteral("Could not allocate a hardware frame");
+                    goto cleanup;
+                }
+                if (av_hwframe_transfer_data(hwframe, vframe, 0) < 0) {
+                    error = QStringLiteral("Could not upload a frame to the encoder");
+                    goto cleanup;
+                }
+                applySdrBt709Tags(hwframe);
+                hwframe->pts = i;
+                encodeFrame = hwframe;
+            }
+            if (!encodeWriteFrame(fmt, vctx, vstream, encodeFrame, pkt, &error))
                 goto cleanup;
 
             // Integer math keeps A/V in exact lockstep even on 1001-denominator rates.
@@ -1607,6 +1949,8 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
 cleanup:
     if (sws)
         sws_freeContext(sws);
+    if (hwframe)
+        av_frame_free(&hwframe);
     if (vframe)
         av_frame_free(&vframe);
     if (aframe)
@@ -1617,6 +1961,8 @@ cleanup:
         avcodec_free_context(&vctx);
     if (actx)
         avcodec_free_context(&actx);
+    if (hwDeviceCtx)
+        av_buffer_unref(&hwDeviceCtx);
     if (fmt) {
         if (headerWritten && !ok && fmt->pb)
             av_write_trailer(fmt);

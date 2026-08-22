@@ -192,6 +192,10 @@ private slots:
     void exporterProducesAudioOnlyMp3();
     void exporterTagsSdrBt709ColorMetadata();
     void exporterDefaultCrfIsNearLosslessForH264();
+    void exporterHardwareCodecsListedForThisOs();
+    void exporterHardwarePreferredContainerIsMp4();
+    void exporterSettingsFromMapRoundTripsHardwareCodec();
+    void exporterHardwareEncodeProducesPlayableFile();
     void exporterSettingsFromMapValidatesFrameRate();
     void exporterDefaultsToProjectFrameRate();
     void exporterHonoursExportFrameRateOverride();
@@ -1918,10 +1922,15 @@ void EngineTest::debugReportListsCommonCodecs()
     QCOMPARE(encoders.size(), 5);
     for (const QVariant &entry : encoders) {
         const QVariantMap row = entry.toMap();
-        QVERIFY(row.value(QStringLiteral("hardwareUnavailable")).toBool());
-        QVERIFY(!row.value(QStringLiteral("hardware")).toBool());
+        QVERIFY(!row.value(QStringLiteral("hardwareUnavailable")).toBool());
+        QVERIFY(row.contains(QStringLiteral("hardware")));
         QVERIFY(row.contains(QStringLiteral("software")));
         QVERIFY(row.contains(QStringLiteral("softwareEncoder")));
+        QVERIFY(row.contains(QStringLiteral("hardwareEncoder")));
+        if (row.value(QStringLiteral("hardware")).toBool())
+            QVERIFY(!row.value(QStringLiteral("hardwareEncoder")).toString().isEmpty());
+        else
+            QVERIFY(row.value(QStringLiteral("hardwareEncoder")).toString().isEmpty());
     }
 
     bool sawGpu = false;
@@ -1937,7 +1946,7 @@ void EngineTest::debugReportListsCommonCodecs()
     QVERIFY(text.contains(QStringLiteral("H264")));
     QVERIFY(text.contains(QStringLiteral("CutWire Drift debug report")));
     QVERIFY(text.contains(QStringLiteral("Video encoders")));
-    QVERIFY(text.contains(QStringLiteral("Unavailable")));
+    QVERIFY(text.contains(QStringLiteral("Supported")));
 }
 
 // The proxy re-encodes the source's pixels untouched, so it has to re-emit the source's
@@ -4797,6 +4806,135 @@ void EngineTest::exporterDefaultCrfIsNearLosslessForH264()
     const ExportSettings defaults = Exporter::defaultSettings();
     if (defaults.videoCodecId == QLatin1String("h264"))
         QCOMPARE(defaults.crf, 18);
+}
+
+void EngineTest::exporterHardwareCodecsListedForThisOs()
+{
+    QSet<QString> ids;
+    for (const QVariant &v : Exporter::videoCodecs()) {
+        const QVariantMap m = v.toMap();
+        const QString id = m.value(QStringLiteral("id")).toString();
+        ids.insert(id);
+        if (m.value(QStringLiteral("hardware")).toBool()) {
+            QVERIFY(m.contains(QStringLiteral("available")));
+            QVERIFY(m.value(QStringLiteral("supportsCrf")).toBool());
+            QVERIFY(m.value(QStringLiteral("supportsBitrate")).toBool());
+        }
+    }
+
+#if defined(Q_OS_MACOS)
+    QVERIFY(ids.contains(QStringLiteral("h264_videotoolbox")));
+    QVERIFY(ids.contains(QStringLiteral("h265_videotoolbox")));
+    QVERIFY(!ids.contains(QStringLiteral("h264_nvenc")));
+    QVERIFY(!ids.contains(QStringLiteral("h264_vaapi")));
+    QVERIFY(!ids.contains(QStringLiteral("h264_amf")));
+    QVERIFY(!ids.contains(QStringLiteral("h264_qsv")));
+#elif defined(Q_OS_WIN)
+    QVERIFY(ids.contains(QStringLiteral("h264_nvenc")));
+    QVERIFY(ids.contains(QStringLiteral("h264_qsv")));
+    QVERIFY(ids.contains(QStringLiteral("h264_amf")));
+    QVERIFY(ids.contains(QStringLiteral("h265_nvenc")));
+    QVERIFY(ids.contains(QStringLiteral("av1_nvenc")));
+    QVERIFY(!ids.contains(QStringLiteral("h264_vaapi")));
+    QVERIFY(!ids.contains(QStringLiteral("h264_videotoolbox")));
+#else
+    QVERIFY(ids.contains(QStringLiteral("h264_nvenc")));
+    QVERIFY(ids.contains(QStringLiteral("h264_qsv")));
+    QVERIFY(ids.contains(QStringLiteral("h264_vaapi")));
+    QVERIFY(ids.contains(QStringLiteral("h265_vaapi")));
+    QVERIFY(ids.contains(QStringLiteral("av1_vaapi")));
+    QVERIFY(!ids.contains(QStringLiteral("h264_amf")));
+    QVERIFY(!ids.contains(QStringLiteral("h264_videotoolbox")));
+#endif
+
+    const QVariantMap nvenc = Exporter::videoCodecById(QStringLiteral("h264_nvenc"));
+    QCOMPARE(nvenc.value(QStringLiteral("hardware")).toBool(), true);
+    QVERIFY(nvenc.contains(QStringLiteral("available")));
+}
+
+void EngineTest::exporterHardwarePreferredContainerIsMp4()
+{
+    QCOMPARE(Exporter::preferredContainer(QStringLiteral("h264_nvenc"), QStringLiteral("aac")),
+             QStringLiteral("mp4"));
+    QCOMPARE(Exporter::preferredContainer(QStringLiteral("h265_vaapi"), QStringLiteral("aac")),
+             QStringLiteral("mp4"));
+    QCOMPARE(Exporter::preferredContainer(QStringLiteral("h264_videotoolbox"), QStringLiteral("aac")),
+             QStringLiteral("mp4"));
+}
+
+void EngineTest::exporterSettingsFromMapRoundTripsHardwareCodec()
+{
+    const ExportSettings settings = Exporter::settingsFromMap(
+        {{QStringLiteral("videoCodecId"), QStringLiteral("h264_nvenc")},
+         {QStringLiteral("rateControl"), QStringLiteral("crf")},
+         {QStringLiteral("crf"), 23},
+         {QStringLiteral("videoPreset"), QStringLiteral("p4")}});
+    QCOMPARE(settings.videoCodecId, QStringLiteral("h264_nvenc"));
+    QCOMPARE(settings.rateControl, QStringLiteral("crf"));
+    QCOMPARE(settings.crf, 23);
+    QCOMPARE(settings.videoPreset, QStringLiteral("p4"));
+}
+
+void EngineTest::exporterHardwareEncodeProducesPlayableFile()
+{
+    QString hwId;
+    for (const QVariant &v : Exporter::videoCodecs()) {
+        const QVariantMap m = v.toMap();
+        if (m.value(QStringLiteral("hardware")).toBool() && m.value(QStringLiteral("available")).toBool()
+            && m.value(QStringLiteral("id")).toString().startsWith(QLatin1String("h264_"))) {
+            hwId = m.value(QStringLiteral("id")).toString();
+            break;
+        }
+    }
+    if (hwId.isEmpty())
+        QSKIP("No hardware H.264 encoder available");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    drift::Project project;
+    project.setResolution(160, 90);
+    project.setFps(25);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Shape});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("shape");
+    clip.type = drift::ClipType::Shape;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(1.0);
+    clip.shapeStyle.kind = drift::ShapeKind::Rectangle;
+    clip.shapeStyle.fill = Qt::red;
+    clip.shapeStyle.strokeWidth = 0.0;
+    clip.transformX.setKeyframe(0, 70.0);
+    clip.transformY.setKeyframe(0, 35.0);
+    clip.transformW.setKeyframe(0, 20.0);
+    clip.transformH.setKeyframe(0, 20.0);
+    project.tracks()[0].clips.append(clip);
+
+    ExportSettings settings = Exporter::defaultSettings();
+    settings.targetHeight = 0;
+    settings.videoCodecId = hwId;
+    settings.audioCodecId = QStringLiteral("aac");
+    settings.rateControl = QStringLiteral("crf");
+    settings.crf = 23;
+    if (!Exporter::audioCodecById(settings.audioCodecId).value(QStringLiteral("available")).toBool())
+        QSKIP("AAC encoder not available in this FFmpeg build");
+
+    const QString out = dir.filePath(
+        QStringLiteral("hw.")
+        + Exporter::defaultSuffix(Exporter::preferredContainer(settings.videoCodecId, settings.audioCodecId)));
+    QString error;
+    const bool ok = Exporter::run(project, settings, out, &error);
+    QVERIFY2(ok, qPrintable(error));
+    QVERIFY(QFileInfo(out).size() > 0);
+
+    ClipReader reader;
+    QVERIFY(reader.open(out));
+    QVERIFY(reader.hasVideo());
+    QImage frame;
+    QVERIFY(reader.readVideoFrameAt(0, frame, 160, 90));
+    QVERIFY(!frame.isNull());
 }
 
 namespace {

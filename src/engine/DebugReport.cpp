@@ -1,6 +1,7 @@
 #include "DebugReport.h"
 
 #include "ClipReader.h"
+#include "Exporter.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -441,8 +442,8 @@ QVariantMap DebugReport::collect()
         codecs.append(row);
     }
 
-    // Names match Exporter's software catalog. Hardware encode is not wired up
-    // (no VAAPI/NVENC/QSV/AMF path), so those cells stay unavailable.
+    // Software names match Exporter's catalog. Hardware is the first available
+    // NVENC/QSV/AMF/VAAPI/VideoToolbox encoder for that family, if any.
     static const char *const kH264Enc[] = {"libx264", "h264", nullptr};
     static const char *const kVp9Enc[] = {"libvpx-vp9", nullptr};
     static const char *const kVp8Enc[] = {"libvpx", nullptr};
@@ -451,26 +452,43 @@ QVariantMap DebugReport::collect()
     struct EncoderSpec {
         const char *name;
         const char *const *softwareNames;
+        const char *hwIdPrefix;
     };
     static const EncoderSpec kEncoders[] = {
-        {"H264", kH264Enc},
-        {"VP9", kVp9Enc},
-        {"VP8", kVp8Enc},
-        {"AV1", kAv1Enc},
-        {"HEVC", kHevcEnc},
+        {"H264", kH264Enc, "h264"},
+        {"VP9", kVp9Enc, "vp9"},
+        {"VP8", kVp8Enc, "vp8"},
+        {"AV1", kAv1Enc, "av1"},
+        {"HEVC", kHevcEnc, "h265"},
+    };
+
+    const QVariantList exportCodecs = Exporter::videoCodecs();
+    auto firstHwEncoder = [&exportCodecs](const char *prefix) -> QVariantMap {
+        const QString pre = QString::fromLatin1(prefix);
+        for (const QVariant &v : exportCodecs) {
+            const QVariantMap m = v.toMap();
+            if (!m.value(QStringLiteral("hardware")).toBool())
+                continue;
+            if (!m.value(QStringLiteral("id")).toString().startsWith(pre))
+                continue;
+            if (m.value(QStringLiteral("available")).toBool())
+                return m;
+        }
+        return {};
     };
 
     QVariantList encoders;
     for (const EncoderSpec &spec : kEncoders) {
         const AVCodec *software = findNamedEncoder(spec.softwareNames);
+        const QVariantMap hw = firstHwEncoder(spec.hwIdPrefix);
         QVariantMap row;
         row.insert(QStringLiteral("name"), QString::fromLatin1(spec.name));
         row.insert(QStringLiteral("software"), software != nullptr);
-        row.insert(QStringLiteral("hardware"), false);
-        row.insert(QStringLiteral("hardwareUnavailable"), true);
+        row.insert(QStringLiteral("hardware"), !hw.isEmpty());
         row.insert(QStringLiteral("softwareEncoder"),
                    software ? QString::fromUtf8(software->name) : QString());
-        row.insert(QStringLiteral("hardwareEncoder"), QString());
+        row.insert(QStringLiteral("hardwareEncoder"),
+                   hw.value(QStringLiteral("encoderName")).toString());
         encoders.append(row);
     }
 
