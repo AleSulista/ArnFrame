@@ -94,21 +94,6 @@ int main(int argc, char *argv[])
 {
     applyLogLevel(verboseLoggingRequested(argc, argv));
 
-#ifdef Q_OS_LINUX
-    // NVIDIA proprietary driver on Wayland lacks EGL_EXT_platform_xcb support,
-    // causing QEGLPlatformContext::Failed to create context: 3009.
-    // Force XCB + GLX to work around this Qt/NVIDIA bug.
-    // If removed, it would break the app for most (if not all) users on Wayland with a Nvidia GPU
-    bool isWayland = qgetenv("XDG_SESSION_TYPE") == "wayland";
-    bool hasNvidiaDriver = QFile::exists("/proc/driver/nvidia/version");
-    bool hasNvidiaDevice = QFile::exists("/dev/nvidiactl");
-    
-    if (isWayland && hasNvidiaDriver && hasNvidiaDevice) {
-        qputenv("QT_QPA_PLATFORM", "xcb");
-        qputenv("QT_XCB_GL_INTEGRATION", "xcb_glx");
-    }
-#endif
-    
     for (int i = 1; i < argc; ++i) {
         if (qstrcmp(argv[i], "--mcp-stdio") == 0) {
             QCoreApplication app(argc, argv);
@@ -118,20 +103,17 @@ int main(int argc, char *argv[])
         }
     }
 
-#ifdef Q_OS_MACOS
-    // NSOpenGLContext will not share between the legacy 2.1 context Qt defaults to and the 3.3
-    // core one GlRuntime creates, and drops the share with only a warning, leaving the preview
-    // black. Match the default so both are core 3.3. X11 and WGL share across differing formats.
-    QSurfaceFormat macFormat = QSurfaceFormat::defaultFormat();
-    macFormat.setVersion(3, 3);
-    macFormat.setProfile(QSurfaceFormat::CoreProfile);
-    QSurfaceFormat::setDefaultFormat(macFormat);
-#endif
+    // On NVIDIA/Wayland, leaving the API unspecified makes EGL interpret 3.3
+    // as an invalid GLES version and fail with EGL_BAD_MATCH. Start from the
+    // default format to retain the platform-selected window-buffer attributes.
+    QSurfaceFormat format = QSurfaceFormat::defaultFormat();
+    format.setRenderableType(QSurfaceFormat::OpenGL);
+    format.setVersion(3, 3);
+    format.setProfile(QSurfaceFormat::CoreProfile);
+    QSurfaceFormat::setDefaultFormat(format);
 
-    // The compositor renders into an FBO on its own GL context and hands the
-    // texture to the scene graph without a readback. That requires both contexts
-    // to share objects, and the scene graph to actually be on OpenGL. Both must
-    // be set before the QApplication is constructed.
+    // Keep Qt Quick on OpenGL and create its global share context before the
+    // application, enabling zero-copy texture handoff from the compositor.
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 

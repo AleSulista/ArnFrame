@@ -104,15 +104,32 @@ GlRuntime &runtime()
 
 bool GlRuntime::initGlObjects()
 {
-    QSurfaceFormat format;
-    format.setVersion(3, 3);
-    format.setProfile(QSurfaceFormat::CoreProfile);
-    format.setDepthBufferSize(0);
-    format.setStencilBufferSize(0);
+    QOpenGLContext *shared = QOpenGLContext::globalShareContext();
+    const bool sharingRequired = QCoreApplication::testAttribute(Qt::AA_ShareOpenGLContexts);
 
-    // Surface and context are both created here, on the GL thread, and never
-    // leave it. Creating the context on one thread and using it on another is
-    // what QOpenGLContext forbids ("cannot make current in a different thread").
+    // In the application, use the share context's realized format: EGL may
+    // adjust the requested format during creation. Command-line tools and
+    // tests have no Qt Quick share context, so retain an independent 3.3 Core
+    // context for those too.
+    if (shared && !shared->isValid())
+        shared = nullptr;
+
+    if (sharingRequired && !shared) {
+        qWarning("GlRuntime: required global OpenGL share context is unavailable");
+        return false;
+    }
+
+    QSurfaceFormat format;
+    if (shared) {
+        format = shared->format();
+    } else {
+        format.setRenderableType(QSurfaceFormat::OpenGL);
+        format.setVersion(3, 3);
+        format.setProfile(QSurfaceFormat::CoreProfile);
+        format.setDepthBufferSize(0);
+        format.setStencilBufferSize(0);
+    }
+
     surface = std::make_unique<QOffscreenSurface>();
     surface->setFormat(format);
     surface->create();
@@ -123,12 +140,9 @@ bool GlRuntime::initGlObjects()
     }
 
     context = std::make_unique<QOpenGLContext>();
-    context->setFormat(format);
-    // Share with the Qt Quick scene-graph context so composited textures can be
-    // handed to the preview item without a readback. Requires
-    // Qt::AA_ShareOpenGLContexts, set in main() before the QApplication.
-    if (QOpenGLContext *shared = QOpenGLContext::globalShareContext())
+    if (shared)
         context->setShareContext(shared);
+    context->setFormat(format);
     if (!context->create()) {
         qWarning("GlRuntime: failed to create OpenGL context");
         context.reset();
