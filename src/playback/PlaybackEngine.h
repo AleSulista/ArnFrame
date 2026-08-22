@@ -29,6 +29,7 @@ class PlaybackEngine : public QObject
     Q_PROPERTY(QString previewQuality READ previewQuality WRITE setPreviewQuality NOTIFY previewQualityChanged)
     Q_PROPERTY(QString playbackMode READ playbackMode WRITE setPlaybackMode NOTIFY playbackModeChanged)
     Q_PROPERTY(double playbackRate READ playbackRate WRITE setPlaybackRate NOTIFY playbackRateChanged)
+    Q_PROPERTY(QString decodeMode READ decodeMode WRITE setDecodeMode NOTIFY decodeModeChanged)
 
 public:
     explicit PlaybackEngine(QObject *parent = nullptr);
@@ -56,6 +57,11 @@ public:
     // somewhere the stretcher has never been tested.
     double playbackRate() const { return m_playbackRate; }
     void setPlaybackRate(double rate);
+    // Preview video decode: "auto" (default, per-clip heuristic), "software", or
+    // "hardware". Auto keeps cheap clips on the CPU and uses VAAPI for 4K / heavy
+    // bitrates; the other two force that path for every clip.
+    QString decodeMode() const;
+    void setDecodeMode(const QString &mode);
 
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
@@ -78,6 +84,7 @@ signals:
     void previewQualityChanged();
     void playbackModeChanged();
     void playbackRateChanged();
+    void decodeModeChanged();
     void playheadUsChanged(quint64 us);
 
 private:
@@ -108,6 +115,7 @@ private:
     std::atomic<bool> m_playing = false;
     QString m_previewQuality = QStringLiteral("full");
     QString m_playbackMode = QStringLiteral("fast");
+    QString m_decodeMode = QStringLiteral("auto");
     // Not persisted, unlike quality and mode: a session left at 4x would otherwise come back at 4x
     // with nothing to explain why playback runs away.
     double m_playbackRate = 1.0;

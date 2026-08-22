@@ -3614,24 +3614,20 @@ Auto මඟින් පෙරදසුනේ සත්‍ය වශයෙන්
         <translation>ධාවන වේගය</translation>
     </message>
     <message>
-        <source>Playback speed applies to Fast mode; Quality mode is not real time</source>
-        <translation>ධාවන වේගය අදාළ වන්නේ වේගවත් (Fast) ප්‍රකාරයටයි; Quality ප්‍රකාරය තථ්‍ය කාලීන නොවේ</translation>
+        <source>Software</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Fast</source>
-        <translation>වේගවත් (Fast)</translation>
+        <source>Hardware</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Quality</source>
-        <translation>ගුණාත්මක (Quality)</translation>
-    </message>
-    <message>
-        <source>Playback mode
-Fast: plays in real time with audio, skipping frames it cannot render in time — use this for general playback.
-Quality: renders and shows every single frame, silently and slower than real time — use this to check complex transitions frame by frame.</source>
-        <translation>ධාවන ප්‍රකාරය
-Fast: නියමිත වේලාවට රෙන්ඩර් කළ නොහැකි රාමු මඟහරිමින් ශ්‍රව්‍ය සමඟ තථ්‍ය කාලීනව ධාවනය වේ — සාමාන්‍ය ධාවනය සඳහා මෙය භාවිත කරන්න.
-Quality: තථ්‍ය කාලයට වඩා සෙමින්, ශබ්දයකින් තොරව සෑම රාමුවක්ම රෙන්ඩර් කර පෙන්වයි — සංකීර්ණ සංක්‍රාන්ති රාමුවෙන් රාමුව පරීක්ෂා කිරීමට මෙය භාවිත කරන්න.</translation>
+        <source>How video is decoded for preview.
+Auto picks per clip: Hardware for high-quality 4K, Software otherwise.
+Software is smoother for most clips. It uses more CPU.
+Hardware is better for high-quality 4K.
+If playback stutters, try another.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Toggle guides</source>

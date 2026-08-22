@@ -1,5 +1,7 @@
 #include "PlaybackEngine.h"
 
+#include "engine/ClipReaderPool.h"
+
 #include <QSettings>
 
 #include <algorithm>
@@ -31,6 +33,36 @@ bool isKnownPreviewQuality(const QString &quality)
         || quality == QStringLiteral("quarter") || quality == QStringLiteral("auto");
 }
 
+bool isKnownDecodeMode(const QString &mode)
+{
+    return mode == QStringLiteral("auto") || mode == QStringLiteral("software")
+        || mode == QStringLiteral("hardware");
+}
+
+ClipReader::HardwareDecodeMode decodeModeFromString(const QString &mode)
+{
+    if (mode == QStringLiteral("software"))
+        return ClipReader::HardwareDecodeMode::Software;
+    if (mode == QStringLiteral("hardware"))
+        return ClipReader::HardwareDecodeMode::Hardware;
+    return ClipReader::HardwareDecodeMode::Auto;
+}
+
+QString loadSavedDecodeMode()
+{
+    const QString saved = QSettings().value(QStringLiteral("preview/decodeMode")).toString().toLower();
+    if (isKnownDecodeMode(saved))
+        return saved;
+    // Previous two-state toggle wrote a bool. Keep an explicit Hardware or
+    // Software choice; missing key (never touched) becomes Auto.
+    if (QSettings().contains(QStringLiteral("preview/hardwareDecode"))) {
+        return QSettings().value(QStringLiteral("preview/hardwareDecode")).toBool()
+            ? QStringLiteral("hardware")
+            : QStringLiteral("software");
+    }
+    return QStringLiteral("auto");
+}
+
 } // namespace
 
 PlaybackEngine::PlaybackEngine(QObject *parent)
@@ -41,10 +73,9 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
     if (isKnownPreviewQuality(saved))
         m_previewQuality = saved;
 
-    const QString savedMode =
-        QSettings().value(QStringLiteral("preview/playbackMode")).toString().toLower();
-    if (savedMode == QStringLiteral("fast") || savedMode == QStringLiteral("quality"))
-        m_playbackMode = savedMode;
+    m_decodeMode = loadSavedDecodeMode();
+    ClipReaderPool::instance().setHardwareDecodeMode(decodeModeFromString(m_decodeMode));
+
     m_compositor.setDropLateFrames(!isQualityMode());
     m_compositor.setAdaptiveQuality(isAutoQuality());
 
@@ -214,6 +245,28 @@ void PlaybackEngine::setPlaybackRate(double rate)
 
     if (wasPlaying)
         play();
+}
+
+QString PlaybackEngine::decodeMode() const
+{
+    return m_decodeMode;
+}
+
+void PlaybackEngine::setDecodeMode(const QString &mode)
+{
+    const QString normalized = mode.toLower();
+    if (!isKnownDecodeMode(normalized)) {
+        qWarning("PlaybackEngine: ignoring unknown decode mode '%s'", qPrintable(mode));
+        return;
+    }
+    if (m_decodeMode == normalized)
+        return;
+
+    m_decodeMode = normalized;
+    QSettings().setValue(QStringLiteral("preview/decodeMode"), m_decodeMode);
+    ClipReaderPool::instance().setHardwareDecodeMode(decodeModeFromString(m_decodeMode));
+    emit decodeModeChanged();
+    refreshFrame();
 }
 
 drift::TimeUs PlaybackEngine::frameStepUs() const

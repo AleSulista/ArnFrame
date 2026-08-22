@@ -2,7 +2,6 @@
 
 #include "MediaProbe.h"
 
-#include <QThread>
 #include <QTransform>
 #include <QtMath>
 
@@ -14,6 +13,7 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavcodec/codec.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
@@ -68,6 +68,32 @@ void configureDecodeSws(SwsContext *sws, const AVFrame *src, int dstRange)
 int swsFlagsForResize(int srcW, int srcH, int dstW, int dstH)
 {
     return (srcW != dstW || srcH != dstH) ? SWS_LANCZOS : SWS_BICUBIC;
+}
+
+// avcodec_find_decoder() returns the preferred software decoder. For AV1 that is
+// libdav1d, which has no VAAPI config — looking at that codec alone would skip
+// hardware even when the native `av1` decoder can drive it. H.264/HEVC/VP9 are
+// usually fine because their default decoder already advertises VAAPI. Walk every
+// decoder for this id and pick the first that actually does.
+const AVCodec *findVaapiDecoder(AVCodecID codecId, AVPixelFormat *pixFmt)
+{
+    void *iter = nullptr;
+    while (const AVCodec *codec = av_codec_iterate(&iter)) {
+        if (!av_codec_is_decoder(codec) || codec->id != codecId)
+            continue;
+        for (int i = 0;; ++i) {
+            const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
+            if (!config)
+                break;
+            if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)
+                && config->device_type == AV_HWDEVICE_TYPE_VAAPI) {
+                if (pixFmt)
+                    *pixFmt = config->pix_fmt;
+                return codec;
+            }
+        }
+    }
+    return nullptr;
 }
 
 // Prefer the VAAPI surface format when the decoder offers it; otherwise pick the
@@ -341,11 +367,36 @@ void ClipReader::applyDecodeSize(const QSize &size)
 
 namespace {
 std::atomic<quint64> g_videoFramesDecoded{0};
+std::atomic<int> g_hardwareDecodeMode{static_cast<int>(ClipReader::HardwareDecodeMode::Auto)};
 } // namespace
 
 quint64 ClipReader::videoFramesDecoded()
 {
     return g_videoFramesDecoded.load(std::memory_order_relaxed);
+}
+
+QString ClipReader::videoDecoderName() const
+{
+    if (!m_videoCtx || !m_videoCtx->codec || !m_videoCtx->codec->name)
+        return {};
+    return QString::fromUtf8(m_videoCtx->codec->name);
+}
+
+void ClipReader::setHardwareDecodeMode(HardwareDecodeMode mode)
+{
+    g_hardwareDecodeMode.store(static_cast<int>(mode), std::memory_order_relaxed);
+}
+
+ClipReader::HardwareDecodeMode ClipReader::hardwareDecodeMode()
+{
+    return static_cast<HardwareDecodeMode>(g_hardwareDecodeMode.load(std::memory_order_relaxed));
+}
+
+void ClipReader::resetVideoDecoder()
+{
+    teardownVideoDecoder();
+    m_hwAccelDisabled = false;
+    m_hwScalerFailed = false;
 }
 
 drift::TimeUs ClipReader::frameToleranceUs() const
@@ -561,9 +612,10 @@ bool ClipReader::openSoftwareVideoDecoder()
         return false;
     }
 
-    // Left at defaults this decodes single-threaded on most builds. Each reader
-    // already owns a thread, so keep the fan-out modest rather than per-core.
-    m_videoCtx->thread_count = qBound(1, QThread::idealThreadCount() / 2, 4);
+    // 0 lets libavcodec size the pool (typically one worker per core). Caps used
+    // to leave 4K software decode short of realtime; overlapping readers can
+    // still oversubscribe, which is preferable to stuttering a single clip.
+    m_videoCtx->thread_count = 0;
     m_videoCtx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
 
     if (avcodec_open2(m_videoCtx, codec, nullptr) < 0) {
@@ -576,13 +628,9 @@ bool ClipReader::openSoftwareVideoDecoder()
     return true;
 }
 
-// VAAPI decode is ~8x faster than software, but the GPU->CPU readback that has to
-// follow costs ~1 ms/frame even after a VPP downscale, and no readback is needed at
-// all in software. Cheap streams decode for far less than that, so hwaccel makes
-// them slower — a 1008 kbit/s Constrained Baseline screen recording decodes in
-// 0.02 ms/frame in software but takes 2.4 ms/frame just to read back.
-// Measured on iHD, 1080p: 63 kbit/frame -> 0.02 ms/frame software,
-// 490 kbit/frame -> 1.30 ms/frame. The crossover sits well between the two.
+// VAAPI decode is cheap, but the GPU→CPU readback the preview needs often costs
+// more than software on light streams. Auto uses this to keep those on the CPU
+// and send 4K / high-bitrate clips to the GPU.
 constexpr double kHwAccelMinKbitPerFrame = 250.0;
 
 bool ClipReader::hardwareDecodeIsWorthIt() const
@@ -590,8 +638,6 @@ bool ClipReader::hardwareDecodeIsWorthIt() const
     const AVStream *stream = m_fmt->streams[m_videoStream];
     const AVCodecParameters *par = stream->codecpar;
 
-    // 4K and up is expensive in software at any bitrate, and with the VPP downscale
-    // the readback is bounded by the preview size rather than the source size.
     if (int64_t(par->width) * par->height >= 3840LL * 2160)
         return true;
 
@@ -614,34 +660,22 @@ bool ClipReader::tryOpenHardwareDecoder()
     if (!m_fmt || m_videoStream < 0 || m_hwAccelActive || m_hwAccelDisabled)
         return m_hwAccelActive;
 
-    // Allow forcing software decode on broken VAAPI stacks.
-    if (qEnvironmentVariableIsSet("DRIFT_NO_VAAPI")) {
-        m_hwAccelDisabled = true;
+    // Hardware vs software is a preview preference. Auto keeps the per-clip
+    // heuristic (4K / heavy bitrates on VAAPI, cheap streams on software);
+    // Software and Hardware force that path. DRIFT_NO_VAAPI still forces
+    // software on a broken driver regardless of the toggle.
+    if (qEnvironmentVariableIsSet("DRIFT_NO_VAAPI"))
         return false;
-    }
 
-    if (!qEnvironmentVariableIsSet("DRIFT_FORCE_VAAPI") && !hardwareDecodeIsWorthIt()) {
-        m_hwAccelDisabled = true;
+    const HardwareDecodeMode mode = hardwareDecodeMode();
+    if (mode == HardwareDecodeMode::Software)
         return false;
-    }
+    if (mode == HardwareDecodeMode::Auto && !hardwareDecodeIsWorthIt())
+        return false;
 
     const AVCodecParameters *par = m_fmt->streams[m_videoStream]->codecpar;
-    const AVCodec *codec = avcodec_find_decoder(par->codec_id);
+    const AVCodec *codec = findVaapiDecoder(par->codec_id, &m_hwPixFmt);
     if (!codec)
-        return false;
-
-    for (int i = 0;; ++i) {
-        const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
-        if (!config)
-            break;
-        if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)
-            && config->device_type == AV_HWDEVICE_TYPE_VAAPI) {
-            m_hwPixFmt = config->pix_fmt;
-            break;
-        }
-    }
-
-    if (m_hwPixFmt == AV_PIX_FMT_NONE)
         return false;
 
     if (av_hwdevice_ctx_create(&m_hwDeviceCtx, AV_HWDEVICE_TYPE_VAAPI, nullptr, nullptr, 0) < 0) {

@@ -63,7 +63,9 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavcodec/codec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/pixfmt.h>
 }
 
@@ -105,6 +107,9 @@ private slots:
     void clipReaderSequentialAndSeek();
     void clipReaderAppliesDisplayRotation_data();
     void clipReaderAppliesDisplayRotation();
+    void clipReaderPicksVaapiAv1Decoder();
+    void clipReaderStaysOnSoftwareWhenHardwareDisabled();
+    void clipReaderAutoKeepsCheapClipsOnSoftware();
     void reverseProxyKeepsDisplayRotation();
     void clipReaderAudioSequential();
     void audioStreamsAreIndependentPerStreamId();
@@ -230,6 +235,7 @@ private slots:
 private:
     static QString makeColorSegmentsVideo(QTemporaryDir &dir);
     static QString makeRotatedHalvesVideo(QTemporaryDir &dir, int displayDegrees);
+    static QString makeAv1ColorVideo(QTemporaryDir &dir);
     static QString makeToneAudio(QTemporaryDir &dir);
     static QString makeSweepAudio(QTemporaryDir &dir);
     static QString makeLongGopVideo(QTemporaryDir &dir);
@@ -1749,6 +1755,132 @@ void EngineTest::clipReaderAppliesDisplayRotation()
         return uchar(nv12.data.at(qsizetype(p.y()) * nv12.width + p.x()));
     };
     QVERIFY(lumaAt(redAt) > lumaAt(blueAt));
+}
+
+QString EngineTest::makeAv1ColorVideo(QTemporaryDir &dir)
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        return {};
+
+    const QString out = dir.filePath(QStringLiteral("av1-color.mp4"));
+    const QStringList encoders{QStringLiteral("libsvtav1"), QStringLiteral("libaom-av1")};
+    for (const QString &encoder : encoders) {
+        QStringList args{
+            QStringLiteral("-y"),
+            QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("color=c=red:s=256x256:r=30:d=0.4"),
+            QStringLiteral("-c:v"), encoder,
+            QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+            out,
+        };
+        QProcess proc;
+        proc.start(ffmpeg, args);
+        if (proc.waitForFinished(30000) && proc.exitCode() == 0 && QFileInfo::exists(out))
+            return out;
+    }
+    return {};
+}
+
+// libdav1d is the preferred AV1 decoder and has no VAAPI configs. Hardware decode
+// used to look only at that codec and stay on software — fine for 1080p, not for 4K.
+void EngineTest::clipReaderPicksVaapiAv1Decoder()
+{
+    const AVCodec *preferred = avcodec_find_decoder(AV_CODEC_ID_AV1);
+    if (!preferred)
+        QSKIP("No AV1 decoder in this FFmpeg build");
+
+    auto decoderHasVaapi = [](const AVCodec *codec) {
+        for (int i = 0;; ++i) {
+            const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
+            if (!config)
+                return false;
+            if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)
+                && config->device_type == AV_HWDEVICE_TYPE_VAAPI)
+                return true;
+        }
+    };
+
+    if (decoderHasVaapi(preferred))
+        QSKIP("Default AV1 decoder already has VAAPI; nothing to distinguish");
+
+    bool anyVaapiAv1 = false;
+    void *iter = nullptr;
+    while (const AVCodec *codec = av_codec_iterate(&iter)) {
+        if (av_codec_is_decoder(codec) && codec->id == AV_CODEC_ID_AV1 && decoderHasVaapi(codec)) {
+            anyVaapiAv1 = true;
+            break;
+        }
+    }
+    if (!anyVaapiAv1)
+        QSKIP("No VAAPI-capable AV1 decoder in this FFmpeg build");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeAv1ColorVideo(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg could not generate an AV1 test clip");
+
+    const auto previous = ClipReader::hardwareDecodeMode();
+    ClipReader::setHardwareDecodeMode(ClipReader::HardwareDecodeMode::Hardware);
+    const auto restore = qScopeGuard([previous] { ClipReader::setHardwareDecodeMode(previous); });
+
+    ClipReader reader;
+    QVERIFY(reader.open(path));
+    QImage frame;
+    if (!reader.readVideoFrameAt(0, frame, 256, 256) || frame.isNull())
+        QSKIP("Could not decode the AV1 test clip");
+
+    if (!reader.hardwareAccelActive())
+        QSKIP("VAAPI device could not be created on this machine");
+
+    QCOMPARE(reader.videoDecoderName(), QStringLiteral("av1"));
+
+    ClipReader::setHardwareDecodeMode(ClipReader::HardwareDecodeMode::Software);
+    reader.resetVideoDecoder();
+    QVERIFY(reader.readVideoFrameAt(0, frame, 256, 256));
+    QVERIFY(!frame.isNull());
+    QVERIFY(!reader.hardwareAccelActive());
+}
+
+void EngineTest::clipReaderStaysOnSoftwareWhenHardwareDisabled()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeColorSegmentsVideo(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    const auto previous = ClipReader::hardwareDecodeMode();
+    ClipReader::setHardwareDecodeMode(ClipReader::HardwareDecodeMode::Software);
+    const auto restore = qScopeGuard([previous] { ClipReader::setHardwareDecodeMode(previous); });
+
+    ClipReader reader;
+    QVERIFY(reader.open(path));
+    QImage frame;
+    QVERIFY(reader.readVideoFrameAt(0, frame, 64, 64));
+    QVERIFY(!frame.isNull());
+    QVERIFY(!reader.hardwareAccelActive());
+}
+
+void EngineTest::clipReaderAutoKeepsCheapClipsOnSoftware()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeColorSegmentsVideo(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+
+    const auto previous = ClipReader::hardwareDecodeMode();
+    ClipReader::setHardwareDecodeMode(ClipReader::HardwareDecodeMode::Auto);
+    const auto restore = qScopeGuard([previous] { ClipReader::setHardwareDecodeMode(previous); });
+
+    ClipReader reader;
+    QVERIFY(reader.open(path));
+    QImage frame;
+    QVERIFY(reader.readVideoFrameAt(0, frame, 64, 64));
+    QVERIFY(!frame.isNull());
+    QVERIFY(!reader.hardwareAccelActive());
 }
 
 // The proxy re-encodes the source's pixels untouched, so it has to re-emit the source's

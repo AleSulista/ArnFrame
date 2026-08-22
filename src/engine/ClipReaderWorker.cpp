@@ -135,3 +135,10 @@ void ClipReaderWorker::prefetchNextVideoNv12(quint64 streamId, int maxWidth, int
     if (more)
         requestPrefetchNv12(streamId, maxWidth, maxHeight, readAheadUs);
 }
+
+void ClipReaderWorker::resetVideoDecoders()
+{
+    QMutexLocker lock(&m_mutex);
+    for (auto &entry : m_readers)
+        entry.second->resetVideoDecoder();
+}

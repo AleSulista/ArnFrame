@@ -52,6 +52,7 @@ public slots:
                     int outputSampleRate, float *interleavedStereoOut);
     void prefetchNextVideo(quint64 streamId, int maxWidth, int maxHeight);
     void prefetchNextVideoNv12(quint64 streamId, int maxWidth, int maxHeight, drift::TimeUs readAheadUs);
+    void resetVideoDecoders();
 
 private:
     // Only clips overlapping right now need concurrent readers, and that is a handful at most.

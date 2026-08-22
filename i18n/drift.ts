@@ -3612,21 +3612,19 @@ Auto renders only as many pixels as the preview actually shows, and lowers that 
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Playback speed applies to Fast mode; Quality mode is not real time</source>
+        <source>Software</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Fast</source>
+        <source>Hardware</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Quality</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Playback mode
-Fast: plays in real time with audio, skipping frames it cannot render in time — use this for general playback.
-Quality: renders and shows every single frame, silently and slower than real time — use this to check complex transitions frame by frame.</source>
+        <source>How video is decoded for preview.
+Auto picks per clip: Hardware for high-quality 4K, Software otherwise.
+Software is smoother for most clips. It uses more CPU.
+Hardware is better for high-quality 4K.
+If playback stutters, try another.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

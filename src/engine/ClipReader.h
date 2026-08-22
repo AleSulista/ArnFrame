@@ -84,6 +84,18 @@ public:
     // cursor is not near has to decode its way there from the preceding keyframe, so this is what
     // a badly shared decoder costs. Tests read the delta.
     static quint64 videoFramesDecoded();
+    // Codec actually opened for video, empty until the first decode. Distinguishes libdav1d
+    // (software AV1) from the native `av1` decoder that can drive VAAPI.
+    QString videoDecoderName() const;
+    bool hardwareAccelActive() const { return m_hwAccelActive; }
+
+    // Preview toolbar: Auto (default) runs the per-clip heuristic, Software never
+    // uses VAAPI, Hardware always tries it. Drop the current video codec after
+    // changing this so the next read opens on the new path.
+    enum class HardwareDecodeMode { Auto, Software, Hardware };
+    static void setHardwareDecodeMode(HardwareDecodeMode mode);
+    static HardwareDecodeMode hardwareDecodeMode();
+    void resetVideoDecoder();
 
 private:
     bool ensureVideoDecoder();

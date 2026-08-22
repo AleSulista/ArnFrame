@@ -71,6 +71,17 @@ void ClipReaderPool::setReadAheadUs(drift::TimeUs readAheadUs)
     m_readAheadUs.store(qMax<drift::TimeUs>(0, readAheadUs), std::memory_order_relaxed);
 }
 
+void ClipReaderPool::setHardwareDecodeMode(ClipReader::HardwareDecodeMode mode)
+{
+    ClipReader::setHardwareDecodeMode(mode);
+
+    QMutexLocker lock(&m_mutex);
+    for (auto &entry : m_videoWorkers) {
+        QMetaObject::invokeMethod(entry.second->worker, "resetVideoDecoders",
+                                  Qt::BlockingQueuedConnection);
+    }
+}
+
 void ClipReaderPool::warmVideoFrames(const QList<VideoRequest> &requests)
 {
     for (const VideoRequest &request : requests) {

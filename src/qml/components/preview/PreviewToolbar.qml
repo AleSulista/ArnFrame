@@ -5,9 +5,9 @@ import Drift
 import ".."
 
 // Transport toolbar: timecode readout, play/pause, zoom readout, preview
-// quality, guides and fullscreen. The three groups were independently anchored
-// and overlapped at narrow preview widths. A RowLayout keeps Play centred
-// while the side groups compress instead of colliding.
+// quality, software/hardware decode, guides and fullscreen. The three groups
+// were independently anchored and overlapped at narrow preview widths. A
+// RowLayout keeps Play centred while the side groups compress instead of colliding.
 Item {
     id: toolbar
 
@@ -203,32 +203,28 @@ Item {
             font.pixelSize: Theme.fontSizeXs
             readonly property var values: [0.25, 0.5, 1.0, 1.5, 2.0, 4.0]
             model: ["0.25×", "0.5×", "1×", "1.5×", "2×", "4×"]
-            // Quality mode steps one frame per completed render and never opens the audio sink, so
-            // there is no real-time rate for a speed to be a multiple of.
-            enabled: EditorState.playback.playbackMode !== "quality"
-            tooltip: enabled
-                     ? qsTr("Playback speed")
-                     : qsTr("Playback speed applies to Fast mode; Quality mode is not real time")
+            tooltip: qsTr("Playback speed")
             currentIndex: Math.max(0, values.indexOf(EditorState.playback.playbackRate))
             onActivated: EditorState.playback.playbackRate = values[currentIndex]
         }
 
         ThemedComboBox {
-            id: playbackModeCombo
+            id: decodeCombo
             anchors.verticalCenter: parent.verticalCenter
             implicitHeight: Theme.controlHeightSm
             width: widestContentWidth + leftPadding + rightPadding
             leftPadding: Theme.spacingMd
             rightPadding: Theme.spacing2xl
             font.pixelSize: Theme.fontSizeXs
-            readonly property var values: ["fast", "quality"]
-            model: [qsTr("Fast"), qsTr("Quality")]
-            tooltip: qsTr("Playback mode\nFast: plays in real time with audio, skipping frames it "
-                          + "cannot render in time — use this for general playback.\n"
-                          + "Quality: renders and shows every single frame, silently and slower "
-                          + "than real time — use this to check complex transitions frame by frame.")
-            currentIndex: Math.max(0, values.indexOf(EditorState.playback.playbackMode))
-            onActivated: EditorState.playback.playbackMode = values[currentIndex]
+            readonly property var values: ["auto", "software", "hardware"]
+            model: [qsTr("Auto"), qsTr("Software"), qsTr("Hardware")]
+            tooltip: qsTr("How video is decoded for preview.\n"
+                          + "Auto picks per clip: Hardware for high-quality 4K, Software otherwise.\n"
+                          + "Software is smoother for most clips. It uses more CPU.\n"
+                          + "Hardware is better for high-quality 4K.\n"
+                          + "If playback stutters, try another.")
+            currentIndex: Math.max(0, values.indexOf(EditorState.playback.decodeMode))
+            onActivated: EditorState.playback.decodeMode = values[currentIndex]
         }
 
         Rectangle {
