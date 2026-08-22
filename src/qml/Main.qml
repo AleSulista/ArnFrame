@@ -346,6 +346,10 @@ ApplicationWindow {
         id: updateDialog
     }
 
+    DebugInfoDialog {
+        id: debugInfoDialog
+    }
+
     SegmentationWindow {
         id: segmentationWindow
     }
@@ -416,6 +420,10 @@ ApplicationWindow {
     // Opened from the header badge, which only exists while there is something to show.
     function openUpdateDialog() {
         updateDialog.open()
+    }
+
+    function openDebugInfo() {
+        debugInfoDialog.open()
     }
 
     function promptRecoveryIfNeeded() {

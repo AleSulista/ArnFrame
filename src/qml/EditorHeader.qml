@@ -396,6 +396,19 @@ Rectangle {
                 }
             }
 
+            // Decoder capability and host facts for bug reports.
+            IconButton {
+                glyph: Theme.icons.bug
+                variant: "ghost"
+                tooltip: qsTr("Debug info")
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: {
+                    const win = root.Window.window
+                    if (win)
+                        win.openDebugInfo()
+                }
+            }
+
             // Only exists while there is a newer release to tell the user about; the check itself
             // is silent, so this dot is the whole notification.
             Item {

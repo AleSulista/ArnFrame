@@ -13,6 +13,7 @@
 #include "engine/AddonRegistry.h"
 #include "engine/AudioMixer.h"
 #include "engine/ClipReaderPool.h"
+#include "engine/DebugReport.h"
 #include "engine/ProjectDependencies.h"
 #include "engine/AudioEffectCatalog.h"
 #include "engine/EffectCatalog.h"
@@ -12211,6 +12212,21 @@ QString AppController::mcpAgentGuide() const
 void AppController::copyMcpAgentGuide()
 {
     copyToClipboard(mcpAgentGuide());
+}
+
+QVariantMap AppController::debugInfo() const
+{
+    return DebugReport::collect();
+}
+
+QString AppController::debugInfoText() const
+{
+    return DebugReport::formatPlainText(debugInfo());
+}
+
+void AppController::copyDebugInfo()
+{
+    copyToClipboard(debugInfoText());
 }
 
 void AppController::rebuildMcpClipIndexIfNeeded() const

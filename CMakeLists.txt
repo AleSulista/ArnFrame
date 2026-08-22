@@ -361,6 +361,8 @@ add_library(driftengine STATIC
     src/engine/Exporter.cpp
     src/engine/ClipReader.h
     src/engine/ClipReader.cpp
+    src/engine/DebugReport.h
+    src/engine/DebugReport.cpp
     src/engine/ClipReaderWorker.h
     src/engine/ClipReaderWorker.cpp
     src/engine/ClipReaderPool.h
@@ -661,6 +663,7 @@ qt_add_qml_module(drift
         src/qml/components/AddonStartupDialog.qml
         src/qml/components/MissingAddonsDialog.qml
         src/qml/components/UpdateDialog.qml
+        src/qml/components/DebugInfoDialog.qml
         src/qml/components/ProjectSetupDialog.qml
         src/qml/components/LayoutChooserDialog.qml
         src/qml/components/ProjectPropertiesDialog.qml

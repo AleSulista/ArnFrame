@@ -12,6 +12,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QVariantList>
+#include <QVariantMap>
 #include <QVector3D>
 #include <QVector4D>
 #include <atomic>
@@ -25,6 +27,7 @@
 #include "core/Project.h"
 #include "engine/AudioMixer.h"
 #include "engine/ClipReader.h"
+#include "engine/DebugReport.h"
 #include "engine/Exporter.h"
 #include "engine/CompositorFrameHistory.h"
 #include "engine/AudioEffectCatalog.h"
@@ -110,6 +113,7 @@ private slots:
     void clipReaderPicksVaapiAv1Decoder();
     void clipReaderStaysOnSoftwareWhenHardwareDisabled();
     void clipReaderAutoKeepsCheapClipsOnSoftware();
+    void debugReportListsCommonCodecs();
     void reverseProxyKeepsDisplayRotation();
     void clipReaderAudioSequential();
     void audioStreamsAreIndependentPerStreamId();
@@ -1881,6 +1885,59 @@ void EngineTest::clipReaderAutoKeepsCheapClipsOnSoftware()
     QVERIFY(reader.readVideoFrameAt(0, frame, 64, 64));
     QVERIFY(!frame.isNull());
     QVERIFY(!reader.hardwareAccelActive());
+}
+
+void EngineTest::debugReportListsCommonCodecs()
+{
+    const QVariantMap info = DebugReport::collect();
+    const QVariantList codecs = info.value(QStringLiteral("codecs")).toList();
+    QCOMPARE(codecs.size(), 5);
+
+    QStringList names;
+    for (const QVariant &entry : codecs) {
+        const QVariantMap row = entry.toMap();
+        names.append(row.value(QStringLiteral("name")).toString());
+        QVERIFY(row.contains(QStringLiteral("software")));
+        QVERIFY(row.contains(QStringLiteral("hardware")));
+        QVERIFY(row.contains(QStringLiteral("softwareDecoder")));
+        QVERIFY(row.contains(QStringLiteral("hardwareDecoder")));
+    }
+    QCOMPARE(names, (QStringList{
+                         QStringLiteral("H264"),
+                         QStringLiteral("VP9"),
+                         QStringLiteral("VP8"),
+                         QStringLiteral("AV1"),
+                         QStringLiteral("HEVC"),
+                     }));
+
+    QVERIFY(!info.value(QStringLiteral("system")).toList().isEmpty());
+    QVERIFY(!info.value(QStringLiteral("package")).toString().isEmpty());
+    QVERIFY(info.contains(QStringLiteral("vaapiAvailable")));
+
+    const QVariantList encoders = info.value(QStringLiteral("encoders")).toList();
+    QCOMPARE(encoders.size(), 5);
+    for (const QVariant &entry : encoders) {
+        const QVariantMap row = entry.toMap();
+        QVERIFY(row.value(QStringLiteral("hardwareUnavailable")).toBool());
+        QVERIFY(!row.value(QStringLiteral("hardware")).toBool());
+        QVERIFY(row.contains(QStringLiteral("software")));
+        QVERIFY(row.contains(QStringLiteral("softwareEncoder")));
+    }
+
+    bool sawGpu = false;
+    const QVariantList system = info.value(QStringLiteral("system")).toList();
+    for (const QVariant &entry : system) {
+        const QString label = entry.toMap().value(QStringLiteral("label")).toString();
+        if (label.startsWith(QLatin1String("GPU")))
+            sawGpu = true;
+    }
+    QVERIFY(sawGpu);
+
+    const QString text = DebugReport::formatPlainText(info);
+    QVERIFY(text.contains(QStringLiteral("H264")));
+    QVERIFY(text.contains(QStringLiteral("CutWire Drift debug report")));
+    QVERIFY(text.contains(QStringLiteral("Video encoders")));
+    QVERIFY(text.contains(QStringLiteral("Unavailable")));
 }
 
 // The proxy re-encodes the source's pixels untouched, so it has to re-emit the source's

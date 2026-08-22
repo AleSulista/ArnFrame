@@ -404,6 +404,7 @@ QtObject {
         diamondMinus: "diamond-minus",
         mask: "square-dashed",
         puzzle: "puzzle",
+        bug: "bug",
         info: "info",
         package: "package",
         fileText: "file-text",
