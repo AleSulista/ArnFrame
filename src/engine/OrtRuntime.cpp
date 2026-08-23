@@ -14,6 +14,7 @@
 #include <QSettings>
 
 #include <optional>
+#include <string>
 #include <utility>
 
 #ifdef _WIN32
@@ -226,6 +227,26 @@ bool ensureLoaded(QString *error)
         chosen = &found.first();
 
 #ifdef _WIN32
+    // onnxruntime.dll lives in the addon lib/ folder, not next to Drift.exe. LoadLibrary of a
+    // full path finds that DLL's own static imports beside it, but the CUDA EP is loaded later
+    // by basename (onnxruntime_providers_cuda.dll) and then hard-imports cublas64_13.dll etc.
+    // Those lookups start at the application directory unless this directory is on the process
+    // search path. AddDllDirectory only affects LoadLibrary after SetDefaultDllDirectories
+    // includes LOAD_LIBRARY_SEARCH_USER_DIRS — which LOAD_LIBRARY_SEARCH_DEFAULT_DIRS does,
+    // while still searching the app dir and System32 (so Qt/FFmpeg next to the exe keep working).
+    {
+        const std::wstring libDir =
+            QDir::toNativeSeparators(QFileInfo(chosen->libPath).absolutePath()).toStdWString();
+        if (!SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)) {
+            return fail(QStringLiteral("Cannot configure DLL directories (error %1)")
+                            .arg(GetLastError()));
+        }
+        if (!AddDllDirectory(libDir.c_str())) {
+            return fail(QStringLiteral("Cannot add %1 to the DLL search path (error %2)")
+                            .arg(QFileInfo(chosen->libPath).absolutePath())
+                            .arg(GetLastError()));
+        }
+    }
     HMODULE handle = LoadLibraryW(chosen->libPath.toStdWString().c_str());
     if (!handle)
         return fail(QStringLiteral("Cannot load %1 (error %2)").arg(chosen->libPath).arg(GetLastError()));
