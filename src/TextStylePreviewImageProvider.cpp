@@ -6,6 +6,8 @@
 
 #include <QPainter>
 
+#include <optional>
+
 namespace {
 
 // Fallback when a pack has no sampleText (should not happen for built-in packs).
@@ -27,7 +29,7 @@ TextStylePreviewImageProvider::TextStylePreviewImageProvider()
 QImage TextStylePreviewImageProvider::requestImage(const QString &id, QSize *size,
                                                    const QSize &requestedSize)
 {
-    const drift::TextPreset *preset = drift::textPresetForId(id);
+    const std::optional<drift::TextPreset> preset = drift::textPresetForId(id);
     if (!preset) {
         if (size)
             *size = QSize();

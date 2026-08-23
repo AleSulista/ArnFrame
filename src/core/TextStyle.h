@@ -3,8 +3,11 @@
 #include "Time.h"
 
 #include <QColor>
+#include <QJsonObject>
 #include <QList>
 #include <QString>
+
+#include <optional>
 
 namespace drift {
 
@@ -157,8 +160,21 @@ struct TextPreset
     QString sampleText;
 };
 
+// Built-in style packs only. User-saved presets live in TextPresetStore; textPresetForId()
+// resolves both, which is what keeps the preview provider and applyTextPreset kind-agnostic.
 const QList<TextPreset> &textPresets();
-const TextPreset *textPresetForId(const QString &id);
-const TextStyle *textStyleForPresetId(const QString &id);
+// By value: a user preset lives in a mutable library that the GUI thread edits while the
+// preview provider resolves ids on the image-loading thread.
+std::optional<TextPreset> textPresetForId(const QString &id);
+std::optional<TextStyle> textStyleForPresetId(const QString &id);
+
+// Shared with the project file format, which is why these live here rather than in Project.cpp:
+// the user preset store writes the same style objects and must inherit the same key migrations.
+QJsonObject textHighlightToJson(const TextHighlight &h);
+TextHighlight textHighlightFromJson(const QJsonObject &o, const TextHighlight &fallback);
+QJsonObject wordAccentToJson(const WordAccent &a);
+WordAccent wordAccentFromJson(const QJsonObject &o);
+QJsonObject textStyleToJson(const TextStyle &s);
+TextStyle textStyleFromJson(const QJsonObject &o);
 
 } // namespace drift

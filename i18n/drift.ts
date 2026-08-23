@@ -1097,6 +1097,50 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Could not save the text style</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save text style</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text style saved</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not rename the text style</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text style renamed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not delete the text style</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text style deleted</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not export the text style</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text style exported</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not import the text style</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text style imported</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Resize text</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2201,6 +2245,14 @@
     </message>
     <message>
         <source>Not supported</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Add-ons</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5486,7 +5538,63 @@ If playback stutters, try another.</source>
 <context>
     <name>TextAssetsTab</name>
     <message>
+        <source>Drift text style (*.drifttextstyle)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import text style</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export text style</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Click a style to add text at the playhead. Double-click it on the preview to edit.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>My styles</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import a text style…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Style some text, then use “Save style…” in the properties Text tab to keep it here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Style options</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rename…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Built-in</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rename text style</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete text style</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove “%1” from your saved styles? Clips already using it keep their look.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -5502,6 +5610,22 @@ If playback stutters, try another.</source>
     </message>
     <message>
         <source>Style pack</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save style…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save this text&apos;s look as a reusable style</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save text style</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>My style %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5973,9 +6097,32 @@ If playback stutters, try another.</source>
     </message>
 </context>
 <context>
+    <name>TextStyleNameDialog</name>
+    <message>
+        <source>Save</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>My style</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>TextStylePackPicker</name>
     <message>
         <source>Custom</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>My styles</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Built-in</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

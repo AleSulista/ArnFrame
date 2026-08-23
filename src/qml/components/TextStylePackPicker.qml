@@ -11,12 +11,30 @@ Item {
     signal packPicked(string packId)
 
     readonly property var presets: EditorState.textPresets()
+
+    // A QVariantList from an invokable is not reactive, so saving or deleting a style is picked
+    // up by poking this counter from the controller's signal.
+    property int userPresetsTick: 0
+    readonly property var userPresets: {
+        void root.userPresetsTick
+        return EditorState.userTextPresets()
+    }
+
+    Connections {
+        target: EditorState
+        function onUserTextPresetsChanged() { root.userPresetsTick++ }
+    }
+
     readonly property string displayLabel: {
         if (root.packId.length === 0)
             return qsTr("Custom")
-        for (let i = 0; i < root.presets.length; ++i) {
-            if (root.presets[i].id === root.packId)
-                return root.presets[i].label
+        for (let i = 0; i < root.userPresets.length; ++i) {
+            if (root.userPresets[i].id === root.packId)
+                return root.userPresets[i].label
+        }
+        for (let j = 0; j < root.presets.length; ++j) {
+            if (root.presets[j].id === root.packId)
+                return root.presets[j].label
         }
         return qsTr("Custom")
     }
@@ -93,6 +111,48 @@ Item {
         }
     }
 
+    Component {
+        id: packDelegate
+
+        Column {
+            id: packCard
+            required property var modelData
+            readonly property bool selected: root.packId === modelData.id
+            width: packColumn.cellWidth
+            spacing: 3
+
+            Text {
+                width: parent.width
+                text: packCard.modelData.label
+                elide: Text.ElideRight
+                color: packCard.selected ? Theme.primary : Theme.panelForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+            }
+
+            TextStylePackThumb {
+                width: parent.width
+                height: Math.round(width * 0.48)
+                presetId: packCard.modelData.id
+                selected: packCard.selected
+                hovered: packHover.hovered
+
+                HoverHandler {
+                    id: packHover
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        root.packPicked(packCard.modelData.id)
+                        popup.close()
+                    }
+                }
+            }
+        }
+    }
+
     Popup {
         id: popup
         y: root.height + 2
@@ -111,55 +171,61 @@ Item {
             id: flick
             clip: true
             implicitWidth: popup.width - popup.padding * 2
-            implicitHeight: Math.min(320, packGrid.height)
-            contentHeight: packGrid.height
+            implicitHeight: Math.min(320, packColumn.height)
+            contentHeight: packColumn.height
             ScrollBar.vertical: AppScrollBar { }
 
-            Grid {
-                id: packGrid
+            Column {
+                id: packColumn
                 width: flick.width
-                columns: 2
                 spacing: 8
-                readonly property real cellWidth: (width - spacing * (columns - 1)) / columns
+                // Both grids are the same shape, so the cell size is computed once here rather
+                // than per grid — the shared delegate has one thing to bind to.
+                readonly property int columns: 2
+                readonly property real gridSpacing: 8
+                readonly property real cellWidth:
+                    (width - gridSpacing * (columns - 1)) / columns
 
-                Repeater {
-                    model: root.presets
-                    delegate: Column {
-                        id: packCard
-                        required property var modelData
-                        readonly property bool selected: root.packId === modelData.id
-                        width: packGrid.cellWidth
-                        spacing: 3
+                Text {
+                    width: parent.width
+                    visible: root.userPresets.length > 0
+                    text: qsTr("My styles")
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                }
 
-                        Text {
-                            width: parent.width
-                            text: packCard.modelData.label
-                            elide: Text.ElideRight
-                            color: packCard.selected ? Theme.primary : Theme.panelForeground
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeXs
-                        }
+                Grid {
+                    id: userGrid
+                    width: parent.width
+                    visible: root.userPresets.length > 0
+                    columns: packColumn.columns
+                    spacing: packColumn.gridSpacing
 
-                        TextStylePackThumb {
-                            width: parent.width
-                            height: Math.round(width * 0.48)
-                            presetId: packCard.modelData.id
-                            selected: packCard.selected
-                            hovered: packHover.hovered
+                    Repeater {
+                        model: root.userPresets
+                        delegate: packDelegate
+                    }
+                }
 
-                            HoverHandler {
-                                id: packHover
-                            }
+                Text {
+                    width: parent.width
+                    visible: root.userPresets.length > 0
+                    text: qsTr("Built-in")
+                    color: Theme.mutedForeground
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeXs
+                }
 
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    root.packPicked(packCard.modelData.id)
-                                    popup.close()
-                                }
-                            }
-                        }
+                Grid {
+                    id: packGrid
+                    width: parent.width
+                    columns: packColumn.columns
+                    spacing: packColumn.gridSpacing
+
+                    Repeater {
+                        model: root.presets
+                        delegate: packDelegate
                     }
                 }
             }

@@ -278,6 +278,8 @@ add_library(driftcore STATIC
     src/core/Transition.cpp
     src/core/TextStyle.h
     src/core/TextStyle.cpp
+    src/core/TextPresetStore.h
+    src/core/TextPresetStore.cpp
     src/core/ShapeStyle.h
     src/core/ShapeStyle.cpp
     src/core/ShapePath.h
@@ -653,6 +655,7 @@ qt_add_qml_module(drift
         src/qml/components/CollapsibleSection.qml
         src/qml/components/TextStylePackThumb.qml
         src/qml/components/TextStylePackPicker.qml
+        src/qml/components/TextStyleNameDialog.qml
         src/qml/components/EmojiPicker.qml
         src/qml/components/ThemedButton.qml
         src/qml/components/ThemedChip.qml

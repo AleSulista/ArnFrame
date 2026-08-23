@@ -358,6 +358,8 @@ QtObject {
         maximize: "maximize",
         minimize: "minimize",
         folder: "folder",
+        folderInput: "folder-input",
+        folderOutput: "folder-output",
         headphones: "headphones",
         type: "type",
         smile: "smile",

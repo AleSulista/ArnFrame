@@ -258,6 +258,17 @@ Item {
                                    id)
             }
 
+            ThemedButton {
+                width: parent.width
+                variant: "secondary"
+                glyph: Theme.icons.save
+                text: qsTr("Save style…")
+                tooltip: qsTr("Save this text's look as a reusable style")
+                onClicked: saveStyleDialog.openWith(qsTr("Save text style"),
+                                                    qsTr("My style %1")
+                                                        .arg(EditorState.userTextPresets().length + 1))
+            }
+
             Text {
                 text: qsTr("Font")
                 color: Theme.mutedForeground
@@ -1251,6 +1262,12 @@ Item {
         }
     }
 
+
+    TextStyleNameDialog {
+        id: saveStyleDialog
+        onSubmitted: name => EditorState.saveTextStyleAsPreset(EditorState.selectedTrack,
+                                                               EditorState.selectedClip, name)
+    }
 
     ColorDialog {
         id: styleColorDialog

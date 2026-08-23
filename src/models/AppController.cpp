@@ -7,6 +7,7 @@
 #include "core/ShapePath.h"
 #include "core/SubtitleCue.h"
 #include "core/SrtIO.h"
+#include "core/TextPresetStore.h"
 #include "core/TimelineOps.h"
 #include "core/Transition.h"
 #include "core/commands/ProjectCommands.h"
@@ -3422,7 +3423,7 @@ void AppController::addTextClip(const QString &text, double atSeconds, const QSt
     clip.srcIn = 0;
     clip.srcOut = drift::kTextClipDurationUs;
     if (!presetId.isEmpty()) {
-        if (const drift::TextStyle *preset = drift::textStyleForPresetId(presetId)) {
+        if (const std::optional<drift::TextStyle> preset = drift::textStyleForPresetId(presetId)) {
             clip.textStyle = *preset;
             clip.textStyle.packId = presetId;
         }
@@ -3467,7 +3468,7 @@ void AppController::addSubtitleClip(double atSeconds)
     clip.timelineDuration = drift::kSubtitleClipDurationUs;
     clip.srcIn = 0;
     clip.srcOut = drift::kSubtitleClipDurationUs;
-    if (const drift::TextStyle *preset = drift::textStyleForPresetId(QStringLiteral("subtitle")))
+    if (const std::optional<drift::TextStyle> preset = drift::textStyleForPresetId(QStringLiteral("subtitle")))
         clip.textStyle = *preset;
     applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
 
@@ -3526,7 +3527,7 @@ bool AppController::importSubtitleFile(const QUrl &url, double atSeconds)
     clip.srcOut = duration;
     clip.subtitleCues = cues;
     clip.name = drift::subtitleClipName(cues);
-    if (const drift::TextStyle *preset = drift::textStyleForPresetId(QStringLiteral("subtitle")))
+    if (const std::optional<drift::TextStyle> preset = drift::textStyleForPresetId(QStringLiteral("subtitle")))
         clip.textStyle = *preset;
     applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
 
@@ -6182,7 +6183,7 @@ void AppController::finalizeGeneratedSubtitles(drift::TimeUs timelineStart,
     clip.timelineDuration = timelineDuration;
     clip.srcIn = 0;
     clip.srcOut = timelineDuration;
-    if (const drift::TextStyle *preset = drift::textStyleForPresetId(QStringLiteral("subtitle")))
+    if (const std::optional<drift::TextStyle> preset = drift::textStyleForPresetId(QStringLiteral("subtitle")))
         clip.textStyle = *preset;
     applyDefaultVisualLayout(clip, m_project.width(), m_project.height());
     clip.subtitleCues = cues;
@@ -7399,7 +7400,7 @@ void AppController::applyTextPreset(int trackIndex, int clipIndex, const QString
     if (clip.type != drift::ClipType::Text && clip.type != drift::ClipType::Subtitle)
         return;
 
-    const drift::TextStyle *preset = drift::textStyleForPresetId(presetId);
+    const std::optional<drift::TextStyle> preset = drift::textStyleForPresetId(presetId);
     if (!preset)
         return;
 
@@ -7421,6 +7422,107 @@ QVariantList AppController::textPresets() const
         });
     }
     return out;
+}
+
+QVariantList AppController::userTextPresets() const
+{
+    QVariantList out;
+    for (const drift::TextPreset &preset : drift::TextPresetStore::instance().presets()) {
+        out.append(QVariantMap{
+            {QStringLiteral("id"), preset.id},
+            {QStringLiteral("label"), preset.label},
+            {QStringLiteral("style"), textStyleToMap(preset.style)},
+        });
+    }
+    return out;
+}
+
+QString AppController::saveTextStyleAsPreset(int trackIndex, int clipIndex, const QString &label)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return {};
+
+    drift::Track &track = m_project.tracks()[trackIndex];
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return {};
+
+    drift::Clip &clip = track.clips[clipIndex];
+    if (clip.type != drift::ClipType::Text && clip.type != drift::ClipType::Subtitle)
+        return {};
+
+    // The card's thumbnail draws this, so the user's own words make the preset recognisable at a
+    // glance. Long lines would render as a wall of tiny glyphs, hence the clamp.
+    QString sample = clip.textContent.simplified();
+    const QStringList words = sample.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (words.size() > 4)
+        sample = words.mid(0, 4).join(QLatin1Char(' '));
+
+    const QString presetId =
+        drift::TextPresetStore::instance().add(label, clip.textStyle, sample);
+    if (presetId.isEmpty()) {
+        setLastMessage(tr("Could not save the text style"), QStringLiteral("error"));
+        return {};
+    }
+    emit userTextPresetsChanged();
+
+    // Point the clip at the style it just minted, so the inspector's picker shows the new name
+    // instead of continuing to read "Custom".
+    const drift::Project before = m_project;
+    clip.textStyle.packId = presetId;
+    pushProjectEdit(before, tr("Save text style"));
+    finishEdit(tr("Text style saved"));
+    return presetId;
+}
+
+bool AppController::renameUserTextPreset(const QString &presetId, const QString &label)
+{
+    if (!drift::TextPresetStore::instance().rename(presetId, label)) {
+        setLastMessage(tr("Could not rename the text style"), QStringLiteral("error"));
+        return false;
+    }
+    emit userTextPresetsChanged();
+    setLastMessage(tr("Text style renamed"), QStringLiteral("success"));
+    return true;
+}
+
+bool AppController::deleteUserTextPreset(const QString &presetId)
+{
+    // Clips keep their style; only the library entry goes, so a dangling packId just reads as
+    // "Custom" in the picker.
+    if (!drift::TextPresetStore::instance().remove(presetId)) {
+        setLastMessage(tr("Could not delete the text style"), QStringLiteral("error"));
+        return false;
+    }
+    emit userTextPresetsChanged();
+    setLastMessage(tr("Text style deleted"), QStringLiteral("success"));
+    return true;
+}
+
+bool AppController::exportUserTextPreset(const QString &presetId, const QUrl &fileUrl)
+{
+    const QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : fileUrl.toString();
+    if (path.isEmpty())
+        return false;
+    if (!drift::TextPresetStore::instance().exportToFile(presetId, path)) {
+        setLastMessage(tr("Could not export the text style"), QStringLiteral("error"));
+        return false;
+    }
+    setLastMessage(tr("Text style exported"), QStringLiteral("success"));
+    return true;
+}
+
+bool AppController::importUserTextPreset(const QUrl &fileUrl)
+{
+    const QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : fileUrl.toString();
+    if (path.isEmpty())
+        return false;
+    if (drift::TextPresetStore::instance().importFromFile(path).isEmpty()) {
+        setLastMessage(tr("Could not import the text style"), QStringLiteral("error"));
+        return false;
+    }
+    emit userTextPresetsChanged();
+    setLastMessage(tr("Text style imported"), QStringLiteral("success"));
+    return true;
 }
 
 QVariantList AppController::fontCategories() const

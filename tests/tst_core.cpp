@@ -1,9 +1,12 @@
 #include <QtTest>
 
 #include <QColor>
+#include <QDir>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QSet>
+#include <QStandardPaths>
 
 #include "core/ClipAnimation.h"
 #include "core/Keyframe.h"
@@ -11,6 +14,7 @@
 #include "core/ShapePath.h"
 #include "core/SrtIO.h"
 #include "core/SubtitleCue.h"
+#include "core/TextPresetStore.h"
 #include "core/TimelineOps.h"
 #include "core/Transition.h"
 
@@ -48,6 +52,7 @@ private slots:
     void textStyleAndBlendModeSerialization();
     void legacyBoldMigratesToFontWeight();
     void textPresetsAreWellFormed();
+    void userTextPresetsRoundTrip();
     void karaokeWordIndexTracksTheCue();
     void shapeStyleSerialization();
     void legacyShapeStyleLoadsWithDefaults();
@@ -1043,7 +1048,7 @@ void CoreTest::textPresetsAreWellFormed()
         if (accent.highlight.enabled)
             QVERIFY(accent.highlight.color.isValid());
     }
-    QVERIFY(drift::textStyleForPresetId(QStringLiteral("nope")) == nullptr);
+    QVERIFY(!drift::textStyleForPresetId(QStringLiteral("nope")));
 }
 
 void CoreTest::karaokeWordIndexTracksTheCue()
@@ -2604,6 +2609,95 @@ void CoreTest::sliceClipToTimelineRangeKeepsSourceInSync()
     QVERIFY(!drift::sliceClipToTimelineRange(src, drift::secondsToUs(11.0), drift::secondsToUs(12.0),
                                              miss));
     QVERIFY(!drift::sliceClipToTimelineRange(src, 0, drift::kMinClipDurationUs / 2, miss));
+}
+
+// The user library shares TextStyle's project-file codec, so the risk is not the fields but the
+// wiring around them: the id namespace, disk round-trip, and that a saved pack stops claiming
+// whatever built-in it was edited from.
+void CoreTest::userTextPresetsRoundTrip()
+{
+    const QString org = QCoreApplication::organizationName();
+    const QString app = QCoreApplication::applicationName();
+    QStandardPaths::setTestModeEnabled(true);
+    QCoreApplication::setOrganizationName(QStringLiteral("DriftTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("DriftTestTextPresets"));
+
+    drift::TextPresetStore &store = drift::TextPresetStore::instance();
+    QFile::remove(drift::TextPresetStore::storePath());
+    store.reload();
+    QVERIFY(store.presets().isEmpty());
+
+    drift::TextStyle style;
+    style.fontFamily = QStringLiteral("Archivo Black");
+    style.pixelSize = 91;
+    style.fontWeight = 400;
+    style.glowEnabled = true;
+    style.glowColor = QColor(12, 240, 90);
+    style.underlineEnabled = true;
+    style.accent.rule = drift::WordAccentRule::EveryNth;
+    style.accent.n = 3;
+    style.accent.highlight.enabled = true;
+    style.animIn.kind = drift::TextAnimKind::Bounce;
+    style.animIn.unit = drift::TextAnimUnit::Word;
+    style.animIn.staggerUs = 33000;
+    style.animOut.kind = drift::TextAnimKind::Blur;
+    style.packId = QStringLiteral("impact"); // must not survive: a saved pack is its own style
+
+    drift::TextStyle expected = style;
+    expected.packId.clear();
+
+    const QString id = store.add(QStringLiteral("  Neon punch  "), style,
+                                 QStringLiteral("Hello there"));
+    QVERIFY(drift::isUserTextPresetId(id));
+    QCOMPARE(store.presets().size(), 1);
+    QCOMPARE(store.presets().first().label, QStringLiteral("Neon punch"));
+    QVERIFY(store.add(QStringLiteral("   "), style, QStringLiteral("x")).isEmpty());
+
+    // Resolvable through the shared entry point the preview provider and applyTextPreset use,
+    // while staying out of the built-in catalog.
+    QVERIFY(drift::textPresetForId(id).has_value());
+    QCOMPARE(drift::textStyleForPresetId(id)->pixelSize, 91);
+    for (const drift::TextPreset &builtin : drift::textPresets())
+        QVERIFY(builtin.id != id);
+
+    store.reload();
+    QCOMPARE(store.presets().size(), 1);
+    const drift::TextPreset reloaded = store.presets().first();
+    QCOMPARE(reloaded.id, id);
+    QCOMPARE(reloaded.sampleText, QStringLiteral("Hello there"));
+    QVERIFY(reloaded.style.packId.isEmpty());
+    QVERIFY(drift::textStyleToJson(reloaded.style) == drift::textStyleToJson(expected));
+
+    QVERIFY(store.rename(id, QStringLiteral("Renamed")));
+    QVERIFY(!store.rename(QStringLiteral("user:missing"), QStringLiteral("x")));
+    QVERIFY(!store.rename(id, QStringLiteral("   ")));
+    store.reload();
+    QCOMPARE(store.presets().first().label, QStringLiteral("Renamed"));
+
+    const QString exportPath =
+        QDir(QDir::tempPath()).filePath(QStringLiteral("drift-style-test.drifttextstyle"));
+    QFile::remove(exportPath);
+    QVERIFY(store.exportToFile(id, exportPath));
+    const QString importedId = store.importFromFile(exportPath);
+    QVERIFY(!importedId.isEmpty());
+    QVERIFY(importedId != id); // a shared file never overwrites an existing entry
+    QCOMPARE(store.presets().size(), 2);
+    QVERIFY(drift::textStyleToJson(store.presetForId(importedId)->style)
+            == drift::textStyleToJson(expected));
+    QFile::remove(exportPath);
+
+    QVERIFY(store.remove(id));
+    QVERIFY(!store.remove(id));
+    store.reload();
+    QCOMPARE(store.presets().size(), 1);
+    QCOMPARE(store.presets().first().id, importedId);
+    QVERIFY(!drift::textPresetForId(id));
+
+    QFile::remove(drift::TextPresetStore::storePath());
+    store.reload();
+    QCoreApplication::setOrganizationName(org);
+    QCoreApplication::setApplicationName(app);
+    QStandardPaths::setTestModeEnabled(false);
 }
 
 QTEST_MAIN(CoreTest)
