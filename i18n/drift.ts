@@ -1580,6 +1580,14 @@
         </translation>
     </message>
     <message>
+        <source>Couldn’t write %1: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project JSON saved</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Exporting…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2331,6 +2339,14 @@
     </message>
     <message>
         <source>Save Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Project JSON</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>JSON document (*.json)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -4157,6 +4173,10 @@ If playback stutters, try another.</source>
     </message>
     <message>
         <source>Save with media…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save as JSON…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

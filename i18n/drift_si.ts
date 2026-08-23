@@ -1580,6 +1580,14 @@
         </translation>
     </message>
     <message>
+        <source>Couldn’t write %1: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project JSON saved</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Exporting…</source>
         <translation>නිර්යාත කරමින්…</translation>
     </message>
@@ -2332,6 +2340,14 @@
     <message>
         <source>Save Project</source>
         <translation>ව්‍යාපෘතිය සුරකින්න</translation>
+    </message>
+    <message>
+        <source>Save Project JSON</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>JSON document (*.json)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Save Shareable Copy</source>
@@ -4161,6 +4177,10 @@ If playback stutters, try another.</source>
     <message>
         <source>Save with media…</source>
         <translation>මාධ්‍ය සමඟ සුරකින්න…</translation>
+    </message>
+    <message>
+        <source>Save as JSON…</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Project properties…</source>
