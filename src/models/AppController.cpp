@@ -11473,6 +11473,31 @@ void AppController::saveProject(const QUrl &url)
     setLastMessage(tr("Project saved"), QStringLiteral("success"));
 }
 
+void AppController::saveProjectJson(const QUrl &url)
+{
+    const QString path = url.toLocalFile();
+    if (path.isEmpty()) {
+        setLastMessage(tr("That save location isn’t valid"), QStringLiteral("error"));
+        return;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        setLastMessage(tr("Couldn’t write %1: %2").arg(QFileInfo(path).fileName(),
+                                                       file.errorString()),
+                       QStringLiteral("error"));
+        return;
+    }
+    const QByteArray json = serializeProjectJson();
+    if (file.write(json) != json.size() || !file.flush()) {
+        setLastMessage(tr("Couldn’t write %1: %2").arg(QFileInfo(path).fileName(),
+                                                       file.errorString()),
+                       QStringLiteral("error"));
+        return;
+    }
+    setLastMessage(tr("Project JSON saved"), QStringLiteral("success"));
+}
+
 void AppController::packageProject(const QUrl &url)
 {
     const QString path = url.toLocalFile();

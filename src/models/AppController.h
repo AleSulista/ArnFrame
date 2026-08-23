@@ -891,6 +891,10 @@ public:
     Q_INVOKABLE void saveProject(const QUrl &url);
     // Same container, every source asset embedded. Runs off the GUI thread — it copies the media.
     Q_INVOKABLE void packageProject(const QUrl &url);
+    // Export-only: the raw document JSON, no container and no media. Leaves the open project's
+    // path, dirty flag and recents alone — the .drift stays the project of record, and this cannot
+    // be reopened through loadProject().
+    Q_INVOKABLE void saveProjectJson(const QUrl &url);
     Q_INVOKABLE void cancelPackage();
     Q_INVOKABLE void loadProject(const QUrl &url);
     Q_INVOKABLE void newProject();

@@ -67,6 +67,17 @@ Rectangle {
         return !EditorState.hasUnsavedChanges
     }
 
+    // Raw document JSON: an export, not a project file. Always asks for a path and leaves the
+    // current .drift association untouched.
+    function saveProjectJson() {
+        var url = FileDialogs.saveFile(qsTr("Save Project JSON"),
+                                       [qsTr("JSON document (*.json)")],
+                                       EditorState.projectName, "json", "",
+                                       ["application/json"])
+        if (url != "")
+            EditorState.saveProjectJson(url)
+    }
+
     // Save As with every source file copied in, so the result opens on a machine that has none of
     // the media. Always asks for a path: it is a different artefact from the working save.
     function packageProject() {
@@ -246,6 +257,7 @@ Rectangle {
                     onNewProjectRequested: root.requestNewProject()
                     onOpenRecentRequested: (path) => root.openRecent(path)
                     onPackageRequested: root.packageProject()
+                    onSaveJsonRequested: root.saveProjectJson()
                     onPropertiesRequested: projectPropertiesDialog.openDialog()
                 }
             }
