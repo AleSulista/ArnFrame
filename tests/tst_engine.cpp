@@ -29,6 +29,7 @@
 #include "engine/ClipReader.h"
 #include "engine/DebugReport.h"
 #include "engine/Exporter.h"
+#include "engine/OrtRuntime.h"
 #include "engine/CompositorFrameHistory.h"
 #include "engine/AudioEffectCatalog.h"
 #include "engine/audio/AudioEffectFactory.h"
@@ -1941,6 +1942,25 @@ void EngineTest::debugReportListsCommonCodecs()
             sawGpu = true;
     }
     QVERIFY(sawGpu);
+
+    QVERIFY(info.contains(QStringLiteral("hints")));
+    const QVariantList hints = info.value(QStringLiteral("hints")).toList();
+    QStringList hintIds;
+    for (const QVariant &entry : hints) {
+        const QVariantMap row = entry.toMap();
+        QVERIFY(row.contains(QStringLiteral("id")));
+        QVERIFY(row.contains(QStringLiteral("title")));
+        QVERIFY(row.contains(QStringLiteral("detail")));
+        hintIds.append(row.value(QStringLiteral("id")).toString());
+    }
+    if (info.value(QStringLiteral("package")).toString() != QLatin1String("Flatpak")) {
+        QVERIFY(!hintIds.contains(QStringLiteral("codecs-extra")));
+        QVERIFY(!hintIds.contains(QStringLiteral("vaapi-nvidia")));
+    }
+    if (drift::ort::available())
+        QVERIFY(!hintIds.contains(QStringLiteral("onnxruntime")));
+    else
+        QVERIFY(hintIds.contains(QStringLiteral("onnxruntime")));
 
     const QString text = DebugReport::formatPlainText(info);
     QVERIFY(text.contains(QStringLiteral("H264")));

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Window
 import Drift
 
 // Header bug button. Decoder/encoder capability plus host facts to paste into a GitHub issue.
@@ -11,7 +12,7 @@ ThemedDialog {
     acceptText: qsTr("Copy report")
     rejectText: qsTr("Close")
 
-    property var info: ({ codecs: [], encoders: [], system: [] })
+    property var info: ({ codecs: [], encoders: [], system: [], hints: [] })
 
     onOpened: info = EditorState.debugInfo()
     onAccepted: {
@@ -256,6 +257,82 @@ ThemedDialog {
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Column {
+                width: parent.width
+                spacing: Theme.spacingLg
+                visible: (root.info.hints || []).length > 0
+                height: visible ? implicitHeight : 0
+
+                ThemedLabel {
+                    width: parent.width
+                    size: "sm"
+                    tone: "default"
+                    text: qsTr("Checks")
+                    font.weight: Font.Medium
+                }
+
+                Repeater {
+                    model: root.info.hints || []
+
+                    Rectangle {
+                        required property var modelData
+
+                        width: parent.width
+                        implicitHeight: hintCol.height + Theme.spacingLg * 2
+                        radius: Theme.radiusSm
+                        color: "transparent"
+                        border.width: Theme.borderWidth
+                        border.color: Theme.panelBorder
+
+                        Column {
+                            id: hintCol
+                            x: Theme.spacingLg
+                            y: Theme.spacingLg
+                            width: parent.width - Theme.spacingLg * 2
+                            spacing: Theme.spacingSm
+
+                            ThemedLabel {
+                                width: parent.width
+                                size: "sm"
+                                tone: "default"
+                                font.weight: Font.Medium
+                                text: modelData.title || ""
+                            }
+
+                            ThemedLabel {
+                                width: parent.width
+                                size: "sm"
+                                text: modelData.detail || ""
+                            }
+
+                            ThemedLabel {
+                                width: parent.width
+                                size: "xs"
+                                tone: "default"
+                                visible: !!(modelData.command)
+                                height: visible ? implicitHeight : 0
+                                font.family: Theme.monoFontFamily
+                                wrapMode: Text.WrapAnywhere
+                                text: modelData.command || ""
+                            }
+
+                            ThemedButton {
+                                visible: modelData.action === "addons"
+                                height: visible ? implicitHeight : 0
+                                text: qsTr("Open Add-ons")
+                                variant: "secondary"
+                                onClicked: {
+                                    root.close()
+                                    if (typeof Window !== "undefined" && Window.window
+                                            && Window.window.openAddonManager)
+                                        Window.window.openAddonManager("onnxruntime")
                                 }
                             }
                         }

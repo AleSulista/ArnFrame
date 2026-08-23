@@ -2,6 +2,7 @@
 
 #include "ClipReader.h"
 #include "Exporter.h"
+#include "OrtRuntime.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -407,6 +408,35 @@ QString supportLabel(bool ok)
     return ok ? trReport("Supported") : trReport("Not supported");
 }
 
+bool flatpakExtensionMounted(const QString &subdir)
+{
+    static const char *const kTriplets[] = {"x86_64-linux-gnu", "aarch64-linux-gnu", "i386-linux-gnu"};
+    for (const char *triplet : kTriplets) {
+        if (QFile::exists(QStringLiteral("/usr/lib/%1/%2").arg(QLatin1String(triplet), subdir)))
+            return true;
+    }
+    return false;
+}
+
+bool gpuIsNvidia(const GpuAdapter &gpu)
+{
+    return gpu.vendorId == 0x10de || gpu.driver == QLatin1String("nvidia")
+           || gpu.vendor.compare(QLatin1String("NVIDIA"), Qt::CaseInsensitive) == 0;
+}
+
+QVariantMap hintRow(const QString &id, const QString &title, const QString &detail,
+                    const QString &command = {}, const QString &action = {})
+{
+    QVariantMap m{{QStringLiteral("id"), id},
+                  {QStringLiteral("title"), title},
+                  {QStringLiteral("detail"), detail}};
+    if (!command.isEmpty())
+        m.insert(QStringLiteral("command"), command);
+    if (!action.isEmpty())
+        m.insert(QStringLiteral("action"), action);
+    return m;
+}
+
 } // namespace
 
 QVariantMap DebugReport::collect()
@@ -533,14 +563,58 @@ QVariantMap DebugReport::collect()
     system.append(systemRow(trReport("FFmpeg"), QString::fromUtf8(av_version_info())));
     system.append(systemRow(trReport("VAAPI"),
                             vaapiOk ? trReport("Available") : trReport("Not available")));
+    const QList<drift::ort::RuntimeInfo> ortRuntimes = drift::ort::installedRuntimes();
+    if (ortRuntimes.isEmpty()) {
+        system.append(systemRow(trReport("ONNX Runtime"), trReport("Not installed")));
+    } else {
+        const drift::ort::RuntimeInfo &rt = ortRuntimes.first();
+        QString value = rt.variant;
+        if (!rt.version.isEmpty())
+            value = QStringLiteral("%1 %2").arg(rt.variant, rt.version);
+        system.append(systemRow(trReport("ONNX Runtime"), value));
+    }
     system.append(systemRow(trReport("Preview decode"), decodeModeLabel()));
     system.append(systemRow(trReport("Locale"), QLocale::system().name()));
     if (qEnvironmentVariableIsSet("DRIFT_NO_VAAPI"))
         system.append(systemRow(QStringLiteral("DRIFT_NO_VAAPI"), trReport("Set")));
 
+    QVariantList hints;
+    if (package == QLatin1String("Flatpak")) {
+        const bool hasX264 = findNamedEncoder(kH264Enc) != nullptr;
+        if (!flatpakExtensionMounted(QStringLiteral("codecs-extra")) && !hasX264) {
+            hints.append(hintRow(
+                QStringLiteral("codecs-extra"), trReport("Missing extra codecs"),
+                trReport("H.264 and H.265 encoding is missing from this Flatpak. Install the extra "
+                         "codecs extension, then restart Drift."),
+                QStringLiteral("flatpak install org.freedesktop.Platform.codecs-extra")));
+        }
+        bool nvidia = false;
+        for (const GpuAdapter &gpu : gpus) {
+            if (gpuIsNvidia(gpu)) {
+                nvidia = true;
+                break;
+            }
+        }
+        if (nvidia && !flatpakExtensionMounted(QStringLiteral("dri/nvidia-vaapi-driver"))) {
+            hints.append(hintRow(
+                QStringLiteral("vaapi-nvidia"), trReport("NVIDIA VAAPI driver not installed"),
+                trReport("Hardware decode and VAAPI encode on NVIDIA need the NVIDIA VAAPI "
+                         "extension. Install it, then restart Drift."),
+                QStringLiteral("flatpak install org.freedesktop.Platform.VAAPI.nvidia")));
+        }
+    }
+    if (ortRuntimes.isEmpty()) {
+        hints.append(hintRow(
+            QStringLiteral("onnxruntime"), trReport("AI engine not installed"),
+            trReport("Auto-subtitles, segmentation and face tracking need ONNX Runtime from "
+                     "Add-ons → Acceleration."),
+            {}, QStringLiteral("addons")));
+    }
+
     info.insert(QStringLiteral("codecs"), codecs);
     info.insert(QStringLiteral("encoders"), encoders);
     info.insert(QStringLiteral("system"), system);
+    info.insert(QStringLiteral("hints"), hints);
     info.insert(QStringLiteral("version"), QStringLiteral(DRIFT_VERSION));
     info.insert(QStringLiteral("package"), package);
     info.insert(QStringLiteral("vaapiAvailable"), vaapiOk);
@@ -585,5 +659,19 @@ QString DebugReport::formatPlainText(const QVariantMap &info)
     appendCodecTable(QStringLiteral("Video encoders"), QStringLiteral("Software"), QStringLiteral("Hardware"),
                      QStringLiteral("encoders"), QStringLiteral("softwareEncoder"),
                      QStringLiteral("hardwareEncoder"));
+
+    const QVariantList hints = info.value(QStringLiteral("hints")).toList();
+    if (!hints.isEmpty()) {
+        text += QStringLiteral("\n## Hints\n");
+        for (const QVariant &entry : hints) {
+            const QVariantMap row = entry.toMap();
+            text += QStringLiteral("- %1: %2\n")
+                        .arg(row.value(QStringLiteral("title")).toString(),
+                             row.value(QStringLiteral("detail")).toString());
+            const QString command = row.value(QStringLiteral("command")).toString();
+            if (!command.isEmpty())
+                text += QStringLiteral("  `%1`\n").arg(command);
+        }
+    }
     return text;
 }
