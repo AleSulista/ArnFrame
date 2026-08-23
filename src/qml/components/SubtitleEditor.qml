@@ -194,20 +194,41 @@ Item {
         })
     }
 
-    // Push cue values into the fixed editor fields without fighting an active edit.
-    function syncEditor() {
-        if (!cueText.activeFocus)
-            cueText.text = selectedCue ? selectedCue.text : ""
-        if (!startField.activeFocus)
-            startField.text = selectedCue ? formatCueTime(selectedCue.start) : ""
-        if (!endField.activeFocus)
-            endField.text = selectedCue ? formatCueTime(selectedCue.end) : ""
+    // Both editor refreshes run from change handlers on what `selectedCue` is derived from, and a
+    // derived binding is not guaranteed to have been re-evaluated by then — reading it there hands
+    // back the previously selected cue. Resolve the cue from the source of truth instead.
+    function currentCue() {
+        const i = EditorState.selectedSubtitleCue
+        return (i >= 0 && i < cues.length) ? cues[i] : null
     }
 
-    // While playing, the edited cue tracks the playhead. When paused it only changes on
+    // Refresh the fields from the model after the cue list was rebuilt elsewhere (a start/end
+    // commit, a timeline-lane drag) without fighting an edit in progress.
+    function syncEditor() {
+        const cue = currentCue()
+        if (!cueText.activeFocus)
+            cueText.text = cue ? cue.text : ""
+        if (!startField.activeFocus)
+            startField.text = cue ? formatCueTime(cue.start) : ""
+        if (!endField.activeFocus)
+            endField.text = cue ? formatCueTime(cue.end) : ""
+    }
+
+    // A different cue was picked: its values replace the fields outright. Clicking a row does
+    // not move focus out of the text box, so the guards in syncEditor would otherwise leave
+    // the previous cue's text sitting there. Anything typed and not applied is dropped.
+    function loadEditor() {
+        const cue = currentCue()
+        cueText.text = cue ? cue.text : ""
+        startField.text = cue ? formatCueTime(cue.start) : ""
+        endField.text = cue ? formatCueTime(cue.end) : ""
+    }
+
+    // While playing, the edited cue tracks the playhead — but not while the text box is being
+    // typed into, since following would replace what is in it. When paused it only changes on
     // an explicit click (side list or timeline lane) or when adding a cue.
     onActiveCueIndexChanged: {
-        if (EditorState.playing)
+        if (EditorState.playing && !cueText.activeFocus)
             EditorState.selectedSubtitleCue = root.activeCueIndex
     }
     onCuesChanged: {
@@ -215,18 +236,23 @@ Item {
             EditorState.selectedSubtitleCue = root.cues.length - 1
         syncEditor()
     }
-    onSelectedCueIndexChanged: syncEditor()
+    onSelectedCueIndexChanged: loadEditor()
 
     // Reset the editing selection only when a different clip is selected — not on every
     // cue edit (selectedClipData hands back a fresh object each time).
     function resetSelectionForClip() {
-        Qt.callLater(function () { EditorState.selectedSubtitleCue = root.activeCueIndex })
+        Qt.callLater(function () {
+            // loadEditor explicitly: a new clip whose active cue lands on the same index
+            // leaves selectedCueIndex unchanged, so nothing else would refresh the fields.
+            EditorState.selectedSubtitleCue = root.activeCueIndex
+            loadEditor()
+        })
     }
     onTrackIndexChanged: resetSelectionForClip()
     onClipIndexChanged: resetSelectionForClip()
     Component.onCompleted: {
         EditorState.selectedSubtitleCue = root.activeCueIndex
-        syncEditor()
+        loadEditor()
     }
 
     Connections {
