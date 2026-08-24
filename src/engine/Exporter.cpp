@@ -1703,7 +1703,11 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
 
         if (vdef->hw != HwBackend::None) {
             const AVHWDeviceType type = hwDeviceType(vdef->hw);
-            if (av_hwdevice_ctx_create(&hwDeviceCtx, type, nullptr, nullptr, 0) < 0) {
+            // deviceAvailable() first, not just for the answer: it is the only VAAPI probe
+            // that survives a host with no libva, where FFmpeg's stub asserts instead.
+            // A codec id restored from settings can name an encoder this machine cannot run.
+            if (!drift::hwaccel::deviceAvailable(type)
+                || av_hwdevice_ctx_create(&hwDeviceCtx, type, nullptr, nullptr, 0) < 0) {
                 error = QStringLiteral("Could not create the %1 encoder device.")
                             .arg(QLatin1String(hwVendorName(vdef->hw)));
                 goto cleanup;

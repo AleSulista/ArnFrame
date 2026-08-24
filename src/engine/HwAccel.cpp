@@ -11,7 +11,29 @@ extern "C" {
 #include <libavutil/log.h>
 }
 
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
+#include <dlfcn.h>
+#endif
+
 namespace drift::hwaccel {
+namespace {
+
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
+// FFmpeg reaches libva through implib-gen stubs whose generated dlopen failure path is
+// assert(0), so asking it about VAAPI on a host with no libva aborts the process instead
+// of reporting no device. Load the two the default-device path actually calls into first;
+// libva-x11 is not on that path, so its absence is fine. The handles are deliberately
+// never closed: FFmpeg dlopens the same sonames moments later, and unloading underneath
+// it would undo the check.
+bool vaapiLoadable()
+{
+    static const bool ok = dlopen("libva.so.2", RTLD_LAZY | RTLD_LOCAL) != nullptr
+        && dlopen("libva-drm.so.2", RTLD_LAZY | RTLD_LOCAL) != nullptr;
+    return ok;
+}
+#endif
+
+} // namespace
 
 QList<Backend> decodeBackendOrder()
 {
@@ -121,6 +143,10 @@ bool deviceAvailable(AVHWDeviceType type)
 {
     if (type == AV_HWDEVICE_TYPE_NONE)
         return false;
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
+    if (type == AV_HWDEVICE_TYPE_VAAPI && !vaapiLoadable())
+        return false;
+#endif
     static QMutex mutex;
     static QHash<int, bool> cache;
     QMutexLocker lock(&mutex);

@@ -127,10 +127,10 @@ jobs:
 
       # cmake is deliberately not installed from apt: the runner image already carries a newer one
       # on PATH and apt's would only add ambiguity.
-      # libva* are runtime, not build, deps: Qt Multimedia's FFmpeg backend reaches VA-API
-      # through implib-gen stubs whose generated dlopen failure path is assert(0), so any test
-      # that constructs a QMediaDevices SIGABRTs on a runner without them rather than falling
-      # back to software decode.
+      # libva* are runtime, not build, deps: FFmpeg reaches VA-API through implib-gen stubs
+      # whose generated dlopen failure path is assert(0). hwaccel::deviceAvailable() now
+      # guards that, so their absence no longer SIGABRTs — they stay so the tests probe VAAPI
+      # for real instead of taking the guard's early-out on every run.
       - name: Install native build dependencies
         timeout-minutes: 10
         env:
@@ -253,20 +253,26 @@ jobs:
           export EXTRA_QT_MODULES="waylandcompositor"
           #
           # The -l lines are libraries dlopened by soname, so linuxdeploy sees no NEEDED entry
-          # to follow: OpenSSL (Qt's ossl TLS backend — without it the AppImage ships the
-          # cert-only backend and addon downloads have no HTTPS) and libva (Qt Multimedia's
-          # FFmpeg backend reaches VA-API through implib-gen stubs whose generated dlopen
-          # failure path is assert(0), so a host without libva SIGABRTs rather than falling
-          # back to software decode).
+          # to follow: OpenSSL is Qt's ossl TLS backend — without it the AppImage ships the
+          # cert-only backend and addon downloads have no HTTPS.
+          #
+          # libva is deliberately NOT bundled, and must not be re-added. AppRun puts usr/lib on
+          # LD_LIBRARY_PATH, so a bundled libva.so.2 wins every dlopen and caps VA-API at
+          # whatever this runner image ships (22.04: libva 1.14). libva refuses a driver whose
+          # VA-API version is newer than its own, so that copy rejects the host's driver on any
+          # current distro and hardware decode silently disappears. Resolving from the host is
+          # the only version pairing that can be right.
+          #
+          # A host with no libva at all is handled in code, not here: FFmpeg reaches VA-API
+          # through implib-gen stubs whose generated dlopen failure path is assert(0), so
+          # hwaccel::deviceAvailable() dlopens libva.so.2 and libva-drm.so.2 itself before
+          # letting FFmpeg near VAAPI. See vaapiLoadable() in src/engine/HwAccel.cpp.
           ./linuxdeploy.AppImage --appdir AppDir --plugin qt --output appimage \
             -d flatpak/org.cutwire.Drift.desktop \
             -i flatpak/share/icons/hicolor/256x256/apps/org.cutwire.Drift.png \
             -e AppDir/usr/bin/drift \
             -l /usr/lib/x86_64-linux-gnu/libssl.so.3 \
-            -l /usr/lib/x86_64-linux-gnu/libcrypto.so.3 \
-            -l /usr/lib/x86_64-linux-gnu/libva.so.2 \
-            -l /usr/lib/x86_64-linux-gnu/libva-drm.so.2 \
-            -l /usr/lib/x86_64-linux-gnu/libva-x11.so.2
+            -l /usr/lib/x86_64-linux-gnu/libcrypto.so.3
           appimage="$(ls ./*.AppImage | grep -iv linuxdeploy | head -n 1)"
           mv "${appimage}" "dist/Drift-${{ inputs.version }}-x86_64.AppImage"
 
