@@ -28,11 +28,12 @@
                         {QStringLiteral("path"), stringProp(QStringLiteral("Absolute write path — strongly recommended; parent folders are created"))}},
                        {QStringLiteral("data")}) },
 
-        { "load_project", "project", "Open a .dcut project",
-          "Load a project file, replacing the open timeline. DISCARDS unsaved changes without warning "
-          "and clears the undo stack — save_project first if the current project matters (inspect.dirty "
-          "tells you).",
-          objectSchema({{QStringLiteral("path"), stringProp(QStringLiteral("Absolute .dcut path"))}},
+        { "load_project", "project", "Open a project file",
+          "Load a .drift bundle or a JSON document from Save as JSON, replacing the open timeline. "
+          "JSON is an import: inspect.path stays empty and save_project still needs a .drift path. "
+          "DISCARDS unsaved changes without warning and clears the undo stack — save_project first "
+          "if the current project matters (inspect.dirty tells you).",
+          objectSchema({{QStringLiteral("path"), stringProp(QStringLiteral("Absolute .drift or .json path"))}},
                        {QStringLiteral("path")}),
           false, true },
         { "new_project", "project", "Start empty",

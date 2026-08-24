@@ -45,6 +45,8 @@ private slots:
     void moveTrackReordersAndRemapsSelection();
     void addTrackInsertsEmptyTrackByType();
     void projectPersistenceRoundTrip();
+    void projectJsonExportImportRoundTrip();
+    void projectJsonImportRejectsGarbageAndLeavesTimeline();
     void newProjectClearsEverything();
     void projectSetupOnPristineProjectStaysClean();
     void darkModePreferencePersistsAcrossSessions();
@@ -456,6 +458,82 @@ void EditorStateTest::projectPersistenceRoundTrip()
     QVERIFY(state.trackMuted(0));
     QCOMPARE(state.bookmarks().size(), 1);
     QCOMPARE(state.mediaGridMode(), false);
+}
+
+void EditorStateTest::projectJsonExportImportRoundTrip()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("JsonRoundTrip"), 0.0);
+    state.setTrackMuted(0, true);
+    state.addBookmark(2.0, QStringLiteral("Mark"));
+    state.setMediaGridMode(false);
+    state.setProjectMetadata(QStringLiteral("FromJson"), QStringLiteral("Ada"), QString());
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString jsonPath = dir.filePath(QStringLiteral("project.json"));
+    const QString driftPath = dir.filePath(QStringLiteral("project.drift"));
+
+    state.saveProject(QUrl::fromLocalFile(driftPath));
+    QVERIFY(!state.hasUnsavedChanges());
+    QCOMPARE(state.currentProjectPath(), driftPath);
+
+    state.saveProjectJson(QUrl::fromLocalFile(jsonPath));
+    QVERIFY(QFileInfo::exists(jsonPath));
+    // Export leaves the .drift association and dirty flag alone.
+    QCOMPARE(state.currentProjectPath(), driftPath);
+    QVERIFY(!state.hasUnsavedChanges());
+    QCOMPARE(state.lastMessage(), QStringLiteral("Project JSON saved"));
+
+    state.newProject();
+    QVERIFY(state.currentProjectPath().isEmpty());
+
+    state.loadProjectJson(QUrl::fromLocalFile(jsonPath));
+    QCOMPARE(state.lastMessage(), QStringLiteral("Project JSON loaded"));
+    QCOMPARE(state.projectMetadata().value(QStringLiteral("title")).toString(),
+             QStringLiteral("FromJson"));
+    QCOMPARE(state.projectMetadata().value(QStringLiteral("author")).toString(),
+             QStringLiteral("Ada"));
+    QCOMPARE(state.tracks().size(), 2);
+    QVERIFY(state.trackMuted(0));
+    QCOMPARE(state.bookmarks().size(), 1);
+    QCOMPARE(state.mediaGridMode(), false);
+    // Import is not a project of record: Save must ask for a .drift path.
+    QVERIFY(state.currentProjectPath().isEmpty());
+    QVERIFY(state.hasUnsavedChanges());
+
+    // loadProject sniffs JSON so a dropped file, CLI arg or MCP load_project works.
+    state.newProject();
+    state.loadProject(QUrl::fromLocalFile(jsonPath));
+    QCOMPARE(state.lastMessage(), QStringLiteral("Project JSON loaded"));
+    QCOMPARE(state.projectMetadata().value(QStringLiteral("title")).toString(),
+             QStringLiteral("FromJson"));
+    QVERIFY(state.currentProjectPath().isEmpty());
+    QVERIFY(state.hasUnsavedChanges());
+}
+
+void EditorStateTest::projectJsonImportRejectsGarbageAndLeavesTimeline()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    state.addTextClip(QStringLiteral("KeepMe"), 0.0);
+    QCOMPARE(state.tracks().size(), 2);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("nope.json"));
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("{ \"hello\": true }");
+    }
+
+    state.loadProjectJson(QUrl::fromLocalFile(path));
+    QCOMPARE(state.lastMessageSeverity(), QStringLiteral("error"));
+    QCOMPARE(state.lastMessage(), QStringLiteral("This file isn’t a Drift project."));
+    QCOMPARE(state.tracks().size(), 2);
+    QCOMPARE(state.tracks().at(0).toMap().value(QStringLiteral("clips")).toList().size(), 1);
 }
 
 // resetToDefaultTimeline() only clears the tracks, so New Project used to keep the asset pool,

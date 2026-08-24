@@ -11511,6 +11511,68 @@ void AppController::saveProjectJson(const QUrl &url)
     setLastMessage(tr("Project JSON saved"), QStringLiteral("success"));
 }
 
+namespace {
+
+// saveProjectJson writes a JSON object; a .drift bundle starts with the "DRIFTPRJ" magic.
+// Peeking lets loadProject accept a dropped / CLI / MCP JSON path without relying on the suffix.
+bool fileStartsWithJsonObject(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    QByteArray head = file.read(64);
+    if (head.startsWith("\xEF\xBB\xBF"))
+        head.remove(0, 3);
+    for (int i = 0; i < head.size(); ++i) {
+        const char c = head.at(i);
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+            continue;
+        return c == '{';
+    }
+    return false;
+}
+
+} // namespace
+
+void AppController::loadProjectJson(const QUrl &url)
+{
+    const QString path = url.toLocalFile();
+    if (path.isEmpty()) {
+        setLastMessage(tr("That project location isn’t valid"), QStringLiteral("error"));
+        return;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        setLastMessage(tr("Couldn’t read %1: %2").arg(QFileInfo(path).fileName(),
+                                                      file.errorString()),
+                       QStringLiteral("error"));
+        return;
+    }
+
+    const QByteArray data = file.readAll();
+    file.close();
+
+    // Drop an in-flight bundle extract so it cannot land on top of this document.
+    ++m_loadGeneration;
+
+    QString error;
+    if (!applyProjectJson(data, &error)) {
+        setLastMessage(error, QStringLiteral("error"));
+        return;
+    }
+
+    // Referenced media only — a previous packaged project's extraction paths must not hitch a
+    // ride into the next Save.
+    m_embeddedSources.clear();
+    // Untitled: Save must not write a .drift bundle over this .json, and recents stay .drift.
+    setCurrentProjectPath(QString());
+    setDirty(true);
+    deleteRecoveryFile();
+    setProjectLayoutChosen(true);
+    setLastMessage(tr("Project JSON loaded"), QStringLiteral("success"));
+}
+
 void AppController::packageProject(const QUrl &url)
 {
     const QString path = url.toLocalFile();
@@ -11583,6 +11645,11 @@ void AppController::loadProject(const QUrl &url)
     const QString path = url.toLocalFile();
     if (path.isEmpty()) {
         setLastMessage(tr("That project location isn’t valid"), QStringLiteral("error"));
+        return;
+    }
+
+    if (fileStartsWithJsonObject(path)) {
+        loadProjectJson(url);
         return;
     }
 

@@ -892,9 +892,13 @@ public:
     // Same container, every source asset embedded. Runs off the GUI thread — it copies the media.
     Q_INVOKABLE void packageProject(const QUrl &url);
     // Export-only: the raw document JSON, no container and no media. Leaves the open project's
-    // path, dirty flag and recents alone — the .drift stays the project of record, and this cannot
-    // be reopened through loadProject().
+    // path, dirty flag and recents alone — the .drift stays the project of record.
     Q_INVOKABLE void saveProjectJson(const QUrl &url);
+    // Inverse of saveProjectJson. Replaces the open timeline from that document; media stays as
+    // referenced paths. Does not become the project of record (no recents, empty path, dirty) so
+    // Save cannot overwrite the .json with a .drift bundle. loadProject routes here when the file
+    // is JSON, so a dropped / CLI / MCP path works without a second entry point.
+    Q_INVOKABLE void loadProjectJson(const QUrl &url);
     Q_INVOKABLE void cancelPackage();
     Q_INVOKABLE void loadProject(const QUrl &url);
     Q_INVOKABLE void newProject();

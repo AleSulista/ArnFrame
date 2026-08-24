@@ -1596,6 +1596,14 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Couldn’t read %1: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project JSON loaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Exporting…</source>
         <translation>නිර්යාත කරමින්…</translation>
     </message>
@@ -2355,6 +2363,10 @@
     </message>
     <message>
         <source>JSON document (*.json)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Project JSON</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -4195,6 +4207,10 @@ If playback stutters, try another.</source>
     </message>
     <message>
         <source>Save as JSON…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open JSON…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
