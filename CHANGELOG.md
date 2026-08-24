@@ -16,6 +16,12 @@ The preview stayed black on NVIDIA under Wayland (and earlier builds fell back t
 
 ## ✨ Added
 
+### Feature [`2d98c74`](https://github.com/CutWire-Studios/Drift/commit/2d98c74) Effect presets, copy and paste
+
+An effect stack can be lifted off one clip and dropped on another. A clip’s timeline menu has **Copy effects** and **Paste effects**, and each card in the Effects inspector has a copy button of its own for taking a single effect. Keyframes are rescaled to the new clip’s length, so a fade authored over two seconds stays a fade across the whole of a six-second shot. Stacks travel as JSON on the system clipboard, so a copy also crosses to a second running Drift.
+
+**Save as preset…** — from the Effects inspector, one effect card, or the clip menu — keeps a stack under **My presets** at the top of the Effects assets tab. Click a preset to apply it to the selected clip; presets can be renamed, deleted, exported as `.drifteffects`, and imported, so they travel between machines. They are saved per user rather than per project, and stay visible whether or not the effect templates pack is installed. An effect belonging to an add-on that is no longer installed now says **(not installed)** on its card instead of rendering as an empty one.
+
 ### Feature (#70) Remember window geometry and panel sizes
 
 The editor now reopens the way you left it. Window size, position and whether it was maximized are remembered between sessions, as are the panel proportions you drag out — the preview/timeline split and the widths of the assets and properties panels. The portrait and landscape workspaces each keep their own arrangement. Window position is not restored on Wayland, where the compositor, not the app, decides where a window opens.
@@ -55,6 +61,10 @@ The subtitle editor scrolls and highlights the cue on screen as the playhead mov
 ### Feature (#60) Save project as JSON
 
 **Save as JSON…** in the project menu writes a human-readable `.json` copy of the open project. It is an export, not a substitute for the `.drift` project file: the current project path is left alone.
+
+### Feature (#88) Open a project from JSON
+
+**Open JSON…** in the project menu reads back a `.json` copy written by **Save as JSON…**. Opening sniffs the file rather than trusting its suffix, so a JSON project also opens when it arrives through the normal Open, the recent list, or the command line. It opens as an untitled project: **Save** asks for a path instead of writing a `.drift` bundle over the `.json`, and the document references its media rather than carrying embedded copies.
 
 ---
 
