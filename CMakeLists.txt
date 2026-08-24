@@ -343,6 +343,8 @@ add_library(driftengine STATIC
     src/engine/AddonRegistry.h
     src/engine/AddonRegistry.cpp
     src/engine/AddonSigningKey.h
+    src/engine/HwAccel.h
+    src/engine/HwAccel.cpp
     src/engine/MediaProbe.h
     src/engine/MediaProbe.cpp
     src/engine/MediaThumbnail.h

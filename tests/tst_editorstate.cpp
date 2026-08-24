@@ -14,6 +14,7 @@
 
 #include <QScopeGuard>
 
+#include "engine/HwAccel.h"
 #include "models/AppController.h"
 #include "models/AssetLibrary.h"
 #include "MulticamImageProvider.h"
@@ -47,6 +48,7 @@ private slots:
     void newProjectClearsEverything();
     void projectSetupOnPristineProjectStaysClean();
     void darkModePreferencePersistsAcrossSessions();
+    void decodeModePickerListsOnlyWorkingBackends();
     void exportFrameRatePersistsAcrossSessions();
     void lastExportSettingsNormalisesStringTypedValues();
     void textStyleBlendModeKeyframesAndEffects();
@@ -529,6 +531,62 @@ void EditorStateTest::projectSetupOnPristineProjectStaysClean()
     state.undo();
     QCOMPARE(state.projectWidth(), 1080);
     QCOMPARE(state.projectHeight(), 1920);
+}
+
+// The picker offers a backend only when its device opens here, and a mode naming one
+// this machine lacks has to fall back to Auto rather than to a choice that would never
+// engage — settings outlive the GPU they were written on.
+void EditorStateTest::decodeModePickerListsOnlyWorkingBackends()
+{
+    QStandardPaths::setTestModeEnabled(true);
+    const QString org = QCoreApplication::organizationName();
+    const QString app = QCoreApplication::applicationName();
+    QCoreApplication::setOrganizationName(QStringLiteral("DriftTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("DriftTest"));
+    const auto restore = qScopeGuard([&] {
+        QSettings().remove(QStringLiteral("preview/decodeMode"));
+        QCoreApplication::setOrganizationName(org);
+        QCoreApplication::setApplicationName(app);
+        QStandardPaths::setTestModeEnabled(false);
+    });
+    QSettings().remove(QStringLiteral("preview/decodeMode"));
+
+    AssetLibrary library;
+    AppController state(&library);
+    PlaybackEngine *playback = state.playback();
+
+    const QVariantList modes = playback->decodeModes();
+    QVERIFY(modes.size() >= 2);
+    QCOMPARE(modes.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("auto"));
+    QCOMPARE(modes.at(1).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("software"));
+
+    QStringList hardwareIds;
+    for (qsizetype i = 2; i < modes.size(); ++i) {
+        const QVariantMap row = modes.at(i).toMap();
+        const QString id = row.value(QStringLiteral("id")).toString();
+        QVERIFY(id.startsWith(QStringLiteral("hw:")));
+        QVERIFY(!row.value(QStringLiteral("label")).toString().isEmpty());
+        hardwareIds.append(id);
+    }
+    QCOMPARE(hardwareIds.size(), drift::hwaccel::availableDecodeBackends().size());
+
+    QCOMPARE(playback->decodeMode(), QStringLiteral("auto"));
+
+    playback->setDecodeMode(QStringLiteral("software"));
+    QCOMPARE(playback->decodeMode(), QStringLiteral("software"));
+
+    playback->setDecodeMode(QStringLiteral("hw:nosuchgpu"));
+    QCOMPARE(playback->decodeMode(), QStringLiteral("auto"));
+
+    // The previous two-state value resolves to whichever backend the probe would pick.
+    playback->setDecodeMode(QStringLiteral("hardware"));
+    QCOMPARE(playback->decodeMode(),
+             hardwareIds.isEmpty() ? QStringLiteral("auto") : hardwareIds.first());
+
+    for (const QString &id : std::as_const(hardwareIds)) {
+        playback->setDecodeMode(id);
+        QCOMPARE(playback->decodeMode(), id);
+    }
 }
 
 void EditorStateTest::darkModePreferencePersistsAcrossSessions()

@@ -29,6 +29,7 @@
 #include "engine/ClipReader.h"
 #include "engine/DebugReport.h"
 #include "engine/Exporter.h"
+#include "engine/HwAccel.h"
 #include "engine/OrtRuntime.h"
 #include "engine/CompositorFrameHistory.h"
 #include "engine/AudioEffectCatalog.h"
@@ -111,7 +112,8 @@ private slots:
     void clipReaderSequentialAndSeek();
     void clipReaderAppliesDisplayRotation_data();
     void clipReaderAppliesDisplayRotation();
-    void clipReaderPicksVaapiAv1Decoder();
+    void hwAccelBackendIdsRoundTrip();
+    void clipReaderPicksHwAv1Decoder();
     void clipReaderStaysOnSoftwareWhenHardwareDisabled();
     void clipReaderAutoKeepsCheapClipsOnSoftware();
     void debugReportListsCommonCodecs();
@@ -1791,38 +1793,50 @@ QString EngineTest::makeAv1ColorVideo(QTemporaryDir &dir)
     return {};
 }
 
-// libdav1d is the preferred AV1 decoder and has no VAAPI configs. Hardware decode
-// used to look only at that codec and stay on software — fine for 1080p, not for 4K.
-void EngineTest::clipReaderPicksVaapiAv1Decoder()
+// The picker and the saved setting both key off these ids, so a backend whose id does
+// not round-trip would silently become Auto on the next launch.
+void EngineTest::hwAccelBackendIdsRoundTrip()
+{
+    const QList<drift::hwaccel::Backend> order = drift::hwaccel::decodeBackendOrder();
+    QVERIFY(!order.isEmpty());
+    for (const drift::hwaccel::Backend backend : order) {
+        const QString id = drift::hwaccel::id(backend);
+        QVERIFY(!id.isEmpty());
+        QCOMPARE(drift::hwaccel::backendFromId(id), backend);
+        QVERIFY(drift::hwaccel::deviceType(backend) != AV_HWDEVICE_TYPE_NONE);
+        QVERIFY(qstrlen(drift::hwaccel::name(backend)) > 0);
+    }
+
+    // What a settings file written on another machine looks like here.
+    QCOMPARE(drift::hwaccel::backendFromId(QStringLiteral("nosuchgpu")),
+             drift::hwaccel::Backend::None);
+    QCOMPARE(drift::hwaccel::id(drift::hwaccel::Backend::None), QString());
+
+    for (const drift::hwaccel::Backend backend : drift::hwaccel::availableDecodeBackends())
+        QVERIFY(order.contains(backend));
+}
+
+// libdav1d is the preferred AV1 decoder and has no hardware configs at all. Hardware
+// decode used to look only at that codec and stay on software — fine for 1080p, not 4K.
+void EngineTest::clipReaderPicksHwAv1Decoder()
 {
     const AVCodec *preferred = avcodec_find_decoder(AV_CODEC_ID_AV1);
     if (!preferred)
         QSKIP("No AV1 decoder in this FFmpeg build");
 
-    auto decoderHasVaapi = [](const AVCodec *codec) {
-        for (int i = 0;; ++i) {
-            const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
-            if (!config)
-                return false;
-            if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)
-                && config->device_type == AV_HWDEVICE_TYPE_VAAPI)
-                return true;
-        }
-    };
-
-    if (decoderHasVaapi(preferred))
-        QSKIP("Default AV1 decoder already has VAAPI; nothing to distinguish");
-
-    bool anyVaapiAv1 = false;
-    void *iter = nullptr;
-    while (const AVCodec *codec = av_codec_iterate(&iter)) {
-        if (av_codec_is_decoder(codec) && codec->id == AV_CODEC_ID_AV1 && decoderHasVaapi(codec)) {
-            anyVaapiAv1 = true;
+    const AVCodec *hardware = nullptr;
+    for (const drift::hwaccel::Backend backend : drift::hwaccel::decodeBackendOrder()) {
+        const AVHWDeviceType type = drift::hwaccel::deviceType(backend);
+        if (!drift::hwaccel::deviceAvailable(type))
+            continue;
+        hardware = drift::hwaccel::findDecoder(AV_CODEC_ID_AV1, type, nullptr);
+        if (hardware)
             break;
-        }
     }
-    if (!anyVaapiAv1)
-        QSKIP("No VAAPI-capable AV1 decoder in this FFmpeg build");
+    if (!hardware)
+        QSKIP("No hardware-capable AV1 decoder available on this machine");
+    if (hardware == preferred)
+        QSKIP("Default AV1 decoder already drives hardware; nothing to distinguish");
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -1841,7 +1855,7 @@ void EngineTest::clipReaderPicksVaapiAv1Decoder()
         QSKIP("Could not decode the AV1 test clip");
 
     if (!reader.hardwareAccelActive())
-        QSKIP("VAAPI device could not be created on this machine");
+        QSKIP("Hardware device could not be created on this machine");
 
     QCOMPARE(reader.videoDecoderName(), QStringLiteral("av1"));
 
@@ -1917,7 +1931,7 @@ void EngineTest::debugReportListsCommonCodecs()
 
     QVERIFY(!info.value(QStringLiteral("system")).toList().isEmpty());
     QVERIFY(!info.value(QStringLiteral("package")).toString().isEmpty());
-    QVERIFY(info.contains(QStringLiteral("vaapiAvailable")));
+    QVERIFY(info.contains(QStringLiteral("hardwareDecodeAvailable")));
 
     const QVariantList encoders = info.value(QStringLiteral("encoders")).toList();
     QCOMPARE(encoders.size(), 5);
