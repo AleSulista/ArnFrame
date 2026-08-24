@@ -1263,7 +1263,7 @@ Item {
     }
 
 
-    TextStyleNameDialog {
+    NameDialog {
         id: saveStyleDialog
         onSubmitted: name => EditorState.saveTextStyleAsPreset(EditorState.selectedTrack,
                                                                EditorState.selectedClip, name)

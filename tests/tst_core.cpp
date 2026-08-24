@@ -14,6 +14,7 @@
 #include "core/ShapePath.h"
 #include "core/SrtIO.h"
 #include "core/SubtitleCue.h"
+#include "core/EffectStackStore.h"
 #include "core/TextPresetStore.h"
 #include "core/TimelineOps.h"
 #include "core/Transition.h"
@@ -53,6 +54,10 @@ private slots:
     void legacyBoldMigratesToFontWeight();
     void textPresetsAreWellFormed();
     void userTextPresetsRoundTrip();
+    void effectStackJsonRoundTrip();
+    void effectStackRejectsForeignPayloads();
+    void effectKeyframeRescaleIsProportional();
+    void userEffectPresetsRoundTrip();
     void karaokeWordIndexTracksTheCue();
     void shapeStyleSerialization();
     void legacyShapeStyleLoadsWithDefaults();
@@ -2694,6 +2699,223 @@ void CoreTest::userTextPresetsRoundTrip()
     QVERIFY(!drift::textPresetForId(id));
 
     QFile::remove(drift::TextPresetStore::storePath());
+    store.reload();
+    QCoreApplication::setOrganizationName(org);
+    QCoreApplication::setApplicationName(app);
+    QStandardPaths::setTestModeEnabled(false);
+}
+
+namespace {
+
+// A stack exercising everything the payload has to carry: two video effects, one of them
+// disabled, a keyframed param with hand-dragged tangents, a corner key, a hold key, a track
+// switched off, and an audio effect on the other side of the payload.
+drift::EffectStackPreset sampleStack()
+{
+    drift::EffectStackPreset stack;
+    stack.label = QStringLiteral("Neon grade");
+    stack.sourceDurationUs = 2000000;
+
+    drift::Effect blur;
+    blur.name = QStringLiteral("gblur");
+    blur.catalogId = QStringLiteral("blur.gaussian");
+    blur.parameters.insert(QStringLiteral("sigma"), 8.5);
+    blur.parameters.insert(QStringLiteral("wireframe"), true);
+    blur.parameters.insert(QStringLiteral("shade"), QStringLiteral("#b03048"));
+
+    drift::KeyframeTrack<double> sigma;
+    drift::Keyframe<double> first;
+    first.value = 0.0;
+    first.outDx = 500000.0;
+    first.outDy = 2.0;
+    first.corner = true;
+    sigma.setKeyframe(0, first);
+    drift::Keyframe<double> mid;
+    mid.value = 4.0;
+    mid.hold = true;
+    sigma.setKeyframe(1000000, mid);
+    drift::Keyframe<double> last;
+    last.value = 8.5;
+    last.inDx = -500000.0;
+    last.inDy = -2.0;
+    sigma.setKeyframe(2000000, last);
+    sigma.setEnabled(false);
+    blur.paramKeyframes.insert(QStringLiteral("sigma"), sigma);
+    stack.effects.append(blur);
+
+    drift::Effect contrast;
+    contrast.name = QStringLiteral("eq");
+    contrast.catalogId = QStringLiteral("adjust.contrast");
+    contrast.parameters.insert(QStringLiteral("contrast"), 1.4);
+    contrast.enabled = false;
+    stack.effects.append(contrast);
+
+    drift::Effect echo;
+    echo.name = QStringLiteral("Echo");
+    echo.catalogId = QStringLiteral("space.echo");
+    echo.parameters.insert(QStringLiteral("mix"), 0.35);
+    stack.audioEffects.append(echo);
+
+    return stack;
+}
+
+void compareEffects(const QList<drift::Effect> &got, const QList<drift::Effect> &want)
+{
+    QCOMPARE(got.size(), want.size());
+    for (int i = 0; i < got.size(); ++i) {
+        QCOMPARE(got.at(i).name, want.at(i).name);
+        QCOMPARE(got.at(i).catalogId, want.at(i).catalogId);
+        QCOMPARE(got.at(i).enabled, want.at(i).enabled);
+        QCOMPARE(got.at(i).parameters, want.at(i).parameters);
+
+        const auto &gotTracks = got.at(i).paramKeyframes;
+        const auto &wantTracks = want.at(i).paramKeyframes;
+        QCOMPARE(gotTracks.keys(), wantTracks.keys());
+        for (auto it = wantTracks.constBegin(); it != wantTracks.constEnd(); ++it) {
+            const drift::KeyframeTrack<double> &g = gotTracks.value(it.key());
+            QCOMPARE(g.enabled(), it.value().enabled());
+            QCOMPARE(g.keyframes().keys(), it.value().keyframes().keys());
+            for (auto k = it.value().keyframes().constBegin();
+                 k != it.value().keyframes().constEnd(); ++k) {
+                QVERIFY(g.keyframes().value(k.key()) == k.value());
+            }
+        }
+    }
+}
+
+} // namespace
+
+// The payload is written to the system clipboard, exported to a file and stored in the library, so
+// everything a user tuned has to survive a trip through JSON unchanged.
+void CoreTest::effectStackJsonRoundTrip()
+{
+    const drift::EffectStackPreset stack = sampleStack();
+    const QJsonObject object = drift::effectStackToJson(stack);
+
+    QCOMPARE(object.value(QStringLiteral("drift")).toString(), QStringLiteral("effectStack"));
+    QCOMPARE(object.value(QStringLiteral("version")).toInt(), 1);
+    // An export carries no library id; only a stored preset does.
+    QVERIFY(!object.contains(QStringLiteral("id")));
+
+    const QByteArray json = QJsonDocument(object).toJson(QJsonDocument::Compact);
+    const drift::EffectStackPreset back =
+        drift::effectStackFromJson(QJsonDocument::fromJson(json).object());
+
+    QCOMPARE(back.label, stack.label);
+    QCOMPARE(back.sourceDurationUs, stack.sourceDurationUs);
+    compareEffects(back.effects, stack.effects);
+    compareEffects(back.audioEffects, stack.audioEffects);
+}
+
+// The marker check is what makes it safe to auto-detect a paste off the system clipboard, which is
+// shared with every other application and usually holds prose. It must not regress.
+void CoreTest::effectStackRejectsForeignPayloads()
+{
+    QVERIFY(drift::effectStackFromJson(QJsonObject{}).isEmpty());
+
+    QJsonObject stripped = drift::effectStackToJson(sampleStack());
+    QVERIFY(!drift::effectStackFromJson(stripped).isEmpty()); // control
+    stripped.remove(QStringLiteral("drift"));
+    QVERIFY(drift::effectStackFromJson(stripped).isEmpty());
+
+    // A payload from a future build may carry fields this one would silently drop; pasting half a
+    // stack is worse than pasting none.
+    QJsonObject newer = drift::effectStackToJson(sampleStack());
+    newer.insert(QStringLiteral("version"), 99);
+    QVERIFY(drift::effectStackFromJson(newer).isEmpty());
+}
+
+void CoreTest::effectKeyframeRescaleIsProportional()
+{
+    const drift::EffectStackPreset stack = sampleStack();
+
+    QList<drift::Effect> effects = stack.effects;
+    drift::rescaleEffectKeyframes(effects, 2000000, 6000000);
+    const drift::KeyframeTrack<double> &track =
+        effects.first().paramKeyframes.value(QStringLiteral("sigma"));
+
+    QCOMPARE(track.keyframes().keys(), (QList<drift::TimeUs>{0, 3000000, 6000000}));
+    QCOMPARE(track.enabled(), false); // a track switched off must stay switched off
+
+    // dx is microseconds on the same axis as the key time and scales with it; dy is in the
+    // parameter's own units and must not move, or every ease flattens or exaggerates.
+    const drift::Keyframe<double> first = track.keyframes().value(0);
+    QCOMPARE(first.outDx, 1500000.0);
+    QCOMPARE(first.outDy, 2.0);
+    QCOMPARE(first.value, 0.0);
+    QVERIFY(first.corner);
+    QVERIFY(track.keyframes().value(3000000).hold);
+    const drift::Keyframe<double> last = track.keyframes().value(6000000);
+    QCOMPARE(last.inDx, -1500000.0);
+    QCOMPARE(last.inDy, -2.0);
+
+    // Degenerate and identity cases leave the stack alone.
+    for (const QPair<drift::TimeUs, drift::TimeUs> &pair :
+         QList<QPair<drift::TimeUs, drift::TimeUs>>{{0, 4000000}, {2000000, 0}, {2000000, 2000000}}) {
+        QList<drift::Effect> untouched = stack.effects;
+        drift::rescaleEffectKeyframes(untouched, pair.first, pair.second);
+        compareEffects(untouched, stack.effects);
+    }
+
+    // A key past the source duration scales past the target rather than being clamped, matching
+    // how a trim leaves keys sitting beyond the new edge.
+    QList<drift::Effect> overhang = stack.effects;
+    drift::rescaleEffectKeyframes(overhang, 1000000, 2000000);
+    QCOMPARE(overhang.first().paramKeyframes.value(QStringLiteral("sigma")).keyframes().lastKey(),
+             drift::TimeUs{4000000});
+}
+
+void CoreTest::userEffectPresetsRoundTrip()
+{
+    const QString org = QCoreApplication::organizationName();
+    const QString app = QCoreApplication::applicationName();
+    QStandardPaths::setTestModeEnabled(true);
+    QCoreApplication::setOrganizationName(QStringLiteral("DriftTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("DriftTestEffectPresets"));
+
+    drift::EffectStackStore &store = drift::EffectStackStore::instance();
+    QFile::remove(drift::EffectStackStore::storePath());
+    store.reload();
+    QVERIFY(store.presets().isEmpty());
+
+    const drift::EffectStackPreset stack = sampleStack();
+    QVERIFY(store.add(QStringLiteral("   "), stack).isEmpty());       // blank label
+    QVERIFY(store.add(QStringLiteral("Empty"), {}).isEmpty());        // nothing to save
+
+    const QString id = store.add(QStringLiteral("  Neon grade  "), stack);
+    QVERIFY(!id.isEmpty());
+    QVERIFY(drift::isUserEffectPresetId(id));
+
+    store.reload();
+    QCOMPARE(store.presets().size(), 1);
+    const drift::EffectStackPreset stored = store.presets().first();
+    QCOMPARE(stored.label, QStringLiteral("Neon grade")); // trimmed
+    QCOMPARE(stored.sourceDurationUs, stack.sourceDurationUs);
+    compareEffects(stored.effects, stack.effects);
+    compareEffects(stored.audioEffects, stack.audioEffects);
+
+    QVERIFY(store.rename(id, QStringLiteral("Neon night")));
+    QVERIFY(!store.rename(QStringLiteral("user:nope"), QStringLiteral("Nothing")));
+    QCOMPARE(store.presetForId(id)->label, QStringLiteral("Neon night"));
+
+    // Re-importing your own export adds a copy rather than clobbering the original.
+    const QString path = QDir(QDir::tempPath()).filePath(QStringLiteral("drift-stack.json"));
+    QFile::remove(path);
+    QVERIFY(store.exportToFile(id, path));
+    const QString importedId = store.importFromFile(path);
+    QVERIFY(!importedId.isEmpty());
+    QVERIFY(importedId != id);
+    QCOMPARE(store.presets().size(), 2);
+    compareEffects(store.presetForId(importedId)->effects, stack.effects);
+    QFile::remove(path);
+
+    QVERIFY(store.remove(id));
+    QVERIFY(!store.remove(id));
+    store.reload();
+    QCOMPARE(store.presets().size(), 1);
+    QCOMPARE(store.presets().first().id, importedId);
+
+    QFile::remove(drift::EffectStackStore::storePath());
     store.reload();
     QCoreApplication::setOrganizationName(org);
     QCoreApplication::setApplicationName(app);

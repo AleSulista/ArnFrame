@@ -3,6 +3,9 @@
 #include "Keyframe.h"
 #include "Time.h"
 
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QList>
 #include <QMap>
 #include <QString>
 #include <QVariant>
@@ -37,5 +40,17 @@ struct Effect
     // A copy with every animated param baked down to its value at clipTimeUs.
     Effect resolvedAt(TimeUs clipTimeUs) const;
 };
+
+QJsonObject keyframesToJson(const KeyframeTrack<double> &track);
+// Also migrates the pre-tangent "interpolation" field older projects carry.
+KeyframeTrack<double> keyframesFromJson(const QJsonObject &object);
+
+QJsonArray effectsToJson(const QList<Effect> &effects);
+QList<Effect> effectsFromJson(const QJsonArray &array);
+
+// Moves every keyframe on `effects` off a clip of `fromDurationUs` and onto one of
+// `toDurationUs`, keeping each key at the same fraction of the clip. This is what lets a stack
+// copied from a two-second shot read the same way on a six-second one.
+void rescaleEffectKeyframes(QList<Effect> &effects, TimeUs fromDurationUs, TimeUs toDurationUs);
 
 } // namespace drift

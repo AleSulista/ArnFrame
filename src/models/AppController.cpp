@@ -1196,9 +1196,13 @@ QVariantMap effectToMap(const drift::Effect &effect, int effectIndex, drift::Tim
     }
     return {
         {QStringLiteral("catalogId"), effect.catalogId},
-        {QStringLiteral("label"), def ? def->meta.displayName : effect.name},
+        // Compositor-only effects carry no filter name, so an uninstalled one would label itself
+        // with an empty string; the catalog id is at least the name the user has to go install.
+        {QStringLiteral("label"),
+         def ? def->meta.displayName : (effect.name.isEmpty() ? effect.catalogId : effect.name)},
         {QStringLiteral("params"), params},
         {QStringLiteral("compositorOnly"), def ? def->meta.compositorOnly : false},
+        {QStringLiteral("missing"), def == nullptr},
         {QStringLiteral("enabled"), effect.enabled},
     };
 }
@@ -1261,6 +1265,8 @@ void remapKeyframeTrack(drift::KeyframeTrack<T> &dst, const drift::KeyframeTrack
 
     const drift::TimeUs span = from.srcOut - from.srcIn;
     drift::KeyframeTrack<T> out;
+    // A track switched off keeps its keys, and retiming must not switch it back on.
+    out.setEnabled(src.enabled());
     // Tangents travel inside each key, so remapping the times carries the shape with them.
     for (auto it = src.keyframes().constBegin(); it != src.keyframes().constEnd(); ++it) {
         const drift::TimeUs sourceOffset =
@@ -1526,6 +1532,9 @@ QHash<QString, QString> defaultShortcuts()
         {QStringLiteral("clearSelection"), QStringLiteral("Escape")},
         {QStringLiteral("selectAll"), QStringLiteral("Ctrl+A")},
         {QStringLiteral("duplicate"), QStringLiteral("Ctrl+D")},
+        // Premiere's Copy/Paste Attributes bindings, and clear of the clip clipboard on Ctrl+C/V.
+        {QStringLiteral("copyEffects"), QStringLiteral("Ctrl+Alt+C")},
+        {QStringLiteral("pasteEffects"), QStringLiteral("Ctrl+Alt+V")},
         {QStringLiteral("split"), QStringLiteral("S")},
         {QStringLiteral("merge"), QStringLiteral("Ctrl+M")},
         {QStringLiteral("unlink"), QStringLiteral("Ctrl+Shift+U")},
@@ -1960,6 +1969,8 @@ QVariantList AppController::actions() const
         action(QStringLiteral("cut"), tr("Cut selection")),
         action(QStringLiteral("paste"), tr("Paste at current time")),
         action(QStringLiteral("duplicate"), tr("Duplicate selected clip")),
+        action(QStringLiteral("copyEffects"), tr("Copy effects from clip")),
+        action(QStringLiteral("pasteEffects"), tr("Paste effects onto clip")),
         action(QStringLiteral("split"), tr("Split at current time")),
         action(QStringLiteral("merge"), tr("Merge adjacent clips")),
         action(QStringLiteral("separateAudio"), tr("Separate audio")),
@@ -9106,6 +9117,24 @@ drift::Effect effectFromCatalogEntry(const EffectPresetEntry &def,
     return effect;
 }
 
+// The audio twin of effectFromCatalogEntry. Audio presets have no fixedParams and no filter
+// graph, so the name is the display name and the whole parameter map comes from the manifest.
+drift::Effect audioEffectFromCatalogEntry(const AudioEffectEntry &def,
+                                          const QMap<QString, QVariant> &overrides)
+{
+    drift::Effect effect;
+    effect.name = def.displayName;
+    effect.catalogId = def.id;
+    for (const drift::EffectParamSpec &p : def.parameters) {
+        const auto overrideIt = overrides.constFind(p.key);
+        if (overrideIt != overrides.constEnd())
+            effect.parameters.insert(p.key, overrideIt.value());
+        else
+            effect.parameters.insert(p.key, p.defaultVariant());
+    }
+    return effect;
+}
+
 bool templateSyncNeedsBeats(const QString &sync)
 {
     return sync == QLatin1String("onset") || sync == QLatin1String("beat")
@@ -9855,11 +9884,7 @@ void AppController::addAudioEffect(int trackIndex, int clipIndex, const QString 
     if (!def)
         return;
 
-    drift::Effect effect;
-    effect.name = def->displayName;
-    effect.catalogId = def->id;
-    for (const drift::EffectParamSpec &p : def->parameters)
-        effect.parameters.insert(p.key, p.defaultValue);
+    const drift::Effect effect = audioEffectFromCatalogEntry(*def, {});
 
     const drift::Project before = m_project;
     track.clips[clipIndex].audioEffects.append(effect);
@@ -9977,6 +10002,308 @@ void AppController::setAudioEffectParam(int trackIndex, int clipIndex, int effec
     clip.audioEffects[effectIndex].parameters.insert(key, value);
     pushProjectEdit(before, tr("Edit audio effect"));
     finishEdit(tr("Audio effect updated"));
+}
+
+// --- effect stacks: copy/paste and user presets ------------------------------
+
+drift::EffectStackPreset AppController::effectStackFor(int trackIndex, int clipIndex,
+                                                       int effectIndex, int audioEffectIndex) const
+{
+    drift::EffectStackPreset stack;
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return stack;
+
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return stack;
+
+    const drift::Clip &clip = track.clips.at(clipIndex);
+    stack.label = clip.name;
+    // Written even when the stack holds only audio effects, which are not keyframable: one field
+    // that is always present beats a reader that has to ask why it is missing.
+    stack.sourceDurationUs = clip.timelineDuration;
+
+    // Both indices unset means the whole clip; otherwise exactly one effect, on its own side.
+    const bool wholeClip = effectIndex < 0 && audioEffectIndex < 0;
+    if (wholeClip) {
+        stack.effects = clip.effects;
+        stack.audioEffects = clip.audioEffects;
+        return stack;
+    }
+    if (effectIndex >= 0 && effectIndex < clip.effects.size())
+        stack.effects.append(clip.effects.at(effectIndex));
+    if (audioEffectIndex >= 0 && audioEffectIndex < clip.audioEffects.size())
+        stack.audioEffects.append(clip.audioEffects.at(audioEffectIndex));
+    return stack;
+}
+
+void AppController::applyEffectStack(int trackIndex, int clipIndex,
+                                     const drift::EffectStackPreset &stack,
+                                     const QString &undoLabel)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+
+    if (clipIndex < 0 || clipIndex >= m_project.tracks().at(trackIndex).clips.size())
+        return;
+    if (stack.isEmpty())
+        return;
+
+    // Read-only for now: the snapshot below has to be taken before anything mutable is held, or
+    // copying the project re-shares the container this reference points into and the append lands
+    // in the undo snapshot too.
+    const drift::Clip &source = m_project.tracks().at(trackIndex).clips.at(clipIndex);
+    const drift::TimeUs targetDurationUs = source.timelineDuration;
+    // Audio effects only run in the mixer, and the audio inspector is hidden for clips with no
+    // audio, so pasting them onto an image or a title would leave them invisible and inert.
+    const bool clipHasAudio =
+        source.type == drift::ClipType::Video || source.type == drift::ClipType::Audio;
+
+    QStringList missing;
+    QList<drift::Effect> video;
+    video.reserve(stack.effects.size());
+    for (const drift::Effect &incoming : stack.effects) {
+        // Rebuilding from the catalog re-derives the filter name and the manifest's fixed params,
+        // so a preset written against an older build of an effect applies as that effect is
+        // today, carrying across only what the user actually set.
+        if (const EffectPresetEntry *def = effectDefForId(incoming.catalogId)) {
+            drift::Effect effect = effectFromCatalogEntry(*def, incoming.parameters);
+            effect.paramKeyframes = incoming.paramKeyframes;
+            effect.enabled = incoming.enabled;
+            video.append(effect);
+        } else {
+            // Uninstalled addon: kept, exactly as project load keeps it, so the stack survives the
+            // round-trip and starts working the moment the pack is installed.
+            video.append(incoming);
+            if (!incoming.catalogId.isEmpty())
+                missing.append(incoming.catalogId);
+        }
+    }
+
+    QList<drift::Effect> audio;
+    if (clipHasAudio) {
+        audio.reserve(stack.audioEffects.size());
+        for (const drift::Effect &incoming : stack.audioEffects) {
+            if (const AudioEffectEntry *def = audioEffectDefForId(incoming.catalogId)) {
+                drift::Effect effect = audioEffectFromCatalogEntry(*def, incoming.parameters);
+                effect.enabled = incoming.enabled;
+                audio.append(effect);
+            } else {
+                audio.append(incoming);
+                if (!incoming.catalogId.isEmpty())
+                    missing.append(incoming.catalogId);
+            }
+        }
+    }
+
+    // Audio params are not keyframable, so only the video half moves.
+    drift::rescaleEffectKeyframes(video, stack.sourceDurationUs, targetDurationUs);
+
+    const drift::Project before = m_project;
+    // Indexed after the snapshot, not before: the non-const operator[] detaches each container on
+    // the way down, which is what keeps the append out of `before`.
+    drift::Clip &clip = m_project.tracks()[trackIndex].clips[clipIndex];
+    // Append, never replace. Appending is also what lets the keyframe graph's hidden-property set
+    // stand: every existing "fx.<n>.<key>" still addresses the effect it did before.
+    clip.effects.append(video);
+    clip.audioEffects.append(audio);
+    m_selectedTrack = trackIndex;
+    m_selectedClip = clipIndex;
+    m_selection = {qMakePair(trackIndex, clipIndex)};
+    pushProjectEdit(before, undoLabel);
+    finishEdit(undoLabel);
+
+    // finishEdit clears lastMessage, so the warning has to come after it.
+    if (!missing.isEmpty()) {
+        missing.removeDuplicates();
+        missing.sort();
+        const QString sample = missing.mid(0, 3).join(QStringLiteral(", "));
+        setLastMessage(missing.size() == 1
+                           ? tr("This stack uses “%1”, which isn’t installed — it "
+                                "won’t show. Open Extras to install it.").arg(sample)
+                           : tr("This stack uses %1 effects that aren’t installed — they "
+                                "won’t show. Open Extras to install them.")
+                                 .arg(missing.size()),
+                       QStringLiteral("warning"));
+    }
+}
+
+void AppController::copyEffectToClipboard(int trackIndex, int clipIndex, int effectIndex)
+{
+    copyEffectStack(effectStackFor(trackIndex, clipIndex, effectIndex, -1), tr("Effect copied"));
+}
+
+void AppController::copyAudioEffectToClipboard(int trackIndex, int clipIndex, int effectIndex)
+{
+    copyEffectStack(effectStackFor(trackIndex, clipIndex, -1, effectIndex),
+                    tr("Audio effect copied"));
+}
+
+void AppController::copyClipEffectsToClipboard(int trackIndex, int clipIndex)
+{
+    copyEffectStack(effectStackFor(trackIndex, clipIndex, -1, -1), tr("Effects copied"));
+}
+
+void AppController::copyEffectStack(const drift::EffectStackPreset &stack, const QString &message)
+{
+    if (stack.isEmpty()) {
+        setLastMessage(tr("This clip has no effects to copy"), QStringLiteral("error"));
+        return;
+    }
+    QClipboard *board = QGuiApplication::clipboard();
+    if (!board)
+        return;
+    // Text rather than a custom MIME type: text/plain is the one format that survives portals,
+    // Wayland bridging and clipboard managers between two running instances — and it lets the
+    // payload be pasted into a file by hand, since a copy and a .drifteffects file are one format.
+    board->setText(QString::fromUtf8(
+        QJsonDocument(drift::effectStackToJson(stack)).toJson(QJsonDocument::Indented)));
+    setLastMessage(message, QStringLiteral("success"));
+}
+
+drift::EffectStackPreset AppController::effectStackOnClipboard()
+{
+    const QClipboard *board = QGuiApplication::clipboard();
+    if (!board)
+        return {};
+    const QString text = board->text();
+    // A substring test before the parse: this runs when a context menu opens, and the clipboard
+    // may well be holding a page of prose from another application.
+    if (!text.contains(QLatin1String("\"drift\"")))
+        return {};
+    return drift::effectStackFromJson(QJsonDocument::fromJson(text.toUtf8()).object());
+}
+
+bool AppController::clipboardHasEffects() const
+{
+    return !effectStackOnClipboard().isEmpty();
+}
+
+void AppController::pasteEffectsFromClipboard(int trackIndex, int clipIndex)
+{
+    const drift::EffectStackPreset stack = effectStackOnClipboard();
+    if (stack.isEmpty()) {
+        setLastMessage(tr("No effects on the clipboard"), QStringLiteral("error"));
+        return;
+    }
+    applyEffectStack(trackIndex, clipIndex, stack, tr("Paste effects"));
+}
+
+QVariantList AppController::userEffectPresets() const
+{
+    QVariantList out;
+    for (const drift::EffectStackPreset &preset : drift::EffectStackStore::instance().presets()) {
+        // The card has no thumbnail to draw, so it lists what is in the stack instead.
+        QStringList labels;
+        for (const drift::Effect &effect : preset.effects) {
+            const EffectPresetEntry *def = effectDefForId(effect.catalogId);
+            labels.append(def ? def->meta.displayName : effect.catalogId);
+        }
+        for (const drift::Effect &effect : preset.audioEffects) {
+            const AudioEffectEntry *def = audioEffectDefForId(effect.catalogId);
+            labels.append(def ? def->displayName : effect.catalogId);
+        }
+        out.append(QVariantMap{
+            {QStringLiteral("id"), preset.id},
+            {QStringLiteral("label"), preset.label},
+            {QStringLiteral("effectCount"), preset.effects.size()},
+            {QStringLiteral("audioEffectCount"), preset.audioEffects.size()},
+            {QStringLiteral("labels"), labels},
+        });
+    }
+    return out;
+}
+
+QString AppController::saveEffectStack(const drift::EffectStackPreset &stack, const QString &label)
+{
+    if (stack.isEmpty()) {
+        setLastMessage(tr("There are no effects to save"), QStringLiteral("error"));
+        return {};
+    }
+    const QString presetId = drift::EffectStackStore::instance().add(label, stack);
+    if (presetId.isEmpty()) {
+        setLastMessage(tr("Could not save the effect preset"), QStringLiteral("error"));
+        return {};
+    }
+    emit userEffectPresetsChanged();
+    setLastMessage(tr("Effect preset saved"), QStringLiteral("success"));
+    return presetId;
+}
+
+QString AppController::saveEffectAsPreset(int trackIndex, int clipIndex, int effectIndex,
+                                          const QString &label)
+{
+    return saveEffectStack(effectStackFor(trackIndex, clipIndex, effectIndex, -1), label);
+}
+
+QString AppController::saveAudioEffectAsPreset(int trackIndex, int clipIndex, int effectIndex,
+                                               const QString &label)
+{
+    return saveEffectStack(effectStackFor(trackIndex, clipIndex, -1, effectIndex), label);
+}
+
+QString AppController::saveClipEffectsAsPreset(int trackIndex, int clipIndex, const QString &label)
+{
+    return saveEffectStack(effectStackFor(trackIndex, clipIndex, -1, -1), label);
+}
+
+void AppController::applyEffectPreset(int trackIndex, int clipIndex, const QString &presetId)
+{
+    const std::optional<drift::EffectStackPreset> preset =
+        drift::EffectStackStore::instance().presetForId(presetId);
+    if (!preset)
+        return;
+    applyEffectStack(trackIndex, clipIndex, *preset, tr("Apply effect preset"));
+}
+
+bool AppController::renameUserEffectPreset(const QString &presetId, const QString &label)
+{
+    if (!drift::EffectStackStore::instance().rename(presetId, label)) {
+        setLastMessage(tr("Could not rename the effect preset"), QStringLiteral("error"));
+        return false;
+    }
+    emit userEffectPresetsChanged();
+    setLastMessage(tr("Effect preset renamed"), QStringLiteral("success"));
+    return true;
+}
+
+bool AppController::deleteUserEffectPreset(const QString &presetId)
+{
+    // Clips keep the effects they were given; only the library entry goes.
+    if (!drift::EffectStackStore::instance().remove(presetId)) {
+        setLastMessage(tr("Could not delete the effect preset"), QStringLiteral("error"));
+        return false;
+    }
+    emit userEffectPresetsChanged();
+    setLastMessage(tr("Effect preset deleted"), QStringLiteral("success"));
+    return true;
+}
+
+bool AppController::exportUserEffectPreset(const QString &presetId, const QUrl &fileUrl)
+{
+    const QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : fileUrl.toString();
+    if (path.isEmpty())
+        return false;
+    if (!drift::EffectStackStore::instance().exportToFile(presetId, path)) {
+        setLastMessage(tr("Could not export the effect preset"), QStringLiteral("error"));
+        return false;
+    }
+    setLastMessage(tr("Effect preset exported"), QStringLiteral("success"));
+    return true;
+}
+
+bool AppController::importUserEffectPreset(const QUrl &fileUrl)
+{
+    const QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : fileUrl.toString();
+    if (path.isEmpty())
+        return false;
+    if (drift::EffectStackStore::instance().importFromFile(path).isEmpty()) {
+        setLastMessage(tr("Could not import the effect preset"), QStringLiteral("error"));
+        return false;
+    }
+    emit userEffectPresetsChanged();
+    setLastMessage(tr("Effect preset imported"), QStringLiteral("success"));
+    return true;
 }
 
 void AppController::setTrackMuted(int trackIndex, bool muted)
@@ -10742,6 +11069,10 @@ void AppController::triggerAction(const QString &actionId)
         selectAllClips();
     else if (actionId == QStringLiteral("duplicate"))
         duplicateSelectedClip();
+    else if (actionId == QStringLiteral("copyEffects"))
+        copyClipEffectsToClipboard(m_selectedTrack, m_selectedClip);
+    else if (actionId == QStringLiteral("pasteEffects"))
+        pasteEffectsFromClipboard(m_selectedTrack, m_selectedClip);
     else if (actionId == QStringLiteral("split"))
         splitAtPlayhead();
     else if (actionId == QStringLiteral("merge"))
