@@ -53,9 +53,10 @@ public:
     // buffers — export and thumbnails consume as fast as they decode anyway.
     void setReadAheadUs(drift::TimeUs readAheadUs);
 
-    // Preview toolbar: Auto (per clip), Software, or Hardware. Drops every open
-    // video decoder so the next read opens on the chosen path.
-    void setHardwareDecodeMode(ClipReader::HardwareDecodeMode mode);
+    // Preview toolbar: Auto (per clip), Software, or Hardware on a named backend.
+    // Drops every open video decoder so the next read opens on the chosen path.
+    void setHardwareDecodeMode(ClipReader::HardwareDecodeMode mode,
+                               drift::hwaccel::Backend backend = drift::hwaccel::Backend::None);
 
     QImage readVideoFrame(const QString &path, quint64 streamId, drift::TimeUs sourceUs, int maxWidth,
                           int maxHeight);

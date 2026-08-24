@@ -2,6 +2,7 @@
 
 #include "AudioMixer.h"
 #include "FrameCompositor.h"
+#include "HwAccel.h"
 #include "core/Project.h"
 #include "core/Time.h"
 
@@ -285,29 +286,6 @@ QString hwEncoderLabel(const VideoCodecDef &def)
                                        QLatin1String(hwCodecFamilyName(def.id)));
 }
 
-bool hwDeviceAvailable(AVHWDeviceType type)
-{
-    if (type == AV_HWDEVICE_TYPE_NONE)
-        return false;
-    static QMutex mutex;
-    static QHash<int, bool> cache;
-    QMutexLocker lock(&mutex);
-    const auto it = cache.constFind(static_cast<int>(type));
-    if (it != cache.cend())
-        return it.value();
-
-    AVBufferRef *ctx = nullptr;
-    const int previousLog = av_log_get_level();
-    av_log_set_level(AV_LOG_QUIET);
-    const int err = av_hwdevice_ctx_create(&ctx, type, nullptr, nullptr, 0);
-    av_log_set_level(previousLog);
-    if (ctx)
-        av_buffer_unref(&ctx);
-    const bool ok = err >= 0;
-    cache.insert(static_cast<int>(type), ok);
-    return ok;
-}
-
 bool isHardwarePixelFormat(AVPixelFormat fmt)
 {
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(fmt);
@@ -397,7 +375,8 @@ QVariantMap videoDefToMap(const VideoCodecDef &def)
     const AVCodec *enc = findEncoder(def.encoderNames);
     bool available = enc != nullptr;
     if (def.hw != HwBackend::None)
-        available = available && hwBackendOnThisOs(def.hw) && hwDeviceAvailable(hwDeviceType(def.hw));
+        available = available && hwBackendOnThisOs(def.hw)
+                    && drift::hwaccel::deviceAvailable(hwDeviceType(def.hw));
 
     QVariantMap m;
     m.insert(QStringLiteral("id"), QString::fromUtf8(def.id));

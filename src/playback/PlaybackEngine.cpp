@@ -1,8 +1,10 @@
 #include "PlaybackEngine.h"
 
 #include "engine/ClipReaderPool.h"
+#include "engine/HwAccel.h"
 
 #include <QSettings>
+#include <QVariantMap>
 
 #include <algorithm>
 #include <array>
@@ -33,31 +35,61 @@ bool isKnownPreviewQuality(const QString &quality)
         || quality == QStringLiteral("quarter") || quality == QStringLiteral("auto");
 }
 
-bool isKnownDecodeMode(const QString &mode)
+constexpr QLatin1String kHwPrefix("hw:");
+
+// Which backend a "hw:<id>" mode names, or None for every other mode.
+drift::hwaccel::Backend decodeBackendFromString(const QString &mode)
 {
-    return mode == QStringLiteral("auto") || mode == QStringLiteral("software")
-        || mode == QStringLiteral("hardware");
+    if (!mode.startsWith(kHwPrefix))
+        return drift::hwaccel::Backend::None;
+    return drift::hwaccel::backendFromId(mode.mid(kHwPrefix.size()));
+}
+
+// Canonical form of a decode mode, or empty when it names nothing this build knows.
+// A backend that is not on this machine resolves to Auto rather than to a mode that
+// would silently never engage — settings outlive the GPU they were written on.
+QString normalizeDecodeMode(const QString &mode)
+{
+    const QString lowered = mode.toLower();
+    if (lowered == QStringLiteral("auto") || lowered == QStringLiteral("software"))
+        return lowered;
+
+    const QList<drift::hwaccel::Backend> available = drift::hwaccel::availableDecodeBackends();
+    // Legacy "hardware" (and anything that means "any GPU") pins the backend the probe
+    // would have chosen, so the picker can show what is actually in use.
+    if (lowered == QStringLiteral("hardware")) {
+        return available.isEmpty()
+            ? QStringLiteral("auto")
+            : kHwPrefix + drift::hwaccel::id(available.first());
+    }
+    if (lowered.startsWith(kHwPrefix)) {
+        const drift::hwaccel::Backend backend = decodeBackendFromString(lowered);
+        if (backend != drift::hwaccel::Backend::None && available.contains(backend))
+            return lowered;
+        return QStringLiteral("auto");
+    }
+    return {};
 }
 
 ClipReader::HardwareDecodeMode decodeModeFromString(const QString &mode)
 {
     if (mode == QStringLiteral("software"))
         return ClipReader::HardwareDecodeMode::Software;
-    if (mode == QStringLiteral("hardware"))
+    if (mode == QStringLiteral("hardware") || mode.startsWith(kHwPrefix))
         return ClipReader::HardwareDecodeMode::Hardware;
     return ClipReader::HardwareDecodeMode::Auto;
 }
 
 QString loadSavedDecodeMode()
 {
-    const QString saved = QSettings().value(QStringLiteral("preview/decodeMode")).toString().toLower();
-    if (isKnownDecodeMode(saved))
-        return saved;
+    const QString saved = QSettings().value(QStringLiteral("preview/decodeMode")).toString();
+    if (const QString normalized = normalizeDecodeMode(saved); !normalized.isEmpty())
+        return normalized;
     // Previous two-state toggle wrote a bool. Keep an explicit Hardware or
     // Software choice; missing key (never touched) becomes Auto.
     if (QSettings().contains(QStringLiteral("preview/hardwareDecode"))) {
         return QSettings().value(QStringLiteral("preview/hardwareDecode")).toBool()
-            ? QStringLiteral("hardware")
+            ? normalizeDecodeMode(QStringLiteral("hardware"))
             : QStringLiteral("software");
     }
     return QStringLiteral("auto");
@@ -74,7 +106,9 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
         m_previewQuality = saved;
 
     m_decodeMode = loadSavedDecodeMode();
-    ClipReaderPool::instance().setHardwareDecodeMode(decodeModeFromString(m_decodeMode));
+    ClipReaderPool::instance().setHardwareDecodeMode(decodeModeFromString(m_decodeMode),
+                                                     decodeBackendFromString(m_decodeMode));
+    m_hwFallbackCount = ClipReader::hardwareFallbackCount();
 
     m_compositor.setDropLateFrames(!isQualityMode());
     m_compositor.setAdaptiveQuality(isAutoQuality());
@@ -252,10 +286,26 @@ QString PlaybackEngine::decodeMode() const
     return m_decodeMode;
 }
 
+QVariantList PlaybackEngine::decodeModes() const
+{
+    QVariantList modes;
+    auto append = [&modes](const QString &id, const QString &label) {
+        modes.append(QVariantMap{{QStringLiteral("id"), id}, {QStringLiteral("label"), label}});
+    };
+    append(QStringLiteral("auto"), tr("Auto"));
+    append(QStringLiteral("software"), tr("Software"));
+    // Only backends whose device opens here, so every listed choice is one that runs.
+    for (const drift::hwaccel::Backend backend : drift::hwaccel::availableDecodeBackends()) {
+        append(kHwPrefix + drift::hwaccel::id(backend),
+               tr("Hardware (%1)").arg(QString::fromLatin1(drift::hwaccel::name(backend))));
+    }
+    return modes;
+}
+
 void PlaybackEngine::setDecodeMode(const QString &mode)
 {
-    const QString normalized = mode.toLower();
-    if (!isKnownDecodeMode(normalized)) {
+    const QString normalized = normalizeDecodeMode(mode);
+    if (normalized.isEmpty()) {
         qWarning("PlaybackEngine: ignoring unknown decode mode '%s'", qPrintable(mode));
         return;
     }
@@ -264,9 +314,31 @@ void PlaybackEngine::setDecodeMode(const QString &mode)
 
     m_decodeMode = normalized;
     QSettings().setValue(QStringLiteral("preview/decodeMode"), m_decodeMode);
-    ClipReaderPool::instance().setHardwareDecodeMode(decodeModeFromString(m_decodeMode));
+    ClipReaderPool::instance().setHardwareDecodeMode(decodeModeFromString(m_decodeMode),
+                                                     decodeBackendFromString(m_decodeMode));
+    // A new path gets a fresh benefit of the doubt: a fallback under the old one says
+    // nothing about this one, and leaving the count behind would suppress the notice.
+    m_hwFallbackCount = ClipReader::hardwareFallbackCount();
     emit decodeModeChanged();
     refreshFrame();
+}
+
+// Readers drop to software on their own when a driver fails mid-decode, which is
+// otherwise invisible — the preview just gets slower. Called per composited frame;
+// the check is one relaxed atomic load.
+void PlaybackEngine::checkHardwareFallback()
+{
+    const quint64 count = ClipReader::hardwareFallbackCount();
+    if (count == m_hwFallbackCount)
+        return;
+    m_hwFallbackCount = count;
+    if (m_decodeMode == QStringLiteral("software"))
+        return;
+
+    const drift::hwaccel::Backend backend = decodeBackendFromString(m_decodeMode);
+    emit hardwareDecodeFellBack(backend == drift::hwaccel::Backend::None
+                                    ? QString()
+                                    : QString::fromLatin1(drift::hwaccel::name(backend)));
 }
 
 drift::TimeUs PlaybackEngine::frameStepUs() const
@@ -463,6 +535,8 @@ void PlaybackEngine::onCompositeFinished()
 
 void PlaybackEngine::onFrameReady(const GpuFrameTexture &frame)
 {
+    checkHardwareFallback();
+
     if (!frame.isValid())
         return;
 

@@ -292,6 +292,19 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
         setLastMessage(message, QStringLiteral("error"));
     });
 
+    // Hardware decode that dies mid-playback is otherwise silent — the reader drops to
+    // software on its own and the preview just gets slower, which reads as a Drift bug.
+    connect(&m_playback, &PlaybackEngine::hardwareDecodeFellBack, this,
+            [this](const QString &backendName) {
+                setLastMessage(backendName.isEmpty()
+                                   ? tr("Hardware decoding failed on this clip; using software "
+                                        "decoding instead.")
+                                   : tr("%1 decoding failed on this clip; using software decoding "
+                                        "instead.")
+                                         .arg(backendName),
+                               QStringLiteral("warning"));
+            });
+
     // An empty device list on a machine that plainly has speakers means the multimedia backend
     // plugin did not load — which is silent everywhere else, because video decoding does not go
     // through it. Deferred so the toast host exists by the time this fires.

@@ -26,7 +26,15 @@ Right-click an empty gap on a track and choose **Close Gap** to pull every later
 
 ### Feature [`cdbe317`](https://github.com/CutWire-Studios/Drift/commit/cdbe317) Hardware or software decode for preview
 
-The preview toolbar has an **Auto / Software / Hardware** decode picker. Auto uses hardware for heavy 4K clips and the CPU otherwise; Software is smoother for most clips; Hardware is better for high-quality 4K. AV1 preview on Linux picks a VAAPI-capable decoder when one is available. If playback stutters, try another mode.
+The preview toolbar has an **Auto / Software / Hardware** decode picker. Auto uses hardware for heavy 4K clips and the CPU otherwise; Software is smoother for most clips; Hardware is better for high-quality 4K. AV1 preview picks a hardware-capable decoder when one is available. If playback stutters, try another mode.
+
+### Feature Hardware video decoding on Windows and macOS
+
+Preview decode used to reach the GPU only on Linux, through VAAPI. It now probes a per-platform list: **NVDEC then Direct3D 11** on Windows, **VideoToolbox** on macOS, and **NVDEC then VAAPI** on Linux — so an NVIDIA machine no longer depends on the VAAPI driver for decode.
+
+The preview decode picker names the backend instead of offering a single **Hardware** entry: **Auto**, **Software**, then one entry per backend that actually opens on your machine (for example **Hardware (NVDEC)** and **Hardware (VAAPI)** on an NVIDIA Linux box). Picking one uses it for every clip and never quietly switches to another, so if a driver is the problem you can pick around it. A saved choice naming a backend the machine does not have falls back to Auto rather than to a mode that would never engage.
+
+Hardware decode that fails mid-playback used to be silent — the reader dropped to software on its own and the preview just got slower. It now says so, and the debug report gained an **Active decode** line showing what the preview actually ended up using. The `DRIFT_NO_VAAPI` escape hatch is now `DRIFT_NO_HWACCEL`, and it also stops the startup device probe.
 
 ### Feature (#40) Hardware video encoding on export
 

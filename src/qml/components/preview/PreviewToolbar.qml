@@ -216,12 +216,15 @@ Item {
             leftPadding: Theme.spacingMd
             rightPadding: Theme.spacing2xl
             font.pixelSize: Theme.fontSizeXs
-            readonly property var values: ["auto", "software", "hardware"]
-            model: [qsTr("Auto"), qsTr("Software"), qsTr("Hardware")]
+            // Populated from the engine: the hardware entries are the backends whose
+            // device actually opens here, so anything listed is something that runs.
+            readonly property var modes: EditorState.playback.decodeModes()
+            readonly property var values: modes.map(function (m) { return m.id })
+            model: modes.map(function (m) { return m.label })
             tooltip: qsTr("How video is decoded for preview.\n"
-                          + "Auto picks per clip: Hardware for high-quality 4K, Software otherwise.\n"
+                          + "Auto picks per clip: hardware for high-quality 4K, software otherwise.\n"
                           + "Software is smoother for most clips. It uses more CPU.\n"
-                          + "Hardware is better for high-quality 4K.\n"
+                          + "Hardware is better for high-quality 4K, and forces one GPU decoder.\n"
                           + "If playback stutters, try another.")
             currentIndex: Math.max(0, values.indexOf(EditorState.playback.decodeMode))
             onActivated: EditorState.playback.decodeMode = values[currentIndex]

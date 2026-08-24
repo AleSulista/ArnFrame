@@ -2,6 +2,7 @@
 
 #include "ClipReader.h"
 #include "Exporter.h"
+#include "HwAccel.h"
 #include "OrtRuntime.h"
 
 #include <QCoreApplication>
@@ -339,41 +340,15 @@ QString openglRenderer()
     return renderer;
 }
 
-bool decoderHasVaapi(const AVCodec *codec)
+// The backend the preview decoder would land on here: the first one this platform
+// offers whose device actually opens. ClipReader walks the same list per clip.
+drift::hwaccel::Backend activeDecodeBackend()
 {
-    if (!codec)
-        return false;
-    for (int i = 0;; ++i) {
-        const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
-        if (!config)
-            return false;
-        if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)
-            && config->device_type == AV_HWDEVICE_TYPE_VAAPI)
-            return true;
+    for (const drift::hwaccel::Backend backend : drift::hwaccel::decodeBackendOrder()) {
+        if (drift::hwaccel::deviceAvailable(drift::hwaccel::deviceType(backend)))
+            return backend;
     }
-}
-
-const AVCodec *findVaapiDecoder(AVCodecID codecId)
-{
-    void *iter = nullptr;
-    while (const AVCodec *codec = av_codec_iterate(&iter)) {
-        if (av_codec_is_decoder(codec) && codec->id == codecId && decoderHasVaapi(codec))
-            return codec;
-    }
-    return nullptr;
-}
-
-bool vaapiDeviceAvailable()
-{
-#if defined(Q_OS_LINUX)
-    AVBufferRef *ctx = nullptr;
-    const int err = av_hwdevice_ctx_create(&ctx, AV_HWDEVICE_TYPE_VAAPI, nullptr, nullptr, 0);
-    if (ctx)
-        av_buffer_unref(&ctx);
-    return err >= 0;
-#else
-    return false;
-#endif
+    return drift::hwaccel::Backend::None;
 }
 
 const AVCodec *findNamedEncoder(const char *const *names)
@@ -390,12 +365,33 @@ QString decodeModeLabel()
     switch (ClipReader::hardwareDecodeMode()) {
     case ClipReader::HardwareDecodeMode::Software:
         return trReport("Software");
-    case ClipReader::HardwareDecodeMode::Hardware:
-        return trReport("Hardware");
+    case ClipReader::HardwareDecodeMode::Hardware: {
+        const drift::hwaccel::Backend pinned = ClipReader::pinnedDecodeBackend();
+        if (pinned == drift::hwaccel::Backend::None)
+            return trReport("Hardware");
+        return QStringLiteral("%1 (%2)")
+            .arg(trReport("Hardware"), QString::fromLatin1(drift::hwaccel::name(pinned)));
+    }
     case ClipReader::HardwareDecodeMode::Auto:
         break;
     }
     return trReport("Auto");
+}
+
+// What the preview actually ended up doing, which is the half of the story the mode
+// alone does not tell: a pinned backend that silently fell back looks identical above.
+QString activeDecodeLabel()
+{
+    const std::optional<drift::hwaccel::Backend> active = ClipReader::activeDecodeBackend();
+    if (!active)
+        return trReport("Nothing decoded yet");
+
+    const QString base = *active == drift::hwaccel::Backend::None
+        ? trReport("Software")
+        : QString::fromLatin1(drift::hwaccel::name(*active));
+    if (ClipReader::hardwareFallbackCount() == 0)
+        return base;
+    return QStringLiteral("%1 — %2").arg(base, trReport("hardware decoding failed"));
 }
 
 QVariantMap systemRow(const QString &label, const QString &value)
@@ -443,7 +439,9 @@ QVariantMap DebugReport::collect()
 {
     QVariantMap info;
     const QString package = packageKind();
-    const bool vaapiOk = vaapiDeviceAvailable();
+    const drift::hwaccel::Backend backend = activeDecodeBackend();
+    const AVHWDeviceType backendType = drift::hwaccel::deviceType(backend);
+    const bool hwDecodeOk = backend != drift::hwaccel::Backend::None;
 
     struct CodecSpec {
         const char *name;
@@ -460,11 +458,11 @@ QVariantMap DebugReport::collect()
     QVariantList codecs;
     for (const CodecSpec &spec : kCodecs) {
         const AVCodec *software = avcodec_find_decoder(spec.id);
-        const AVCodec *hardware = findVaapiDecoder(spec.id);
+        const AVCodec *hardware = drift::hwaccel::findDecoder(spec.id, backendType, nullptr);
         QVariantMap row;
         row.insert(QStringLiteral("name"), QString::fromLatin1(spec.name));
         row.insert(QStringLiteral("software"), software != nullptr);
-        row.insert(QStringLiteral("hardware"), vaapiOk && hardware != nullptr);
+        row.insert(QStringLiteral("hardware"), hwDecodeOk && hardware != nullptr);
         row.insert(QStringLiteral("softwareDecoder"),
                    software ? QString::fromUtf8(software->name) : QString());
         row.insert(QStringLiteral("hardwareDecoder"),
@@ -561,8 +559,9 @@ QVariantMap DebugReport::collect()
 
     system.append(systemRow(trReport("Qt"), QString::fromLatin1(qVersion())));
     system.append(systemRow(trReport("FFmpeg"), QString::fromUtf8(av_version_info())));
-    system.append(systemRow(trReport("VAAPI"),
-                            vaapiOk ? trReport("Available") : trReport("Not available")));
+    system.append(systemRow(trReport("Hardware decode"),
+                            hwDecodeOk ? QString::fromLatin1(drift::hwaccel::name(backend))
+                                       : trReport("Not available")));
     const QList<drift::ort::RuntimeInfo> ortRuntimes = drift::ort::installedRuntimes();
     if (ortRuntimes.isEmpty()) {
         system.append(systemRow(trReport("ONNX Runtime"), trReport("Not installed")));
@@ -574,9 +573,10 @@ QVariantMap DebugReport::collect()
         system.append(systemRow(trReport("ONNX Runtime"), value));
     }
     system.append(systemRow(trReport("Preview decode"), decodeModeLabel()));
+    system.append(systemRow(trReport("Active decode"), activeDecodeLabel()));
     system.append(systemRow(trReport("Locale"), QLocale::system().name()));
-    if (qEnvironmentVariableIsSet("DRIFT_NO_VAAPI"))
-        system.append(systemRow(QStringLiteral("DRIFT_NO_VAAPI"), trReport("Set")));
+    if (drift::hwaccel::disabledByEnv())
+        system.append(systemRow(QStringLiteral("DRIFT_NO_HWACCEL"), trReport("Set")));
 
     QVariantList hints;
     if (package == QLatin1String("Flatpak")) {
@@ -598,8 +598,9 @@ QVariantMap DebugReport::collect()
         if (nvidia && !flatpakExtensionMounted(QStringLiteral("dri/nvidia-vaapi-driver"))) {
             hints.append(hintRow(
                 QStringLiteral("vaapi-nvidia"), trReport("NVIDIA VAAPI driver not installed"),
-                trReport("Hardware decode and VAAPI encode on NVIDIA need the NVIDIA VAAPI "
-                         "extension. Install it, then restart Drift."),
+                trReport("VAAPI encode on NVIDIA needs the NVIDIA VAAPI extension, and so does "
+                         "hardware decode when NVDEC is unavailable. Install it, then restart "
+                         "Drift."),
                 QStringLiteral("flatpak install org.freedesktop.Platform.VAAPI.nvidia")));
         }
     }
@@ -617,7 +618,9 @@ QVariantMap DebugReport::collect()
     info.insert(QStringLiteral("hints"), hints);
     info.insert(QStringLiteral("version"), QStringLiteral(DRIFT_VERSION));
     info.insert(QStringLiteral("package"), package);
-    info.insert(QStringLiteral("vaapiAvailable"), vaapiOk);
+    info.insert(QStringLiteral("hardwareDecodeAvailable"), hwDecodeOk);
+    info.insert(QStringLiteral("hardwareDecodeBackend"),
+                QString::fromLatin1(drift::hwaccel::name(backend)));
     return info;
 }
 

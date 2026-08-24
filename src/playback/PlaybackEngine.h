@@ -58,10 +58,14 @@ public:
     double playbackRate() const { return m_playbackRate; }
     void setPlaybackRate(double rate);
     // Preview video decode: "auto" (default, per-clip heuristic), "software", or
-    // "hardware". Auto keeps cheap clips on the CPU and uses VAAPI for 4K / heavy
-    // bitrates; the other two force that path for every clip.
+    // "hw:<backend>" naming one of decodeModes(). Auto keeps cheap clips on the CPU and
+    // uses the GPU for 4K / heavy bitrates; the other two force that path for every
+    // clip. A backend this machine does not have resolves back to "auto".
     QString decodeMode() const;
     void setDecodeMode(const QString &mode);
+    // Picker model: {id, label} rows, hardware entries only for backends that open
+    // here. Not a constant — it depends on the GPU and driver the app started with.
+    Q_INVOKABLE QVariantList decodeModes() const;
 
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
@@ -78,6 +82,9 @@ public:
 signals:
     // Playback cannot produce sound; carries a message meant for the user.
     void audioError(const QString &message);
+    // A reader hit a driver failure and went sticky-software. `backendName` is the
+    // backend the user pinned, empty when Auto chose it.
+    void hardwareDecodeFellBack(const QString &backendName);
 
     void currentFrameChanged();
     void playingChanged();
@@ -96,6 +103,7 @@ private:
     void onCompositeFinished();
     void onFrameReady(const GpuFrameTexture &frame);
     void checkEndOfTimeline(drift::TimeUs timeUs);
+    void checkHardwareFallback();
     bool isQualityMode() const { return m_playbackMode == QStringLiteral("quality"); }
     bool isAutoQuality() const { return m_previewQuality == QStringLiteral("auto"); }
     bool shouldLoopWorkArea(drift::TimeUs *loopInOut, drift::TimeUs *loopOutOut) const;
@@ -116,6 +124,9 @@ private:
     QString m_previewQuality = QStringLiteral("full");
     QString m_playbackMode = QStringLiteral("fast");
     QString m_decodeMode = QStringLiteral("auto");
+    // Baseline for ClipReader's process-wide fallback counter, so the notice fires on
+    // a new fallback rather than on every frame after the first one.
+    quint64 m_hwFallbackCount = 0;
     // Not persisted, unlike quality and mode: a session left at 4x would otherwise come back at 4x
     // with nothing to explain why playback runs away.
     double m_playbackRate = 1.0;

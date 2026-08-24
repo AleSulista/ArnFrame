@@ -1,5 +1,6 @@
 #include "ClipReader.h"
 
+#include "HwAccel.h"
 #include "MediaProbe.h"
 
 #include <QTransform>
@@ -70,33 +71,7 @@ int swsFlagsForResize(int srcW, int srcH, int dstW, int dstH)
     return (srcW != dstW || srcH != dstH) ? SWS_LANCZOS : SWS_BICUBIC;
 }
 
-// avcodec_find_decoder() returns the preferred software decoder. For AV1 that is
-// libdav1d, which has no VAAPI config — looking at that codec alone would skip
-// hardware even when the native `av1` decoder can drive it. H.264/HEVC/VP9 are
-// usually fine because their default decoder already advertises VAAPI. Walk every
-// decoder for this id and pick the first that actually does.
-const AVCodec *findVaapiDecoder(AVCodecID codecId, AVPixelFormat *pixFmt)
-{
-    void *iter = nullptr;
-    while (const AVCodec *codec = av_codec_iterate(&iter)) {
-        if (!av_codec_is_decoder(codec) || codec->id != codecId)
-            continue;
-        for (int i = 0;; ++i) {
-            const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
-            if (!config)
-                break;
-            if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)
-                && config->device_type == AV_HWDEVICE_TYPE_VAAPI) {
-                if (pixFmt)
-                    *pixFmt = config->pix_fmt;
-                return codec;
-            }
-        }
-    }
-    return nullptr;
-}
-
-// Prefer the VAAPI surface format when the decoder offers it; otherwise pick the
+// Prefer the hardware surface format when the decoder offers it; otherwise pick the
 // first software format so get_format never hard-fails with AV_PIX_FMT_NONE
 // (that path leaves the hwaccel decoder in a half-initialized state).
 AVPixelFormat hwGetFormat(AVCodecContext *ctx, const AVPixelFormat *pixFmts)
@@ -314,6 +289,7 @@ void ClipReader::teardownVideoDecoder()
     if (m_hwDeviceCtx)
         av_buffer_unref(&m_hwDeviceCtx);
     m_hwAccelActive = false;
+    m_hwBackend = drift::hwaccel::Backend::None;
     m_hwPixFmt = AV_PIX_FMT_NONE;
     m_videoPositioned = false;
     m_lastVideoPtsUs = 0;
@@ -368,6 +344,10 @@ void ClipReader::applyDecodeSize(const QSize &size)
 namespace {
 std::atomic<quint64> g_videoFramesDecoded{0};
 std::atomic<int> g_hardwareDecodeMode{static_cast<int>(ClipReader::HardwareDecodeMode::Auto)};
+std::atomic<int> g_pinnedDecodeBackend{static_cast<int>(drift::hwaccel::Backend::None)};
+// -1 until a video decoder opens; otherwise the Backend the last one landed on.
+std::atomic<int> g_activeDecodeBackend{-1};
+std::atomic<quint64> g_hwFallbackCount{0};
 } // namespace
 
 quint64 ClipReader::videoFramesDecoded()
@@ -382,14 +362,34 @@ QString ClipReader::videoDecoderName() const
     return QString::fromUtf8(m_videoCtx->codec->name);
 }
 
-void ClipReader::setHardwareDecodeMode(HardwareDecodeMode mode)
+void ClipReader::setHardwareDecodeMode(HardwareDecodeMode mode, drift::hwaccel::Backend backend)
 {
+    g_pinnedDecodeBackend.store(static_cast<int>(backend), std::memory_order_relaxed);
     g_hardwareDecodeMode.store(static_cast<int>(mode), std::memory_order_relaxed);
 }
 
 ClipReader::HardwareDecodeMode ClipReader::hardwareDecodeMode()
 {
     return static_cast<HardwareDecodeMode>(g_hardwareDecodeMode.load(std::memory_order_relaxed));
+}
+
+drift::hwaccel::Backend ClipReader::pinnedDecodeBackend()
+{
+    return static_cast<drift::hwaccel::Backend>(
+        g_pinnedDecodeBackend.load(std::memory_order_relaxed));
+}
+
+std::optional<drift::hwaccel::Backend> ClipReader::activeDecodeBackend()
+{
+    const int value = g_activeDecodeBackend.load(std::memory_order_relaxed);
+    if (value < 0)
+        return std::nullopt;
+    return static_cast<drift::hwaccel::Backend>(value);
+}
+
+quint64 ClipReader::hardwareFallbackCount()
+{
+    return g_hwFallbackCount.load(std::memory_order_relaxed);
 }
 
 void ClipReader::resetVideoDecoder()
@@ -624,13 +624,17 @@ bool ClipReader::openSoftwareVideoDecoder()
     }
 
     m_hwAccelActive = false;
+    m_hwBackend = drift::hwaccel::Backend::None;
     m_hwPixFmt = AV_PIX_FMT_NONE;
+    g_activeDecodeBackend.store(static_cast<int>(drift::hwaccel::Backend::None),
+                                std::memory_order_relaxed);
     return true;
 }
 
-// VAAPI decode is cheap, but the GPU→CPU readback the preview needs often costs
-// more than software on light streams. Auto uses this to keep those on the CPU
-// and send 4K / high-bitrate clips to the GPU.
+// Hardware decode is cheap, but the GPU→CPU readback the preview needs often costs
+// more than software on light streams — more so on a backend with no surface scaler
+// (D3D11VA), where the readback moves full-resolution pixels. Auto uses this to keep
+// light clips on the CPU and send 4K / high-bitrate ones to the GPU.
 constexpr double kHwAccelMinKbitPerFrame = 250.0;
 
 bool ClipReader::hardwareDecodeIsWorthIt() const
@@ -655,51 +659,37 @@ bool ClipReader::hardwareDecodeIsWorthIt() const
     return (double(bitRate) / fps / 1000.0) >= kHwAccelMinKbitPerFrame;
 }
 
-bool ClipReader::tryOpenHardwareDecoder()
+bool ClipReader::openHardwareDecoderWith(drift::hwaccel::Backend backend)
 {
-    if (!m_fmt || m_videoStream < 0 || m_hwAccelActive || m_hwAccelDisabled)
-        return m_hwAccelActive;
-
-    // Hardware vs software is a preview preference. Auto keeps the per-clip
-    // heuristic (4K / heavy bitrates on VAAPI, cheap streams on software);
-    // Software and Hardware force that path. DRIFT_NO_VAAPI still forces
-    // software on a broken driver regardless of the toggle.
-    if (qEnvironmentVariableIsSet("DRIFT_NO_VAAPI"))
-        return false;
-
-    const HardwareDecodeMode mode = hardwareDecodeMode();
-    if (mode == HardwareDecodeMode::Software)
-        return false;
-    if (mode == HardwareDecodeMode::Auto && !hardwareDecodeIsWorthIt())
+    const AVHWDeviceType type = drift::hwaccel::deviceType(backend);
+    if (!drift::hwaccel::deviceAvailable(type))
         return false;
 
     const AVCodecParameters *par = m_fmt->streams[m_videoStream]->codecpar;
-    const AVCodec *codec = findVaapiDecoder(par->codec_id, &m_hwPixFmt);
+    AVPixelFormat pixFmt = AV_PIX_FMT_NONE;
+    const AVCodec *codec = drift::hwaccel::findDecoder(par->codec_id, type, &pixFmt);
     if (!codec)
         return false;
 
-    if (av_hwdevice_ctx_create(&m_hwDeviceCtx, AV_HWDEVICE_TYPE_VAAPI, nullptr, nullptr, 0) < 0) {
-        m_hwPixFmt = AV_PIX_FMT_NONE;
+    if (av_hwdevice_ctx_create(&m_hwDeviceCtx, type, nullptr, nullptr, 0) < 0) {
         if (m_hwDeviceCtx)
             av_buffer_unref(&m_hwDeviceCtx);
-        m_hwAccelDisabled = true;
         return false;
     }
 
     m_videoCtx = avcodec_alloc_context3(codec);
     if (!m_videoCtx) {
         av_buffer_unref(&m_hwDeviceCtx);
-        m_hwPixFmt = AV_PIX_FMT_NONE;
         return false;
     }
 
     if (avcodec_parameters_to_context(m_videoCtx, par) < 0) {
         avcodec_free_context(&m_videoCtx);
         av_buffer_unref(&m_hwDeviceCtx);
-        m_hwPixFmt = AV_PIX_FMT_NONE;
         return false;
     }
 
+    m_hwPixFmt = pixFmt;
     m_videoCtx->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
     m_videoCtx->opaque = &m_hwPixFmt;
     m_videoCtx->get_format = hwGetFormat;
@@ -708,12 +698,50 @@ bool ClipReader::tryOpenHardwareDecoder()
         avcodec_free_context(&m_videoCtx);
         av_buffer_unref(&m_hwDeviceCtx);
         m_hwPixFmt = AV_PIX_FMT_NONE;
-        m_hwAccelDisabled = true;
         return false;
     }
 
+    m_hwBackend = backend;
     m_hwAccelActive = true;
+    g_activeDecodeBackend.store(static_cast<int>(backend), std::memory_order_relaxed);
     return true;
+}
+
+bool ClipReader::tryOpenHardwareDecoder()
+{
+    if (!m_fmt || m_videoStream < 0 || m_hwAccelActive || m_hwAccelDisabled)
+        return m_hwAccelActive;
+
+    // Hardware vs software is a preview preference. Auto keeps the per-clip
+    // heuristic (4K / heavy bitrates on the GPU, cheap streams on software);
+    // Software and Hardware force that path. DRIFT_NO_HWACCEL still forces
+    // software on a broken driver regardless of the toggle.
+    if (drift::hwaccel::disabledByEnv())
+        return false;
+
+    const HardwareDecodeMode mode = hardwareDecodeMode();
+    if (mode == HardwareDecodeMode::Software)
+        return false;
+    if (mode == HardwareDecodeMode::Auto && !hardwareDecodeIsWorthIt())
+        return false;
+
+    // An explicit pick is honoured on its own: falling back to a backend the user did
+    // not choose would hide exactly the problem they picked around.
+    if (const drift::hwaccel::Backend pinned = pinnedDecodeBackend();
+        pinned != drift::hwaccel::Backend::None) {
+        if (openHardwareDecoderWith(pinned))
+            return true;
+    } else {
+        for (const drift::hwaccel::Backend backend : drift::hwaccel::decodeBackendOrder()) {
+            if (openHardwareDecoderWith(backend))
+                return true;
+        }
+    }
+
+    // Nothing here takes this stream. Sticky so every later frame of this clip does
+    // not re-walk the codec list.
+    m_hwAccelDisabled = true;
+    return false;
 }
 
 bool ClipReader::fallbackFromHardwareDecoder()
@@ -721,6 +749,7 @@ bool ClipReader::fallbackFromHardwareDecoder()
     if (!m_hwAccelActive && !m_hwDeviceCtx)
         return openSoftwareVideoDecoder();
 
+    g_hwFallbackCount.fetch_add(1, std::memory_order_relaxed);
     teardownVideoDecoder();
     m_hwAccelDisabled = true;
     return openSoftwareVideoDecoder();
@@ -758,6 +787,14 @@ bool ClipReader::ensureHwScaler(const AVFrame *hwFrame, int targetWidth, int tar
     if (m_hwScalerFailed || !hwFrame->hw_frames_ctx)
         return false;
 
+    // A backend with no surface scaler (D3D11VA) has to read back full-size surfaces;
+    // the sticky flag routes hwFrameToSoftware() straight to that path from here on.
+    const char *scalerName = drift::hwaccel::scaleFilter(m_hwBackend);
+    if (!scalerName) {
+        m_hwScalerFailed = true;
+        return false;
+    }
+
     // Rebuild when the caller's decode size changes, or when the decoder handed us
     // a new frame pool (it reallocates on resolution changes and after a flush).
     if (m_vppGraph && m_vppW == targetWidth && m_vppH == targetHeight && m_vppFramesCtx
@@ -778,7 +815,7 @@ bool ClipReader::ensureHwScaler(const AVFrame *hwFrame, int targetWidth, int tar
 
     const AVFilter *bufferFilter = avfilter_get_by_name("buffer");
     const AVFilter *sinkFilter = avfilter_get_by_name("buffersink");
-    const AVFilter *scaleFilter = avfilter_get_by_name("scale_vaapi");
+    const AVFilter *scaleFilter = avfilter_get_by_name(scalerName);
     if (!bufferFilter || !sinkFilter || !scaleFilter) {
         teardownHwScaler();
         m_hwScalerFailed = true;
@@ -838,6 +875,7 @@ AVFrame *ClipReader::hwFrameToSoftware(const AVFrame *hwFrame, int targetWidth, 
     // Downscale on the GPU first when we can: the readback is the dominant cost of
     // the whole hwaccel path and it is proportional to the surface area, so moving
     // preview-sized pixels instead of full-resolution ones is most of the win.
+    // Backends without a surface scaler skip this and transfer at full size.
     if (ensureHwScaler(hwFrame, targetWidth, targetHeight)) {
         av_frame_unref(m_vppScaled);
         av_frame_unref(m_swFrame);
@@ -851,7 +889,7 @@ AVFrame *ClipReader::hwFrameToSoftware(const AVFrame *hwFrame, int targetWidth, 
                 return m_swFrame;
             av_frame_unref(m_swFrame);
         }
-        // VPP is configured but misbehaving — stop using it and transfer full size.
+        // The scaler is configured but misbehaving — stop using it, transfer full size.
         m_hwScalerFailed = true;
         teardownHwScaler();
     }
@@ -1109,7 +1147,7 @@ bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int
         if (!convertedOk && m_hwAccelActive
             && (best->format == m_hwPixFmt
                 || isHardwarePixelFormat(static_cast<AVPixelFormat>(best->format)))) {
-            // Transfer from the VAAPI surface failed — abandon hwaccel.
+            // Transfer from the hardware surface failed — abandon hwaccel.
             sawHwFailure = true;
         }
     }
@@ -1147,7 +1185,7 @@ bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int maxWi
     if (!hwFailure)
         return false;
 
-    // Sticky software fallback for this reader — continuing with a broken VAAPI
+    // Sticky software fallback for this reader — continuing with a broken hardware
     // context is what triggers free(): invalid size on subsequent frames.
     if (!fallbackFromHardwareDecoder())
         return false;

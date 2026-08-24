@@ -874,6 +874,14 @@
         <translation>විවිධ ධාවන පථවල අවම වශයෙන් වීඩියෝ ක්ලිප් දෙකක්වත් තෝරන්න.</translation>
     </message>
     <message>
+        <source>Hardware decoding failed on this clip; using software decoding instead.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 decoding failed on this clip; using software decoding instead.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>That angle has nothing at the current time.</source>
         <translation>ඒ කෝණයට වත්මන් කාලයේ කිසිවක් නැත.</translation>
     </message>
@@ -3680,6 +3688,21 @@
     </message>
 </context>
 <context>
+    <name>PlaybackEngine</name>
+    <message>
+        <source>Auto</source>
+        <translation type="unfinished">ස්වයංක්‍රීය (Auto)</translation>
+    </message>
+    <message>
+        <source>Software</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hardware (%1)</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>PreviewPanel</name>
     <message>
         <source>Nothing to preview yet</source>
@@ -3773,18 +3796,10 @@ Auto මඟින් පෙරදසුනේ සත්‍ය වශයෙන්
         <translation>ධාවන වේගය</translation>
     </message>
     <message>
-        <source>Software</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Hardware</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>How video is decoded for preview.
-Auto picks per clip: Hardware for high-quality 4K, Software otherwise.
+Auto picks per clip: hardware for high-quality 4K, software otherwise.
 Software is smoother for most clips. It uses more CPU.
-Hardware is better for high-quality 4K.
+Hardware is better for high-quality 4K, and forces one GPU decoder.
 If playback stutters, try another.</source>
         <translation type="unfinished"></translation>
     </message>
