@@ -89,6 +89,31 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.4.0" date="2026-08-25">
+      <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.4.0</url>
+      <description>
+        <p>GPU decoding and encoding on every platform, effect and text presets you can reuse
+        across projects, and a fix for NVIDIA on Wayland.</p>
+        <ul>
+          <li>Fixed the black preview on NVIDIA under Wayland — Drift now runs as a native
+          Wayland app instead of falling back to X11</li>
+          <li>Video decoding for the preview now uses the GPU on Windows and macOS too, not
+          only Linux, and you can pick the backend from the preview toolbar</li>
+          <li>Export can encode on the GPU with NVENC, Quick Sync, AMF, VAAPI or VideoToolbox</li>
+          <li>Copy an effect or a whole effect stack between clips, and save your own presets</li>
+          <li>Save the look of a title as a text style and reuse or share it</li>
+          <li>The subtitle editor follows the playhead, and titles can contain colour emoji</li>
+          <li>Save a project as readable JSON and open one back again</li>
+          <li>Close a gap on a track, or split just one clip instead of every clip under
+          the playhead</li>
+          <li>Window size and panel proportions are remembered between sessions</li>
+          <li>A bug button in the header collects the details needed for a good bug report</li>
+          <li>Large media imports are faster and use far less memory</li>
+        </ul>
+        <p>Thanks to @CathodeAnode for the NVIDIA Wayland fix and the media-library performance
+        work, and to @jmn8718 for close gap and per-clip split.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-08-20">
       <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.3.0</url>
       <description>
