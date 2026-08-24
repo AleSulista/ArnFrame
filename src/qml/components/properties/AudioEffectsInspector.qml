@@ -122,7 +122,7 @@ Item {
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSm
                             font.weight: Font.Medium
-                            width: parent.width - 22 * 4 - 20 - 8
+                            width: parent.width - 22 * 5 - 20 - 8
                             elide: Text.ElideRight
                             anchors.verticalCenter: parent.verticalCenter
                         }
@@ -158,6 +158,16 @@ Item {
                             onClicked: EditorState.setAudioEffectEnabled(
                                            EditorState.selectedTrack, EditorState.selectedClip,
                                            audioEffectCard.index, !audioEffectCard.effectEnabled)
+                        }
+                        IconButton {
+                            glyph: Theme.icons.copy
+                            variant: "ghost"
+                            buttonSize: 22
+                            iconSize: 12
+                            tooltip: qsTr("Copy this audio effect")
+                            onClicked: EditorState.copyAudioEffectToClipboard(
+                                           EditorState.selectedTrack, EditorState.selectedClip,
+                                           audioEffectCard.index)
                         }
                         IconButton {
                             glyph: Theme.icons.x

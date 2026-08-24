@@ -2,13 +2,16 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Drift
 
-// Name prompt shared by "save this clip's style" and "rename a saved style". Both are a single
-// short field, so they are one dialog rather than two near-identical ones.
+// Name prompt shared by every "save this as a preset" and "rename a preset" flow — text styles
+// and effect stacks alike. All of them are a single short field, so they are one dialog rather
+// than a family of near-identical ones.
 ThemedDialog {
     id: root
 
     // Emitted with the trimmed name; never fires empty.
     signal submitted(string name)
+
+    property alias placeholder: nameField.placeholderText
 
     acceptText: qsTr("Save")
     preferredWidth: Theme.dialogWidthSm

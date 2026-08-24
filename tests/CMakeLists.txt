@@ -41,6 +41,7 @@ target_compile_definitions(tst_editorstate PRIVATE
     DRIFT_VERSION="${PROJECT_VERSION}")
 add_test(NAME EditorState COMMAND tst_editorstate)
 drift_copy_effects(tst_editorstate)
+drift_copy_audio_effects(tst_editorstate)
 drift_copy_transitions(tst_editorstate)
 
 qt_add_executable(tst_playback

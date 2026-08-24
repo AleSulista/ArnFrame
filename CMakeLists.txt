@@ -280,6 +280,8 @@ add_library(driftcore STATIC
     src/core/TextStyle.cpp
     src/core/TextPresetStore.h
     src/core/TextPresetStore.cpp
+    src/core/EffectStackStore.h
+    src/core/EffectStackStore.cpp
     src/core/ShapeStyle.h
     src/core/ShapeStyle.cpp
     src/core/ShapePath.h
@@ -626,6 +628,7 @@ qt_add_qml_module(drift
         src/qml/components/assets/ShortcutsTab.qml
         src/qml/components/assets/MediaAssetsTab.qml
         src/qml/components/assets/AssetCategoryChips.qml
+        src/qml/components/assets/EffectStacksSection.qml
         src/qml/components/assets/AssetFavoriteButton.qml
         src/qml/TimelinePanel.qml
         src/qml/components/timeline/TimelineToolbar.qml
@@ -657,7 +660,7 @@ qt_add_qml_module(drift
         src/qml/components/CollapsibleSection.qml
         src/qml/components/TextStylePackThumb.qml
         src/qml/components/TextStylePackPicker.qml
-        src/qml/components/TextStyleNameDialog.qml
+        src/qml/components/NameDialog.qml
         src/qml/components/EmojiPicker.qml
         src/qml/components/ThemedButton.qml
         src/qml/components/ThemedChip.qml

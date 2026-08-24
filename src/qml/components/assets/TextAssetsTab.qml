@@ -265,7 +265,7 @@ Item {
         }
     }
 
-    TextStyleNameDialog {
+    NameDialog {
         id: renameDialog
 
         property string presetId: ""

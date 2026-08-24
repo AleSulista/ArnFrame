@@ -11,6 +11,10 @@ Item {
     // "Browse effects" actually takes the user somewhere.
     signal browseEffectsRequested()
 
+    // The name prompt lives in PropertiesPanel, so the inspector only says which stack the
+    // user asked to save. -1 means the whole clip rather than one effect.
+    signal saveEffectPresetRequested(int effectIndex)
+
     property int clipDataRevision: 0
     readonly property var clipData: {
         void clipDataRevision
@@ -266,6 +270,29 @@ Item {
                     radius: Theme.radiusSm
                     color: Theme.panelAccent
 
+                    // Save-as-preset lives here rather than in the header row: a fifth ghost
+                    // button already crowds a 22px row at panel width, and a sixth would leave
+                    // the label permanently elided.
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: effectCardMenu.popup()
+                    }
+                    ThemedContextMenu {
+                        id: effectCardMenu
+                        ThemedMenuItem {
+                            text: qsTr("Copy this effect")
+                            icon.name: Theme.icons.copy
+                            onTriggered: EditorState.copyEffectToClipboard(
+                                             EditorState.selectedTrack, EditorState.selectedClip,
+                                             effectCard.index)
+                        }
+                        ThemedMenuItem {
+                            text: qsTr("Save as preset…")
+                            icon.name: Theme.icons.save
+                            onTriggered: root.saveEffectPresetRequested(effectCard.index)
+                        }
+                    }
+
                     Row {
                         id: effectHeader
                         anchors.left: parent.left
@@ -276,13 +303,17 @@ Item {
                         spacing: 2
 
                         Text {
-                            text: effectCard.effectData.label
+                            // An effect from an addon that is not installed has no catalog entry,
+                            // so it renders with no params at all; saying so beats a blank card.
+                            text: effectCard.effectData.missing
+                                  ? qsTr("%1 (not installed)").arg(effectCard.effectData.label)
+                                  : effectCard.effectData.label
                             color: effectCard.effectEnabled
                                    ? Theme.panelForeground : Theme.mutedForeground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSm
                             font.weight: Font.Medium
-                            width: parent.width - 22 * 4 - 8
+                            width: parent.width - 22 * 5 - 8
                             elide: Text.ElideRight
                             anchors.verticalCenter: parent.verticalCenter
                         }
@@ -318,6 +349,16 @@ Item {
                             onClicked: EditorState.setEffectEnabled(
                                            EditorState.selectedTrack, EditorState.selectedClip,
                                            effectCard.index, !effectCard.effectEnabled)
+                        }
+                        IconButton {
+                            glyph: Theme.icons.copy
+                            variant: "ghost"
+                            buttonSize: 22
+                            iconSize: 12
+                            tooltip: qsTr("Copy this effect")
+                            onClicked: EditorState.copyEffectToClipboard(
+                                           EditorState.selectedTrack, EditorState.selectedClip,
+                                           effectCard.index)
                         }
                         IconButton {
                             glyph: Theme.icons.x
@@ -481,5 +522,29 @@ Item {
                 }
             }
         }
+
+        // Paste is offered even with an empty clipboard: checking costs a synchronous round-trip
+        // to whichever process owns the selection, so the button asks only when it is pressed.
+        Row {
+            visible: root.hasSelection
+            width: parent.width
+            spacing: Theme.spacingSm
+
+            ThemedButton {
+                text: qsTr("Paste effects")
+                glyph: Theme.icons.clipboardPaste
+                variant: "secondary"
+                onClicked: EditorState.pasteEffectsFromClipboard(
+                               EditorState.selectedTrack, EditorState.selectedClip)
+            }
+            ThemedButton {
+                text: qsTr("Save as preset…")
+                glyph: Theme.icons.save
+                variant: "secondary"
+                visible: root.selectedEffects.length > 0
+                onClicked: root.saveEffectPresetRequested(-1)
+            }
+        }
+
     }
 }

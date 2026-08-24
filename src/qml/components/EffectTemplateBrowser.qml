@@ -50,11 +50,24 @@ Column {
         EditorState.applyEffectTemplate(EditorState.selectedTrack, EditorState.selectedClip, templateId)
     }
 
+    // Saved stacks sit above the built-in templates and show whether or not the templates pack is
+    // installed — they are the user's own work, and losing sight of them when a pack is missing
+    // would be the wrong failure.
+    EffectStacksSection {
+        id: savedSection
+        width: parent.width
+    }
+
+    Item {
+        width: 1
+        height: Theme.spacingMd
+    }
+
     // Without the pack installed the catalog is empty and the grid rendered nothing,
     // unlike the sibling audio and transitions tabs which both offer an install CTA.
     EmptyState {
         width: parent.width
-        height: visible ? root.height : 0
+        height: visible ? Math.max(0, root.height - savedSection.height - Theme.spacingMd) : 0
         visible: root.catalog.length === 0
         glyph: Theme.icons.wand
         title: qsTr("No effect templates")
@@ -66,7 +79,7 @@ Column {
     Column {
         visible: root.catalog.length > 0
         width: parent.width
-        height: parent.height
+        height: Math.max(0, parent.height - savedSection.height - Theme.spacingMd)
         spacing: 0
 
         Text {

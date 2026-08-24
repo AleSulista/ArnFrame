@@ -882,6 +882,14 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Copy effects from clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste effects onto clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>That angle has nothing at the current time.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1477,6 +1485,86 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>This stack uses “%1”, which isn’t installed — it won’t show. Open Extras to install it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This stack uses %1 effects that aren’t installed — they won’t show. Open Extras to install them.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effect copied</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio effect copied</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effects copied</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This clip has no effects to copy</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No effects on the clipboard</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste effects</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There are no effects to save</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not save the effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effect preset saved</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not rename the effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effect preset renamed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not delete the effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effect preset deleted</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not export the effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effect preset exported</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not import the effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effect preset imported</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Track mute</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1999,6 +2087,10 @@
     </message>
     <message>
         <source>Enable audio effect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy this audio effect</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2573,6 +2665,65 @@
     </message>
 </context>
 <context>
+    <name>EffectStacksSection</name>
+    <message>
+        <source>Drift effect stack (*.drifteffects)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import effect stack</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export effect stack</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>My presets</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import an effect stack…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tune a clip&apos;s effects, then use “Save as preset…” in the properties Effects tab to keep them here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>+%1 more</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preset options</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rename…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rename effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove “%1” from your saved presets? Clips already using it keep their effects.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>EffectTemplateBrowser</name>
     <message>
         <source>No effect templates</source>
@@ -2725,6 +2876,18 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Copy this effect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save as preset…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 (not installed)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Move effect up</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2766,6 +2929,10 @@
     </message>
     <message>
         <source>Clear</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste effects</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -3658,6 +3825,21 @@
     </message>
 </context>
 <context>
+    <name>NameDialog</name>
+    <message>
+        <source>Save</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>My style</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>NewTrackMenu</name>
     <message>
         <source>Video</source>
@@ -4062,6 +4244,18 @@ If playback stutters, try another.</source>
     </message>
     <message>
         <source>Click a clip on the timeline to edit its properties</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save effect as preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>My look</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -6148,21 +6342,6 @@ If playback stutters, try another.</source>
     </message>
 </context>
 <context>
-    <name>TextStyleNameDialog</name>
-    <message>
-        <source>Save</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Name</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>My style</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>TextStylePackPicker</name>
     <message>
         <source>Custom</source>
@@ -6253,6 +6432,18 @@ If playback stutters, try another.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Copy effects</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste effects</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save effects as preset…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Delete</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6283,6 +6474,10 @@ If playback stutters, try another.</source>
 </context>
 <context>
     <name>TimelinePanel</name>
+    <message>
+        <source>Save effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <source>Add new track</source>
         <translation type="unfinished"></translation>
@@ -6345,6 +6540,10 @@ If playback stutters, try another.</source>
     </message>
     <message>
         <source>Clip name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>My look</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

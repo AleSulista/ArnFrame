@@ -882,6 +882,14 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Copy effects from clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste effects onto clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>That angle has nothing at the current time.</source>
         <translation>ඒ කෝණයට වත්මන් කාලයේ කිසිවක් නැත.</translation>
     </message>
@@ -1477,6 +1485,86 @@
         <translation>ශ්‍රව්‍ය ප්‍රයෝගය යාවත්කාලීන විය</translation>
     </message>
     <message>
+        <source>This stack uses “%1”, which isn’t installed — it won’t show. Open Extras to install it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This stack uses %1 effects that aren’t installed — they won’t show. Open Extras to install them.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effect copied</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio effect copied</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effects copied</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This clip has no effects to copy</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No effects on the clipboard</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste effects</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There are no effects to save</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not save the effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effect preset saved</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not rename the effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effect preset renamed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not delete the effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effect preset deleted</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not export the effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effect preset exported</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not import the effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effect preset imported</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Track mute</source>
         <translation>ට්‍රැකය නිහඬ කිරීම</translation>
     </message>
@@ -2000,6 +2088,10 @@
     <message>
         <source>Enable audio effect</source>
         <translation>ශ්‍රව්‍ය ප්‍රයෝගය ක්‍රියාත්මක කරන්න</translation>
+    </message>
+    <message>
+        <source>Copy this audio effect</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Remove audio effect</source>
@@ -2573,6 +2665,65 @@
     </message>
 </context>
 <context>
+    <name>EffectStacksSection</name>
+    <message>
+        <source>Drift effect stack (*.drifteffects)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import effect stack</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export effect stack</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>My presets</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import an effect stack…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tune a clip&apos;s effects, then use “Save as preset…” in the properties Effects tab to keep them here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>+%1 more</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preset options</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rename…</source>
+        <translation type="unfinished">නම වෙනස් කරන්න…</translation>
+    </message>
+    <message>
+        <source>Export…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation type="unfinished">මකන්න</translation>
+    </message>
+    <message>
+        <source>Rename effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove “%1” from your saved presets? Clips already using it keep their effects.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>EffectTemplateBrowser</name>
     <message>
         <source>No effect templates</source>
@@ -2725,6 +2876,18 @@
         <translation>ප්‍රයෝග ගවේෂණය කරන්න</translation>
     </message>
     <message>
+        <source>Copy this effect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save as preset…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 (not installed)</source>
+        <translation type="unfinished">%1 (ස්ථාපනය කර නැත)</translation>
+    </message>
+    <message>
         <source>Move effect up</source>
         <translation>ප්‍රයෝගය ඉහළට ගෙනයන්න</translation>
     </message>
@@ -2767,6 +2930,10 @@
     <message>
         <source>Clear</source>
         <translation type="unfinished">හිස් කරන්න</translation>
+    </message>
+    <message>
+        <source>Paste effects</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -3658,6 +3825,21 @@
     </message>
 </context>
 <context>
+    <name>NameDialog</name>
+    <message>
+        <source>Save</source>
+        <translation type="unfinished">සුරකින්න</translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation type="unfinished">නම</translation>
+    </message>
+    <message>
+        <source>My style</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>NewTrackMenu</name>
     <message>
         <source>Video</source>
@@ -4065,6 +4247,18 @@ If playback stutters, try another.</source>
     <message>
         <source>Click a clip on the timeline to edit its properties</source>
         <translation>ක්ලිපයක ගුණාංග සංස්කරණය කිරීමට කාලරේඛාවේ ඇති ක්ලිපයක් මත ක්ලික් කරන්න</translation>
+    </message>
+    <message>
+        <source>Save effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save effect as preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>My look</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -6151,21 +6345,6 @@ If playback stutters, try another.</source>
     </message>
 </context>
 <context>
-    <name>TextStyleNameDialog</name>
-    <message>
-        <source>Save</source>
-        <translation type="unfinished">සුරකින්න</translation>
-    </message>
-    <message>
-        <source>Name</source>
-        <translation type="unfinished">නම</translation>
-    </message>
-    <message>
-        <source>My style</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>TextStylePackPicker</name>
     <message>
         <source>Custom</source>
@@ -6256,6 +6435,18 @@ If playback stutters, try another.</source>
         <translation>නම වෙනස් කරන්න…</translation>
     </message>
     <message>
+        <source>Copy effects</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste effects</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save effects as preset…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Delete</source>
         <translation>මකන්න</translation>
     </message>
@@ -6286,6 +6477,10 @@ If playback stutters, try another.</source>
 </context>
 <context>
     <name>TimelinePanel</name>
+    <message>
+        <source>Save effect preset</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <source>Add new track</source>
         <translation>නව ට්‍රැකයක් එක් කරන්න</translation>
@@ -6349,6 +6544,10 @@ If playback stutters, try another.</source>
     <message>
         <source>Clip name</source>
         <translation>ක්ලිප් නම</translation>
+    </message>
+    <message>
+        <source>My look</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Close Gap</source>
