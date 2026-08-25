@@ -429,9 +429,10 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     loadAssetFavorites();
 
     // Periodically snapshot unsaved work to a recovery file so a crash doesn't
-    // lose progress. The file is removed only when the user saves, loads another
-    // project, starts fresh, or discards recovery — not on a clean quit, so the
-    // next launch can always ask whether to restore.
+    // lose progress. A confirmed close (Save or Don't Save) clears dirty first,
+    // so aboutToQuit only writes this when quit was interrupted (SIGTERM, kill).
+    // The file is also removed when the user saves, loads another project,
+    // starts fresh, or discards recovery.
     m_autosaveTimer = new QTimer(this);
     m_autosaveTimer->setInterval(kAutosaveIntervalMs);
     connect(m_autosaveTimer, &QTimer::timeout, this, [this] {

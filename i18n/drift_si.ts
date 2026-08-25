@@ -4934,8 +4934,8 @@ If playback stutters, try another.</source>
         <translation>ආරම්භයේදී අවසන් ව්‍යාපෘතිය නැවත විවෘත කරන්න</translation>
     </message>
     <message>
-        <source>Automatically restore the last open project. Unsaved work is kept in a side snapshot and never overwrites your save file.</source>
-        <translation>අවසන් වරට විවෘත කළ ව්‍යාපෘතිය ස්වයංක්‍රීයව ප්‍රතිසාධනය කරන්න. නොසුරකින ලද කාර්යයන් වෙනම තාවකාලික පිටපතක තබා ගන්නා අතර කිසි විටෙකත් ඔබේ සුරැකි ගොනුව මත ලියවෙන්නේ නැත.</translation>
+        <source>Automatically restore the last open project on startup. Closing still asks you to save; a crash snapshot never overwrites your save file.</source>
+        <translation>අවසන් වරට විවෘත කළ ව්‍යාපෘතිය ආරම්භයේදී ස්වයංක්‍රීයව ප්‍රතිසාධනය කරන්න. වසා දැමීමේදී තවමත් සුරැකීමට ඇසෙනු ඇත; බිඳවැටුම් පිටපතක් කිසි විටෙකත් ඔබේ සුරැකි ගොනුව මත ලියවෙන්නේ නැත.</translation>
     </message>
     <message>
         <source>Agent access</source>

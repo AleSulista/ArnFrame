@@ -3,8 +3,8 @@ import QtQuick.Controls.Basic
 import Drift
 
 // Shown on every launch while an autosave snapshot from the previous session
-// exists (crash or normal close with unsaved work). Restore reloads it; New
-// session starts fresh and clears the snapshot.
+// exists (typically a crash — a confirmed close clears the snapshot). Restore
+// reloads it; New session starts fresh and clears the snapshot.
 ThemedDialog {
     id: root
 

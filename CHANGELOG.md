@@ -8,6 +8,8 @@ Tracks work done on `main` **since the last public release**. Use this to see wh
 
 ## ✅ Fixed
 
+- Closing a project with unsaved changes now asks Save / Don't Save / Cancel instead of quitting silently and offering “Recovered unsaved work” on the next launch.
+
 ## ✨ Added
 
 ## 🎨 Improved

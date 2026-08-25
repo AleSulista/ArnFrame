@@ -409,7 +409,7 @@ Item {
             ThemedSwitch {
                 checked: EditorState.reopenLastProject
                 text: qsTr("Reopen last project on startup")
-                tooltip: qsTr("Automatically restore the last open project. Unsaved work is kept in a side snapshot and never overwrites your save file.")
+                tooltip: qsTr("Automatically restore the last open project on startup. Closing still asks you to save; a crash snapshot never overwrites your save file.")
                 onToggled: EditorState.reopenLastProject = checked
             }
 

@@ -4931,7 +4931,7 @@ If playback stutters, try another.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Automatically restore the last open project. Unsaved work is kept in a side snapshot and never overwrites your save file.</source>
+        <source>Automatically restore the last open project on startup. Closing still asks you to save; a crash snapshot never overwrites your save file.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
