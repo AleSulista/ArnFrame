@@ -48,7 +48,8 @@ EffectPresetEntry EffectPackageLoader::loadPackage(const QString &packageDir, QS
     const QJsonObject root = doc.object();
     const QString backend = root.value(QStringLiteral("backend")).toString();
     if (backend != QLatin1String("gpu") && backend != QLatin1String("libav")
-        && backend != QLatin1String("compositor") && backend != QLatin1String("model3d")) {
+        && backend != QLatin1String("compositor") && backend != QLatin1String("model3d")
+        && backend != QLatin1String("faceswap")) {
         setError(errorOut, &entry,
                  backend.isEmpty() ? QStringLiteral("effect.json missing backend")
                                    : QStringLiteral("unsupported backend '%1'").arg(backend));
@@ -100,6 +101,15 @@ EffectPresetEntry EffectPackageLoader::loadPackage(const QString &packageDir, QS
 
     if (backend == QLatin1String("model3d")) {
         entry.isModel3d = true;
+        entry.meta.compositorOnly = true;
+        entry.gpu.packageDir = packageDir;
+        return entry;
+    }
+
+    // Like model3d: not a fragment pipeline, but the same parameter schema, and the renderer
+    // needs packageDir to find the package's own mesh topology.
+    if (backend == QLatin1String("faceswap")) {
+        entry.isFaceSwap = true;
         entry.meta.compositorOnly = true;
         entry.gpu.packageDir = packageDir;
         return entry;

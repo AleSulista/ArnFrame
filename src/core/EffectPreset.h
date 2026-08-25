@@ -30,6 +30,9 @@ struct EffectParamSpec
     QString defaultColorHex = QStringLiteral("#ffffff"); // normalized to 6 digits at parse time
     QString defaultString;                              // FilePath default (absolute after resolve)
     QStringList fileFilters;                            // QFileDialog name filters
+    // Controls a shader stage GLES cannot compile. The inspector drops these on an ES context,
+    // where the renderer ignores them anyway.
+    bool desktopGlOnly = false;
 
     bool isBoolean() const { return type == EffectParamType::Bool; }
     bool isColor() const { return type == EffectParamType::Color; }

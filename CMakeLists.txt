@@ -501,8 +501,12 @@ add_library(driftengine STATIC
     src/engine/FaceMesh.cpp
     src/engine/ModelAsset.h
     src/engine/ModelAsset.cpp
+    src/engine/GlFaceSwapRenderer.h
+    src/engine/GlFaceSwapRenderer.cpp
     src/engine/GlModelRenderer.h
     src/engine/GlModelRenderer.cpp
+    src/engine/FaceSwapSource.h
+    src/engine/FaceSwapSource.cpp
     src/engine/FacePropCatalog.h
     src/engine/FacePropCatalog.cpp
     src/engine/DeepFilterDenoiser.h

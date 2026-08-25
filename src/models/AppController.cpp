@@ -40,6 +40,7 @@
 #include "engine/AudioOnsets.h"
 #include "engine/MediaWaveform.h"
 #include "engine/FaceLandmarker.h"
+#include "engine/FaceSwapSource.h"
 #include "engine/FaceTrack.h"
 #include "engine/ModelAsset.h"
 #include "engine/ReverseProxyCache.h"
@@ -72,6 +73,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QOpenGLContext>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
@@ -1651,6 +1653,14 @@ QVariantMap keyframeTrackToMap(const drift::KeyframeTrack<double> &track, drift:
     };
 }
 
+// Which GL flavour the app will run on. This is asked from the GUI thread, where no context is
+// current, so it reads the module type rather than a context — the same signal GlRuntime uses to
+// pick the surface format, and fixed for the life of the process.
+bool runningOnGles()
+{
+    return QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES;
+}
+
 // `effectIndex` and `timelineStart` are only needed to describe the params' keyframe tracks: the
 // inspector addresses them as "fx.<index>.<key>", and key times are reported on the timeline.
 QVariantMap effectToMap(const drift::Effect &effect, int effectIndex, drift::TimeUs timelineStart)
@@ -1659,6 +1669,8 @@ QVariantMap effectToMap(const drift::Effect &effect, int effectIndex, drift::Tim
     QVariantList params;
     if (def) {
         for (const drift::EffectParamSpec &paramDef : def->meta.parameters) {
+            if (paramDef.desktopGlOnly && runningOnGles())
+                continue;
             QVariant value = effect.parameters.value(paramDef.key);
             if (!value.isValid())
                 value = paramDef.defaultVariant();
@@ -6750,6 +6762,51 @@ void AppController::detectFacesForClip(int trackIndex, int clipIndex)
     });
 }
 
+void AppController::ingestFaceSwapSource(const QString &photoPath)
+{
+    if (photoPath.isEmpty() || drift::faceSwapSourceReady(photoPath))
+        return;
+    if (m_faceSwapIngesting.contains(photoPath))
+        return;
+    // Gated on the models being present rather than attempted and failed: without the addon this
+    // would report an error on every clip in the project the moment one is opened.
+    if (!drift::FaceLandmarker::modelPresent())
+        return;
+
+    m_faceSwapIngesting.insert(photoPath);
+    (void)QtConcurrent::run([this, photoPath]() {
+        QString error;
+        const bool ok = drift::ingestFaceSwapSource(photoPath, &error);
+        QMetaObject::invokeMethod(
+            this,
+            [this, photoPath, ok, error]() {
+                m_faceSwapIngesting.remove(photoPath);
+                if (!ok) {
+                    setLastMessage(error, QStringLiteral("error"));
+                    return;
+                }
+                // The effect has been rendering pass-through while this ran.
+                emitPreviewFrame();
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void AppController::ingestFaceSwapSourcesInProject()
+{
+    for (const drift::Track &track : m_project.tracks()) {
+        for (const drift::Clip &clip : track.clips) {
+            for (const drift::Effect &effect : clip.effects) {
+                const EffectPresetEntry *def = effectDefForId(effect.catalogId);
+                if (!def || !def->isFaceSwap)
+                    continue;
+                ingestFaceSwapSource(
+                    effect.parameters.value(QStringLiteral("sourceImage")).toString());
+            }
+        }
+    }
+}
+
 void AppController::finalizeFaceDetection(const QString &clipId, const QString &trackPath,
                                           drift::TimeUs srcOffsetUs)
 {
@@ -11102,6 +11159,9 @@ void AppController::setEffectStringParam(int trackIndex, int clipIndex, int effe
     clip.effects[effectIndex].parameters.insert(key, path);
     pushProjectEdit(before, QStringLiteral("Edit effect"));
     finishEdit(QStringLiteral("Effect updated"));
+
+    if (def->isFaceSwap && key == QLatin1String("sourceImage"))
+        ingestFaceSwapSource(path);
 }
 
 QVariantList AppController::audioEffectCatalog() const
@@ -13103,6 +13163,10 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
     }
 
     restoreFilmstripsAfterLoad();
+    // Face Swap landmarks are derived from the photo and deliberately not bundled, so a project
+    // opened anywhere but where it was made has none. Re-derive them in the background; the
+    // effect renders pass-through until each lands.
+    ingestFaceSwapSourcesInProject();
     m_playback.setProject(&m_project);
     m_undoStack.clear();
     clearSelection();

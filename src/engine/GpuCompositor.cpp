@@ -3,6 +3,7 @@
 #include "EffectCatalog.h"
 #include "FaceModelTransform.h"
 #include "FaceTrack.h"
+#include "GlFaceSwapRenderer.h"
 #include "GlModelRenderer.h"
 #include "GlRuntime.h"
 #include "GpuEffectDefinition.h"
@@ -242,6 +243,18 @@ GlTarget buildLayerTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const GpuLay
             const drift::FaceModelParams modelParams = drift::faceModelParamsFromMap(params);
             GlTarget next =
                 drawFaceModelEffect(rt, gl, modelParams, layer.faceSlots, target);
+            if (!next.isValid())
+                continue; // grace mode
+            rt.releaseTarget(std::move(target));
+            target = std::move(next);
+            continue;
+        }
+
+        if (def->isFaceSwap) {
+            QMap<QString, QVariant> params = resolvedEffectParameters(effect, *def);
+            const drift::FaceSwapParams swapParams =
+                drift::faceSwapParamsFromMap(params, def->gpu.packageDir);
+            GlTarget next = drawFaceSwapEffect(rt, gl, swapParams, layer.faceSlots, target);
             if (!next.isValid())
                 continue; // grace mode
             rt.releaseTarget(std::move(target));

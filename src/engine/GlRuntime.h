@@ -101,6 +101,21 @@ public:
     std::map<QString, CompiledEffect> programs;
     std::map<QString, GLuint> staticTextures; // absolute path -> GL texture
 
+    // Face Swap source photos. Keyed on "<absolutePath>|<mtimeMs>|<size>", so editing a photo in
+    // place rebuilds the textures instead of serving a stale one. Destroyed in shutdown()
+    // alongside staticTextures.
+    //
+    // Kept apart from staticTextures because those are package assets: staticTexture() uploads
+    // them flipped and wrapping, and a photo needs neither — its v axis has to line up with the
+    // landmark uv the mesh carries.
+    struct FaceSwapPhotoGpu
+    {
+        GLuint texture = 0; // the photo, unflipped, clamped
+        GLuint lowFreq = 0; // face-relative low-frequency field for the lighting match
+        float aspect = 1.f; // photo height / width, to turn width-normalized landmarks into uv
+    };
+    std::map<QString, FaceSwapPhotoGpu> faceSwapPhotos;
+
     // Face-prop GPU uploads. Bounded LRU; destroyed in shutdown() alongside staticTextures.
     struct ModelCache
     {
@@ -134,6 +149,11 @@ public:
         QString path;
     };
     FaceMeshGpu faceMesh;
+
+    // Face Swap's mesh. A separate slot rather than sharing faceMesh: the two carry different
+    // topologies and different vertex layouts, so one clip using both effects would rebuild the
+    // buffers twice per frame.
+    FaceMeshGpu faceSwapMesh;
 
     // A QOpenGLContext has thread affinity and can only be made current on the
     // thread it lives on, but GL work arrives from several threads (the

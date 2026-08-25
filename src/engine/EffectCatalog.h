@@ -18,6 +18,7 @@ struct EffectPresetEntry
     QMap<QString, QVariant> fixedParams;   // always applied, not exposed as sliders
     bool isGpu = false;                    // true for file-based GPU effect packages
     bool isModel3d = false;                // true for "backend": "model3d" face-prop packages
+    bool isFaceSwap = false;               // true for "backend": "faceswap" packages
     bool needsFace = false;                // "requires": "face" — engine injects u_face* uniforms
     drift::GpuEffectDefinition gpu;        // valid when isGpu && gpu.valid; packageDir also set for model3d
     int catalogOrder = 0;                  // lower sorts first in the browser catalog

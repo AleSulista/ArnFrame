@@ -182,7 +182,9 @@ QImage EffectProcessor::applyEffects(const QImage &input, const QList<drift::Eff
         if (def && def->meta.id == QStringLiteral("time_echo"))
             continue;
 
-        if (def && def->isModel3d) {
+        // Both compositor-only face backends ride the GPU chain as a modelDef step; applyChain
+        // picks the renderer apart again.
+        if (def && (def->isModel3d || def->isFaceSwap)) {
             flushLegacy();
             QMap<QString, QVariant> params = resolvedEffectParameters(effect, *def);
             GpuEffectExecutor::ChainStep step;

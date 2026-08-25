@@ -22,19 +22,22 @@
       "type": "float",
       "minValue": 0.0,
       "maxValue": 1.0,
-      "defaultValue": 0.25
+      "defaultValue": 0.25,
+      "desktopGlOnly": true
     },
     {
       "identifier": "wireframe",
       "displayName": "Wireframe",
       "type": "bool",
-      "defaultValue": 1
+      "defaultValue": 1,
+      "desktopGlOnly": true
     },
     {
       "identifier": "wireColor",
       "displayName": "Wire Color",
       "type": "color",
-      "defaultValue": "#33f2ff"
+      "defaultValue": "#33f2ff",
+      "desktopGlOnly": true
     },
     {
       "identifier": "wireWidth",
@@ -42,7 +45,8 @@
       "type": "float",
       "minValue": 0.5,
       "maxValue": 4.0,
-      "defaultValue": 1.0
+      "defaultValue": 1.0,
+      "desktopGlOnly": true
     },
     {
       "identifier": "scale",

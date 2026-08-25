@@ -5,6 +5,7 @@
 
 #include <QFileInfo>
 #include <QMatrix4x4>
+#include <QOpenGLContext>
 #include <QOpenGLShaderProgram>
 #include <QtMath>
 #include <QVector>
@@ -18,56 +19,6 @@
 
 namespace drift::gl {
 namespace {
-
-// Restores depth/cull/blend/colour-mask/depth-mask on every exit path. Nothing else in GlRuntime
-// enables GL_DEPTH_TEST or GL_CULL_FACE, so a leak here makes later fullscreen quads vanish
-// intermittently on some drivers.
-struct GlStateGuard
-{
-    QOpenGLExtraFunctions *gl;
-    GLboolean depthTest = GL_FALSE;
-    GLboolean cullFace = GL_FALSE;
-    GLboolean blend = GL_FALSE;
-    GLboolean depthMask = GL_TRUE;
-    GLboolean colorMask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
-    GLint depthFunc = GL_LESS;
-    GLint cullFaceMode = GL_BACK;
-    GLint frontFace = GL_CCW;
-
-    explicit GlStateGuard(QOpenGLExtraFunctions *g)
-        : gl(g)
-    {
-        depthTest = gl->glIsEnabled(GL_DEPTH_TEST);
-        cullFace = gl->glIsEnabled(GL_CULL_FACE);
-        blend = gl->glIsEnabled(GL_BLEND);
-        gl->glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
-        gl->glGetBooleanv(GL_COLOR_WRITEMASK, colorMask);
-        gl->glGetIntegerv(GL_DEPTH_FUNC, &depthFunc);
-        gl->glGetIntegerv(GL_CULL_FACE_MODE, &cullFaceMode);
-        gl->glGetIntegerv(GL_FRONT_FACE, &frontFace);
-    }
-
-    ~GlStateGuard()
-    {
-        if (depthTest)
-            gl->glEnable(GL_DEPTH_TEST);
-        else
-            gl->glDisable(GL_DEPTH_TEST);
-        if (cullFace)
-            gl->glEnable(GL_CULL_FACE);
-        else
-            gl->glDisable(GL_CULL_FACE);
-        if (blend)
-            gl->glEnable(GL_BLEND);
-        else
-            gl->glDisable(GL_BLEND);
-        gl->glDepthMask(depthMask);
-        gl->glColorMask(colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
-        gl->glDepthFunc(GLenum(depthFunc));
-        gl->glCullFace(GLenum(cullFaceMode));
-        gl->glFrontFace(GLenum(frontFace));
-    }
-};
 
 constexpr const char *kModelVert = R"(#version 330 core
 layout(location = 0) in vec3 a_pos;
@@ -422,6 +373,12 @@ void destroyGlModels(GlRuntime &rt, QOpenGLExtraFunctions *gl)
             gl->glDeleteBuffers(1, &rt.faceMesh.ibo);
             rt.faceMesh = {};
         }
+        if (rt.faceSwapMesh.vao) {
+            gl->glDeleteVertexArrays(1, &rt.faceSwapMesh.vao);
+            gl->glDeleteBuffers(1, &rt.faceSwapMesh.vbo);
+            gl->glDeleteBuffers(1, &rt.faceSwapMesh.ibo);
+            rt.faceSwapMesh = {};
+        }
     }
     rt.models.lru.clear();
     rt.models.index.clear();
@@ -621,10 +578,17 @@ GlTarget drawFaceModelEffect(GlRuntime &rt, QOpenGLExtraFunctions *gl, const Fac
 
     // Opaque props stay on face_model (no GS) so they remain bit-identical. Fill+wire uses a
     // separate program id so we never relink the cached opaque shader with a geometry stage.
+    //
+    // GLES has neither a geometry stage nor `noperspective`, so face_model_fillwire cannot be
+    // compiled there at all. The effect's defaults ask for it (wireframe on, fillOpacity 0.25),
+    // so an ES context is forced onto the opaque program rather than failing to link; the
+    // inspector hides the four fill/wire controls to match.
+    const QOpenGLContext *context = QOpenGLContext::currentContext();
+    const bool esContext = context && context->isOpenGLES();
     constexpr double kOpaqueFillEps = 1e-6;
     const bool useFillWire =
-        params.wireframe || (params.fillOpacity < 1.0 - kOpaqueFillEps);
-    const bool forceBlend = params.fillOpacity < 1.0 - kOpaqueFillEps;
+        !esContext && (params.wireframe || (params.fillOpacity < 1.0 - kOpaqueFillEps));
+    const bool forceBlend = !esContext && (params.fillOpacity < 1.0 - kOpaqueFillEps);
 
     QOpenGLShaderProgram *prog =
         useFillWire ? rt.builtinProgram(QStringLiteral("face_model_fillwire"), kModelVert,
@@ -741,9 +705,19 @@ GlTarget drawFaceModelEffect(GlRuntime &rt, QOpenGLExtraFunctions *gl, const Fac
     gl->glDisable(GL_BLEND);
     overlay.fbo->release();
 
-    // Resolve supersample, then composite over source.
+    return resolveFaceOverlay(rt, gl, std::move(overlay), source);
+}
+
+GlTarget resolveFaceOverlay(GlRuntime &rt, QOpenGLExtraFunctions *gl, GlTarget &&overlay,
+                            const GlTarget &source)
+{
+    const int srcW = source.width;
+    const int srcH = source.height;
+    const int drawW = overlay.width;
+    const int drawH = overlay.height;
+
     GlTarget overlayFull;
-    if (supersample) {
+    if (drawW != srcW || drawH != srcH) {
         overlayFull = rt.acquireTarget(srcW, srcH);
         if (!overlayFull.isValid()) {
             rt.releaseTarget(std::move(overlay));

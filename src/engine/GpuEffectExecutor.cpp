@@ -1,6 +1,7 @@
 #include "GpuEffectExecutor.h"
 
 #include "FaceModelTransform.h"
+#include "GlFaceSwapRenderer.h"
 #include "GlModelRenderer.h"
 #include "GlRuntime.h"
 #include "GpuEffectDefinition.h"
@@ -98,6 +99,17 @@ QImage GpuEffectExecutor::applyChain(const QList<ChainStep> &steps, const QImage
                     drift::faceModelParamsFromMap(step.parameters);
                 GlTarget next =
                     drawFaceModelEffect(rt, gl, modelParams, step.faceSlots, current);
+                if (!next.isValid())
+                    continue;
+                rt.releaseTarget(std::move(current));
+                current = std::move(next);
+                continue;
+            }
+
+            if (step.modelDef && step.modelDef->isFaceSwap) {
+                const drift::FaceSwapParams swapParams =
+                    drift::faceSwapParamsFromMap(step.parameters, step.modelDef->gpu.packageDir);
+                GlTarget next = drawFaceSwapEffect(rt, gl, swapParams, step.faceSlots, current);
                 if (!next.isValid())
                     continue;
                 rt.releaseTarget(std::move(current));

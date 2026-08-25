@@ -2,6 +2,7 @@
 
 #include "engine/GpuEffectDefinition.h"
 
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -666,6 +667,27 @@ QString newFaceTrackPath()
                              .arg(QRandomGenerator::global()->bounded(100000), 5, 10,
                                   QLatin1Char('0'));
     return QDir(dir).filePath(name);
+}
+
+QString faceSwapSourcePath(const QString &photoPath)
+{
+    if (photoPath.isEmpty())
+        return {};
+    const QString root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (root.isEmpty())
+        return {};
+    const QString dir = QDir(root).filePath(QStringLiteral("faceswapsources"));
+    if (!QDir().mkpath(dir))
+        return {};
+
+    const QFileInfo info(photoPath);
+    const QString key = QStringLiteral("%1|%2|%3")
+                            .arg(info.absoluteFilePath())
+                            .arg(info.lastModified().toMSecsSinceEpoch())
+                            .arg(info.size());
+    const QByteArray digest =
+        QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha1).toHex();
+    return QDir(dir).filePath(QStringLiteral("photo-%1.json").arg(QString::fromLatin1(digest)));
 }
 
 bool writeFaceTrack(const QString &path, const FaceTrack &track, QString *errorOut)

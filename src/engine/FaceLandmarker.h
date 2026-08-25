@@ -6,6 +6,7 @@
 #include <QString>
 #include <QVector3D>
 
+#include <array>
 #include <memory>
 
 namespace drift {
@@ -44,6 +45,34 @@ inline constexpr Span kEyeRightUpper{92, 9};
 // MediaPipe's 468-vertex mesh without the attention-head iris rings. FaceAnchors::mesh is empty or
 // this long — never a partial set — so a sidecar can omit the blob entirely on older tracks.
 inline constexpr int kFaceMeshPoints = 468;
+
+// Raw MediaPipe mesh indices for the loops that anything outside the landmarker needs. These are
+// the definitions the contour spans above are built from; they live here rather than in the .cpp
+// because the face-swap alpha ramp seeds its BFS from the same rings, and a second copy of these
+// tables could silently drift from this one.
+//
+// HANDEDNESS: named in *image* space, matching FaceAnchors — "left" is the low-x side of the
+// frame, not the subject's own left. MediaPipe names its sets from the subject's point of view,
+// so kEyeLeftRing here is MediaPipe's FACEMESH_RIGHT_EYE.
+namespace mpidx {
+
+// FACEMESH_FACE_OVAL, the outer boundary contour.
+inline constexpr std::array<int, 36> kFaceOval{10,  338, 297, 332, 284, 251, 389, 356, 454,
+                                               323, 361, 288, 397, 365, 379, 378, 400, 377,
+                                               152, 148, 176, 149, 150, 136, 172, 58,  132,
+                                               93,  234, 127, 162, 21,  54,  103, 67,  109};
+
+inline constexpr std::array<int, 20> kLipInner{78,  191, 80,  81,  82,  13,  312, 311, 310, 415,
+                                               308, 324, 318, 402, 317, 14,  87,  178, 88,  95};
+
+// Wound from the inner corner along the upper lid to the outer corner, then back along the lower
+// lid. contour::kEyeLeftUpper depends on the first nine points being the upper lid.
+inline constexpr std::array<int, 16> kEyeLeftRing{33,  246, 161, 160, 159, 158, 157, 173,
+                                                  133, 155, 154, 153, 145, 144, 163, 7};
+inline constexpr std::array<int, 16> kEyeRightRing{362, 398, 384, 385, 386, 387, 388, 466,
+                                                   263, 249, 390, 373, 374, 380, 381, 382};
+
+} // namespace mpidx
 
 // Everything a face shader needs, in normalized frame coordinates (0..1, top-left origin).
 struct FaceAnchors

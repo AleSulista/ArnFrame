@@ -1229,6 +1229,13 @@ protected:
     void runSegmentationSeed(int generation);
     void finalizeFaceDetection(const QString &clipId, const QString &trackPath,
                                drift::TimeUs srcOffsetUs);
+    // Landmark a Face Swap source photo in the background and cache the result. Cheap enough
+    // (one still, sub-second once the session is warm) that it gets no progress UI of its own —
+    // the effect renders pass-through until the landmarks land, then the preview refreshes.
+    void ingestFaceSwapSource(const QString &photoPath);
+    // Every Face Swap photo in the project that has no cached landmarks. Runs on open, because
+    // the sidecar is derived and does not travel with the bundle.
+    void ingestFaceSwapSourcesInProject();
     // The one place a scan request is built, so the GUI and MCP paths cannot disagree about
     // the settings — and therefore about the cache key derived from them.
     drift::SceneDetectRequest sceneRequestFor(const drift::Clip &clip, bool withObjects,
@@ -1447,6 +1454,9 @@ protected:
     double m_faceDetectProgress = 0.0;
     QString m_faceDetectStatus;
     QAtomicInt m_faceDetectCancel = 0;
+    // Photos with an ingest in flight, so a slider nudge or a second clip using the same photo
+    // does not queue the landmarker twice.
+    QSet<QString> m_faceSwapIngesting;
     // Scene detection. Only one clip's analysis is live at a time — the panel shows the
     // selected clip — so this needs no cache of its own beyond the on-disk one.
     QVariantList m_scenes;

@@ -48,6 +48,8 @@
 #include "engine/FaceMesh.h"
 #include "engine/FaceModelTransform.h"
 #include "engine/ModelAsset.h"
+#include "engine/GlFaceSwapRenderer.h"
+#include "engine/FaceSwapSource.h"
 #include "engine/GlModelRenderer.h"
 #include "engine/GlRuntime.h"
 #include "engine/EmojiCatalog.h"
@@ -106,6 +108,12 @@ private slots:
     void faceMesh3dPassThroughWithoutMesh();
     void faceMesh3dDrawsWarpedOverlay();
     void faceMeshParamsSkipHeadProxy();
+    void faceSwapEffectPackageLoads();
+    void faceSwapMeshTopologyLoads();
+    void faceSwapVertexAlphaRamps();
+    void faceSwapPassThroughWithoutSource();
+    void faceSwapDrawsSwappedFace();
+    void faceSwapMakeThumbnail();
     void beautyEffectsPassThroughWithoutContours();
     void emojiCatalogNeedsFontAddon();
     void emojiRasterisesGlyph();
@@ -1340,6 +1348,323 @@ void EngineTest::faceMeshParamsSkipHeadProxy()
 
 // Every beauty package must pass the frame through untouched when the clip has no contours, or an
 // un-rescanned clip looks broken rather than merely un-scanned.
+namespace {
+
+// The canonical rest mesh laid out around `centre` at `halfWidth`, as a plausible tracked face:
+// head space is +Y toward the forehead while uv.y grows downward, so y is negated.
+QList<QVector3D> faceSwapTestMesh(const drift::FaceMeshRest &rest, QPointF centre, double halfWidth)
+{
+    QList<QVector3D> mesh;
+    mesh.reserve(drift::kFaceMeshPoints);
+    const float s = float(2.0 * halfWidth);
+    for (int i = 0; i < drift::kFaceMeshPoints; ++i) {
+        const QVector3D &p = rest.positions.at(i);
+        mesh.append(QVector3D(float(centre.x()) + p.x() * s, float(centre.y()) - p.y() * s,
+                              p.z() * s));
+    }
+    return mesh;
+}
+
+drift::FaceAnchors faceSwapTestAnchors(const drift::FaceMeshRest &rest, double halfWidth)
+{
+    drift::FaceAnchors a;
+    a.valid = true;
+    a.faceCenter = QPointF(0.5, 0.5);
+    a.faceRx = halfWidth;
+    a.faceRy = halfWidth * 1.2;
+    a.hasMesh = true;
+    a.mesh = faceSwapTestMesh(rest, QPointF(0.5, 0.5), halfWidth);
+    return a;
+}
+
+} // namespace
+
+void EngineTest::faceSwapEffectPackageLoads()
+{
+    const EffectPresetEntry *def = effectDefForId(QStringLiteral("face_swap"));
+    QVERIFY2(def, "face_swap package missing from catalog");
+    QVERIFY(def->isFaceSwap);
+    QVERIFY(!def->isModel3d);
+    QVERIFY(def->needsFace);
+    QVERIFY(def->meta.compositorOnly);
+
+    bool hasSource = false;
+    for (const drift::EffectParamSpec &spec : def->meta.parameters) {
+        if (spec.key != QLatin1String("sourceImage"))
+            continue;
+        hasSource = true;
+        QVERIFY(spec.isFilePath());
+        // No default: an unset photo is what makes a freshly added effect pass through, and a
+        // package-relative default would resolve to a file that is not a photo.
+        QVERIFY(spec.defaultString.isEmpty());
+        QVERIFY(!spec.fileFilters.isEmpty());
+    }
+    QVERIFY2(hasSource, "face_swap must expose a sourceImage file parameter");
+
+    // The renderer resolves the topology from the package directory rather than a parameter, so
+    // that lookup has to keep working.
+    const QString bin = QDir(def->gpu.packageDir).filePath(QStringLiteral("mediapipe_face.bin"));
+    QVERIFY2(QFileInfo::exists(bin), qPrintable(bin));
+}
+
+void EngineTest::faceSwapMeshTopologyLoads()
+{
+    const QString bin = QDir(QString::fromUtf8(DRIFT_TEST_EFFECTS_DIR))
+                            .filePath(QStringLiteral("face_swap/mediapipe_face.bin"));
+    QVERIFY2(QFileInfo::exists(bin), qPrintable(bin));
+
+    const auto rest = drift::loadFaceMeshRest(bin);
+    QVERIFY2(rest, qPrintable(drift::faceMeshRestWarning(bin)));
+
+    // The index buffer addresses tracked mesh points directly, so the vertex count has to be
+    // exactly the landmark count — anything else reads past the end of the vertex stream.
+    QCOMPARE(rest->positions.size(), drift::kFaceMeshPoints);
+    QVERIFY(rest->indices.size() >= 3);
+    QCOMPARE(rest->indices.size() % 3, 0);
+    // No handles: the swap never warps a rest pose, it draws the tracked points themselves.
+    QVERIFY(rest->handles.isEmpty());
+
+    for (uint32_t i : rest->indices)
+        QVERIFY(int(i) < drift::kFaceMeshPoints);
+
+    QSet<QString> seen;
+    for (int i = 0; i + 2 < rest->indices.size(); i += 3) {
+        const uint32_t a = rest->indices[i];
+        const uint32_t b = rest->indices[i + 1];
+        const uint32_t c = rest->indices[i + 2];
+        QVERIFY2(a != b && b != c && a != c, "degenerate triangle in the topology");
+        QList<uint32_t> tri{a, b, c};
+        std::sort(tri.begin(), tri.end());
+        const QString key = QStringLiteral("%1-%2-%3").arg(tri[0]).arg(tri[1]).arg(tri[2]);
+        QVERIFY2(!seen.contains(key), qPrintable(QStringLiteral("duplicate triangle %1").arg(key)));
+        seen.insert(key);
+    }
+}
+
+void EngineTest::faceSwapVertexAlphaRamps()
+{
+    const QString bin = QDir(QString::fromUtf8(DRIFT_TEST_EFFECTS_DIR))
+                            .filePath(QStringLiteral("face_swap/mediapipe_face.bin"));
+    const auto rest = drift::loadFaceMeshRest(bin);
+    QVERIFY(rest);
+
+    // Feather only: the oval itself is fully transparent so the swap never ends on a hard
+    // silhouette, and the middle of the face is fully covered.
+    const QVector<float> plain = drift::faceSwapVertexAlpha(*rest, 0.35, 0.0, 0.0);
+    QCOMPARE(plain.size(), drift::kFaceMeshPoints);
+    for (int i : drift::mpidx::kFaceOval)
+        QCOMPARE(plain.at(i), 0.f);
+    QVERIFY2(plain.at(1) > 0.99f, "the nose tip should be fully covered");
+    QVERIFY2(plain.at(drift::mpidx::kEyeLeftRing[0]) > 0.f,
+             "the eyes should be covered when keepEyes is 0");
+
+    // A wider feather cannot make any vertex more covered than a narrow one.
+    const QVector<float> wide = drift::faceSwapVertexAlpha(*rest, 1.0, 0.0, 0.0);
+    for (int i = 0; i < drift::kFaceMeshPoints; ++i)
+        QVERIFY(wide.at(i) <= plain.at(i) + 1e-5f);
+
+    // Keeping the eyes and mouth opens them right up, and leaves the nose alone.
+    const QVector<float> holes = drift::faceSwapVertexAlpha(*rest, 0.35, 1.0, 1.0);
+    for (int i : drift::mpidx::kEyeLeftRing)
+        QCOMPARE(holes.at(i), 0.f);
+    for (int i : drift::mpidx::kEyeRightRing)
+        QCOMPARE(holes.at(i), 0.f);
+    for (int i : drift::mpidx::kLipInner)
+        QCOMPARE(holes.at(i), 0.f);
+    QVERIFY2(holes.at(1) > 0.99f, "opening the eyes and mouth should not uncover the nose");
+
+    for (int i = 0; i < drift::kFaceMeshPoints; ++i) {
+        QVERIFY(holes.at(i) >= 0.f && holes.at(i) <= 1.f);
+        QVERIFY(plain.at(i) >= 0.f && plain.at(i) <= 1.f);
+    }
+}
+
+void EngineTest::faceSwapPassThroughWithoutSource()
+{
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("GPU effect executor unavailable");
+    const EffectPresetEntry *def = effectDefForId(QStringLiteral("face_swap"));
+    if (!def)
+        QSKIP("face_swap package missing from catalog");
+
+    const QString bin = QDir(def->gpu.packageDir).filePath(QStringLiteral("mediapipe_face.bin"));
+    const auto rest = drift::loadFaceMeshRest(bin);
+    QVERIFY(rest);
+
+    QImage source(128, 128, QImage::Format_RGBA8888);
+    source.fill(QColor(80, 90, 100));
+
+    // A fully tracked face, but no photo picked yet: the effect must leave the frame alone
+    // rather than render a hole where the face is.
+    const drift::FaceAnchors face = faceSwapTestAnchors(*rest, 0.25);
+
+    drift::Effect effect;
+    effect.catalogId = QStringLiteral("face_swap");
+    const QImage out = EffectProcessor::applyEffects(source, {effect}, 0, {face});
+    QVERIFY(!out.isNull());
+    QCOMPARE(out.size(), source.size());
+    QCOMPARE(out.pixelColor(64, 64), source.pixelColor(64, 64));
+
+    // Same again with a path that was never ingested — no sidecar, so still pass-through.
+    effect.parameters.insert(QStringLiteral("sourceImage"),
+                             QStringLiteral("/nonexistent/never-ingested.png"));
+    const QImage out2 = EffectProcessor::applyEffects(source, {effect}, 0, {face});
+    QVERIFY(!out2.isNull());
+    QCOMPARE(out2.pixelColor(64, 64), source.pixelColor(64, 64));
+}
+
+void EngineTest::faceSwapDrawsSwappedFace()
+{
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("GPU effect executor unavailable");
+    const EffectPresetEntry *def = effectDefForId(QStringLiteral("face_swap"));
+    if (!def)
+        QSKIP("face_swap package missing from catalog");
+
+    const QString bin = QDir(def->gpu.packageDir).filePath(QStringLiteral("mediapipe_face.bin"));
+    const auto rest = drift::loadFaceMeshRest(bin);
+    QVERIFY(rest);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString photoPath = dir.filePath(QStringLiteral("face.png"));
+    QImage photo(256, 256, QImage::Format_RGBA8888);
+    photo.fill(QColor(230, 40, 40));
+    QVERIFY(photo.save(photoPath));
+
+    // Stand in for the landmarker: the sidecar is an ordinary one-frame face track, so the test
+    // can write the photo's landmarks directly instead of needing the face models installed.
+    drift::FaceAnchors sourceFace = faceSwapTestAnchors(*rest, 0.25);
+    drift::FaceTrack sourceTrack;
+    sourceTrack.fps = 1;
+    sourceTrack.frames.append(drift::FaceTrackFrame{{sourceFace}});
+    QString writeError;
+    QVERIFY2(drift::writeFaceTrack(drift::faceSwapSourcePath(photoPath), sourceTrack, &writeError),
+             qPrintable(writeError));
+    QVERIFY(drift::faceSwapSourceReady(photoPath));
+
+    QImage source(128, 128, QImage::Format_RGBA8888);
+    source.fill(QColor(20, 20, 20));
+    const drift::FaceAnchors face = faceSwapTestAnchors(*rest, 0.25);
+
+    drift::Effect effect;
+    effect.catalogId = QStringLiteral("face_swap");
+    effect.parameters.insert(QStringLiteral("sourceImage"), photoPath);
+    // Lighting match off so the assertion is about the swap landing, not about the correction.
+    effect.parameters.insert(QStringLiteral("colorMatch"), 0.0);
+    effect.parameters.insert(QStringLiteral("keepEyes"), 0.0);
+    effect.parameters.insert(QStringLiteral("keepMouth"), 0.0);
+
+    const QImage out = EffectProcessor::applyEffects(source, {effect}, 0, {face});
+    QVERIFY(!out.isNull());
+    QCOMPARE(out.size(), source.size());
+    const QColor centre = out.pixelColor(64, 64);
+    QVERIFY2(centre.red() > 150,
+             qPrintable(QStringLiteral("centre is %1; the photo should cover the face")
+                            .arg(centre.name())));
+    // Outside the oval the frame is untouched.
+    QCOMPARE(out.pixelColor(2, 2), source.pixelColor(2, 2));
+
+    // A following effect must still render — catches a leaked GL_DEPTH_TEST or depth mask, the
+    // same failure the model3d state test guards against.
+    drift::Effect brightness;
+    brightness.catalogId = QStringLiteral("adjust.brightness");
+    brightness.parameters.insert(QStringLiteral("brightness"), 0.25);
+    const QImage chained = EffectProcessor::applyEffects(source, {effect, brightness}, 0, {face});
+    QVERIFY(!chained.isNull());
+    QVERIFY2(chained.pixelColor(2, 2).red() > out.pixelColor(2, 2).red(),
+             "brightness after a face swap step did not apply");
+}
+
+// Generates effects/face_swap/thumbnail.png. Skipped unless DRIFT_FACE_SWAP_THUMB names an output
+// path, so it costs a normal run nothing.
+//
+// It lives here rather than in tools/effectthumbs because that tool only handles `backend: "gpu"`
+// packages — the compositor-only face backends are skipped outright, which is why face_mesh_3d's
+// thumbnail is a hand-made asset with no way to reproduce it. This one is a real render of the
+// effect through EffectProcessor, on two deliberately mismatched synthetic faces so the swap, the
+// feathered edge and the eye/mouth passthrough are all visible.
+void EngineTest::faceSwapMakeThumbnail()
+{
+    const QByteArray out = qgetenv("DRIFT_FACE_SWAP_THUMB");
+    if (out.isEmpty())
+        QSKIP("set DRIFT_FACE_SWAP_THUMB to regenerate");
+    if (!GpuEffectExecutor::instance().isAvailable())
+        QSKIP("GPU unavailable");
+    const EffectPresetEntry *def = effectDefForId(QStringLiteral("face_swap"));
+    QVERIFY(def);
+    const auto rest =
+        drift::loadFaceMeshRest(QDir(def->gpu.packageDir).filePath(QStringLiteral("mediapipe_face.bin")));
+    QVERIFY(rest);
+
+    const int S = 512;
+    auto paintFace = [&](QColor bg, QColor skin, QColor hair, QColor eye, QColor lip, bool stripes) {
+        QImage img(S, S, QImage::Format_RGBA8888);
+        img.fill(bg);
+        QPainter p(&img);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        if (stripes) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(255, 255, 255, 12));
+            for (int i = -S; i < S * 2; i += 46)
+                p.drawRect(QRectF(i, 0, 20, S));
+        }
+        const QPointF c(S * 0.5, S * 0.5);
+        const double rx = S * 0.26, ry = S * 0.33;
+        p.setBrush(hair);
+        p.setPen(Qt::NoPen);
+        p.drawEllipse(QPointF(c.x(), c.y() - ry * 0.30), rx * 1.16, ry * 0.92);
+        p.setBrush(skin);
+        p.drawEllipse(c, rx, ry);
+        const double eyeY = c.y() - ry * 0.20, eyeDx = rx * 0.42;
+        for (double sx : {-1.0, 1.0}) {
+            p.setBrush(QColor(250, 250, 250));
+            p.drawEllipse(QPointF(c.x() + sx * eyeDx, eyeY), rx * 0.20, ry * 0.11);
+            p.setBrush(eye);
+            p.drawEllipse(QPointF(c.x() + sx * eyeDx, eyeY), rx * 0.095, rx * 0.095);
+        }
+        p.setBrush(skin.darker(115));
+        p.drawEllipse(QPointF(c.x(), c.y() + ry * 0.16), rx * 0.11, ry * 0.07);
+        p.setBrush(lip);
+        p.drawEllipse(QPointF(c.x(), c.y() + ry * 0.48), rx * 0.34, ry * 0.11);
+        p.end();
+        return img;
+    };
+
+    // The frame being edited: cool, and the face whose eyes and mouth stay.
+    const QImage frame = paintFace(QColor(32, 40, 58), QColor(122, 142, 172), QColor(44, 54, 74),
+                                   QColor(40, 78, 120), QColor(96, 104, 130), true);
+    // The photo the identity comes from: warm, and clearly a different person.
+    const QImage photo = paintFace(QColor(60, 40, 34), QColor(238, 178, 132), QColor(104, 56, 32),
+                                   QColor(104, 60, 24), QColor(214, 88, 78), false);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString photoPath = dir.filePath(QStringLiteral("photo.png"));
+    QVERIFY(photo.save(photoPath));
+
+    drift::FaceTrack track;
+    track.fps = 1;
+    track.frames.append(drift::FaceTrackFrame{{faceSwapTestAnchors(*rest, 0.26)}});
+    QString e;
+    QVERIFY2(drift::writeFaceTrack(drift::faceSwapSourcePath(photoPath), track, &e), qPrintable(e));
+
+    drift::Effect effect;
+    effect.catalogId = QStringLiteral("face_swap");
+    effect.parameters.insert(QStringLiteral("sourceImage"), photoPath);
+    effect.parameters.insert(QStringLiteral("colorMatch"), 0.12);
+    effect.parameters.insert(QStringLiteral("keepEyes"), 0.85);
+    effect.parameters.insert(QStringLiteral("keepMouth"), 0.6);
+    effect.parameters.insert(QStringLiteral("feather"), 0.22);
+
+    const QImage result =
+        EffectProcessor::applyEffects(frame, {effect}, 0, {faceSwapTestAnchors(*rest, 0.26)});
+    QVERIFY(!result.isNull());
+    QVERIFY(result.convertToFormat(QImage::Format_RGBA8888)
+                .scaled(256, 256, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                .save(QString::fromUtf8(out), "PNG"));
+}
+
 void EngineTest::beautyEffectsPassThroughWithoutContours()
 {
     if (!GpuEffectExecutor::instance().isAvailable())

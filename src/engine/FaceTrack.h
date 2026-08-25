@@ -72,6 +72,18 @@ void applyFaceUniforms(QMap<QString, QVariant> *parameters,
 QString faceTrackCacheDir();
 QString newFaceTrackPath();
 
+// Where a face-swap source photo's landmarks live: <AppDataLocation>/faceswapsources/<key>.json.
+//
+// A still photo's landmarks are just a one-frame FaceTrack, so the swap reuses this whole file
+// rather than inventing a second sidecar format — same quantized mesh blob, same writer, same
+// cached reader. `fps` is 1 and there is exactly one frame; callers read frames[0] directly
+// instead of sampling.
+//
+// Keyed on the photo's path, modification time and size, matching every other derived-asset
+// cache here. Replacing the photo therefore re-ingests rather than serving stale landmarks, and
+// moving it re-ingests too — which is cheap, and what the project-open sweep already handles.
+QString faceSwapSourcePath(const QString &photoPath);
+
 // Writes via a ".part" file and renames, so a cancelled or crashed bake never leaves a file that
 // looks complete.
 bool writeFaceTrack(const QString &path, const FaceTrack &track, QString *errorOut);

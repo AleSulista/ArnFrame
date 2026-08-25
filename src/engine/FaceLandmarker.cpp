@@ -39,11 +39,12 @@ constexpr int kIdxLowerLip = 14;
 constexpr int kIdxMouthLeft = 61;
 constexpr int kIdxMouthRight = 291;
 
-// FACEMESH_FACE_OVAL, the outer boundary contour.
-constexpr std::array<int, 36> kFaceOval{10,  338, 297, 332, 284, 251, 389, 356, 454,
-                                        323, 361, 288, 397, 365, 379, 378, 400, 377,
-                                        152, 148, 176, 149, 150, 136, 172, 58,  132,
-                                        93,  234, 127, 162, 21,  54,  103, 67,  109};
+// kFaceOval, kLipInner and the two eye rings live in FaceLandmarker.h — the face-swap alpha ramp
+// seeds its BFS from the same loops, and one definition is the only way those stay in step.
+using mpidx::kEyeLeftRing;
+using mpidx::kEyeRightRing;
+using mpidx::kFaceOval;
+using mpidx::kLipInner;
 
 // The rest of the contour loops, in the order contour::Span expects.
 //
@@ -54,15 +55,6 @@ constexpr std::array<int, 36> kFaceOval{10,  338, 297, 332, 284, 251, 389, 356, 
 // mirrored liner and shadow, which a symmetric test face will not reveal — check the overlay.
 constexpr std::array<int, 20> kLipOuter{61,  185, 40,  39,  37,  0,   267, 269, 270, 409,
                                         291, 375, 321, 405, 314, 17,  84,  181, 91,  146};
-constexpr std::array<int, 20> kLipInner{78,  191, 80,  81,  82,  13,  312, 311, 310, 415,
-                                        308, 324, 318, 402, 317, 14,  87,  178, 88,  95};
-
-// Wound from the inner corner along the upper lid to the outer corner, then back along the lower
-// lid. contour::kEyeLeftUpper depends on the first nine points being the upper lid.
-constexpr std::array<int, 16> kEyeLeftRing{33,  246, 161, 160, 159, 158, 157, 173,
-                                           133, 155, 154, 153, 145, 144, 163, 7};
-constexpr std::array<int, 16> kEyeRightRing{362, 398, 384, 385, 386, 387, 388, 466,
-                                            263, 249, 390, 373, 374, 380, 381, 382};
 
 constexpr std::array<int, 10> kBrowLeftRing{107, 66, 105, 63, 70, 46, 53, 52, 65, 55};
 constexpr std::array<int, 10> kBrowRightRing{336, 296, 334, 293, 300, 276, 283, 282, 295, 285};

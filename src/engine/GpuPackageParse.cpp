@@ -140,6 +140,7 @@ bool parseParameters(const QJsonArray &params, QList<drift::EffectParamSpec> *ou
         spec.max = p.value(QStringLiteral("maxValue")).toDouble(p.value(QStringLiteral("max")).toDouble(1.0));
         spec.defaultValue =
             p.value(QStringLiteral("defaultValue")).toDouble(p.value(QStringLiteral("default")).toDouble(0.0));
+        spec.desktopGlOnly = p.value(QStringLiteral("desktopGlOnly")).toBool(false);
 
         if (spec.key.isEmpty()) {
             fail(errorOut, QStringLiteral("parameter missing identifier"));

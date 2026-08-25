@@ -399,6 +399,13 @@ void GlRuntime::shutdown()
                     gl->glDeleteTextures(1, &tex);
                 }
                 staticTextures.clear();
+                for (const auto &entry : faceSwapPhotos) {
+                    if (entry.second.texture)
+                        gl->glDeleteTextures(1, &entry.second.texture);
+                    if (entry.second.lowFreq)
+                        gl->glDeleteTextures(1, &entry.second.lowFreq);
+                }
+                faceSwapPhotos.clear();
                 if (vbo) {
                     gl->glDeleteBuffers(1, &vbo);
                     vbo = 0;
