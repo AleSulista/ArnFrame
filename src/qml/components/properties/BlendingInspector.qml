@@ -66,7 +66,7 @@ Item {
             width: parent.width
             model: ["normal", "multiply", "screen", "overlay", "add", "darken", "lighten"]
             // Human labels — raw ids were shown to the user.
-            readonly property var labels: ({
+            property var labels: ({
                 "normal": qsTr("Normal"),
                 "multiply": qsTr("Multiply"),
                 "screen": qsTr("Screen"),
