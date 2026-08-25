@@ -217,23 +217,40 @@ PanelFrame {
         return kinds.length === 0 || kinds.indexOf(kind) >= 0
     }
 
+    // ListElement only accepts literal values; qsTr() calls are not
+    // evaluated. Labels are translated via tabLabels below.
+    property var tabLabels: ({
+        "media": qsTr("Media"),
+        "text": qsTr("Text"),
+        "subtitles": qsTr("Subtitles"),
+        "stickers": qsTr("Stickers"),
+        "shapes": qsTr("Shapes"),
+        "scenes": qsTr("Scenes"),
+        "effects": qsTr("Effects"),
+        "templates": qsTr("Templates"),
+        "transitions": qsTr("Transitions"),
+        "sounds": qsTr("Audio FX"),
+        "settings": qsTr("Settings"),
+        "shortcuts": qsTr("Shortcuts")
+    })
+
     // Rail order: project media → on-canvas graphics → processing → prefs.
     // `separatorAfter` draws a hairline under the tab so groups read as sections.
     // tabId "sounds" is kept for favorites persistence (settings key).
     ListModel {
         id: tabsModel
-        ListElement { tabId: "media"; icon: 0; label: "Media"; separatorAfter: true }
-        ListElement { tabId: "text"; icon: 1; label: "Text"; separatorAfter: false }
-        ListElement { tabId: "subtitles"; icon: 2; label: "Subtitles"; separatorAfter: false }
-        ListElement { tabId: "stickers"; icon: 3; label: "Stickers"; separatorAfter: false }
-        ListElement { tabId: "shapes"; icon: 4; label: "Shapes"; separatorAfter: true }
-        ListElement { tabId: "scenes"; icon: 11; label: "Scenes"; separatorAfter: true }
-        ListElement { tabId: "effects"; icon: 5; label: "Effects"; separatorAfter: false }
-        ListElement { tabId: "templates"; icon: 6; label: "Templates"; separatorAfter: false }
-        ListElement { tabId: "transitions"; icon: 7; label: "Transitions"; separatorAfter: false }
-        ListElement { tabId: "sounds"; icon: 8; label: "Audio FX"; separatorAfter: true }
-        ListElement { tabId: "settings"; icon: 9; label: "Settings"; separatorAfter: false }
-        ListElement { tabId: "shortcuts"; icon: 10; label: "Shortcuts"; separatorAfter: false }
+        ListElement { tabId: "media"; icon: 0; separatorAfter: true }
+        ListElement { tabId: "text"; icon: 1; separatorAfter: false }
+        ListElement { tabId: "subtitles"; icon: 2; separatorAfter: false }
+        ListElement { tabId: "stickers"; icon: 3; separatorAfter: false }
+        ListElement { tabId: "shapes"; icon: 4; separatorAfter: true }
+        ListElement { tabId: "scenes"; icon: 11; separatorAfter: true }
+        ListElement { tabId: "effects"; icon: 5; separatorAfter: false }
+        ListElement { tabId: "templates"; icon: 6; separatorAfter: false }
+        ListElement { tabId: "transitions"; icon: 7; separatorAfter: false }
+        ListElement { tabId: "sounds"; icon: 8; separatorAfter: true }
+        ListElement { tabId: "settings"; icon: 9; separatorAfter: false }
+        ListElement { tabId: "shortcuts"; icon: 10; separatorAfter: false }
     }
     property var tabIcons: [
         Theme.icons.film,
@@ -380,12 +397,12 @@ PanelFrame {
                             anchors.horizontalCenter: parent.horizontalCenter
                             glyph: root.tabIcons[model.icon]
                             variant: "ghost"
-                            tooltip: model.label
+                            tooltip: tabLabels[model.tabId]
                             active: root.activeTab === index
                             onClicked: root.activeTab = index
 
                             Accessible.role: Accessible.PageTab
-                            Accessible.name: model.label
+                            Accessible.name: tabLabels[model.tabId]
                             Accessible.checked: root.activeTab === index
                         }
 
@@ -442,7 +459,7 @@ PanelFrame {
                     anchors.left: parent.left
                     anchors.leftMargin: Theme.pagePadding
                     anchors.verticalCenter: parent.verticalCenter
-                    text: tabsModel.get(root.activeTab).label
+                    text: tabLabels[tabsModel.get(root.activeTab).tabId]
                     color: Theme.mutedForeground
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSm
