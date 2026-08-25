@@ -12,4 +12,6 @@ Tracks work done on `main` **since the last public release**. Use this to see wh
 
 ## ✨ Added
 
+- Settings → Interface scale: 100–200% extra UI size (buttons, text, icons) on top of the system display scale. Takes effect after restart.
+
 ## 🎨 Improved

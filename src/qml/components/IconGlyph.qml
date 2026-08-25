@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Effects
+import QtQuick.Window
 import Drift
 
 // Renders a Lucide icon from resources/icons/<name>.png (white-mask PNGs
@@ -25,7 +26,12 @@ Item {
         source: root.glyph.length > 0
                 ? "qrc:/qt/qml/Drift/resources/icons/" + root.glyph + ".png"
                 : ""
-        sourceSize: Qt.size(Math.ceil(root.iconSize * 2), Math.ceil(root.iconSize * 2))
+        // Floor at 2× so 100%/125% stays as sharp as today; follow the real
+        // device pixel ratio so 175–200% (and HiDPI + extra scale) do not go soft.
+        sourceSize: {
+            const dpr = Math.max(2, Screen.devicePixelRatio)
+            return Qt.size(Math.ceil(root.iconSize * dpr), Math.ceil(root.iconSize * dpr))
+        }
         fillMode: Image.PreserveAspectFit
         visible: false
     }

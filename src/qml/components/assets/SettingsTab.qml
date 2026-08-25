@@ -370,6 +370,47 @@ Item {
             }
 
             Text {
+                text: qsTr("Interface scale")
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+                topPadding: Theme.spacingMd
+            }
+
+            ThemedComboBox {
+                width: parent.width
+                textRole: "label"
+                valueRole: "id"
+                model: [
+                    { id: 1.0,  label: qsTr("100% (system)") },
+                    { id: 1.25, label: "125%" },
+                    { id: 1.5,  label: "150%" },
+                    { id: 1.75, label: "175%" },
+                    { id: 2.0,  label: "200%" }
+                ]
+                tooltip: qsTr("Makes buttons, text, and icons larger. This is extra scale on top of the size already set in your display settings. Takes effect after restart.")
+                currentIndex: {
+                    const opts = model
+                    for (var i = 0; i < opts.length; ++i) {
+                        if (Math.abs(opts[i].id - EditorState.uiScale) < 0.001)
+                            return i
+                    }
+                    return 0
+                }
+                onActivated: {
+                    if (currentIndex >= 0 && currentIndex < model.length)
+                        EditorState.uiScale = model[currentIndex].id
+                }
+            }
+
+            ThemedLabel {
+                width: parent.width
+                visible: EditorState.uiScaleNeedsRestart
+                text: qsTr("Restart Drift to apply this size.")
+                color: Theme.panelSecondaryForeground
+            }
+
+            Text {
                 text: qsTr("Language")
                 color: Theme.mutedForeground
                 font.family: Theme.fontFamily

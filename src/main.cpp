@@ -117,9 +117,13 @@ int main(int argc, char *argv[])
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 
+    // Names must be set before reading QSettings for ui/scale, and QT_SCALE_FACTOR
+    // must be in the environment before QApplication is constructed.
+    QCoreApplication::setApplicationName("CutWire Drift");
+    QCoreApplication::setOrganizationName("CutWire Drift");
+    AppController::applyStoredUiScale();
+
     QApplication app(argc, argv);
-    QApplication::setApplicationName("CutWire Drift");
-    QApplication::setOrganizationName("CutWire Drift");
     // Associates the window with the installed .desktop entry so shells (notably
     // Wayland) can find its icon and app metadata.
     QGuiApplication::setDesktopFileName(QStringLiteral("org.cutwire.Drift"));

@@ -4918,6 +4918,22 @@ If playback stutters, try another.</source>
         <translation>ඔබ දැනටමත් ස්ථාපනය කර ඇති පැකේජ සඳහා යාවත්කාලීන ඇති විට අමතර අංග අයිකනය ස්පන්දනය කරන්න</translation>
     </message>
     <message>
+        <source>Interface scale</source>
+        <translation>අතුරුමුහුණත් පරිමාණය</translation>
+    </message>
+    <message>
+        <source>100% (system)</source>
+        <translation>100% (පද්ධතිය)</translation>
+    </message>
+    <message>
+        <source>Makes buttons, text, and icons larger. This is extra scale on top of the size already set in your display settings. Takes effect after restart.</source>
+        <translation>බොත්තම්, පෙළ සහ අයිකන විශාල කරයි. ඔබේ දර්ශන සැකසුම්වල දැනටමත් ඇති ප්‍රමාණයට අමතර පරිමාණයකි. නැවත ආරම්භයෙන් පසු බලපැවැත්වේ.</translation>
+    </message>
+    <message>
+        <source>Restart Drift to apply this size.</source>
+        <translation>මෙම ප්‍රමාණය යෙදීමට Drift නැවත ආරම්භ කරන්න.</translation>
+    </message>
+    <message>
         <source>Language</source>
         <translation>භාෂාව</translation>
     </message>

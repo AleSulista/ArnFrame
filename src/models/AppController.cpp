@@ -68,6 +68,7 @@
 #include <QLocale>
 #include <QAudioDevice>
 #include <QSettings>
+#include <QByteArray>
 #include <QTranslator>
 #include <QSet>
 #include <QStandardPaths>
@@ -103,6 +104,30 @@ QTranslator g_qtTranslator;
 QString storedUiLanguage()
 {
     return QSettings().value(QStringLiteral("ui/language")).toString().trimmed();
+}
+
+double normalizeUiScale(double scale)
+{
+    static const double kSteps[] = {1.0, 1.25, 1.5, 1.75, 2.0};
+    double best = 1.0;
+    double bestDist = std::numeric_limits<double>::max();
+    for (double step : kSteps) {
+        const double dist = std::abs(scale - step);
+        if (dist < bestDist) {
+            best = step;
+            bestDist = dist;
+        }
+    }
+    return best;
+}
+
+double appliedUiScaleFromEnvironment()
+{
+    bool ok = false;
+    const double env = qEnvironmentVariable("QT_SCALE_FACTOR").toDouble(&ok);
+    if (ok && env > 0.0)
+        return env;
+    return 1.0;
 }
 
 QLocale uiLocaleFromStored()
@@ -414,6 +439,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     m_autoKeyEnabled = settings.value(QStringLiteral("editor/autoKeyEnabled"), false).toBool();
     m_reopenLastProject = settings.value(QStringLiteral("editor/reopenLastProject"), false).toBool();
     m_uiLanguage = storedUiLanguage();
+    m_uiScale = storedUiScale();
     // Unset means the user has never toggled the theme, so the UI keeps tracking the OS.
     const QVariant storedDarkMode = settings.value(QStringLiteral("ui/darkMode"));
     m_darkModeOverridden = storedDarkMode.isValid();
@@ -2239,6 +2265,53 @@ void AppController::setUiLanguage(const QString &language)
         settings.setValue(QStringLiteral("ui/language"), m_uiLanguage);
     installUiTranslators();
     emit uiLanguageChanged();
+}
+
+double AppController::storedUiScale()
+{
+    const QVariant stored = QSettings().value(QStringLiteral("ui/scale"));
+    if (!stored.isValid())
+        return 1.0;
+    bool ok = false;
+    const double value = stored.toDouble(&ok);
+    if (!ok)
+        return 1.0;
+    return normalizeUiScale(value);
+}
+
+void AppController::applyStoredUiScale()
+{
+    // A shell or .desktop Exec=QT_SCALE_FACTOR=… stays the escape hatch.
+    if (qEnvironmentVariableIsSet("QT_SCALE_FACTOR"))
+        return;
+    const double scale = storedUiScale();
+    if (qFuzzyCompare(scale, 1.0))
+        return;
+    qputenv("QT_SCALE_FACTOR", QByteArray::number(scale, 'g', 4));
+}
+
+double AppController::appliedUiScale() const
+{
+    return appliedUiScaleFromEnvironment();
+}
+
+bool AppController::uiScaleNeedsRestart() const
+{
+    return !qFuzzyCompare(m_uiScale, appliedUiScaleFromEnvironment());
+}
+
+void AppController::setUiScale(double scale)
+{
+    const double normalized = normalizeUiScale(scale);
+    if (qFuzzyCompare(m_uiScale, normalized))
+        return;
+    m_uiScale = normalized;
+    QSettings settings;
+    if (qFuzzyCompare(m_uiScale, 1.0))
+        settings.remove(QStringLiteral("ui/scale"));
+    else
+        settings.setValue(QStringLiteral("ui/scale"), m_uiScale);
+    emit uiScaleChanged();
 }
 
 void AppController::toggleKeyframeGraphPropertyVisible(const QString &prop)

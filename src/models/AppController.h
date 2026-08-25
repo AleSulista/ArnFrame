@@ -100,6 +100,11 @@ class AppController : public QObject
     // "en" is the source catalog (no .qm). Other codes match i18n/drift_<code>.qm.
     Q_PROPERTY(QString uiLanguage READ uiLanguage WRITE setUiLanguage NOTIFY uiLanguageChanged)
     Q_PROPERTY(QVariantList uiLanguages READ uiLanguages NOTIFY uiLanguageChanged)
+    // Extra UI scale on top of the OS display scale. QSettings("ui/scale"), 1.0..2.0 in
+    // 0.25 steps. Applied as QT_SCALE_FACTOR before QApplication; a change needs a restart.
+    Q_PROPERTY(double uiScale READ uiScale WRITE setUiScale NOTIFY uiScaleChanged)
+    Q_PROPERTY(double appliedUiScale READ appliedUiScale CONSTANT)
+    Q_PROPERTY(bool uiScaleNeedsRestart READ uiScaleNeedsRestart NOTIFY uiScaleChanged)
     // The keyframe strip draws every animated property of the selected clip. This is the subset
     // the user has folded away: a view filter only — hiding a curve never changes what renders.
     Q_PROPERTY(QStringList keyframeGraphHiddenProperties READ keyframeGraphHiddenProperties
@@ -273,6 +278,14 @@ public:
     bool reopenLastProject() const { return m_reopenLastProject; }
     QString uiLanguage() const { return m_uiLanguage; }
     QVariantList uiLanguages() const;
+    double uiScale() const { return m_uiScale; }
+    double appliedUiScale() const;
+    bool uiScaleNeedsRestart() const;
+    // Snaps to 1.0, 1.25, 1.5, 1.75, or 2.0. Safe before any AppController exists.
+    static double storedUiScale();
+    // Writes QT_SCALE_FACTOR from ui/scale unless the environment already set one.
+    // Call once before QApplication; organization/application names must already be set.
+    static void applyStoredUiScale();
     // Installs the .qm for ui/language (or the system locale). Call once after QApplication
     // is named, and again from setUiLanguage. Safe before any AppController exists.
     static void installUiTranslators();
@@ -419,6 +432,7 @@ public:
     void mcpBeginBatch();
     void mcpEndBatch(const QString &text, bool pushUndo);
     void setUiLanguage(const QString &code);
+    void setUiScale(double scale);
     // Strip chip click — folds `prop`'s curve away, or brings it back. Purely a view filter: the
     // chip stays put either way, and the animation keeps playing while it is hidden.
     Q_INVOKABLE void toggleKeyframeGraphPropertyVisible(const QString &prop);
@@ -996,6 +1010,7 @@ signals:
     void mcpRunningChanged();
     void mcpErrorChanged();
     void uiLanguageChanged();
+    void uiScaleChanged();
     void keyframeGraphVisibilityChanged();
     void subtitleEditingChanged();
     void selectedSubtitleCueChanged();
@@ -1263,6 +1278,7 @@ protected:
     bool m_autoKeyEnabled = false;
     bool m_reopenLastProject = false;
     QString m_uiLanguage;
+    double m_uiScale = 1.0;
     QStringList m_keyframeGraphHiddenProperties;
     bool m_subtitleEditing = false;
     int m_selectedSubtitleCue = -1;
