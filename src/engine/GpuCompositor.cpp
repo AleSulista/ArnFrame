@@ -44,14 +44,16 @@ uniform sampler2D u_mask;
 uniform float u_opacity;
 uniform float u_hasMask;
 uniform float u_maskInvert;
+uniform float u_layerPremul;
 void main() {
     vec4 c = texture(u_layer, v_texCoord);
-    float a = c.a * u_opacity;
+    float s = u_opacity;
     if (u_hasMask > 0.5) {
         float m = texture(u_mask, v_texCoord).r;
-        a *= mix(m, 1.0 - m, u_maskInvert);
+        s *= mix(m, 1.0 - m, u_maskInvert);
     }
-    fragColor = vec4(c.rgb * a, a);
+    float a = c.a * s;
+    fragColor = vec4(u_layerPremul > 0.5 ? c.rgb * s : c.rgb * a, a);
 }
 )";
 
@@ -68,6 +70,7 @@ uniform vec2 u_canvasSize;
 uniform float u_opacity;
 uniform float u_hasMask;
 uniform float u_maskInvert;
+uniform float u_layerPremul;
 uniform int u_blendMode;      // 1 multiply, 2 screen, 3 overlay, 5 darken, 6 lighten
 
 vec3 blendRgb(vec3 base, vec3 src) {
@@ -85,6 +88,7 @@ vec3 blendRgb(vec3 base, vec3 src) {
 
 void main() {
     vec4 src = texture(u_layer, v_texCoord);
+    vec3 srcRgb = (u_layerPremul > 0.5 && src.a > 0.0001) ? src.rgb / src.a : src.rgb;
     float sa = src.a * u_opacity;
     if (u_hasMask > 0.5) {
         float m = texture(u_mask, v_texCoord).r;
@@ -96,7 +100,7 @@ void main() {
 
     // Qt's blend modes operate on the straight-alpha colours, then composite the
     // result over the destination with source-over.
-    vec3 blended = clamp(blendRgb(dstRgb, src.rgb), 0.0, 1.0);
+    vec3 blended = clamp(blendRgb(dstRgb, srcRgb), 0.0, 1.0);
     float outA = sa + dst.a * (1.0 - sa);
     vec3 outRgb = blended * sa + dstRgb * dst.a * (1.0 - sa);
     fragColor = vec4(outRgb, outA);
@@ -272,6 +276,52 @@ void bindQuad(GlRuntime &rt, QOpenGLExtraFunctions *gl)
     gl->glBindVertexArray(0);
 }
 
+// Straight alpha → premultiplied, so a mip chain can be averaged without the
+// transparent texels dragging the colour toward black.
+constexpr const char *kPremultiplyFragShader = R"(#version 330 core
+in vec2 v_texCoord;
+out vec4 fragColor;
+uniform sampler2D u_currentTexture;
+void main() {
+    vec4 c = texture(u_currentTexture, v_texCoord);
+    fragColor = vec4(c.rgb * c.a, c.a);
+}
+)";
+
+// A layer texture is bounded by the canvas, not by the clip's layout rect, so an overlay
+// drawn small minifies by a large factor. GL_LINEAR is a single 2x2 tap: it drops most of
+// the source pixels and aliases. Build a premultiplied mip chain instead and let the draw
+// sample it trilinearly.
+GlTarget mipmappedLayerCopy(GlRuntime &rt, QOpenGLExtraFunctions *gl, const GlTarget &src)
+{
+    QOpenGLShaderProgram *program =
+        rt.builtinProgram(QStringLiteral("__premul__"), kQuadVertexShader, kPremultiplyFragShader);
+    if (!program)
+        return {};
+
+    GlTarget copy = rt.acquireTarget(src.width, src.height);
+    if (!copy.isValid())
+        return {};
+
+    copy.fbo->bind();
+    gl->glViewport(0, 0, copy.width, copy.height);
+    gl->glDisable(GL_BLEND);
+    gl->glClearColor(0.f, 0.f, 0.f, 0.f);
+    gl->glClear(GL_COLOR_BUFFER_BIT);
+    program->bind();
+    program->setUniformValue("u_currentTexture", 0);
+    gl->glActiveTexture(GL_TEXTURE0);
+    gl->glBindTexture(GL_TEXTURE_2D, src.texture());
+    bindQuad(rt, gl);
+    program->release();
+    copy.fbo->release();
+
+    gl->glBindTexture(GL_TEXTURE_2D, copy.texture());
+    gl->glGenerateMipmap(GL_TEXTURE_2D);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    return copy;
+}
+
 // Draw a prepared layer target onto the canvas with transform, opacity, mask and
 // blend mode. For non-fixed-function modes the canvas is ping-ponged.
 void drawLayerOnCanvas(GlRuntime &rt, QOpenGLExtraFunctions *gl, GlTarget &canvas,
@@ -311,6 +361,31 @@ void drawLayerOnCanvas(GlRuntime &rt, QOpenGLExtraFunctions *gl, GlTarget &canva
         }
     } matteGuard{rt, matteTarget};
 
+    // Only worth it when the quad is actually smaller than the texture; at ~1:1 the
+    // single bilinear tap is already exact and the copy would be pure cost.
+    const bool minifies = layerTarget.width > layer.rect.width() * 1.05
+                          || layerTarget.height > layer.rect.height() * 1.05;
+    GlTarget mipTarget = minifies ? mipmappedLayerCopy(rt, gl, layerTarget) : GlTarget{};
+    const GLuint layerTex = mipTarget.isValid() ? mipTarget.texture() : layerTarget.texture();
+    const float layerPremul = mipTarget.isValid() ? 1.f : 0.f;
+
+    // Targets are pooled by size: hand this one back with the default filter or the next
+    // user would sample the mip levels this frame left behind.
+    struct MipGuard
+    {
+        GlRuntime &rt;
+        QOpenGLExtraFunctions *gl;
+        GlTarget &target;
+        ~MipGuard()
+        {
+            if (!target.isValid())
+                return;
+            gl->glBindTexture(GL_TEXTURE_2D, target.texture());
+            gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            rt.releaseTarget(std::move(target));
+        }
+    } mipGuard{rt, gl, mipTarget};
+
     if (isFixedFunctionBlend(blend)) {
         QOpenGLShaderProgram *program =
             rt.builtinProgram(QStringLiteral("__layer__"), kLayerVertexShader, kLayerFragShader);
@@ -332,8 +407,9 @@ void drawLayerOnCanvas(GlRuntime &rt, QOpenGLExtraFunctions *gl, GlTarget &canva
         program->setUniformValue("u_maskInvert", maskInvert);
         program->setUniformValue("u_layer", 0);
         program->setUniformValue("u_mask", 1);
+        program->setUniformValue("u_layerPremul", layerPremul);
         gl->glActiveTexture(GL_TEXTURE0);
-        gl->glBindTexture(GL_TEXTURE_2D, layerTarget.texture());
+        gl->glBindTexture(GL_TEXTURE_2D, layerTex);
         gl->glActiveTexture(GL_TEXTURE1);
         gl->glBindTexture(GL_TEXTURE_2D, maskTex);
         bindQuad(rt, gl);
@@ -375,8 +451,9 @@ void drawLayerOnCanvas(GlRuntime &rt, QOpenGLExtraFunctions *gl, GlTarget &canva
     program->setUniformValue("u_layer", 0);
     program->setUniformValue("u_mask", 1);
     program->setUniformValue("u_dst", 2);
+    program->setUniformValue("u_layerPremul", layerPremul);
     gl->glActiveTexture(GL_TEXTURE0);
-    gl->glBindTexture(GL_TEXTURE_2D, layerTarget.texture());
+    gl->glBindTexture(GL_TEXTURE_2D, layerTex);
     gl->glActiveTexture(GL_TEXTURE1);
     gl->glBindTexture(GL_TEXTURE_2D, maskTex);
     gl->glActiveTexture(GL_TEXTURE2);
