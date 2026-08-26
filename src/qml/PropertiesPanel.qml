@@ -73,25 +73,43 @@ PanelFrame {
         root.syncSubtitlesTab()
     }
 
+    // ListElement only accepts literal values; qsTr() calls are not
+    // evaluated. Labels are translated via tabLabels below.
+    property var tabLabels: ({
+        "general": qsTr("General"),
+        "text": qsTr("Text"),
+        "shape": qsTr("Shape"),
+        "subtitles": qsTr("Subtitles"),
+        "transform": qsTr("Transform"),
+        "animation": qsTr("Animation"),
+        "audio": qsTr("Audio"),
+        "speed": qsTr("Speed"),
+        "blending": qsTr("Blending"),
+        "masks": qsTr("Masks"),
+        "effects": qsTr("Effects"),
+        "audioEffects": qsTr("Audio FX"),
+        "transition": qsTr("Transition")
+    })
+
     // Rail order: clip identity → geometry/timing → compositing / FX.
     // Contextual tabs (text / shape / captions) share the first group so a
     // separator still appears after General when they are hidden.
     // `group` drives hairlines between the next *visible* tab of a different group.
     ListModel {
         id: tabsModel
-        ListElement { tabId: "general"; icon: 0; label: "General"; group: 0 }
-        ListElement { tabId: "text"; icon: 1; label: "Text"; group: 0 }
-        ListElement { tabId: "shape"; icon: 2; label: "Shape"; group: 0 }
-        ListElement { tabId: "subtitles"; icon: 3; label: "Subtitles"; group: 0 }
-        ListElement { tabId: "transform"; icon: 4; label: "Transform"; group: 1 }
-        ListElement { tabId: "animation"; icon: 5; label: "Animation"; group: 1 }
-        ListElement { tabId: "audio"; icon: 6; label: "Audio"; group: 1 }
-        ListElement { tabId: "speed"; icon: 7; label: "Speed"; group: 1 }
-        ListElement { tabId: "blending"; icon: 8; label: "Blend"; group: 2 }
-        ListElement { tabId: "masks"; icon: 9; label: "Cutouts"; group: 2 }
-        ListElement { tabId: "effects"; icon: 10; label: "Effects"; group: 2 }
-        ListElement { tabId: "audioEffects"; icon: 11; label: "Audio FX"; group: 2 }
-        ListElement { tabId: "transition"; icon: 12; label: "Transition"; group: 2 }
+        ListElement { tabId: "general"; icon: 0; group: 0 }
+        ListElement { tabId: "text"; icon: 1; group: 0 }
+        ListElement { tabId: "shape"; icon: 2; group: 0 }
+        ListElement { tabId: "subtitles"; icon: 3; group: 0 }
+        ListElement { tabId: "transform"; icon: 4; group: 1 }
+        ListElement { tabId: "animation"; icon: 5; group: 1 }
+        ListElement { tabId: "audio"; icon: 6; group: 1 }
+        ListElement { tabId: "speed"; icon: 7; group: 1 }
+        ListElement { tabId: "blending"; icon: 8; group: 2 }
+        ListElement { tabId: "masks"; icon: 9; group: 2 }
+        ListElement { tabId: "effects"; icon: 10; group: 2 }
+        ListElement { tabId: "audioEffects"; icon: 11; group: 2 }
+        ListElement { tabId: "transition"; icon: 12; group: 2 }
     }
     property var tabIcons: [
         Theme.icons.info,
@@ -303,12 +321,12 @@ PanelFrame {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 glyph: root.tabIcons[model.icon]
                                 variant: "ghost"
-                                tooltip: model.label
+                                tooltip: tabLabels[model.tabId]
                                 active: root.activeTab === index
                                 onClicked: root.activeTab = index
 
                                 Accessible.role: Accessible.PageTab
-                                Accessible.name: model.label
+                                Accessible.name: tabLabels[model.tabId]
                                 Accessible.checked: root.activeTab === index
                             }
 
@@ -390,7 +408,7 @@ PanelFrame {
                     topPadding: Theme.pagePadding
 
                     Text {
-                        text: tabsModel.get(root.activeTab).label
+                        text: tabLabels[tabsModel.get(root.activeTab).tabId]
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeXs

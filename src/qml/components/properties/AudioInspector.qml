@@ -14,7 +14,7 @@ Item {
     }
     readonly property bool hasSelection: !!clipData && Object.keys(clipData).length > 0
     readonly property string clipKind: hasSelection ? (clipData.kind || "") : ""
-    readonly property var propVolume: { "key": "volume", "label": "Volume", "def": 1.0, "decimals": 2 }
+    readonly property var propVolume: { "key": "volume", "label": qsTr("Volume"), "def": 1.0, "decimals": 2 }
 
     // "Recommended" packs by display width like openai-whisper does; the numbered entries cap
     // words per caption on top of that.

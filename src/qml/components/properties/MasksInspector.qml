@@ -170,12 +170,12 @@ Item {
 
         Repeater {
             model: [
-                { key: "x", label: "Center X", min: 0, max: 1 },
-                { key: "y", label: "Center Y", min: 0, max: 1 },
-                { key: "w", label: "Width", min: 0.05, max: 1 },
-                { key: "h", label: "Height", min: 0.05, max: 1 },
-                { key: "rotation", label: "Rotation", min: -180, max: 180 },
-                { key: "feather", label: "Feather", min: 0, max: 64 }
+                { key: "x", label: qsTr("Center X"), min: 0, max: 1 },
+                { key: "y", label: qsTr("Center Y"), min: 0, max: 1 },
+                { key: "w", label: qsTr("Width"), min: 0.05, max: 1 },
+                { key: "h", label: qsTr("Height"), min: 0.05, max: 1 },
+                { key: "rotation", label: qsTr("Rotation"), min: -180, max: 180 },
+                { key: "feather", label: qsTr("Feather"), min: 0, max: 64 }
             ]
             delegate: Column {
                 required property var modelData

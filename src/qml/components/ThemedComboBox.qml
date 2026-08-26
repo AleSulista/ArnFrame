@@ -189,7 +189,7 @@ ComboBox {
             text: root.textRole ? (modelData[root.textRole] !== undefined
                                    ? modelData[root.textRole]
                                    : (model[root.textRole] !== undefined ? model[root.textRole] : modelData))
-                                : modelData
+                                : (root.labels ? (root.labels[modelData] || modelData) : modelData)
             color: Theme.panelForeground
             opacity: comboDelegate.enabled ? 1 : 0.4
             font: root.font
