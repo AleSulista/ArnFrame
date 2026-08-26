@@ -38,9 +38,11 @@ struct EffectTemplateEntry;
 
 class QTimer;
 
+#ifndef Q_OS_ANDROID
 namespace drift::mcp {
 class McpServer;
 }
+#endif
 
 #include "playback/ClipPreviewPlayer.h"
 #include "playback/PlaybackEngine.h"
@@ -60,6 +62,12 @@ class AppController : public QObject
     Q_PROPERTY(QString audioOutputDeviceId READ audioOutputDeviceId WRITE setAudioOutputDeviceId
                    NOTIFY audioOutputDeviceIdChanged)
     Q_PROPERTY(QVariantList tracks READ tracks NOTIFY tracksChanged)
+    // Whether the touch shell's grow/shrink-all-lanes buttons have anywhere left to go, for their
+    // enabled state. Properties rather than invokables so QML gets real bindings: an invokable
+    // would have to be given a dependency to re-evaluate on, and the only one available is
+    // `tracks`, which rebuilds a QVariantList of every clip in the project each time it is read.
+    Q_PROPERTY(bool canGrowTrackHeights READ canGrowTrackHeights NOTIFY tracksChanged)
+    Q_PROPERTY(bool canShrinkTrackHeights READ canShrinkTrackHeights NOTIFY tracksChanged)
     Q_PROPERTY(double playheadSeconds READ playheadSeconds WRITE setPlayheadSeconds NOTIFY playheadSecondsChanged)
     Q_PROPERTY(double durationSeconds READ durationSeconds NOTIFY tracksChanged)
     Q_PROPERTY(bool playing READ playing WRITE setPlaying NOTIFY playingChanged)
@@ -129,6 +137,7 @@ class AppController : public QObject
     Q_PROPERTY(bool redoAvailable READ redoAvailable NOTIFY undoStackChanged)
     Q_PROPERTY(bool exportInProgress READ exportInProgress NOTIFY exportInProgressChanged)
     Q_PROPERTY(double exportProgress READ exportProgress NOTIFY exportProgressChanged)
+    Q_PROPERTY(bool canShareExport READ canShareExport NOTIFY canShareExportChanged)
     Q_PROPERTY(bool subtitleGenerating READ subtitleGenerating NOTIFY subtitleGeneratingChanged)
     // Id of the asset whose replacement is being probed, empty when idle. Only that one bin row
     // goes busy: the rest of the panel stays usable, and the wait belongs to the row the user
@@ -298,6 +307,7 @@ public:
     bool redoAvailable() const { return m_undoStack.canRedo(); }
     bool exportInProgress() const { return m_exportInProgress; }
     double exportProgress() const;
+    bool canShareExport() const;
     bool subtitleGenerating() const { return m_subtitleGenerating; }
     QString replacingAssetId() const { return m_replacingAssetId; }
     double subtitleGenProgress() const { return m_subtitleGenProgress; }
@@ -846,6 +856,12 @@ public:
     Q_INVOKABLE void setTrackHeightScale(int trackIndex, double scale);
     Q_INVOKABLE double trackHeightScale(int trackIndex) const;
     Q_INVOKABLE void nudgeTrackHeightScale(int trackIndex, int steps);
+    // The touch timeline has no per-lane resize handle and no room in the tool strip for a control
+    // per lane, so its buttons move the whole stack. One tracksChanged for the sweep rather than
+    // one per track — each emission relays the entire track list into QML.
+    Q_INVOKABLE void nudgeAllTrackHeightScales(int steps);
+    bool canGrowTrackHeights() const;
+    bool canShrinkTrackHeights() const;
     Q_INVOKABLE double trackHeightScaleMin() const { return 0.6; }
     Q_INVOKABLE double trackHeightScaleMax() const { return 4.0; }
     Q_INVOKABLE void moveTrack(int fromIndex, int toIndex);
@@ -959,6 +975,16 @@ public:
     // When reopenLastProject is on: restore recovery silently, else load lastSessionPath.
     // Returns true if a restore/load was started (caller should skip RecoveryDialog).
     Q_INVOKABLE bool restoreLastSessionIfEnabled();
+    // The autosave timer and aboutToQuit cover desktop, but Android never emits aboutToQuit when
+    // the OS reclaims a backgrounded process — and backgrounding is how a phone app normally ends.
+    // The shell calls this on the way out so the floor is the last edit, not the last 15s tick.
+    Q_INVOKABLE void flushRecoverySnapshot();
+    // Drops every cache that exists only to make the next composite faster — decoder workers,
+    // still images, rasterised text, uploaded textures and the FBO pool. All of it is rebuilt on
+    // demand, and a backgrounded app that hangs on to it is the one the OS picks to kill first.
+    // Only for the leaving-foreground handler: calling it while active throws away exactly what
+    // the current composite is about to reuse.
+    Q_INVOKABLE void releaseTransientCaches();
     // First non-flag positional argument as a local file URL (paths, file://, portal URIs).
     static QUrl startupProjectUrlFromArguments(const QStringList &args);
     // argv / QFileOpenEvent. Queued until consumeStartupProject(); after that, emits
@@ -987,6 +1013,10 @@ public:
     Q_INVOKABLE void exportWithPreset(const QUrl &outputUrl, const QString &presetId);
     Q_INVOKABLE void exportWithSettings(const QUrl &outputUrl, const QVariantMap &settings);
     Q_INVOKABLE void cancelExport();
+    // Copies the finished export into the shared media collection and hands it to the system share
+    // sheet. Deferred to this point rather than done as part of the export because it is a second
+    // full copy of the video, and most exports are never shared. Android only; false/no-op elsewhere.
+    Q_INVOKABLE void shareLastExport();
     Q_INVOKABLE QUrl fileUrl(const QString &path) const;
     Q_INVOKABLE QString imageUrl(const QString &path) const;
     // Same as imageUrl but requests a single frame of a filmstrip strip (see DriftImageProvider).
@@ -1024,6 +1054,7 @@ signals:
     void undoStackChanged();
     void exportInProgressChanged();
     void exportProgressChanged();
+    void canShareExportChanged();
     void subtitleGeneratingChanged();
     void subtitleGenProgressChanged();
     void subtitleGenStatusChanged();
@@ -1079,6 +1110,9 @@ signals:
     void packagingChanged();
     void packageProgressChanged();
     void packageFinished(bool ok, const QString &message);
+    // Save completion when saveProject took the Android streaming path (see saveProject). Never
+    // emitted on desktop or for a plain, synchronous save — setLastMessage already covers those.
+    void projectSaved(bool ok);
     // Addons the freshly opened project needs but that are not installed. Each entry is
     // id / name / version / kinds, for MissingAddonsDialog.
     void missingAddons(const QVariantList &addons);
@@ -1240,6 +1274,11 @@ protected:
     // Repoint every path field the extraction moved. Clips duplicate their asset's path, so this
     // matches on the value rather than walking by id.
     void remapProjectPaths(const QHash<QString, QString> &remap);
+    // Android: re-copy assets whose app-storage file is gone but whose originating SAF document is
+    // still recorded and still granted. Cheap when nothing is missing — one stat per asset — and
+    // the copies themselves run off-thread, so a project with gigabytes to restore still opens at
+    // once and repoints its rows as they land. No-op on desktop.
+    void rehydrateMissingSources();
     // Drops <AppData>/projects/<id> directories no project in the recents list still refers to.
     void sweepExtractionDirs();
     // Effects and transitions render as no-ops when their package is absent, which is silent and
@@ -1292,8 +1331,17 @@ protected:
     bool m_exportInProgress = false;
     double m_exportProgress = 0.0;
     QAtomicInt m_exportCancel = 0;
+    QUrl m_lastExportUrl;
+    QString m_lastExportName;
+    // Android: the publish-to-gallery copy behind Share is on a worker, so canShareExport reports
+    // false while it runs — that both hides the button (the dialog binds its visibility to it) and
+    // stops a second tap from starting the copy again. Unused on desktop.
+    bool m_sharingExport = false;
     bool m_subtitleGenerating = false;
     QString m_replacingAssetId;
+    // The content:// URI the in-flight replace picked, held across the probe so it can be put back
+    // on the asset once applyProbedSource has overwritten the struct.
+    QString m_replacingAssetSourceUri;
     double m_subtitleGenProgress = 0.0;
     QString m_subtitleGenStatus;
     QAtomicInt m_subtitleGenCancel = 0;
@@ -1472,7 +1520,9 @@ protected:
     // Launch layout picker / first-clip setup completed for this empty project.
     bool m_projectLayoutChosen = false;
 
+#ifndef Q_OS_ANDROID
     std::unique_ptr<drift::mcp::McpServer> m_mcp;
+#endif
     bool m_mcpUndoSuspended = false;
     int m_mcpBatchDepth = 0;
     drift::Project m_mcpBatchBefore;

@@ -75,7 +75,57 @@ set(DRIFT_UPDATE_FEED_URL "https://api.github.com/repos/CutWire-Studios/Drift/re
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets OpenGL Network QuickEffects)
 find_package(Qt6 COMPONENTS LinguistTools QUIET)
-find_package(FFmpeg REQUIRED)
+
+# --- Android prebuilt dependencies -------------------------------------------
+# Cross-compiling to Android has no pkg-config and no system prefix, so FFmpeg, zstd, OpenSSL and
+# SoundTouch come from static PIC archives under third_party/prebuilt/android/<abi>, built by
+# third_party/build-android.sh. They are declared here as the same targets the host branches below
+# produce, so nothing downstream needs to know which way it was satisfied.
+#
+# Static, not shared: the app is a single .so that QtLoader dlopens, and every extra shared library
+# would have to be listed in ANDROID_EXTRA_LIBS and bundled by hand. PIC is mandatory for the same
+# reason — a non-PIC archive linked into a .so fails with an R_AARCH64_ADR_PREL_PG_HI21 relocation
+# error. Drift is GPL-3.0, so statically linking the LGPL pieces is fine.
+if(ANDROID)
+    set(DRIFT_PREBUILT "${CMAKE_SOURCE_DIR}/third_party/prebuilt/android/${ANDROID_ABI}")
+    if(NOT EXISTS "${DRIFT_PREBUILT}/lib/libavcodec.a")
+        message(FATAL_ERROR
+            "No prebuilt dependencies for ${ANDROID_ABI}. Run:\n"
+            "    third_party/build-android.sh ${ANDROID_ABI}")
+    endif()
+
+    # Link order is dependency order; static archives are resolved left to right.
+    add_library(FFmpeg::FFmpeg INTERFACE IMPORTED)
+    target_include_directories(FFmpeg::FFmpeg INTERFACE "${DRIFT_PREBUILT}/include")
+    target_link_libraries(FFmpeg::FFmpeg INTERFACE
+        "${DRIFT_PREBUILT}/lib/libavfilter.a"
+        "${DRIFT_PREBUILT}/lib/libavformat.a"
+        "${DRIFT_PREBUILT}/lib/libavcodec.a"
+        "${DRIFT_PREBUILT}/lib/libswscale.a"
+        "${DRIFT_PREBUILT}/lib/libswresample.a"
+        "${DRIFT_PREBUILT}/lib/libavutil.a"
+        "${DRIFT_PREBUILT}/lib/libx264.a"
+        # mediandk resolves the AMediaCodec_*/AMediaFormat_* the --enable-mediacodec decoders call.
+        m z mediandk)
+
+    add_library(drift_zstd INTERFACE IMPORTED)
+    target_include_directories(drift_zstd INTERFACE "${DRIFT_PREBUILT}/include")
+    target_link_libraries(drift_zstd INTERFACE "${DRIFT_PREBUILT}/lib/libzstd.a")
+    set(DRIFT_ZSTD_TARGET drift_zstd)
+
+    add_library(OpenSSL::Crypto INTERFACE IMPORTED)
+    target_include_directories(OpenSSL::Crypto INTERFACE "${DRIFT_PREBUILT}/include")
+    target_link_libraries(OpenSSL::Crypto INTERFACE "${DRIFT_PREBUILT}/lib/libcrypto.a")
+
+    add_library(drift_soundtouch INTERFACE IMPORTED)
+    target_include_directories(drift_soundtouch INTERFACE "${DRIFT_PREBUILT}/include")
+    target_link_libraries(drift_soundtouch INTERFACE "${DRIFT_PREBUILT}/lib/libSoundTouch.a")
+    set(DRIFT_SOUNDTOUCH_TARGET drift_soundtouch)
+endif()
+
+if(NOT ANDROID)
+    find_package(FFmpeg REQUIRED)
+endif()
 
 # ONNX Runtime powers auto subtitles, object segmentation, face tracking and noise removal. The
 # app links none of it: it compiles against the headers and dlopens a runtime at startup
@@ -121,18 +171,20 @@ endif()
 # Addon packages (.driftpkg) are solid-zstd compressed and Ed25519 signed. zstd upstream only
 # ships a CMake config in recent releases, so fall back to pkg-config.
 find_package(PkgConfig QUIET)
-find_package(zstd CONFIG QUIET)
-if(TARGET zstd::libzstd_shared)
-    set(DRIFT_ZSTD_TARGET zstd::libzstd_shared)
-elseif(TARGET zstd::libzstd)
-    set(DRIFT_ZSTD_TARGET zstd::libzstd)
-elseif(PkgConfig_FOUND)
-    pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
-    set(DRIFT_ZSTD_TARGET PkgConfig::ZSTD)
-else()
-    message(FATAL_ERROR "libzstd not found: no zstd CMake config and no pkg-config to fall back on")
+if(NOT ANDROID)
+    find_package(zstd CONFIG QUIET)
+    if(TARGET zstd::libzstd_shared)
+        set(DRIFT_ZSTD_TARGET zstd::libzstd_shared)
+    elseif(TARGET zstd::libzstd)
+        set(DRIFT_ZSTD_TARGET zstd::libzstd)
+    elseif(PkgConfig_FOUND)
+        pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
+        set(DRIFT_ZSTD_TARGET PkgConfig::ZSTD)
+    else()
+        message(FATAL_ERROR "libzstd not found: no zstd CMake config and no pkg-config to fall back on")
+    endif()
+    find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 endif()
-find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 
 # SoundTouch does the pitch shifting behind the voice effects. juce_dsp has no pitch shifter, and a
 # hand-rolled granular one cancels the signal outright wherever the tap spacing lands on an odd
@@ -142,55 +194,57 @@ find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 # exist, and a non-existent INTERFACE_INCLUDE_DIRECTORIES entry on an imported target is a hard
 # generate-time error rather than something we can fall back from. Where there is no pkg-config at
 # all (MSVC), the CMake config below is the only path, so it gets repaired instead.
-if(PkgConfig_FOUND)
-    pkg_check_modules(SOUNDTOUCH QUIET IMPORTED_TARGET soundtouch)
-endif()
-if(TARGET PkgConfig::SOUNDTOUCH)
-    set(DRIFT_SOUNDTOUCH_TARGET PkgConfig::SOUNDTOUCH)
-    # soundtouch.pc often exports -I.../include/soundtouch (for <SoundTouch.h>), but our sources
-    # use <soundtouch/SoundTouch.h> and need .../include. Prefer the parent when that layout is
-    # present (vcpkg on Windows with pkgconf).
-    get_target_property(_st_pc_includes PkgConfig::SOUNDTOUCH INTERFACE_INCLUDE_DIRECTORIES)
-    if(_st_pc_includes)
-        set(_st_usable "")
-        foreach(_dir IN LISTS _st_pc_includes)
-            if(EXISTS "${_dir}/soundtouch/SoundTouch.h")
-                list(APPEND _st_usable "${_dir}")
-            elseif(EXISTS "${_dir}/SoundTouch.h")
-                get_filename_component(_parent "${_dir}" DIRECTORY)
-                if(EXISTS "${_parent}/soundtouch/SoundTouch.h")
-                    list(APPEND _st_usable "${_parent}")
-                else()
+if(NOT ANDROID)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(SOUNDTOUCH QUIET IMPORTED_TARGET soundtouch)
+    endif()
+    if(TARGET PkgConfig::SOUNDTOUCH)
+        set(DRIFT_SOUNDTOUCH_TARGET PkgConfig::SOUNDTOUCH)
+        # soundtouch.pc often exports -I.../include/soundtouch (for <SoundTouch.h>), but our sources
+        # use <soundtouch/SoundTouch.h> and need .../include. Prefer the parent when that layout is
+        # present (vcpkg on Windows with pkgconf).
+        get_target_property(_st_pc_includes PkgConfig::SOUNDTOUCH INTERFACE_INCLUDE_DIRECTORIES)
+        if(_st_pc_includes)
+            set(_st_usable "")
+            foreach(_dir IN LISTS _st_pc_includes)
+                if(EXISTS "${_dir}/soundtouch/SoundTouch.h")
+                    list(APPEND _st_usable "${_dir}")
+                elseif(EXISTS "${_dir}/SoundTouch.h")
+                    get_filename_component(_parent "${_dir}" DIRECTORY)
+                    if(EXISTS "${_parent}/soundtouch/SoundTouch.h")
+                        list(APPEND _st_usable "${_parent}")
+                    else()
+                        list(APPEND _st_usable "${_dir}")
+                    endif()
+                elseif(IS_DIRECTORY "${_dir}")
                     list(APPEND _st_usable "${_dir}")
                 endif()
-            elseif(IS_DIRECTORY "${_dir}")
-                list(APPEND _st_usable "${_dir}")
-            endif()
-        endforeach()
-        list(REMOVE_DUPLICATES _st_usable)
-        set_target_properties(PkgConfig::SOUNDTOUCH PROPERTIES
-            INTERFACE_INCLUDE_DIRECTORIES "${_st_usable}")
-    endif()
-else()
-    find_package(SoundTouch CONFIG REQUIRED)
-    set(DRIFT_SOUNDTOUCH_TARGET SoundTouch::SoundTouch)
-    # Upstream 2.4.x exports "<prefix>/include;<prefix>/include;<prefix>/COMPONENT;<prefix>/
-    # SoundTouch" — two install() keywords that leaked into INCLUDES DESTINATION, plus a duplicate.
-    # Every packaging of that release carries it, vcpkg's included. <prefix>/include is the real
-    # one and the only one <soundtouch/SoundTouch.h> needs.
-    get_target_property(_st_includes SoundTouch::SoundTouch INTERFACE_INCLUDE_DIRECTORIES)
-    if(_st_includes)
-        set(_st_usable "")
-        foreach(_dir IN LISTS _st_includes)
-            if(IS_DIRECTORY "${_dir}")
-                list(APPEND _st_usable "${_dir}")
-            else()
-                message(STATUS "SoundTouch: ignoring exported include dir that does not exist: ${_dir}")
-            endif()
-        endforeach()
-        list(REMOVE_DUPLICATES _st_usable)
-        set_target_properties(SoundTouch::SoundTouch PROPERTIES
-            INTERFACE_INCLUDE_DIRECTORIES "${_st_usable}")
+            endforeach()
+            list(REMOVE_DUPLICATES _st_usable)
+            set_target_properties(PkgConfig::SOUNDTOUCH PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${_st_usable}")
+        endif()
+    else()
+        find_package(SoundTouch CONFIG REQUIRED)
+        set(DRIFT_SOUNDTOUCH_TARGET SoundTouch::SoundTouch)
+        # Upstream 2.4.x exports "<prefix>/include;<prefix>/include;<prefix>/COMPONENT;<prefix>/
+        # SoundTouch" — two install() keywords that leaked into INCLUDES DESTINATION, plus a duplicate.
+        # Every packaging of that release carries it, vcpkg's included. <prefix>/include is the real
+        # one and the only one <soundtouch/SoundTouch.h> needs.
+        get_target_property(_st_includes SoundTouch::SoundTouch INTERFACE_INCLUDE_DIRECTORIES)
+        if(_st_includes)
+            set(_st_usable "")
+            foreach(_dir IN LISTS _st_includes)
+                if(IS_DIRECTORY "${_dir}")
+                    list(APPEND _st_usable "${_dir}")
+                else()
+                    message(STATUS "SoundTouch: ignoring exported include dir that does not exist: ${_dir}")
+                endif()
+            endforeach()
+            list(REMOVE_DUPLICATES _st_usable)
+            set_target_properties(SoundTouch::SoundTouch PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${_st_usable}")
+        endif()
     endif()
 endif()
 
@@ -345,6 +399,8 @@ add_library(driftengine STATIC
     src/engine/AddonRegistry.h
     src/engine/AddonRegistry.cpp
     src/engine/AddonSigningKey.h
+    src/engine/AndroidUri.h
+    src/engine/AndroidUri.cpp
     src/engine/HwAccel.h
     src/engine/HwAccel.cpp
     src/engine/MediaProbe.h
@@ -498,28 +554,14 @@ qt_add_executable(drift
     src/models/LayoutStore.cpp
     src/models/FileDialogs.h
     src/models/FileDialogs.cpp
+    src/models/Haptics.h
+    src/models/Haptics.cpp
     src/models/AssetLibrary.h
     src/models/AssetLibrary.cpp
     src/models/TimelineModel.h
     src/models/TimelineModel.cpp
     src/models/ClipListModel.h
     src/models/ClipListModel.cpp
-    src/mcp/McpSession.h
-    src/mcp/McpSession.cpp
-    src/mcp/McpCatalog.h
-    src/mcp/McpCatalog.cpp
-    src/mcp/McpProtocol.h
-    src/mcp/McpProtocol.cpp
-    src/mcp/McpHttp.h
-    src/mcp/McpHttp.cpp
-    src/mcp/McpDispatcher.h
-    src/mcp/McpDispatcher.cpp
-    src/mcp/McpDispatcherExtended.cpp
-    src/mcp/McpServer.h
-    src/mcp/McpServer.cpp
-    src/mcp/McpStdio.h
-    src/mcp/McpStdio.cpp
-    src/mcp/McpJson.h
     src/playback/PlaybackEngine.h
     src/playback/PlaybackEngine.cpp
     src/playback/PlaybackClock.h
@@ -533,6 +575,28 @@ qt_add_executable(drift
     src/preview/PreviewItem.h
     src/preview/PreviewItem.cpp
 )
+
+# MCP is a desktop agent protocol (stdio/HTTP). Skip it on Android APK builds.
+if(NOT ANDROID)
+    target_sources(drift PRIVATE
+        src/mcp/McpSession.h
+        src/mcp/McpSession.cpp
+        src/mcp/McpCatalog.h
+        src/mcp/McpCatalog.cpp
+        src/mcp/McpProtocol.h
+        src/mcp/McpProtocol.cpp
+        src/mcp/McpHttp.h
+        src/mcp/McpHttp.cpp
+        src/mcp/McpDispatcher.h
+        src/mcp/McpDispatcher.cpp
+        src/mcp/McpDispatcherExtended.cpp
+        src/mcp/McpServer.h
+        src/mcp/McpServer.cpp
+        src/mcp/McpStdio.h
+        src/mcp/McpStdio.cpp
+        src/mcp/McpJson.h
+    )
+endif()
 
 # Windows needs the icon embedded in the PE resource section for Explorer and
 # the taskbar; setWindowIcon alone is not enough for the .exe identity.
@@ -582,6 +646,9 @@ qt_add_resources(drift "drift_app_icon"
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
 # App-wide notification queue; the visual host is components/ToastHost.qml.
 set_source_files_properties(src/qml/Toasts.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
+# In-flight lift-and-drop state for the phone asset sheet; the ghost is drawn by
+# AndroidBottomSheet and the drop is performed by AndroidTimeline.
+set_source_files_properties(src/qml/TouchDrag.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
 
 # Lucide icons: SVG sources in resources/icons/ (from lucide-icons-1.25.0), PNGs for QML.
 file(GLOB DRIFT_LUCIDE_ICONS RELATIVE "${CMAKE_SOURCE_DIR}" CONFIGURE_DEPENDS
@@ -592,14 +659,29 @@ qt_add_qml_module(drift
     VERSION 1.0
     QML_FILES
         src/qml/Main.qml
+        # Touch entry point, loaded instead of Main.qml on Android (see src/main.cpp).
+        src/qml/AndroidMain.qml
+        src/qml/AndroidHome.qml
+        src/qml/AndroidEditor.qml
+        src/qml/AndroidPreview.qml
+        src/qml/AndroidTimeline.qml
+        src/qml/AndroidLayoutPicker.qml
+        src/qml/AndroidTopBar.qml
+        src/qml/AndroidBottomRail.qml
+        src/qml/AndroidBottomSheet.qml
+        src/qml/AndroidAddMenu.qml
+        src/qml/AndroidEditActions.qml
         src/qml/Theme.qml
         src/qml/Toasts.qml
+        src/qml/TouchDrag.qml
         src/qml/EditorHeader.qml
         src/qml/AssetsPanel.qml
         src/qml/PreviewPanel.qml
         src/qml/components/preview/TransformOverlay.qml
         src/qml/components/preview/CropOverlay.qml
         src/qml/components/preview/PreviewToolbar.qml
+        src/qml/components/preview/AndroidTransformOverlay.qml
+        src/qml/components/preview/AndroidCropOverlay.qml
         src/qml/SegmentationWindow.qml
         src/qml/MulticamWindow.qml
         src/qml/DenoiseWindow.qml
@@ -687,6 +769,7 @@ qt_add_qml_module(drift
         src/qml/components/NewTrackMenu.qml
         src/qml/components/ToastHost.qml
         src/qml/components/EmptyState.qml
+        src/qml/components/TouchLiftArea.qml
         src/qml/components/SkeletonBox.qml
         src/qml/components/ThemedSwitch.qml
         src/qml/components/ThemedCheckBox.qml
@@ -715,6 +798,67 @@ target_link_libraries(drift PRIVATE
     driftengine
 )
 target_include_directories(drift PRIVATE src src/preview)
+
+if(ANDROID)
+    # FileDialogs registers a QtAndroidPrivate::NewIntentListener so a second ACTION_VIEW reaches a
+    # running instance (singleTop delivers it to onNewIntent, which the public API does not expose).
+    # CorePrivate is not pulled in by the plain Qt6 Core package, hence the extra find_package.
+    find_package(Qt6 REQUIRED COMPONENTS CorePrivate)
+    target_link_libraries(drift PRIVATE Qt6::CorePrivate)
+
+    # applicationDirPath() on Android is the APK's lib directory and contains nothing but .so
+    # files, so the file-based package roots the desktop build stages next to the binary have
+    # nowhere to live. The packages ride inside the binary as Qt resources instead;
+    # GpuPackageParse::defaultSearchPaths adds ":/packages/<subdir>" as the bundled root.
+    file(GLOB_RECURSE DRIFT_PACKAGE_FILES RELATIVE "${CMAKE_SOURCE_DIR}" CONFIGURE_DEPENDS
+         "effects/*/effect.json"
+         "effects/*/*.frag"
+         "effects/*/thumbnail.png"
+         "effects/*/*.bin"
+         "transitions/*/*.json"
+         "transitions/*/*.frag"
+         "transitions/*/*.png"
+         "audio-effects/*/audio-effect.json"
+         "audio-effects/*/thumbnail.png"
+         "effect-templates/*/template.json"
+         "effect-templates/*/thumbnail.png")
+    list(REMOVE_DUPLICATES DRIFT_PACKAGE_FILES)
+    qt_add_resources(drift "drift_packages"
+        PREFIX "/packages"
+        BASE "${CMAKE_SOURCE_DIR}"
+        FILES ${DRIFT_PACKAGE_FILES}
+    )
+
+    # Qt Network's OpenSSL TLS plugin dlopens libcrypto_3.so / libssl_3.so at runtime.
+    set(_drift_android_ssl_crypto "${DRIFT_PREBUILT}/lib/libcrypto_3.so")
+    set(_drift_android_ssl_ssl "${DRIFT_PREBUILT}/lib/libssl_3.so")
+    if(NOT EXISTS "${_drift_android_ssl_crypto}" OR NOT EXISTS "${_drift_android_ssl_ssl}")
+        message(FATAL_ERROR
+            "Missing OpenSSL shared libs for Qt Network TLS under ${DRIFT_PREBUILT}/lib.\n"
+            "Expected libcrypto_3.so and libssl_3.so (KDAB android_openssl ssl_3 layout).\n"
+            "Rebuild deps with third_party/build-android.sh ${ANDROID_ABI}, or copy the\n"
+            "ssl_3/${ANDROID_ABI}/*.so files from https://github.com/KDAB/android_openssl.")
+    endif()
+
+    set(DRIFT_ANDROID_PACKAGE_NAME "org.cutwire.drift" CACHE STRING
+        "Android application id")
+    set(DRIFT_ANDROID_APP_NAME "Drift" CACHE STRING
+        "Launcher label")
+    set(DRIFT_ANDROID_VERSION_CODE "1" CACHE STRING
+        "Android versionCode")
+
+    set_target_properties(drift PROPERTIES
+        QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android"
+        QT_ANDROID_PACKAGE_NAME "${DRIFT_ANDROID_PACKAGE_NAME}"
+        QT_ANDROID_APP_NAME "${DRIFT_ANDROID_APP_NAME}"
+        QT_ANDROID_APP_ICON "@mipmap/ic_launcher"
+        QT_ANDROID_MIN_SDK_VERSION 28
+        QT_ANDROID_TARGET_SDK_VERSION 36
+        QT_ANDROID_VERSION_NAME "${PROJECT_VERSION}"
+        QT_ANDROID_VERSION_CODE "${DRIFT_ANDROID_VERSION_CODE}"
+        QT_ANDROID_EXTRA_LIBS "${_drift_android_ssl_crypto};${_drift_android_ssl_ssl}"
+    )
+endif()
 
 # MCP tool names, JSON schemas, agent errors and copied configs are a machine protocol and must
 # stay English. QT_EXCLUDE_FROM_TRANSLATION is a no-op until src/mcp/ exists (the mcp branch);
@@ -860,12 +1004,18 @@ function(drift_copy_effect_templates target)
     drift_stage_packages(${target} effect-templates)
 endfunction()
 
-drift_copy_effects(drift)
-drift_copy_effect_templates(drift)
-drift_copy_transitions(drift)
-drift_copy_audio_effects(drift)
-drift_bundle_onnxruntime(drift)
+# Android gets these through qt_add_resources above; there is no <appDir> to stage into.
+if(NOT ANDROID)
+    drift_copy_effects(drift)
+    drift_copy_effect_templates(drift)
+    drift_copy_transitions(drift)
+    drift_copy_audio_effects(drift)
+    drift_bundle_onnxruntime(drift)
+endif()
 
+# Desktop packaging, the headless CLI tools and the QTest binaries. None of it applies to an
+# APK, so the Android configure skips it wholesale.
+if(NOT ANDROID)
 # --- install (used by packaging, e.g. Flatpak; the dev workflow runs in-place) ---
 include(GNUInstallDirs)
 
@@ -910,3 +1060,4 @@ add_subdirectory(tools)
 # --- tests -------------------------------------------------------------------
 enable_testing()
 add_subdirectory(tests)
+endif() # NOT ANDROID

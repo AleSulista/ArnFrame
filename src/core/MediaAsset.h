@@ -16,6 +16,11 @@ struct MediaAsset
 {
     QString id;
     QString path;
+    // Android only: the fully encoded content:// URI the media was imported from, kept alongside
+    // the app-storage copy `path` points at. The copy is what FFmpeg opens; this is the only way
+    // back to the media once that copy is gone (uninstall, "clear storage", another device).
+    // Empty everywhere else. See AppController::rehydrateMissingSources.
+    QString sourceUri;
     QString name;
     MediaKind kind = MediaKind::Other;
     TimeUs durationUs = 0;

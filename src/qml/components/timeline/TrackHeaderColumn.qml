@@ -13,6 +13,13 @@ Item {
     // so headers stay aligned with their rows.
     property var tracks: []
     property real contentY: 0
+    // Desktop uses Theme.trackLabelsWidth; Android passes a narrower value.
+    property real labelsWidth: Theme.trackLabelsWidth
+    // Phone: grip + mute/hide only (no type glyph / waveform / name band).
+    property bool compact: false
+    // Touch shell: reorder has to be asked for, and the context menu needs a
+    // route that is not the right mouse button.
+    property bool touchMode: false
 
     // Track-header reorder: source index and live drop target while dragging,
     // plus the insertion boundary the indicator line is drawn at.
@@ -85,6 +92,16 @@ Item {
         return Theme.icons.video;
     }
 
+    // Single-letter stand-in for the type glyph plus name band, which do not fit a
+    // 72px compact header. "V1"/"A2" is the whole identification a phone gets.
+    function trackTypeShortLabel(type) {
+        if (type === "audio") return qsTr("A");
+        if (type === "text") return qsTr("T");
+        if (type === "subtitle") return qsTr("S");
+        if (type === "shape") return qsTr("G");
+        return qsTr("V");
+    }
+
     // Human label for a track type.
     function trackTypeLabel(type) {
         if (type === "audio") return qsTr("Audio");
@@ -141,7 +158,7 @@ Item {
             readonly property bool trackMuted: root.tracks[index].muted === true
             readonly property bool trackHidden: root.tracks[index].hidden === true
             readonly property bool trackWaveform: root.tracks[index].showWaveform === true
-            width: Theme.trackLabelsWidth
+            width: root.labelsWidth
             height: root.trackHeight(index)
                     + (index < root.tracks.length - 1 ? Theme.trackGap : 0)
             // Follows the timeline's vertical scroll so labels stay
@@ -159,7 +176,6 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton
-                preventStealing: true
                 cursorShape: root.draggingTrackFrom === index ? Qt.SizeAllCursor
                                                               : Qt.ArrowCursor
 
@@ -168,11 +184,32 @@ Item {
                 // past its own midpoint.
                 property real pressY: 0
                 property bool moved: false
+                // Touch only: the hold was recognised, so this row is now draggable.
+                // Letting go without moving asks for the context menu instead.
+                property bool armed: false
                 readonly property real threshold: 4
+
+                // On touch the reorder waits for a hold. Arming on press meant any 4px
+                // of finger travel reordered the tracks, and the header column could
+                // never be used to scroll the timeline vertically.
+                pressAndHoldInterval: 400
+                preventStealing: root.touchMode ? armed : true
 
                 onPressed: (mouse) => {
                     pressY = mouse.y
                     moved = false
+                    armed = false
+                    if (root.touchMode)
+                        return
+                    root.draggingTrackFrom = index
+                    root.draggingTrackTo = index
+                    root.draggingTrackSlot = -1
+                }
+                onPressAndHold: (mouse) => {
+                    if (!root.touchMode || moved)
+                        return
+                    pressY = mouse.y
+                    armed = true
                     root.draggingTrackFrom = index
                     root.draggingTrackTo = index
                     root.draggingTrackSlot = -1
@@ -184,12 +221,22 @@ Item {
                         return
                     moved = true
                     const local = mapToItem(root, mouse.x, mouse.y)
-                    root.draggingTrackSlot = root.trackInsertSlotAtY(local.y)
+                    // Rows are drawn at trackRowTop(i) - contentY, so `local` is view
+                    // space while trackInsertSlotAtY walks content offsets. Scrolled, the
+                    // drop landed on whichever row happened to sit at that screen y.
+                    root.draggingTrackSlot = root.trackInsertSlotAtY(local.y + root.contentY)
                     root.draggingTrackTo = root.trackMoveTargetForSlot(
                                                root.draggingTrackFrom,
                                                root.draggingTrackSlot)
                 }
                 onReleased: {
+                    const wantsMenu = root.touchMode && armed && !moved
+                    armed = false
+                    if (wantsMenu) {
+                        root.clearTrackDrag()
+                        trackContextMenu.popup()
+                        return
+                    }
                     if (moved && root.draggingTrackFrom >= 0
                             && root.draggingTrackTo >= 0
                             && root.draggingTrackFrom !== root.draggingTrackTo)
@@ -197,7 +244,10 @@ Item {
                                               root.draggingTrackTo)
                     root.clearTrackDrag()
                 }
-                onCanceled: root.clearTrackDrag()
+                onCanceled: {
+                    armed = false
+                    root.clearTrackDrag()
+                }
             }
 
             Rectangle {
@@ -210,11 +260,11 @@ Item {
             // Drag affordance — left-aligned reorder grip.
             IconGlyph {
                 anchors.left: parent.left
-                anchors.leftMargin: 8
+                anchors.leftMargin: root.compact ? 4 : 8
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.verticalCenterOffset: index < root.tracks.length - 1 ? -Theme.trackGap / 2 : 0
                 glyph: Theme.icons.gripVertical
-                iconSize: 14
+                iconSize: root.compact ? 12 : 14
                 iconColor: trackDragMouse.hovered || root.draggingTrackFrom === index
                            ? Theme.panelForeground : Theme.mutedForeground
 
@@ -234,10 +284,14 @@ Item {
 
             Row {
                 anchors.right: parent.right
-                anchors.rightMargin: 12
+                anchors.rightMargin: root.compact ? 4 : 12
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.verticalCenterOffset: index < root.tracks.length - 1 ? -Theme.trackGap / 2 : 0
-                spacing: 8
+                // Each toggle's hit area overhangs its glyph by 4 either side, so a 4px
+                // gap left the mute and hide targets touching: half the visible gap fired
+                // the wrong one, and both silently drop the track from render and export.
+                // 12 leaves a 4px dead band between them.
+                spacing: root.touchMode ? 12 : (root.compact ? 4 : 8)
 
                 IconGlyph {
                     visible: root.tracks[index].type === "video"
@@ -289,7 +343,7 @@ Item {
 
                 // Toggle the whole track between filmstrip previews and audio waveforms.
                 IconGlyph {
-                    visible: root.tracks[index].type === "video"
+                    visible: !root.compact && root.tracks[index].type === "video"
                     glyph: trackLabelRow.trackWaveform ? Theme.icons.audioLines : Theme.icons.film
                     iconSize: 16
                     iconColor: trackLabelRow.trackWaveform ? Theme.primary : Theme.mutedForeground
@@ -312,6 +366,7 @@ Item {
                 }
 
                 IconGlyph {
+                    visible: !root.compact
                     glyph: root.trackTypeIcon(root.tracks[index].type)
                     iconSize: Theme.iconSizeBase
                     iconColor: Theme.mutedForeground
@@ -325,6 +380,41 @@ Item {
                     }
 
                     HoverHandler { id: typeHover }
+                }
+            }
+
+            // Compact stand-in for the glyph and the name band: sits in the gap
+            // between the grip and the mute/hide pair, which is the only free
+            // horizontal space the compact header has.
+            Text {
+                visible: root.compact
+                anchors.left: parent.left
+                anchors.leftMargin: 18
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: index < root.tracks.length - 1 ? -Theme.trackGap / 2 : 0
+                text: root.trackTypeShortLabel(root.tracks[index].type) + (index + 1)
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeTiny
+            }
+
+            // Filmstrip/waveform toggle for compact headers. Parked in the bottom-left
+            // corner rather than in the icon row, which a video track has no room left
+            // in — and only video rows (65px) are tall enough for a second corner.
+            IconGlyph {
+                visible: root.compact && root.tracks[index].type === "video"
+                anchors.left: parent.left
+                anchors.leftMargin: 4
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: (index < root.tracks.length - 1 ? Theme.trackGap : 0) + 4
+                glyph: trackLabelRow.trackWaveform ? Theme.icons.audioLines : Theme.icons.film
+                iconSize: Theme.iconSizeMd
+                iconColor: trackLabelRow.trackWaveform ? Theme.primary : Theme.mutedForeground
+
+                MouseArea {
+                    anchors.fill: parent
+                    anchors.margins: -8
+                    onClicked: EditorState.setTrackShowWaveform(index, !trackLabelRow.trackWaveform)
                 }
             }
 
@@ -343,11 +433,15 @@ Item {
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeTiny
                 elide: Text.ElideRight
-                visible: root.trackHeight(index) >= 40
+                visible: !root.compact && root.trackHeight(index) >= 40
             }
 
-            // Track context menu.
+            // Track context menu. Right-click on desktop; on touch it is opened from the
+            // reorder area below, which sits under the mute/hide toggles so those keep
+            // their own presses. Accepting LeftButton here would put this on top of
+            // everything and swallow the lot.
             MouseArea {
+                id: trackMenuArea
                 anchors.fill: parent
                 acceptedButtons: Qt.RightButton
                 onClicked: trackContextMenu.popup()
@@ -379,6 +473,23 @@ Item {
                                          index, !trackLabelRow.trackWaveform)
                     }
                     ThemedMenuSeparator {}
+                    // Desktop resizes a lane by wheeling over its header. Touch has no
+                    // wheel, so the same nudge is offered explicitly — without it
+                    // heightScale is stuck at 1 and "Reset row height" never enables.
+                    ThemedMenuItem {
+                        visible: root.touchMode
+                        text: qsTr("Taller row")
+                        icon.name: Theme.icons.chevronUp
+                        enabled: root.tracks[index].heightScale < EditorState.trackHeightScaleMax()
+                        onTriggered: EditorState.nudgeTrackHeightScale(index, 1)
+                    }
+                    ThemedMenuItem {
+                        visible: root.touchMode
+                        text: qsTr("Shorter row")
+                        icon.name: Theme.icons.chevronDown
+                        enabled: root.tracks[index].heightScale > EditorState.trackHeightScaleMin()
+                        onTriggered: EditorState.nudgeTrackHeightScale(index, -1)
+                    }
                     ThemedMenuItem {
                         text: qsTr("Reset row height")
                         icon.name: Theme.icons.minimize

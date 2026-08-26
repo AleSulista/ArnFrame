@@ -228,6 +228,816 @@
     </message>
 </context>
 <context>
+    <name>AndroidAddMenu</name>
+    <message>
+        <source>Add to timeline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media</source>
+        <translation type="unfinished">Média</translation>
+    </message>
+    <message>
+        <source>Video, photos and audio from this device</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text</source>
+        <translation type="unfinished">Texte</translation>
+    </message>
+    <message>
+        <source>A title or caption you type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Subtitles</source>
+        <translation type="unfinished">Sous-titres</translation>
+    </message>
+    <message>
+        <source>Captions, generated or imported</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stickers</source>
+        <translation type="unfinished">Autocollants</translation>
+    </message>
+    <message>
+        <source>Emoji and sticker graphics</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shapes</source>
+        <translation type="unfinished">Formes</translation>
+    </message>
+    <message>
+        <source>Boxes, circles and lines</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>AndroidBottomRail</name>
+    <message>
+        <source>Edit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Effects</source>
+        <translation type="unfinished">Effets</translation>
+    </message>
+    <message>
+        <source>Audio FX</source>
+        <translation type="unfinished">Audio FX</translation>
+    </message>
+    <message>
+        <source>Transitions</source>
+        <translation type="unfinished">Transitions</translation>
+    </message>
+    <message>
+        <source>Add to timeline</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>AndroidBottomSheet</name>
+    <message>
+        <source>Sheet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">Fermer</translation>
+    </message>
+</context>
+<context>
+    <name>AndroidCropOverlay</name>
+    <message>
+        <source>Drag the edges to reframe · pinch to zoom</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset</source>
+        <translation type="unfinished">Réinitialiser</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Annuler</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation type="unfinished">Appliquer</translation>
+    </message>
+</context>
+<context>
+    <name>AndroidEditActions</name>
+    <message>
+        <source>Select</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Blade — tap a clip to split</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Trim start — tap a clip to drop everything before the cut</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Trim end — tap a clip to drop everything after the cut</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste at current time</source>
+        <translation type="unfinished">Coller à l&apos;heure actuelle</translation>
+    </message>
+    <message>
+        <source>Duplicate clip</source>
+        <translation type="unfinished">Dupliquer le clip</translation>
+    </message>
+    <message>
+        <source>Merge adjacent clips</source>
+        <translation type="unfinished">Fusionner les clips adjacents</translation>
+    </message>
+    <message>
+        <source>Close gap after clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Freeze frame at current time</source>
+        <translation type="unfinished">Geler l&apos;image à l&apos;instant actuel</translation>
+    </message>
+    <message>
+        <source>Separate audio from video</source>
+        <translation type="unfinished">Séparer l’audio de la vidéo</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation type="unfinished">Supprimer</translation>
+    </message>
+    <message>
+        <source>Add or remove a bookmark here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Previous bookmark</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Next bookmark</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mark work area in at current time</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mark work area out at current time</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Go to work area in</source>
+        <translation type="unfinished">Aller au début de la zone de travail</translation>
+    </message>
+    <message>
+        <source>Go to work area out</source>
+        <translation type="unfinished">Aller à la fin de la zone de travail</translation>
+    </message>
+    <message>
+        <source>Clear work area</source>
+        <translation type="unfinished">Effacer la zone de travail</translation>
+    </message>
+    <message>
+        <source>Toggle snapping</source>
+        <translation type="unfinished">Basculer l&apos;accrochage</translation>
+    </message>
+    <message>
+        <source>Analyzing…</source>
+        <translation type="unfinished">Analyse en cours…</translation>
+    </message>
+    <message>
+        <source>Hide beat markers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Find the beat and show markers</source>
+        <translation type="unfinished">Trouver le battement et afficher les marqueurs</translation>
+    </message>
+    <message>
+        <source>Close gaps when trimming</source>
+        <translation type="unfinished">Fermer les espaces lors du découpage</translation>
+    </message>
+    <message>
+        <source>Allow clip overlap</source>
+        <translation type="unfinished">Autoriser le chevauchement des clips</translation>
+    </message>
+    <message>
+        <source>Shorter layers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Taller layers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fit timeline in view</source>
+        <translation type="unfinished">Adapter la timeline à l&apos;affichage</translation>
+    </message>
+</context>
+<context>
+    <name>AndroidEditor</name>
+    <message>
+        <source>Drift project (*.drift)</source>
+        <translation type="unfinished">Projet Drift (*.drift)</translation>
+    </message>
+    <message>
+        <source>Save Project</source>
+        <translation type="unfinished">Enregistrer le projet</translation>
+    </message>
+    <message>
+        <source>Save Shareable Copy</source>
+        <translation type="unfinished">Enregistrer une copie partageable</translation>
+    </message>
+    <message>
+        <source>Open Project</source>
+        <translation type="unfinished">Ouvrir le projet</translation>
+    </message>
+    <message>
+        <source>Your timeline is empty</source>
+        <translation type="unfinished">Votre chronologie est vide</translation>
+    </message>
+    <message>
+        <source>Import media or open the Media library to start editing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>AndroidHome</name>
+    <message>
+        <source>Media files (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.mp3 *.wav *.aac *.flac *.ogg *.m4a *.png *.jpg *.jpeg *.gif *.webp *.bmp)</source>
+        <translation type="unfinished">Fichiers multimédias (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.mp3 *.wav *.aac *.flac *.ogg *.m4a *.png *.jpg *.jpeg *.gif *.webp *.bmp)</translation>
+    </message>
+    <message>
+        <source>Import Media</source>
+        <translation type="unfinished">Importer le média</translation>
+    </message>
+    <message>
+        <source>An import is already running.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>Imported %n file(s).</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Could not import the selected file(s).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create polished videos fast</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>More</source>
+        <translation type="unfinished">Plus</translation>
+    </message>
+    <message>
+        <source>Light mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dark mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Extras</source>
+        <translation type="unfinished">Extras</translation>
+    </message>
+    <message>
+        <source>Update available</source>
+        <translation type="unfinished">Mise à jour disponible</translation>
+    </message>
+    <message>
+        <source>Recent projects</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Untitled</source>
+        <translation type="unfinished">Sans titre</translation>
+    </message>
+    <message>
+        <source>That project file is missing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove from recents</source>
+        <translation type="unfinished">Supprimer des récents</translation>
+    </message>
+    <message>
+        <source>New project</source>
+        <translation type="unfinished">Nouveau projet</translation>
+    </message>
+    <message>
+        <source>Import media &amp; edit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start blank</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Importing %1 of %2…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Importing…</source>
+        <translation type="unfinished">Importation…</translation>
+    </message>
+</context>
+<context>
+    <name>AndroidLayoutPicker</name>
+    <message>
+        <source>YouTube</source>
+        <translation type="unfinished">YouTube</translation>
+    </message>
+    <message>
+        <source>Instagram</source>
+        <translation type="unfinished">Instagram</translation>
+    </message>
+    <message>
+        <source>Facebook</source>
+        <translation type="unfinished">Facebook</translation>
+    </message>
+    <message>
+        <source>TikTok</source>
+        <translation type="unfinished">TikTok</translation>
+    </message>
+    <message>
+        <source>More</source>
+        <translation type="unfinished">Plus</translation>
+    </message>
+    <message>
+        <source>YT Video</source>
+        <translation type="unfinished">Vidéo YT</translation>
+    </message>
+    <message>
+        <source>YT Short</source>
+        <translation type="unfinished">Short YT</translation>
+    </message>
+    <message>
+        <source>IG Reel</source>
+        <translation type="unfinished">Reel IG</translation>
+    </message>
+    <message>
+        <source>IG Story</source>
+        <translation type="unfinished">Story IG</translation>
+    </message>
+    <message>
+        <source>IG Post</source>
+        <translation type="unfinished">Post IG</translation>
+    </message>
+    <message>
+        <source>IG Feed</source>
+        <translation type="unfinished">Fil IG</translation>
+    </message>
+    <message>
+        <source>FB Reel</source>
+        <translation type="unfinished">Reel FB</translation>
+    </message>
+    <message>
+        <source>FB Video</source>
+        <translation type="unfinished">Vidéo FB</translation>
+    </message>
+    <message>
+        <source>FB Story</source>
+        <translation type="unfinished">Story FB</translation>
+    </message>
+    <message>
+        <source>Snapchat</source>
+        <translation type="unfinished">Snapchat</translation>
+    </message>
+    <message>
+        <source>X / Twitter</source>
+        <translation type="unfinished">X / Twitter</translation>
+    </message>
+    <message>
+        <source>LinkedIn</source>
+        <translation type="unfinished">LinkedIn</translation>
+    </message>
+    <message>
+        <source>Square</source>
+        <translation type="unfinished">Carré</translation>
+    </message>
+    <message>
+        <source>Landscape</source>
+        <translation type="unfinished">Paysage</translation>
+    </message>
+    <message>
+        <source>Portrait</source>
+        <translation type="unfinished">Portrait</translation>
+    </message>
+    <message>
+        <source>Classic</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom</source>
+        <translation type="unfinished">Personnalisé</translation>
+    </message>
+    <message>
+        <source>Any size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>4K</source>
+        <translation type="unfinished">4K</translation>
+    </message>
+    <message>
+        <source>1080p</source>
+        <translation type="unfinished">1080p</translation>
+    </message>
+    <message>
+        <source>720p</source>
+        <translation type="unfinished">720p</translation>
+    </message>
+    <message>
+        <source>Choose a layout for your video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Template</source>
+        <translation type="unfinished">Modèle</translation>
+    </message>
+    <message>
+        <source>Width</source>
+        <translation type="unfinished">Largeur</translation>
+    </message>
+    <message>
+        <source>Height</source>
+        <translation type="unfinished">Hauteur</translation>
+    </message>
+    <message>
+        <source>Quality</source>
+        <translation type="unfinished">Qualité</translation>
+    </message>
+    <message>
+        <source>Frames per second</source>
+        <translation type="unfinished">Images par seconde</translation>
+    </message>
+    <message>
+        <source>%1×%2 · %3 · %4 fps</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview shows the canvas aspect ratio</source>
+        <translation type="unfinished">L&apos;aperçu montre le rapport d&apos;aspect du canevas</translation>
+    </message>
+</context>
+<context>
+    <name>AndroidMain</name>
+    <message>
+        <source>Drift project (*.drift)</source>
+        <translation type="unfinished">Projet Drift (*.drift)</translation>
+    </message>
+    <message>
+        <source>Save Project</source>
+        <translation type="unfinished">Enregistrer le projet</translation>
+    </message>
+    <message>
+        <source>Open Project</source>
+        <translation type="unfinished">Ouvrir le projet</translation>
+    </message>
+    <message>
+        <source>Import in progress…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export finished.</source>
+        <translation type="unfinished">Exportation terminée.</translation>
+    </message>
+    <message>
+        <source>Export cancelled.</source>
+        <translation type="unfinished">Exportation annulée.</translation>
+    </message>
+    <message>
+        <source>Export failed. Check the save location and free space.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Couldn&apos;t create the shareable copy: %1</source>
+        <translation type="unfinished">Impossible de créer la copie partageable : %1</translation>
+    </message>
+    <message>
+        <source>Captions created.</source>
+        <translation type="unfinished">Sous-titres créés.</translation>
+    </message>
+    <message>
+        <source>Couldn’t create captions: %1</source>
+        <translation type="unfinished">Impossible de créer les sous-titres : %1</translation>
+    </message>
+    <message>
+        <source>Couldn’t create captions.</source>
+        <translation type="unfinished">Impossible de créer les sous-titres.</translation>
+    </message>
+    <message>
+        <source>Couldn’t install “%1”: %2</source>
+        <translation type="unfinished">Impossible d&apos;installer «&#xa0;%1&#xa0;» : %2</translation>
+    </message>
+</context>
+<context>
+    <name>AndroidPreview</name>
+    <message>
+        <source>Audio only</source>
+        <translation type="unfinished">Audio uniquement</translation>
+    </message>
+    <message>
+        <source>No clip at the current time</source>
+        <translation type="unfinished">Aucun clip à l&apos;heure actuelle</translation>
+    </message>
+    <message>
+        <source>Fit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fill</source>
+        <translation type="unfinished">Remplissage</translation>
+    </message>
+    <message>
+        <source>Full</source>
+        <translation type="unfinished">Plein</translation>
+    </message>
+    <message>
+        <source>Half</source>
+        <translation type="unfinished">Demi</translation>
+    </message>
+    <message>
+        <source>Quarter</source>
+        <translation type="unfinished">Quart</translation>
+    </message>
+    <message>
+        <source>Quality: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fast</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quality</source>
+        <translation type="unfinished">Qualité</translation>
+    </message>
+    <message>
+        <source>Seek</source>
+        <translation type="unfinished">Chercher</translation>
+    </message>
+    <message>
+        <source>Back 1 second</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Previous frame</source>
+        <translation type="unfinished">Image précédente</translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation type="unfinished">Pause</translation>
+    </message>
+    <message>
+        <source>Play</source>
+        <translation type="unfinished">Lire</translation>
+    </message>
+    <message>
+        <source>Next frame</source>
+        <translation type="unfinished">Image suivante</translation>
+    </message>
+    <message>
+        <source>Loop work area on — tap to turn off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loop work area off — tap to turn on</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Forward 1 second</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>View and playback settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Exit fullscreen preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fullscreen preview</source>
+        <translation type="unfinished">Aperçu plein écran</translation>
+    </message>
+</context>
+<context>
+    <name>AndroidTimeline</name>
+    <message>
+        <source>Save effect preset</source>
+        <translation type="unfinished">Enregistrer le préréglage d&apos;effet</translation>
+    </message>
+    <message>
+        <source>Rename clip</source>
+        <translation type="unfinished">Renommer le clip</translation>
+    </message>
+    <message>
+        <source>Rename</source>
+        <translation type="unfinished">Renommer</translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation type="unfinished">Nom</translation>
+    </message>
+    <message>
+        <source>Clip name</source>
+        <translation type="unfinished">Nom du clip</translation>
+    </message>
+    <message>
+        <source>Rename bookmark</source>
+        <translation type="unfinished">Renommer la repère</translation>
+    </message>
+    <message>
+        <source>Label</source>
+        <translation type="unfinished">Étiquette</translation>
+    </message>
+    <message>
+        <source>Bookmark name</source>
+        <translation type="unfinished">Nom de la repère</translation>
+    </message>
+    <message>
+        <source>Bookmark</source>
+        <translation type="unfinished">Repère</translation>
+    </message>
+    <message>
+        <source>My look</source>
+        <translation type="unfinished">Mon style</translation>
+    </message>
+    <message>
+        <source>Drop a transition where two clips meet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Drop that onto a clip to apply it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keyframes</source>
+        <translation type="unfinished">Images clés</translation>
+    </message>
+    <message numerus="yes">
+        <source>%n clip(s)</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>All</source>
+        <translation type="unfinished">Tous</translation>
+    </message>
+    <message>
+        <source>None</source>
+        <translation type="unfinished">Aucun</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation type="unfinished">Terminé</translation>
+    </message>
+    <message>
+        <source>Add new track</source>
+        <translation type="unfinished">Ajouter une piste</translation>
+    </message>
+    <message>
+        <source>Go to bookmark</source>
+        <translation type="unfinished">Aller à la repère</translation>
+    </message>
+    <message>
+        <source>Move to playhead</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rename…</source>
+        <translation type="unfinished">Renommer…</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation type="unfinished">Supprimer</translation>
+    </message>
+    <message>
+        <source>Close gap</source>
+        <translation type="unfinished">Fermer l&apos;écart</translation>
+    </message>
+    <message>
+        <source>New track</source>
+        <translation type="unfinished">Nouvelle piste</translation>
+    </message>
+</context>
+<context>
+    <name>AndroidTopBar</name>
+    <message>
+        <source>Back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Untitled</source>
+        <translation type="unfinished">Sans titre</translation>
+    </message>
+    <message>
+        <source>Undo</source>
+        <translation type="unfinished">Annuler</translation>
+    </message>
+    <message>
+        <source>Redo</source>
+        <translation type="unfinished">Refaire</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation type="unfinished">Exporter</translation>
+    </message>
+    <message>
+        <source>More</source>
+        <translation type="unfinished">Plus</translation>
+    </message>
+    <message>
+        <source>Save</source>
+        <translation type="unfinished">Enregistrer</translation>
+    </message>
+    <message>
+        <source>Shareable copy</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open project</source>
+        <translation type="unfinished">Ouvrir le projet</translation>
+    </message>
+    <message>
+        <source>New project</source>
+        <translation type="unfinished">Nouveau projet</translation>
+    </message>
+    <message>
+        <source>Choose layout</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project properties</source>
+        <translation type="unfinished">Propriétés du projet</translation>
+    </message>
+    <message>
+        <source>Effect templates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scenes</source>
+        <translation type="unfinished">Scène</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation type="unfinished">Paramètres</translation>
+    </message>
+    <message>
+        <source>Light mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dark mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Extras</source>
+        <translation type="unfinished">Extras</translation>
+    </message>
+    <message>
+        <source>Multicam</source>
+        <translation type="unfinished">Multicam</translation>
+    </message>
+    <message>
+        <source>Debug info</source>
+        <translation type="unfinished">Informations de débogage</translation>
+    </message>
+    <message>
+        <source>Update available</source>
+        <translation type="unfinished">Mise à jour disponible</translation>
+    </message>
+</context>
+<context>
     <name>AnimationInspector</name>
     <message>
         <source>None</source>
@@ -1758,6 +2568,14 @@
         <translation>Exportation en cours…</translation>
     </message>
     <message>
+        <source>Getting your video ready to share…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nothing on this device can share that file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Nudge selection</source>
         <translation>Décaler la sélection</translation>
     </message>
@@ -1909,6 +2727,10 @@
             <numerusform>%n fichiers importés.</numerusform>
         </translation>
     </message>
+    <message>
+        <source>An import is already running.</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message numerus="yes">
         <source>Could not import any of the %n selected files.</source>
         <translation>
@@ -2029,6 +2851,10 @@
     <message>
         <source>Import video, audio or image files</source>
         <translation>Importer des fichiers vidéo, audio ou image</translation>
+    </message>
+    <message>
+        <source>Touch and hold a transition, then drag it onto where two clips meet.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Drag onto where two clips overlap. They fade into each other by default.</source>
@@ -3328,6 +4154,10 @@
         <source>Untitled</source>
         <translation>Sans titre</translation>
     </message>
+    <message>
+        <source>Share</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>FontCatalog</name>
@@ -4434,6 +5264,10 @@ En cas de saccades à la lecture, essayez un autre mode.</translation>
     <message>
         <source>It&apos;s empty here</source>
         <translation>Il est vide ici</translation>
+    </message>
+    <message>
+        <source>Tap a clip on the timeline to edit its properties</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Click a clip on the timeline to edit its properties</source>
@@ -6616,6 +7450,14 @@ En cas de saccades à la lecture, essayez un autre mode.</translation>
         <translation>Sous-titres</translation>
     </message>
     <message>
+        <source>Properties</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select multiple</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Split at current time</source>
         <translation>Diviser à l&apos;heure actuelle</translation>
     </message>
@@ -6931,6 +7773,26 @@ En cas de saccades à la lecture, essayez un autre mode.</translation>
         <translation>Ceci supprime la piste vide. Vous pouvez annuler plus tard.</translation>
     </message>
     <message>
+        <source>A</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>T</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>S</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>G</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>V</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Audio</source>
         <translation>Audio</translation>
     </message>
@@ -6977,6 +7839,14 @@ En cas de saccades à la lecture, essayez un autre mode.</translation>
     <message>
         <source>Show waveform</source>
         <translation>Afficher l’onde sonore</translation>
+    </message>
+    <message>
+        <source>Taller row</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shorter row</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Reset row height</source>

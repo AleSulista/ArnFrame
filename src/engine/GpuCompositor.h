@@ -86,8 +86,12 @@ struct GpuFrameTexture
 {
     unsigned int textureId = 0;
     QSize size;
+    // Readback fallback, only ever filled on Android and only when the driver
+    // refused to put the compositor's context in the scene graph's share group,
+    // which makes textureId unusable there. Premultiplied ARGB32, ready to upload.
+    QImage image;
 
-    bool isValid() const { return textureId != 0 && !size.isEmpty(); }
+    bool isValid() const { return !size.isEmpty() && (textureId != 0 || !image.isNull()); }
 };
 
 // Composites a GpuScene entirely on the GPU. Returns a null image if OpenGL is

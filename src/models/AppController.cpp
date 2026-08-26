@@ -1,6 +1,7 @@
 #include "AppController.h"
 
 #include "AssetLibrary.h"
+#include "FileDialogs.h"
 #include "core/Clip.h"
 #include "core/Mask.h"
 #include "core/SpeedCurve.h"
@@ -12,6 +13,7 @@
 #include "core/Transition.h"
 #include "core/commands/ProjectCommands.h"
 #include "engine/AddonRegistry.h"
+#include "engine/AndroidUri.h"
 #include "engine/AudioMixer.h"
 #include "engine/ClipReaderPool.h"
 #include "engine/DebugReport.h"
@@ -23,6 +25,10 @@
 #include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
 #include "engine/FrameCompositor.h"
+// Engine-internal by its own header comment, and included here only for releaseCaches(): the GPU
+// caches have no other owner outside src/engine to ask. A one-line forwarder on GpuCompositor
+// would restore the boundary.
+#include "engine/GlRuntime.h"
 #include "engine/MediaThumbnail.h"
 #include "engine/AudioFileWriter.h"
 #include "engine/DeepFilterDenoiser.h"
@@ -40,11 +46,14 @@
 #include "engine/StickerCatalog.h"
 #include "MulticamImageStore.h"
 #include "SegmentImageStore.h"
+#include "engine/TextRaster.h"
 #include "engine/TransitionCatalog.h"
 #include "engine/WhisperTranscriber.h"
+#ifndef Q_OS_ANDROID
 #include "mcp/McpCatalog.h"
-#include "mcp/McpJson.h"
 #include "mcp/McpServer.h"
+#endif
+#include "mcp/McpJson.h"
 
 #include <QBuffer>
 #include <QClipboard>
@@ -77,12 +86,15 @@
 #include <QDebug>
 #include <QUuid>
 #include <QVector>
+#include <QFutureWatcher>
 #include <QtConcurrent>
 #include <QtMath>
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -149,6 +161,286 @@ double appliedUiScaleFromEnvironment()
         return env;
     return 1.0;
 }
+
+// Every file dialog on Android returns a content:// URI, and a SAF document has no filesystem
+// path at all. Writers that need a real file — the bundle writer, the encoder, QImage::save —
+// produce their output in app storage first, and commitWriteTarget streams it into the chosen
+// document. On desktop the picked path is written directly and both halves fall away.
+//
+// `suffix` forces the staged file's extension, for writers that pick their format off one: a
+// created-document URI carries no usable name, and the display name's own extension is only as
+// good as whatever the provider recorded.
+QString writeTargetPath(const QUrl &url, const QString &suffix = {})
+{
+    Q_UNUSED(suffix);
+#ifdef Q_OS_ANDROID
+    if (AndroidUri::isContentUri(url)) {
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                            + QStringLiteral("/staged");
+        if (!QDir().mkpath(dir))
+            return {};
+
+        QString name = AndroidUri::displayName(url);
+        name.replace(QLatin1Char('/'), QLatin1Char('_'));
+        if (!suffix.isEmpty() && QFileInfo(name).suffix().compare(suffix, Qt::CaseInsensitive) != 0)
+            name += QLatin1Char('.') + suffix;
+
+        // Keyed on the document so an export and a package running at once cannot end up
+        // staging through the same file.
+        const QByteArray key = QCryptographicHash::hash(url.toString(QUrl::FullyEncoded).toUtf8(),
+                                                        QCryptographicHash::Sha1);
+        return dir + QLatin1Char('/') + QString::fromLatin1(key.left(6).toHex())
+               + QLatin1Char('-') + name;
+    }
+#endif
+    return url.toLocalFile();
+}
+
+// The mirror of writeTargetPath, for readers that need a real file: the bundle reader seeks all
+// over its input and hands paths to FFmpeg, neither of which a content:// URI supports. Copies the
+// document into the same <Cache>/staged directory writeTargetPath uses, which main.cpp already
+// sweeps at startup. On desktop this is url.toLocalFile() and nothing is copied.
+QString readTargetPath(const QUrl &url)
+{
+#ifdef Q_OS_ANDROID
+    if (AndroidUri::isContentUri(url)) {
+        std::unique_ptr<QFile> src = AndroidUri::openForRead(url);
+        if (!src)
+            return {};
+
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                            + QStringLiteral("/staged");
+        if (!QDir().mkpath(dir))
+            return {};
+
+        QString name = AndroidUri::displayName(url);
+        name.replace(QLatin1Char('/'), QLatin1Char('_'));
+        // Keyed on the document, so opening the same project twice reuses one staged file instead
+        // of littering the cache. The "read-" prefix keeps it clear of writeTargetPath's name for
+        // the same document: saving back to a project that is still extracting embedded media
+        // would otherwise overwrite the bundle the extract is reading from.
+        const QByteArray key = QCryptographicHash::hash(url.toString(QUrl::FullyEncoded).toUtf8(),
+                                                        QCryptographicHash::Sha1);
+        const QString staged = dir + QStringLiteral("/read-") + QString::fromLatin1(key.left(6).toHex())
+                               + QLatin1Char('-') + name;
+
+        QFile dst(staged);
+        if (!dst.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            return {};
+        constexpr qint64 kChunk = 1024 * 1024;
+        while (!src->atEnd()) {
+            const QByteArray chunk = src->read(kChunk);
+            if (chunk.isEmpty())
+                break;
+            if (dst.write(chunk) != chunk.size()) {
+                dst.remove();
+                return {};
+            }
+        }
+        if (!dst.flush()) {
+            dst.remove();
+            return {};
+        }
+        return staged;
+    }
+#endif
+    return url.toLocalFile();
+}
+
+// Whether a failed or cancelled job may dispose of the document it was writing to. Qt's save dialog
+// maps to ACTION_CREATE_DOCUMENT, which usually hands back a new empty file — but DocumentsUI also
+// returns the *existing* document's URI when the user taps a file in the folder to replace it, and
+// destroying that on a cancel at 5% would take a file the job never even reached. Call before the
+// job starts: once commitWriteTarget has opened the destination it has already truncated it.
+bool writeTargetIsDisposable(const QUrl &url)
+{
+    Q_UNUSED(url);
+#ifdef Q_OS_ANDROID
+    if (AndroidUri::isContentUri(url)) {
+        const std::unique_ptr<QFile> existing = AndroidUri::openForRead(url);
+        return existing && existing->size() == 0;
+    }
+#endif
+    return false;
+}
+
+bool commitWriteTarget(const QString &staged, const QUrl &url,
+                       const std::function<bool(qint64, qint64)> &progress, QString *error)
+{
+    Q_UNUSED(staged);
+    Q_UNUSED(url);
+    Q_UNUSED(progress);
+    Q_UNUSED(error);
+#ifdef Q_OS_ANDROID
+    if (AndroidUri::isContentUri(url)) {
+        constexpr qint64 kChunk = 1024 * 1024;
+        QFile src(staged);
+        std::unique_ptr<QFile> dst = AndroidUri::openForWrite(url);
+        if (!dst || !src.open(QIODevice::ReadOnly)) {
+            *error = QStringLiteral("Could not write to the location you picked");
+            return false;
+        }
+
+        const qint64 total = src.size();
+        qint64 done = 0;
+        for (QByteArray chunk = src.read(kChunk); !chunk.isEmpty(); chunk = src.read(kChunk)) {
+            if (dst->write(chunk) != chunk.size()) {
+                *error = dst->errorString();
+                return false;
+            }
+            done += chunk.size();
+            if (progress && !progress(done, total)) {
+                *error = QStringLiteral("Cancelled");
+                return false;
+            }
+        }
+        // The staged file is the only other copy, so it must not be unlinked until the
+        // destination is known good. A short write is already caught above — chunks are 1 MiB,
+        // past QFile's write-buffer threshold — but the sub-buffer tail is only flushed at
+        // destruction, and a cloud-backed DocumentsProvider commits the upload when the
+        // ParcelFileDescriptor closes. Both of those failures used to be reported as success.
+        if (src.error() != QFile::NoError) {
+            *error = src.errorString();
+            return false;
+        }
+        if (!dst->flush()) {
+            *error = dst->errorString();
+            return false;
+        }
+        dst->close();
+        if (dst->error() != QFile::NoError) {
+            *error = dst->errorString();
+            return false;
+        }
+        src.close();
+        QFile::remove(staged);
+    }
+#endif
+    return true;
+}
+
+// `deleteDestination` disposes of the document the output was headed for, not just the staging
+// copy: ACTION_CREATE_DOCUMENT has already created the file by the time the picker returns, so an
+// export that fails or is cancelled otherwise leaves a 0-byte "video" in the user's folder. Only
+// ever pass true for a document this same operation created through the save picker — on the
+// Save-in-place path the URL is the user's existing project, and destroying that because a write
+// failed would take the copy they still have with it.
+void discardWriteTarget(const QString &staged, const QUrl &url, bool deleteDestination = false)
+{
+    Q_UNUSED(staged);
+    Q_UNUSED(url);
+    Q_UNUSED(deleteDestination);
+#ifdef Q_OS_ANDROID
+    if (AndroidUri::isContentUri(url)) {
+        QFile::remove(staged);
+        if (deleteDestination)
+            AndroidUri::deleteDocument(url);
+    }
+#endif
+}
+
+// The name to file an export under in the media library. A content:// URI carries only an opaque
+// document id, so the provider has to be asked for the name the user actually chose.
+QString exportDisplayName(const QUrl &url)
+{
+#ifdef Q_OS_ANDROID
+    if (AndroidUri::isContentUri(url))
+        return AndroidUri::displayName(url);
+#endif
+    return QFileInfo(url.toLocalFile()).fileName();
+}
+
+// What a saved or opened project is remembered as. A SAF document's only handle is its URI, and
+// the grant that arrives with the picker result dies with the process — without upgrading it the
+// recents entry would be a dead string on the next launch.
+QString projectLocation(const QUrl &url)
+{
+#ifdef Q_OS_ANDROID
+    if (AndroidUri::isContentUri(url)) {
+        // Read and write: this is the document Save-in-place writes back to, and persisting the
+        // read grant alone is what made the next launch's Save fail with "could not write to the
+        // location you picked". A false return still leaves the read grant taken, so the project
+        // opens either way.
+        AndroidUri::takePersistableReadWritePermission(url);
+        return url.toString(QUrl::FullyEncoded);
+    }
+#endif
+    return url.toLocalFile();
+}
+
+// Whether a remembered project location still resolves. QFileInfo knows nothing about a document
+// id, so a SAF location has to be probed through the provider — the grant can also have lapsed
+// since it was stored, which is indistinguishable from the file being gone and is treated the same.
+bool projectLocationExists(const QString &path)
+{
+#ifdef Q_OS_ANDROID
+    if (path.startsWith(QLatin1String("content://"), Qt::CaseInsensitive))
+        return AndroidUri::openForRead(QUrl(path)) != nullptr;
+#endif
+    return QFileInfo::exists(path);
+}
+
+#ifdef Q_OS_ANDROID
+// FFmpeg cannot open a content:// URI, so replacing a clip's media means copying the document
+// into app storage first. Directory layout and key match AssetLibrary's import materialization
+// so the two share copies and its cleanup on asset removal still recognises this one.
+QString materializeContentUrl(const QUrl &url)
+{
+    constexpr qint64 kChunk = 1024 * 1024;
+    std::unique_ptr<QFile> src = AndroidUri::openForRead(url);
+    if (!src)
+        return {};
+
+    AndroidUri::takePersistableReadPermission(url);
+
+    const QByteArray head = src->read(kChunk);
+    if (head.isEmpty() && src->error() != QFile::NoError)
+        return {};
+
+    QCryptographicHash key(QCryptographicHash::Sha1);
+    key.addData(head);
+    key.addData(QByteArray::number(src->size()));
+
+    QString name = AndroidUri::displayName(url);
+    name.replace(QLatin1Char('/'), QLatin1Char('_'));
+    name.replace(QLatin1Char('\\'), QLatin1Char('_'));
+    if (name.isEmpty() || name == QLatin1String(".") || name == QLatin1String(".."))
+        name = QStringLiteral("import.bin");
+
+    const QString destDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                            + QStringLiteral("/imports/")
+                            + QString::fromLatin1(key.result().left(8).toHex());
+    const QString destPath = destDir + QLatin1Char('/') + name;
+    if (QFileInfo::exists(destPath))
+        return destPath;
+    if (!QDir().mkpath(destDir))
+        return {};
+
+    // Copy aside and rename, so a process death mid-copy cannot leave a truncated file that
+    // every later import of the same media would reuse.
+    QFile dst(destPath + QStringLiteral(".part"));
+    if (!dst.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return {};
+
+    for (QByteArray chunk = head; !chunk.isEmpty(); chunk = src->read(kChunk)) {
+        if (dst.write(chunk) != chunk.size()) {
+            dst.remove();
+            return {};
+        }
+    }
+    if (src->error() != QFile::NoError || !dst.flush()) {
+        dst.remove();
+        return {};
+    }
+
+    dst.close();
+    if (!dst.rename(destPath)) {
+        dst.remove();
+        return {};
+    }
+    return destPath;
+}
+#endif
 
 QLocale uiLocaleFromStored()
 {
@@ -231,8 +523,10 @@ AppController::~AppController()
     if (hadMulticamSession)
         m_playback.setProject(&m_project);
 
+#ifndef Q_OS_ANDROID
     if (m_mcp)
         m_mcp->stop();
+#endif
     // ~QUndoStack clears the stack, which emits indexChanged into the lambda
     // below — but by then the members it touches (m_selection, the models) are
     // already gone. Cut the signals before any member is destroyed.
@@ -281,10 +575,12 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
 
     m_undoStack.setUndoLimit(kMaxUndoSteps);
 
+#ifndef Q_OS_ANDROID
     m_mcp = std::make_unique<drift::mcp::McpServer>(this);
     connect(m_mcp.get(), &drift::mcp::McpServer::runningChanged, this,
             &AppController::mcpRunningChanged);
     connect(m_mcp.get(), &drift::mcp::McpServer::errorChanged, this, &AppController::mcpErrorChanged);
+#endif
     connect(&m_undoStack, &QUndoStack::indexChanged, this, &AppController::undoStackChanged);
     connect(&m_undoStack, &QUndoStack::indexChanged, this, [this] {
         m_timelineModel.refresh();
@@ -497,30 +793,104 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     sweepExtractionDirs();
 }
 
+#ifdef Q_OS_ANDROID
+namespace {
+// Every string in a project document, without deserializing it. Used to work out what the
+// recovery snapshot still points at: collecting all strings rather than the path-shaped ones
+// deliberately errs wide, because every entry here only spares a file from being swept.
+void collectJsonStrings(const QJsonValue &value, QSet<QString> *out)
+{
+    if (value.isString()) {
+        out->insert(value.toString());
+    } else if (value.isArray()) {
+        const QJsonArray array = value.toArray();
+        for (const QJsonValue &item : array)
+            collectJsonStrings(item, out);
+    } else if (value.isObject()) {
+        const QJsonObject object = value.toObject();
+        for (auto it = object.constBegin(); it != object.constEnd(); ++it)
+            collectJsonStrings(it.value(), out);
+    }
+}
+} // namespace
+#endif
+
 // Every packaged project ever opened leaves its media unpacked under <AppData>/projects/<id>. Drop
-// the ones no project in the recents list can still be pointing at.
+// the ones no project in the recents list can still be pointing at, and on Android the derived
+// artifacts nothing points at either.
 void AppController::sweepExtractionDirs()
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (base.isEmpty())
         return;
-    QDir root(QDir(base).filePath(QStringLiteral("projects")));
-    if (!root.exists())
-        return;
 
     QSet<QString> live;
+#ifdef Q_OS_ANDROID
+    QSet<QString> liveFiles; // files outside any bundle that a known project still points at
+#endif
     for (const QVariant &entry : recentProjects()) {
         const QString path = entry.toMap().value(QStringLiteral("path")).toString();
         QString error;
-        if (const auto info = drift::bundle::readManifest(path, &error))
-            live.insert(info->projectId);
+        const auto info = drift::bundle::readManifest(path, &error);
+        if (!info)
+            continue;
+        live.insert(info->projectId);
+#ifdef Q_OS_ANDROID
+        for (const drift::bundle::MediaEntry &media : info->media)
+            liveFiles.insert(media.originalPath);
+#endif
     }
 
-    const QFileInfoList dirs = root.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
-    for (const QFileInfo &dir : dirs) {
-        if (!live.contains(dir.fileName()))
-            QDir(dir.absoluteFilePath()).removeRecursively();
+#ifdef Q_OS_ANDROID
+    // The recovery snapshot is the only record of a session that was never saved, and it is a
+    // project document like any other: its id names an extraction dir that appears in no manifest
+    // — freeze frames are written straight into it — and its paths name derived artifacts nothing
+    // else refers to.
+    QJsonObject recovery;
+    {
+        QFile file(recoveryFilePath());
+        if (file.open(QIODevice::ReadOnly))
+            recovery = QJsonDocument::fromJson(file.readAll()).object();
     }
+    const QString recoveryId = recovery.value(QStringLiteral("id")).toString();
+    if (!recoveryId.isEmpty())
+        live.insert(recoveryId);
+    live.insert(m_project.id());
+    collectJsonStrings(recovery, &liveFiles);
+#endif
+
+    QDir root(QDir(base).filePath(QStringLiteral("projects")));
+    if (root.exists()) {
+        const QFileInfoList dirs = root.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QFileInfo &dir : dirs) {
+            if (!live.contains(dir.fileName()))
+                QDir(dir.absoluteFilePath()).removeRecursively();
+        }
+    }
+
+#ifdef Q_OS_ANDROID
+    // Mattes, face tracks and denoised audio are written under uuid names with no owner recorded
+    // anywhere, so an undo or an abandoned project strands them for good. They are always
+    // *embedded* when a project is saved (bundle::collectMedia), which is what makes reclaiming
+    // them safe: the copy here is the last one for exactly two kinds of project — an unsaved
+    // session, which the recovery snapshot above accounts for, and one saved but not yet reopened,
+    // whose manifest still names this path. For anything else, opening the bundle re-extracts it.
+    const QString derivedDirs[] = {drift::matteCacheDir(), drift::faceTrackCacheDir(),
+                                   drift::denoiseCacheDir()};
+    for (const QString &dirPath : derivedDirs) {
+        if (dirPath.isEmpty())
+            continue;
+        const QFileInfoList files = QDir(dirPath).entryInfoList(QDir::Files);
+        for (const QFileInfo &file : files) {
+            if (!liveFiles.contains(file.absoluteFilePath()))
+                QFile::remove(file.absoluteFilePath());
+        }
+    }
+
+    // <AppData>/imports is deliberately NOT swept. It holds the app's only copy of every SAF
+    // document ever imported and a saved project points straight at those bytes, so a wrong sweep
+    // there would be data loss rather than a re-derivable cache miss.
+#endif
 }
 
 namespace {
@@ -1761,7 +2131,17 @@ bool AppController::replaceAssetSource(int assetIndex, const QUrl &url)
     if (assetId.isEmpty())
         return false;
 
-    const QString path = url.isLocalFile() ? url.toLocalFile() : url.toString();
+    QString path = url.isLocalFile() ? url.toLocalFile() : url.toString();
+    QString sourceUri;
+#ifdef Q_OS_ANDROID
+    // A content:// document has no filesystem path at all, so QFileInfo below rejects every SAF
+    // pick outright. Copy it out first, exactly as import does, and probe the copy.
+    if (AndroidUri::isContentUri(url)) {
+        path = materializeContentUrl(url);
+        if (!path.isEmpty())
+            sourceUri = url.toString(QUrl::FullyEncoded);
+    }
+#endif
     const QFileInfo fileInfo(path);
     if (path.isEmpty() || !fileInfo.isFile()) {
         emit assetReplaceFinished(false, tr("That file could not be read."), 0);
@@ -1785,6 +2165,9 @@ bool AppController::replaceAssetSource(int assetIndex, const QUrl &url)
     // Reading a file off a slow disk is the one part of this the user waits on with nothing to
     // show for it, so the row it belongs to goes busy until the probe lands.
     m_replacingAssetId = assetId;
+    // applyProbedSource overwrites the whole struct from the probe result, which knows nothing
+    // about where the file came from — so the URI is held here and put back in finalizeAssetReplace.
+    m_replacingAssetSourceUri = sourceUri;
     emit replacingAssetIdChanged();
     return true;
 }
@@ -1843,6 +2226,9 @@ void AppController::finalizeAssetReplace(const QString &assetId, const drift::Me
         m_replacingAssetId.clear();
         emit replacingAssetIdChanged();
     }
+    // Taken here rather than at the point of use so the refusals below cannot leave it set for
+    // whichever replace runs next.
+    const QString replacementSourceUri = std::exchange(m_replacingAssetSourceUri, QString());
 
     const drift::MediaAsset *current = m_project.asset(assetId);
     if (!current) {
@@ -1869,12 +2255,14 @@ void AppController::finalizeAssetReplace(const QString &assetId, const drift::Me
 
     const QString newName = filled.name;
     const drift::Project before = m_project;
-    if (!m_assetLibrary->applyProbedSource(assetId, filled)) {
+    drift::MediaAsset replacement = filled;
+    replacement.sourceUri = replacementSourceUri;
+    if (!m_assetLibrary->applyProbedSource(assetId, replacement)) {
         emit assetReplaceFinished(false, tr("That media is no longer in this project."), 0);
         return;
     }
 
-    const int adjusted = rebindClipsToAsset(assetId, filled);
+    const int adjusted = rebindClipsToAsset(assetId, replacement);
     pushProjectEdit(before, tr("Media replaced"));
     finishEdit(tr("Media replaced"));
     emit assetReplaceFinished(true, newName, adjusted);
@@ -2549,6 +2937,10 @@ QUrl AppController::fileUrl(const QString &path) const
 {
     if (path.isEmpty())
         return {};
+    // projectLocation() stores a SAF document as its encoded URI, and currentProjectPath is what
+    // Save-in-place feeds back through here. fromLocalFile on one produces "file:///content:/…".
+    if (path.startsWith(QLatin1String("content://"), Qt::CaseInsensitive))
+        return QUrl(path);
     return QUrl::fromLocalFile(path);
 }
 
@@ -7880,6 +8272,24 @@ bool AppController::deleteUserTextPreset(const QString &presetId)
 
 bool AppController::exportUserTextPreset(const QString &presetId, const QUrl &fileUrl)
 {
+#ifdef Q_OS_ANDROID
+    if (AndroidUri::isContentUri(fileUrl)) {
+        const QString tmp = QDir::temp().filePath(QStringLiteral("drift-text-preset.json"));
+        if (!drift::TextPresetStore::instance().exportToFile(presetId, tmp)) {
+            setLastMessage(tr("Could not export the text style"), QStringLiteral("error"));
+            return false;
+        }
+        QFile src(tmp);
+        std::unique_ptr<QFile> sink = AndroidUri::openForWrite(fileUrl);
+        if (!sink || !src.open(QIODevice::ReadOnly) || sink->write(src.readAll()) < 0) {
+            setLastMessage(tr("Could not export the text style"), QStringLiteral("error"));
+            return false;
+        }
+        QFile::remove(tmp);
+        setLastMessage(tr("Text style exported"), QStringLiteral("success"));
+        return true;
+    }
+#endif
     const QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : fileUrl.toString();
     if (path.isEmpty())
         return false;
@@ -7893,6 +8303,31 @@ bool AppController::exportUserTextPreset(const QString &presetId, const QUrl &fi
 
 bool AppController::importUserTextPreset(const QUrl &fileUrl)
 {
+#ifdef Q_OS_ANDROID
+    if (AndroidUri::isContentUri(fileUrl)) {
+        std::unique_ptr<QFile> src = AndroidUri::openForRead(fileUrl);
+        if (!src) {
+            setLastMessage(tr("Could not import the text style"), QStringLiteral("error"));
+            return false;
+        }
+        const QString tmp = QDir::temp().filePath(QStringLiteral("drift-text-preset-import.json"));
+        QFile dst(tmp);
+        if (!dst.open(QIODevice::WriteOnly) || dst.write(src->readAll()) < 0) {
+            setLastMessage(tr("Could not import the text style"), QStringLiteral("error"));
+            return false;
+        }
+        dst.close();
+        const QString id = drift::TextPresetStore::instance().importFromFile(tmp);
+        QFile::remove(tmp);
+        if (id.isEmpty()) {
+            setLastMessage(tr("Could not import the text style"), QStringLiteral("error"));
+            return false;
+        }
+        emit userTextPresetsChanged();
+        setLastMessage(tr("Text style imported"), QStringLiteral("success"));
+        return true;
+    }
+#endif
     const QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : fileUrl.toString();
     if (path.isEmpty())
         return false;
@@ -10171,10 +10606,22 @@ void AppController::setEffectStringParam(int trackIndex, int clipIndex, int effe
         return;
 
     // Empty URL clears the path (the inspector's clear button). Anything else must resolve to a
-    // local file — portal picks and plain file:// both come through as QUrl.
+    // local file — portal picks, SAF content:// URIs, and plain file:// all come through as QUrl.
+    // cgltf / the rest-mesh loader fopen the path, so a content:// URI is copied into app storage
+    // first rather than stored as-is.
     QString path;
     if (!url.isEmpty()) {
-        path = url.isLocalFile() ? url.toLocalFile() : url.toString(QUrl::PreferLocalFile);
+        if (url.isLocalFile()) {
+            path = url.toLocalFile();
+#ifdef Q_OS_ANDROID
+        } else if (AndroidUri::isContentUri(url)) {
+            // cgltf / the rest-mesh loader fopen the path; Qt can QFile a SAF URI but
+            // those loaders cannot, so copy into app storage once.
+            path = materializeContentUrl(url);
+#endif
+        } else {
+            path = url.toString(QUrl::PreferLocalFile);
+        }
         if (path.isEmpty())
             return;
     }
@@ -10637,6 +11084,24 @@ bool AppController::deleteUserEffectPreset(const QString &presetId)
 
 bool AppController::exportUserEffectPreset(const QString &presetId, const QUrl &fileUrl)
 {
+#ifdef Q_OS_ANDROID
+    if (AndroidUri::isContentUri(fileUrl)) {
+        const QString tmp = QDir::temp().filePath(QStringLiteral("drift-effect-preset.json"));
+        if (!drift::EffectStackStore::instance().exportToFile(presetId, tmp)) {
+            setLastMessage(tr("Could not export the effect preset"), QStringLiteral("error"));
+            return false;
+        }
+        QFile src(tmp);
+        std::unique_ptr<QFile> sink = AndroidUri::openForWrite(fileUrl);
+        if (!sink || !src.open(QIODevice::ReadOnly) || sink->write(src.readAll()) < 0) {
+            setLastMessage(tr("Could not export the effect preset"), QStringLiteral("error"));
+            return false;
+        }
+        QFile::remove(tmp);
+        setLastMessage(tr("Effect preset exported"), QStringLiteral("success"));
+        return true;
+    }
+#endif
     const QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : fileUrl.toString();
     if (path.isEmpty())
         return false;
@@ -10650,6 +11115,31 @@ bool AppController::exportUserEffectPreset(const QString &presetId, const QUrl &
 
 bool AppController::importUserEffectPreset(const QUrl &fileUrl)
 {
+#ifdef Q_OS_ANDROID
+    if (AndroidUri::isContentUri(fileUrl)) {
+        std::unique_ptr<QFile> src = AndroidUri::openForRead(fileUrl);
+        if (!src) {
+            setLastMessage(tr("Could not import the effect preset"), QStringLiteral("error"));
+            return false;
+        }
+        const QString tmp = QDir::temp().filePath(QStringLiteral("drift-effect-preset-import.json"));
+        QFile dst(tmp);
+        if (!dst.open(QIODevice::WriteOnly) || dst.write(src->readAll()) < 0) {
+            setLastMessage(tr("Could not import the effect preset"), QStringLiteral("error"));
+            return false;
+        }
+        dst.close();
+        const QString id = drift::EffectStackStore::instance().importFromFile(tmp);
+        QFile::remove(tmp);
+        if (id.isEmpty()) {
+            setLastMessage(tr("Could not import the effect preset"), QStringLiteral("error"));
+            return false;
+        }
+        emit userEffectPresetsChanged();
+        setLastMessage(tr("Effect preset imported"), QStringLiteral("success"));
+        return true;
+    }
+#endif
     const QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : fileUrl.toString();
     if (path.isEmpty())
         return false;
@@ -10748,6 +11238,51 @@ void AppController::nudgeTrackHeightScale(int trackIndex, int steps)
         return;
     setTrackHeightScale(trackIndex,
                         trackHeightScale(trackIndex) * std::pow(1.18, steps));
+}
+
+void AppController::nudgeAllTrackHeightScales(int steps)
+{
+    if (steps == 0)
+        return;
+
+    // Multiplicative, and per lane rather than one shared multiplier, so lanes that already differ
+    // keep their proportions and a lane sitting on a limit simply stops while the others carry on.
+    // A bigger step than the per-lane nudge: this is a button pressed a couple of times to reframe
+    // the whole timeline, not a wheel rolled under a pointer.
+    const qreal factor = std::pow(1.35, steps);
+    bool changed = false;
+    for (drift::Track &track : m_project.tracks()) {
+        const qreal clamped = qBound(trackHeightScaleMin(), track.heightScale * factor,
+                                     trackHeightScaleMax());
+        if (qFuzzyCompare(track.heightScale, clamped))
+            continue;
+        track.heightScale = clamped;
+        changed = true;
+    }
+
+    // View-only preference, like setTrackHeightScale: no undo entry.
+    if (changed)
+        emit tracksChanged();
+}
+
+bool AppController::canGrowTrackHeights() const
+{
+    // One lane still off the ceiling is enough: the sweep clamps per lane, so it does something
+    // even when the tallest lane is already there.
+    for (const drift::Track &track : m_project.tracks()) {
+        if (!qFuzzyCompare(track.heightScale, trackHeightScaleMax()))
+            return true;
+    }
+    return false;
+}
+
+bool AppController::canShrinkTrackHeights() const
+{
+    for (const drift::Track &track : m_project.tracks()) {
+        if (!qFuzzyCompare(track.heightScale, trackHeightScaleMin()))
+            return true;
+    }
+    return false;
 }
 
 void AppController::moveTrack(int fromIndex, int toIndex)
@@ -12069,6 +12604,8 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
     if (m_assetLibrary)
         m_assetLibrary->setProject(&m_project);
 
+    rehydrateMissingSources();
+
     reportMissingCatalogEntries();
 
     setPlaying(false);
@@ -12145,7 +12682,7 @@ void AppController::rememberEmbeddedSources(const QList<drift::bundle::MediaEntr
 
 void AppController::saveProject(const QUrl &url)
 {
-    const QString path = url.toLocalFile();
+    const QString path = writeTargetPath(url);
     if (path.isEmpty()) {
         setLastMessage(tr("That save location isn’t valid"), QStringLiteral("error"));
         return;
@@ -12157,25 +12694,133 @@ void AppController::saveProject(const QUrl &url)
 
     m_project.setModifiedAt(QDateTime::currentDateTimeUtc());
 
+    // Built up front on both paths: the worker the Android branch may hand this to must not be
+    // reading the project while the timeline is free to change under it.
     const drift::bundle::WriteRequest request = buildWriteRequest(/*embedSource=*/false);
+
+#ifdef Q_OS_ANDROID
+    // A project that arrived as a package keeps its media inside it (see buildWriteRequest), so a
+    // plain Save of one streams every embedded source through the bundle writer and then a second
+    // time into the SAF document — gigabytes, and off the GUI thread with progress and a way out.
+    // That is packageProject's exact shape, so Save borrows it wholesale, packaging flag included.
+    //
+    // Only for that case: a project whose media is referenced rather than embedded writes a JSON
+    // manifest and nothing else, and putting *every* Save behind a modal progress dialog would be
+    // a bad trade for the common one. Desktop always writes straight to the picked path.
+    const bool streamsMedia = std::any_of(request.media.cbegin(), request.media.cend(),
+                                          [](const drift::bundle::MediaEntry &entry) {
+                                              return entry.embedded
+                                                  && entry.role == drift::bundle::MediaRole::Source;
+                                          });
+    if (streamsMedia) {
+        m_packageCancel = 0;
+        m_packaging = true;
+        m_packageProgress = 0.0;
+        emit packagingChanged();
+        emit packageProgressChanged();
+
+        (void)QtConcurrent::run([this, path, url, request]() {
+            Exporter::BackgroundHold hold(QStringLiteral("Saving project"));
+            QString error;
+            const auto progress = [this](qint64 done, qint64 total) {
+                if (m_packageCancel.loadRelaxed())
+                    return false;
+                const double fraction = total > 0 ? double(done) / double(total) : 0.0;
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, fraction]() {
+                        m_packageProgress = fraction;
+                        emit packageProgressChanged();
+                    },
+                    Qt::QueuedConnection);
+                return true;
+            };
+            const bool written = drift::bundle::write(path, request, progress, &error);
+            bool ok = written;
+            if (ok) {
+                // Reports progress but never returns false. commitWriteTarget opens the
+                // destination WriteOnly|Truncate, so the user's existing project is gone the
+                // moment the copy starts; honouring Cancel here would leave that document
+                // truncated and then delete the staged bundle that was about to replace it.
+                // Cancel therefore only reaches the bundle writer above, which is still working
+                // against the staging file and can be abandoned safely.
+                const auto reportOnly = [&progress](qint64 done, qint64 total) {
+                    (void)progress(done, total);
+                    return true;
+                };
+                ok = commitWriteTarget(path, url, reportOnly, &error);
+            }
+            // Never deletes the destination document: on the Save-in-place path this URL is
+            // the user's existing project, and a failed write is no reason to take it away.
+            if (!ok)
+                discardWriteTarget(path, url);
+            QMetaObject::invokeMethod(
+                this,
+                [this, ok, written, error, url, request]() {
+                    m_packaging = false;
+                    emit packagingChanged();
+                    if (!ok) {
+                        // Only a failed commit says anything about the document: a bundle
+                        // writer failure is about the staging file. A commit most likely lost
+                        // its write grant across a restart, so drop the association and let
+                        // the next Save ask for a location.
+                        if (written)
+                            setCurrentProjectPath(QString());
+                        setLastMessage(error, QStringLiteral("error"));
+                        emit projectSaved(false);
+                        return;
+                    }
+                    rememberEmbeddedSources(request.media);
+                    m_packageProgress = 1.0;
+                    emit packageProgressChanged();
+                    const QString location = projectLocation(url);
+                    setCurrentProjectPath(location);
+                    addRecentProject(location);
+                    setDirty(false);
+                    deleteRecoveryFile();
+                    emit projectMetadataChanged();
+                    setLastMessage(tr("Project saved"), QStringLiteral("success"));
+                    emit projectSaved(true);
+                },
+                Qt::QueuedConnection);
+        });
+        return;
+    }
+#endif
+
     QString error;
     if (!drift::bundle::write(path, request, {}, &error)) {
+        discardWriteTarget(path, url);
         setLastMessage(error, QStringLiteral("error"));
+        emit projectSaved(false);
+        return;
+    }
+    if (!commitWriteTarget(path, url, {}, &error)) {
+        discardWriteTarget(path, url);
+        // Saving over the remembered document failed — most likely its write grant did not
+        // survive the restart — so drop the association and let the next Save ask for a location.
+        setCurrentProjectPath(QString());
+        setLastMessage(error, QStringLiteral("error"));
+        emit projectSaved(false);
         return;
     }
     rememberEmbeddedSources(request.media);
 
-    setCurrentProjectPath(path);
-    addRecentProject(path);
+    const QString location = projectLocation(url);
+    setCurrentProjectPath(location);
+    addRecentProject(location);
     setDirty(false);
     deleteRecoveryFile();
     emit projectMetadataChanged();
     setLastMessage(tr("Project saved"), QStringLiteral("success"));
+    emit projectSaved(true);
 }
 
 void AppController::saveProjectJson(const QUrl &url)
 {
-    const QString path = url.toLocalFile();
+    // Not toLocalFile: Qt's Android content file engine opens the encoded URI directly, so the
+    // plain QFile below works on a SAF document with no staging copy in between.
+    const QString path = AndroidUri::filePath(url);
     if (path.isEmpty()) {
         setLastMessage(tr("That save location isn’t valid"), QStringLiteral("error"));
         return;
@@ -12223,7 +12868,7 @@ bool fileStartsWithJsonObject(const QString &path)
 
 void AppController::loadProjectJson(const QUrl &url)
 {
-    const QString path = url.toLocalFile();
+    const QString path = AndroidUri::filePath(url);
     if (path.isEmpty()) {
         setLastMessage(tr("That project location isn’t valid"), QStringLiteral("error"));
         return;
@@ -12262,7 +12907,9 @@ void AppController::loadProjectJson(const QUrl &url)
 
 void AppController::packageProject(const QUrl &url)
 {
-    const QString path = url.toLocalFile();
+    // The bundle writer needs a real file to seek in, so on Android this stages into app storage
+    // and the finished bundle is streamed into the picked document below.
+    const QString path = writeTargetPath(url, QStringLiteral("drift"));
     if (path.isEmpty()) {
         setLastMessage(tr("That save location isn’t valid"), QStringLiteral("error"));
         return;
@@ -12281,7 +12928,12 @@ void AppController::packageProject(const QUrl &url)
     // be reading the project while the timeline is free to change under it.
     const drift::bundle::WriteRequest request = buildWriteRequest(/*embedSource=*/true);
 
-    (void)QtConcurrent::run([this, path, request]() {
+    // Before the job, not inside it: commitWriteTarget truncates the destination the moment it
+    // opens, so afterwards every document looks disposable.
+    const bool disposable = writeTargetIsDisposable(url);
+
+    (void)QtConcurrent::run([this, path, url, request, disposable]() {
+        Exporter::BackgroundHold hold(QStringLiteral("Saving project"));
         QString error;
         const auto progress = [this](qint64 done, qint64 total) {
             if (m_packageCancel.loadRelaxed())
@@ -12296,10 +12948,23 @@ void AppController::packageProject(const QUrl &url)
                 Qt::QueuedConnection);
             return true;
         };
-        const bool ok = drift::bundle::write(path, request, progress, &error);
+        bool ok = drift::bundle::write(path, request, progress, &error);
+        if (ok) {
+            // See saveProject: commitWriteTarget has already truncated the destination by the time
+            // it reports anything, so Cancel reaches the bundle writer above and no further.
+            const auto reportOnly = [&progress](qint64 done, qint64 total) {
+                (void)progress(done, total);
+                return true;
+            };
+            ok = commitWriteTarget(path, url, reportOnly, &error);
+        }
+        // A shareable copy always goes to a document the picker just created, so a failed write
+        // has nothing worth keeping behind it.
+        if (!ok)
+            discardWriteTarget(path, url, disposable);
         QMetaObject::invokeMethod(
             this,
-            [this, ok, error, path, request]() {
+            [this, ok, error, url, request]() {
                 m_packaging = false;
                 emit packagingChanged();
                 if (!ok) {
@@ -12310,8 +12975,9 @@ void AppController::packageProject(const QUrl &url)
                 rememberEmbeddedSources(request.media);
                 m_packageProgress = 1.0;
                 emit packageProgressChanged();
-                setCurrentProjectPath(path);
-                addRecentProject(path);
+                const QString location = projectLocation(url);
+                setCurrentProjectPath(location);
+                addRecentProject(location);
                 setDirty(false);
                 deleteRecoveryFile();
                 emit projectMetadataChanged();
@@ -12329,7 +12995,9 @@ void AppController::cancelPackage()
 
 void AppController::loadProject(const QUrl &url)
 {
-    const QString path = url.toLocalFile();
+    // The bundle reader seeks through its input and hands media paths to FFmpeg, so a SAF document
+    // is staged to a real file first. The JSON branch below needs no such thing and takes the URL.
+    const QString path = readTargetPath(url);
     if (path.isEmpty()) {
         setLastMessage(tr("That project location isn’t valid"), QStringLiteral("error"));
         return;
@@ -12357,8 +13025,8 @@ void AppController::loadProject(const QUrl &url)
     const int generation = ++m_loadGeneration;
     const drift::bundle::BundleInfo bundle = *info;
 
-    auto finishLoad = [this, path, bundle, generation](const QHash<QString, QString> &remap,
-                                                       const QString &extractError, bool extractOk) {
+    auto finishLoad = [this, url, bundle, generation](const QHash<QString, QString> &remap,
+                                                      const QString &extractError, bool extractOk) {
         if (generation != m_loadGeneration)
             return;
         if (!extractOk) {
@@ -12381,8 +13049,12 @@ void AppController::loadProject(const QUrl &url)
                 m_embeddedSources.insert(remap.value(entry.originalPath, entry.originalPath));
         }
 
-        setCurrentProjectPath(path);
-        addRecentProject(path);
+        // Not the staged path: on Android that lives in the cache the startup sweep clears, and
+        // Save-in-place has to write back to the document the user actually opened. projectLocation
+        // upgrades the picker's one-shot grant to a persistable read+write one on the way.
+        const QString location = projectLocation(url);
+        setCurrentProjectPath(location);
+        addRecentProject(location);
         deleteRecoveryFile();
         setProjectLayoutChosen(true);
         setLastMessage(tr("Project loaded"), QStringLiteral("success"));
@@ -12480,6 +13152,62 @@ void AppController::remapProjectPaths(const QHash<QString, QString> &remap)
     }
 }
 
+void AppController::rehydrateMissingSources()
+{
+#ifdef Q_OS_ANDROID
+    // <AppData>/imports is where every SAF import lands, and nothing sweeps it — so a missing file
+    // means the whole app-storage tree went (uninstall, "clear storage") or the project came from
+    // another device. The document the media was picked from is the only way back.
+    QList<QUrl> pending;
+    QStringList missingPaths;
+    for (const drift::MediaAsset &asset : m_project.assets()) {
+        if (asset.sourceUri.isEmpty() || QFileInfo::exists(asset.path))
+            continue;
+        pending.append(QUrl(asset.sourceUri));
+        missingPaths.append(asset.path);
+    }
+    if (pending.isEmpty())
+        return;
+
+    const int generation = ++m_loadGeneration;
+    auto *watcher = new QFutureWatcher<QHash<QString, QString>>(this);
+    connect(watcher, &QFutureWatcher<QHash<QString, QString>>::finished, this,
+            [this, watcher, generation]() {
+                watcher->deleteLater();
+                // Another project opened while the copies ran; this one's paths are gone.
+                if (generation != m_loadGeneration)
+                    return;
+
+                const QHash<QString, QString> remap = watcher->result();
+                if (remap.isEmpty())
+                    return;
+
+                // Rewrites the assets, the clips' duplicated paths, matte and face-track paths and
+                // every file-path effect param, and clears the caches keyed on the old ones.
+                remapProjectPaths(remap);
+
+                // remapProjectPaths edits the document directly, so the bin and the timeline have
+                // to be told; a load has already cleared undo, and a restored file is not an edit.
+                if (m_assetLibrary)
+                    m_assetLibrary->setProject(&m_project);
+                restoreFilmstripsAfterLoad();
+                emit tracksChanged();
+            });
+
+    watcher->setFuture(QtConcurrent::run([pending, missingPaths]() {
+        QHash<QString, QString> remap;
+        for (int i = 0; i < pending.size(); ++i) {
+            // Empty when the grant expired or the user revoked it, or the document is simply gone.
+            // The asset then stays missing, which is exactly where it was a moment ago.
+            const QString restored = materializeContentUrl(pending.at(i));
+            if (!restored.isEmpty())
+                remap.insert(missingPaths.at(i), restored);
+        }
+        return remap;
+    }));
+#endif
+}
+
 void AppController::newProject()
 {
     setPlaying(false);
@@ -12526,7 +13254,8 @@ void AppController::openRecentProject(const QString &path)
 {
     if (path.isEmpty())
         return;
-    loadProject(QUrl::fromLocalFile(path));
+    // Recents hold a SAF document as its encoded URI, which fromLocalFile would mangle.
+    loadProject(fileUrl(path));
 }
 
 QVariantList AppController::recentProjects() const
@@ -12535,6 +13264,16 @@ QVariantList AppController::recentProjects() const
     const QStringList paths = settings.value(QStringLiteral("recentProjects")).toStringList();
     QVariantList out;
     for (const QString &path : paths) {
+        if (path.startsWith(QLatin1String("content://"), Qt::CaseInsensitive)) {
+            // QFileInfo knows nothing about a document id, so every Android recent used to render
+            // as "(missing)". The provider is the only thing that can answer either question.
+            out.append(QVariantMap{
+                {QStringLiteral("path"), path},
+                {QStringLiteral("name"), AndroidUri::displayName(QUrl(path))},
+                {QStringLiteral("exists"), projectLocationExists(path)},
+            });
+            continue;
+        }
         const QFileInfo info(path);
         out.append(QVariantMap{
             {QStringLiteral("path"), path},
@@ -12602,6 +13341,26 @@ QString AppController::recoveryFilePath()
     // Plain JSON, not a bundle: this is an internal crash snapshot written every few seconds and
     // never opened through the file dialog, so it must not repack the project's media.
     return dir + QStringLiteral("/recovery/autosave.json");
+}
+
+void AppController::flushRecoverySnapshot()
+{
+    // Same two things aboutToQuit does, because on Android it never runs: without the settings
+    // write, "reopen last project at startup" also silently never has a path to reopen.
+    QSettings().setValue(QStringLiteral("lastSessionPath"), m_currentProjectPath);
+    if (m_dirty)
+        writeRecoveryFile();
+}
+
+void AppController::releaseTransientCaches()
+{
+    ClipReaderPool::instance().releaseAll();
+    FrameCompositor::clearStillImageCache();
+    clearTextRasterCaches();
+    // Uploaded textures and the FBO pool, without tearing the context down. Runs on the GL thread
+    // and blocks, which is what makes it safe from here; it returns without creating a context if
+    // GL was never brought up at all.
+    drift::gl::runtime().releaseCaches();
 }
 
 void AppController::writeRecoveryFile()
@@ -12708,10 +13467,13 @@ bool AppController::restoreLastSessionIfEnabled()
     }
 
     const QString path = QSettings().value(QStringLiteral("lastSessionPath")).toString();
-    if (path.isEmpty() || !QFileInfo::exists(path))
+    if (path.isEmpty() || !projectLocationExists(path))
         return false;
 
-    loadProject(QUrl::fromLocalFile(path));
+    // fileUrl, not fromLocalFile: lastSessionPath mirrors currentProjectPath, which on Android is
+    // the encoded content:// URI projectLocation() stored — fromLocalFile turns that into
+    // "file:///content:/…" and the load fails with "That project location isn't valid".
+    loadProject(fileUrl(path));
     return true;
 }
 
@@ -12951,7 +13713,18 @@ void AppController::exportWithPreset(const QUrl &outputUrl, const QString &prese
 
 void AppController::exportWithSettings(const QUrl &outputUrl, const QVariantMap &settings)
 {
-    const QString outputPath = outputUrl.toLocalFile();
+    const ExportSettings exportSettings = Exporter::settingsFromMap(settings);
+
+    // The muxer is chosen from the output file's extension, and a created document's URI has
+    // none — so the staging file the encoder writes is given the one the settings imply.
+    const QString container =
+        exportSettings.gifExport
+            ? QStringLiteral("gif")
+            : exportSettings.audioOnly
+                  ? Exporter::preferredAudioOnlyContainer(exportSettings.audioCodecId)
+                  : Exporter::preferredContainer(exportSettings.videoCodecId, exportSettings.audioCodecId);
+    const QString outputPath =
+        writeTargetPath(outputUrl, Exporter::defaultSuffix(container, exportSettings.audioOnly));
     if (outputPath.isEmpty()) {
         setLastMessage(tr("That save location isn’t valid"), QStringLiteral("error"));
         emit exportFinished(false);
@@ -12963,9 +13736,13 @@ void AppController::exportWithSettings(const QUrl &outputUrl, const QVariantMap 
         return;
     }
 
+    // The chosen location, not the staging file: remembering the latter would point the next
+    // export dialog at this app's cache.
+#ifdef Q_OS_ANDROID
+    rememberExportChoice(AndroidUri::filePath(outputUrl), settings);
+#else
     rememberExportChoice(outputPath, settings);
-
-    const ExportSettings exportSettings = Exporter::settingsFromMap(settings);
+#endif
 
     // Stop playback so the decode pool isn't driven from two threads at once.
     setPlaying(false);
@@ -12980,25 +13757,59 @@ void AppController::exportWithSettings(const QUrl &outputUrl, const QVariantMap 
     // Snapshot the project so edits during export can't race the encoder.
     const drift::Project snapshot = m_project;
 
-    (void)QtConcurrent::run([this, snapshot, exportSettings, outputPath]() {
+    const bool disposable = writeTargetIsDisposable(outputUrl);
+
+    (void)QtConcurrent::run([this, snapshot, exportSettings, outputPath, outputUrl, disposable]() {
+        // Spans the encode *and* the copy into the user's document. Exporter::run takes its own
+        // hold, but that one ends when run() returns — and the commit below is the phase that
+        // would otherwise lose a multi-minute render to a screen that idled out mid-copy. The
+        // holds are refcounted, so the inner one nests without restarting the service.
+        Exporter::BackgroundHold hold(QStringLiteral("Exporting"), /*cancellable=*/true);
         QString error;
-        const bool ok = Exporter::run(
-            snapshot, exportSettings, outputPath, &error, [this](double fraction) {
-                QMetaObject::invokeMethod(
-                    this,
-                    [this, fraction]() {
-                        m_exportProgress = fraction;
-                        emit exportProgressChanged();
-                    },
-                    Qt::QueuedConnection);
-                return m_exportCancel.loadRelaxed() == 0;
-            });
+        const auto report = [this](double fraction) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, fraction]() {
+                    m_exportProgress = fraction;
+                    emit exportProgressChanged();
+                },
+                Qt::QueuedConnection);
+            // Either route into the same stop: the in-app Cancel button sets m_exportCancel, the
+            // notification's action sets the service flag.
+            return m_exportCancel.loadRelaxed() == 0 && !Exporter::BackgroundHold::cancelRequested();
+        };
+        bool ok = Exporter::run(snapshot, exportSettings, outputPath, &error, report);
+        // Android: the encoder needs a real file, and the document the user picked is only
+        // reachable through the resolver, so the finished encode is streamed into it — the bar
+        // runs a second time for that, and cancel still lands.
+        if (ok) {
+            ok = commitWriteTarget(
+                outputPath, outputUrl,
+                [&report](qint64 done, qint64 total) {
+                    const double fraction = total > 0 ? double(done) / double(total) : 0.0;
+                    Exporter::BackgroundHold::setPercent(static_cast<int>(fraction * 100.0));
+                    return report(fraction);
+                },
+                &error);
+        }
+        // An empty document is one this export created through the save picker: without disposing
+        // of it a cancel at 5% leaves a 0-byte file the user's gallery shows as a video. A document
+        // that already had bytes is one the user chose to replace, and a cancel never reached it.
+        if (!ok)
+            discardWriteTarget(outputPath, outputUrl, disposable);
 
         QMetaObject::invokeMethod(
             this,
-            [this, ok, error]() {
+            [this, ok, error, outputUrl]() {
                 m_exportInProgress = false;
                 m_exportProgress = ok ? 1.0 : 0.0;
+#ifdef Q_OS_ANDROID
+                m_lastExportUrl = ok ? outputUrl : QUrl();
+                m_lastExportName = ok ? exportDisplayName(outputUrl) : QString();
+                emit canShareExportChanged();
+#else
+                Q_UNUSED(outputUrl);
+#endif
                 emit exportProgressChanged();
                 emit exportInProgressChanged();
                 setLastMessage(ok ? tr("Export complete") : error,
@@ -13009,39 +13820,114 @@ void AppController::exportWithSettings(const QUrl &outputUrl, const QVariantMap 
     });
 }
 
+bool AppController::canShareExport() const
+{
+#ifdef Q_OS_ANDROID
+    return !m_lastExportUrl.isEmpty() && !m_sharingExport;
+#else
+    return false;
+#endif
+}
+
+void AppController::shareLastExport()
+{
+#ifdef Q_OS_ANDROID
+    if (m_lastExportUrl.isEmpty() || m_sharingExport)
+        return;
+
+    // publishToGallery streams every byte of the export into a MediaStore row, reading it back out
+    // of the SAF document the user picked — which can be a cloud provider, so the copy is bounded
+    // by the network. Inline, as this used to be, that is an ANR on anything longer than a clip.
+    // Only the copy moves: shareFile starts an Activity and has to stay on the GUI thread.
+    m_sharingExport = true;
+    emit canShareExportChanged();
+    setLastMessage(tr("Getting your video ready to share…"));
+
+    const QUrl source = m_lastExportUrl;
+    const QString name = m_lastExportName;
+    (void)QtConcurrent::run([this, source, name]() {
+        Exporter::BackgroundHold hold(QStringLiteral("Preparing to share"));
+        QString error;
+        const QUrl published = Exporter::publishToGallery(source, name, &error);
+        QMetaObject::invokeMethod(
+            this,
+            [this, published, error]() {
+                m_sharingExport = false;
+                emit canShareExportChanged();
+                if (published.isEmpty()) {
+                    setLastMessage(error, QStringLiteral("error"));
+                    return;
+                }
+                if (!FileDialogs().shareFile(published))
+                    setLastMessage(tr("Nothing on this device can share that file"),
+                                   QStringLiteral("error"));
+            },
+            Qt::QueuedConnection);
+    });
+#endif
+}
+
 bool AppController::mcpRunning() const
 {
+#ifndef Q_OS_ANDROID
     return m_mcp && m_mcp->running();
+#else
+    return false;
+#endif
 }
 
 QString AppController::mcpUrl() const
 {
+#ifndef Q_OS_ANDROID
     return m_mcp ? m_mcp->url() : QString();
+#else
+    return {};
+#endif
 }
 
 QString AppController::mcpToken() const
 {
+#ifndef Q_OS_ANDROID
     return m_mcp ? m_mcp->token() : QString();
+#else
+    return {};
+#endif
 }
 
 int AppController::mcpPort() const
 {
+#ifndef Q_OS_ANDROID
     return m_mcp ? int(m_mcp->port()) : 0;
+#else
+    return 0;
+#endif
 }
 
 QString AppController::mcpError() const
 {
+#ifndef Q_OS_ANDROID
     return m_mcp ? m_mcp->error() : QString();
+#else
+    return {};
+#endif
 }
 
 QString AppController::mcpCursorSnippet() const
 {
+#ifndef Q_OS_ANDROID
     return m_mcp ? m_mcp->cursorSnippet() : QString();
+#else
+    return {};
+#endif
 }
 
 QString AppController::mcpClaudeCommand() const
 {
+#ifndef Q_OS_ANDROID
     return m_mcp ? m_mcp->claudeCommand() : QString();
+#else
+    return {};
+#endif
 }
 
 QString AppController::mcpStdioSnippet() const
@@ -13058,12 +13944,16 @@ QString AppController::mcpStdioSnippet() const
 
 void AppController::setMcpEnabled(bool enabled)
 {
+#ifndef Q_OS_ANDROID
     if (!m_mcp)
         return;
     if (enabled)
         m_mcp->start();
     else
         m_mcp->stop();
+#else
+    Q_UNUSED(enabled);
+#endif
 }
 
 namespace {
@@ -13095,12 +13985,16 @@ void AppController::copyMcpStdioSnippet()
 
 QString AppController::mcpAgentGuide() const
 {
+#ifndef Q_OS_ANDROID
     QString guide = drift::mcp::agentGuideText();
     if (m_mcp && m_mcp->running()) {
         guide += QStringLiteral("\nThis session:\nURL: %1\nToken: %2\n")
                      .arg(mcpUrl(), mcpToken());
     }
     return guide;
+#else
+    return {};
+#endif
 }
 
 void AppController::copyMcpAgentGuide()
