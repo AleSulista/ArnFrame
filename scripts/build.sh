@@ -14,6 +14,11 @@
 #   ANDROID_NDK_ROOT the NDK version the Qt kit was built against, NOT simply the newest installed.
 #                    Mixing NDK majors between Qt, FFmpeg and the app produces libc++ symbol
 #                    errors and dlopen failures that get misattributed to something else.
+#   DRIFT_ANDROID_PACKAGE_NAME  application id (default org.cutwire.drift; CI uses .ci)
+#   DRIFT_ANDROID_APP_NAME      launcher label (default Drift)
+#   DRIFT_ANDROID_VERSION_CODE  optional Play-Store integer; unset → CMake derives from
+#                               PROJECT_VERSION (same semver as desktop)
+#   SKIP_APK=1                  compile the native library only (no APK packaging)
 set -euo pipefail
 
 ABI="${1:-arm64-v8a}"
@@ -41,12 +46,14 @@ esac
 # The kit ships its own matching host Qt, which beats guessing at a distro layout.
 : "${QT_HOST_PATH:=$HOME/Qt/$QT_VERSION/gcc_64}"
 
-# Package identity. The defaults are the release app; CI overrides them so its APKs install
-# alongside a release build rather than being refused for a signature mismatch. See the
-# DRIFT_ANDROID_* block in the root CMakeLists.
+# Package identity. The defaults are the release app; CI overrides PACKAGE_NAME / APP_NAME so
+# test APKs install alongside a release build rather than being refused for a signature mismatch.
+# VERSION_CODE defaults in CMake from PROJECT_VERSION (same semver as desktop); set it only when
+# you need a different integer (e.g. github.run_number for successive CI side-loads).
+# SKIP_APK=1 builds the native library only — used by the push smoke test.
 : "${DRIFT_ANDROID_PACKAGE_NAME:=org.cutwire.drift}"
 : "${DRIFT_ANDROID_APP_NAME:=Drift}"
-: "${DRIFT_ANDROID_VERSION_CODE:=1}"
+: "${SKIP_APK:=0}"
 
 [ -d "$ANDROID_NDK_ROOT" ] || { echo "no NDK at $ANDROID_NDK_ROOT" >&2; exit 1; }
 export ANDROID_NDK_ROOT ANDROID_SDK_ROOT
@@ -76,18 +83,28 @@ if [ ! -f "$ROOT/third_party/prebuilt/android/$ABI/lib/libavcodec.a" ]; then
 fi
 
 # --- configure and build -----------------------------------------------------
-"$QT_CMAKE" -G Ninja -S "$ROOT" -B "$BUILD" \
-    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    -DQT_HOST_PATH="$QT_HOST_PATH" \
-    -DANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" \
-    -DANDROID_NDK_ROOT="$ANDROID_NDK_ROOT" \
-    -DQT_ANDROID_ABIS="$ABI" \
-    -DDRIFT_BUNDLE_ONNXRUNTIME=OFF \
-    -DDRIFT_ANDROID_PACKAGE_NAME="$DRIFT_ANDROID_PACKAGE_NAME" \
-    -DDRIFT_ANDROID_APP_NAME="$DRIFT_ANDROID_APP_NAME" \
-    -DDRIFT_ANDROID_VERSION_CODE="$DRIFT_ANDROID_VERSION_CODE"
+CMAKE_ARGS=(
+    -G Ninja -S "$ROOT" -B "$BUILD"
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
+    -DQT_HOST_PATH="$QT_HOST_PATH"
+    -DANDROID_SDK_ROOT="$ANDROID_SDK_ROOT"
+    -DANDROID_NDK_ROOT="$ANDROID_NDK_ROOT"
+    -DQT_ANDROID_ABIS="$ABI"
+    -DDRIFT_BUNDLE_ONNXRUNTIME=OFF
+    -DDRIFT_ANDROID_PACKAGE_NAME="$DRIFT_ANDROID_PACKAGE_NAME"
+    -DDRIFT_ANDROID_APP_NAME="$DRIFT_ANDROID_APP_NAME"
+)
+if [ -n "${DRIFT_ANDROID_VERSION_CODE:-}" ]; then
+    CMAKE_ARGS+=(-DDRIFT_ANDROID_VERSION_CODE="$DRIFT_ANDROID_VERSION_CODE")
+fi
+
+"$QT_CMAKE" "${CMAKE_ARGS[@]}"
 
 cmake --build "$BUILD" --parallel
+if [ "$SKIP_APK" = "1" ]; then
+    echo "==> SKIP_APK=1: native build only (no androiddeployqt / gradle package)"
+    exit 0
+fi
 cmake --build "$BUILD" --target apk
 
 echo

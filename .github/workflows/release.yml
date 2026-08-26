@@ -57,6 +57,7 @@ jobs:
     uses: ./.github/workflows/package.yml
     with:
       version: ${{ needs.verify.outputs.version }}
+      android_identity: release
     secrets: inherit
 
   release:
@@ -87,6 +88,7 @@ jobs:
             Open, or `xattr -dr com.apple.quarantine /Applications/Drift.app`.
           - **Arch Linux**: `sudo pacman -U drift-*.pkg.tar.zst`
           - **Flatpak**: requires `flatpak` with the Flathub remote added (`flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo`), then `flatpak install --user Drift-*.flatpak`
+          - **Android**: install the APK for your ABI (`arm64-v8a` on virtually all phones; `x86_64` for emulators). Sideload with `adb install Drift-*-arm64-v8a.apk`.
 
           Fonts, stickers, speech models and GPU/CPU acceleration runtimes are not bundled — install
           the ones you want from the Addon Manager in the app header.
@@ -104,7 +106,8 @@ jobs:
             dist/windows-portable/*.zip \
             dist/macos-dmg/*.dmg \
             dist/arch-package/*.pkg.tar.zst \
-            dist/flatpak-bundle/*.flatpak
+            dist/flatpak-bundle/*.flatpak \
+            dist/android-apk-*/*.apk
 
       # Posts a branded embed card to CutWire Discord #releases. This lives here
       # rather than in a `release: published` workflow because releases created
@@ -170,6 +173,14 @@ jobs:
                   return "Flatpak bundle"
               if n.endswith(".pkg.tar.zst"):
                   return "Arch Linux"
+              if n.endswith(".apk"):
+                  if "arm64" in n:
+                      return "Android (arm64)"
+                  if "armeabi" in n or "armv7" in n:
+                      return "Android (armeabi-v7a)"
+                  if "x86_64" in n:
+                      return "Android (x86_64)"
+                  return "Android"
               return name
 
           tag = release.get("tag_name") or ""

@@ -841,11 +841,21 @@ if(ANDROID)
     endif()
 
     set(DRIFT_ANDROID_PACKAGE_NAME "org.cutwire.drift" CACHE STRING
-        "Android application id")
+        "Android application id (use org.cutwire.drift.ci for side-by-side test builds)")
     set(DRIFT_ANDROID_APP_NAME "Drift" CACHE STRING
         "Launcher label")
-    set(DRIFT_ANDROID_VERSION_CODE "1" CACHE STRING
-        "Android versionCode")
+    # versionName is PROJECT_VERSION — same string the desktop binary embeds as DRIFT_VERSION.
+    # versionCode is the Play-Store integer; default tracks that semver so a desktop bump is an
+    # Android bump too (0.4.0 → 400). CI may override with -DDRIFT_ANDROID_VERSION_CODE=.
+    string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" _drift_android_ver "${PROJECT_VERSION}")
+    if(_drift_android_ver)
+        math(EXPR _drift_android_version_code_default
+            "${CMAKE_MATCH_1} * 10000 + ${CMAKE_MATCH_2} * 100 + ${CMAKE_MATCH_3}")
+    else()
+        set(_drift_android_version_code_default 1)
+    endif()
+    set(DRIFT_ANDROID_VERSION_CODE "${_drift_android_version_code_default}" CACHE STRING
+        "Android versionCode (defaults to major*10000+minor*100+patch from PROJECT_VERSION)")
 
     set_target_properties(drift PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android"
