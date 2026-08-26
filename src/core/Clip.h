@@ -74,6 +74,12 @@ struct Clip
     QString faceTrackPath;
     TimeUs faceTrackSrcOffsetUs = 0;
 
+    // Path to the .trf video stabilization file and UI progress states
+    QString stabilizePath;
+    bool stabilizing = false;
+    int stabilizeSmoothing = 15;
+    bool stabilizeTripod = false;
+
     // Fades are edge-relative ramps applied multiplicatively on top of opacity
     // (visual clips) or volume (audio). They auto-follow trims and speed changes.
     TimeUs fadeInUs = 0;

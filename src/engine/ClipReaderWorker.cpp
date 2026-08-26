@@ -49,10 +49,13 @@ ClipReader *ClipReaderWorker::readerFor(quint64 streamId)
     return it->second.get();
 }
 
-QImage ClipReaderWorker::decodeVideo(quint64 streamId, drift::TimeUs sourceUs, int maxWidth, int maxHeight)
+QImage ClipReaderWorker::decodeVideo(quint64 streamId, drift::TimeUs sourceUs, int maxWidth, int maxHeight,
+                                     const QString &stabilizePath, int stabilizeSmoothing, bool stabilizeTripod)
 {
     QMutexLocker lock(&m_mutex);
     ClipReader *reader = readerFor(streamId);
+    if (reader)
+        reader->setStabilizeParams(stabilizePath, stabilizeSmoothing, stabilizeTripod);
     QImage frame;
     if (!reader || !reader->readVideoFrameAt(sourceUs, frame, maxWidth, maxHeight))
         return {};
@@ -60,10 +63,13 @@ QImage ClipReaderWorker::decodeVideo(quint64 streamId, drift::TimeUs sourceUs, i
 }
 
 Nv12Frame ClipReaderWorker::decodeVideoNv12(quint64 streamId, drift::TimeUs sourceUs, int maxWidth,
-                                            int maxHeight)
+                                            int maxHeight, const QString &stabilizePath,
+                                            int stabilizeSmoothing, bool stabilizeTripod)
 {
     QMutexLocker lock(&m_mutex);
     ClipReader *reader = readerFor(streamId);
+    if (reader)
+        reader->setStabilizeParams(stabilizePath, stabilizeSmoothing, stabilizeTripod);
     Nv12Frame frame;
     if (!reader || !reader->readVideoFrameAtNv12(sourceUs, frame, maxWidth, maxHeight))
         return {};

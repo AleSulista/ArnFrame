@@ -102,7 +102,8 @@ void ClipReaderPool::warmVideoFrames(const QList<VideoRequest> &requests)
 }
 
 QImage ClipReaderPool::readVideoFrame(const QString &path, quint64 streamId, drift::TimeUs sourceUs,
-                                      int maxWidth, int maxHeight)
+                                      int maxWidth, int maxHeight, const QString &stabilizePath,
+                                      int stabilizeSmoothing, bool stabilizeTripod)
 {
     if (path.isEmpty())
         return {};
@@ -118,8 +119,9 @@ QImage ClipReaderPool::readVideoFrame(const QString &path, quint64 streamId, dri
 
     QImage frame;
     QMetaObject::invokeMethod(worker, "decodeVideo", Qt::BlockingQueuedConnection, Q_RETURN_ARG(QImage, frame),
-                              Q_ARG(quint64, streamId), Q_ARG(drift::TimeUs, sourceUs),
-                              Q_ARG(int, maxWidth), Q_ARG(int, maxHeight));
+                               Q_ARG(quint64, streamId), Q_ARG(drift::TimeUs, sourceUs),
+                               Q_ARG(int, maxWidth), Q_ARG(int, maxHeight),
+                               Q_ARG(QString, stabilizePath), Q_ARG(int, stabilizeSmoothing), Q_ARG(bool, stabilizeTripod));
 
     // Decode one frame beyond the current position while the caller composites
     // this one. The reader knows the source frame duration; the old code guessed
@@ -131,7 +133,9 @@ QImage ClipReaderPool::readVideoFrame(const QString &path, quint64 streamId, dri
 }
 
 Nv12Frame ClipReaderPool::readVideoFrameNv12(const QString &path, quint64 streamId,
-                                             drift::TimeUs sourceUs, int maxWidth, int maxHeight)
+                                             drift::TimeUs sourceUs, int maxWidth, int maxHeight,
+                                             const QString &stabilizePath,
+                                             int stabilizeSmoothing, bool stabilizeTripod)
 {
     if (path.isEmpty())
         return {};
@@ -144,9 +148,10 @@ Nv12Frame ClipReaderPool::readVideoFrameNv12(const QString &path, quint64 stream
 
     Nv12Frame frame;
     QMetaObject::invokeMethod(worker, "decodeVideoNv12", Qt::BlockingQueuedConnection,
-                              Q_RETURN_ARG(Nv12Frame, frame), Q_ARG(quint64, streamId),
-                              Q_ARG(drift::TimeUs, sourceUs), Q_ARG(int, maxWidth),
-                              Q_ARG(int, maxHeight));
+                               Q_RETURN_ARG(Nv12Frame, frame), Q_ARG(quint64, streamId),
+                               Q_ARG(drift::TimeUs, sourceUs), Q_ARG(int, maxWidth),
+                               Q_ARG(int, maxHeight),
+                               Q_ARG(QString, stabilizePath), Q_ARG(int, stabilizeSmoothing), Q_ARG(bool, stabilizeTripod));
 
     worker->requestPrefetchNv12(streamId, maxWidth, maxHeight,
                                 m_readAheadUs.load(std::memory_order_relaxed));

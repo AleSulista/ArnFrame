@@ -732,6 +732,10 @@
         <translation>මුහුණු ට්‍රැකය හිස් කරන්න</translation>
     </message>
     <message>
+        <source>Analyzing video for stabilization (Pass 1)…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Face detection already in progress</source>
         <translation>මුහුණු හඳුනාගැනීම දැනටමත් සිදුවෙමින් පවතී</translation>
     </message>
@@ -908,6 +912,58 @@
     <message>
         <source>Cutting out subject…</source>
         <translation>විෂයය වෙන් කරමින්…</translation>
+    </message>
+    <message>
+        <source>Select a video clip to stabilize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clip has no video file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilization already in progress for this clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not create stabilization cache directory</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ffmpeg executable not found in PATH</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilize Video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilization analysis failed or cancelled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rendering stabilized video (Pass 2)…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Video stabilized successfully!</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilization rendering failed or cancelled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove Stabilization</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change Stabilization Smoothing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change Stabilization Tripod Mode</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Detecting faces…</source>
@@ -6839,6 +6895,34 @@ If playback stutters, try another.</source>
     <message>
         <source>Reset position &amp; size</source>
         <translation>පිහිටීම සහ ප්‍රමාණය යළි සකසන්න</translation>
+    </message>
+    <message>
+        <source>Video Stabilization</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Analyzing...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilize Video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Re-stabilize Video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation type="unfinished">ඉවත් කරන්න</translation>
+    </message>
+    <message>
+        <source>Smoothing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tripod Mode (Freeze)</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

@@ -59,10 +59,12 @@ public:
                                drift::hwaccel::Backend backend = drift::hwaccel::Backend::None);
 
     QImage readVideoFrame(const QString &path, quint64 streamId, drift::TimeUs sourceUs, int maxWidth,
-                          int maxHeight);
+                          int maxHeight, const QString &stabilizePath = QString(),
+                          int stabilizeSmoothing = 15, bool stabilizeTripod = false);
     // Preview path: NV12 for cheaper GPU upload. Falls back empty when decode fails.
     Nv12Frame readVideoFrameNv12(const QString &path, quint64 streamId, drift::TimeUs sourceUs,
-                                 int maxWidth, int maxHeight);
+                                 int maxWidth, int maxHeight, const QString &stabilizePath = QString(),
+                                 int stabilizeSmoothing = 15, bool stabilizeTripod = false);
     int readAudioInterleaved(const QString &path, quint64 streamId, drift::TimeUs sourceStartUs,
                              int sampleCount, int outputSampleRate, float *interleavedStereoOut);
     // Tell every audio reader its cursor is stale, so the next read seeks to the position asked

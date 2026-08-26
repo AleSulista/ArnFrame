@@ -5,6 +5,11 @@
 
 #include <QTransform>
 #include <QtMath>
+#include <QFile>
+#include <QDir>
+#include <QUuid>
+#include <QTextStream>
+#include <QStandardPaths>
 
 #include <atomic>
 #include <cmath>
@@ -15,6 +20,7 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavcodec/codec.h>
+#include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
@@ -25,6 +31,60 @@ extern "C" {
 }
 
 namespace {
+
+bool sliceTrfFile(const QString &sourcePath, const QString &destPath, int startFrame, double scaleX, double scaleY)
+{
+    QFile src(sourcePath);
+    if (!src.open(QIODevice::ReadOnly | QIODevice::Text))
+        return false;
+
+    QFile dest(destPath);
+    if (!dest.open(QIODevice::WriteOnly | QIODevice::Text))
+        return false;
+
+    QTextStream srcStream(&src);
+    QTextStream destStream(&dest);
+
+    // Read and copy all header lines starting with '#'
+    while (!srcStream.atEnd()) {
+        qint64 pos = src.pos();
+        QString line = srcStream.readLine();
+        if (line.startsWith(QLatin1Char('#'))) {
+            destStream << line << "\n";
+        } else {
+            src.seek(pos);
+            break;
+        }
+    }
+
+    int currentLine = 0;
+    while (currentLine < startFrame && !srcStream.atEnd()) {
+        srcStream.readLine();
+        currentLine++;
+    }
+
+    int outFrameIndex = 1;
+    while (!srcStream.atEnd()) {
+        QString line = srcStream.readLine();
+        QStringList parts = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        if (parts.size() >= 5) {
+            bool ok1 = false, ok2 = false;
+            double ox = parts[3].toDouble(&ok1);
+            double oy = parts[4].toDouble(&ok2);
+            if (ok1 && ok2) {
+                parts[3] = QString::number(ox * scaleX, 'f', 6);
+                parts[4] = QString::number(oy * scaleY, 'f', 6);
+            }
+            parts[0] = QString::number(outFrameIndex);
+            destStream << parts.join(QLatin1Char(' ')) << "\n";
+            outFrameIndex++;
+        } else {
+            destStream << line << "\n";
+        }
+    }
+
+    return true;
+}
 
 bool isHardwarePixelFormat(AVPixelFormat fmt)
 {
@@ -275,6 +335,7 @@ ClipReader::~ClipReader()
 
 void ClipReader::teardownVideoDecoder()
 {
+    teardownSwFilterGraph();
     teardownHwScaler();
     if (m_sws) {
         sws_freeContext(m_sws);
@@ -782,6 +843,117 @@ void ClipReader::teardownHwScaler()
     m_vppH = 0;
 }
 
+void ClipReader::teardownSwFilterGraph()
+{
+    if (m_swFilterGraph)
+        avfilter_graph_free(&m_swFilterGraph);
+    m_swFilterGraph = nullptr;
+    m_swFilterSrc = nullptr;
+    m_swFilterSink = nullptr;
+    m_swFilterW = 0;
+    m_swFilterH = 0;
+    m_swFilterFormat = AV_PIX_FMT_NONE;
+    m_expectedNextFrameIndex = -1;
+    if (!m_tempTrfPath.isEmpty()) {
+        QFile::remove(m_tempTrfPath);
+        m_tempTrfPath.clear();
+    }
+}
+
+bool ClipReader::initSwFilterGraph(int width, int height, AVPixelFormat pixFmt)
+{
+    if (m_swFilterGraph) {
+        if (m_swFilterW == width && m_swFilterH == height && m_swFilterFormat == pixFmt
+            && m_swFilterSmoothing == m_stabilizeSmoothing && m_swFilterTripod == m_stabilizeTripod)
+            return true;
+        teardownSwFilterGraph();
+    }
+
+    m_swFilterGraph = avfilter_graph_alloc();
+    if (!m_swFilterGraph)
+        return false;
+
+    const AVFilter *bufferFilter = avfilter_get_by_name("buffer");
+    const AVFilter *sinkFilter = avfilter_get_by_name("buffersink");
+    if (!bufferFilter || !sinkFilter) {
+        teardownSwFilterGraph();
+        return false;
+    }
+
+    m_swFilterSrc = avfilter_graph_alloc_filter(m_swFilterGraph, bufferFilter, "in");
+    if (!m_swFilterSrc) {
+        teardownSwFilterGraph();
+        return false;
+    }
+
+    AVBufferSrcParameters *params = av_buffersrc_parameters_alloc();
+    if (!params) {
+        teardownSwFilterGraph();
+        return false;
+    }
+    params->format = pixFmt;
+    params->width = width;
+    params->height = height;
+    params->time_base = m_fmt->streams[m_videoStream]->time_base;
+    const int paramsRc = av_buffersrc_parameters_set(m_swFilterSrc, params);
+    av_free(params);
+    if (paramsRc < 0 || avfilter_init_str(m_swFilterSrc, nullptr) < 0) {
+        teardownSwFilterGraph();
+        return false;
+    }
+
+    AVFilterContext *sink = nullptr;
+    if (avfilter_graph_create_filter(&sink, sinkFilter, "out", nullptr, nullptr, m_swFilterGraph) < 0) {
+        teardownSwFilterGraph();
+        return false;
+    }
+    m_swFilterSink = sink;
+
+    QString targetTrfPath = m_tempTrfPath.isEmpty() ? m_stabilizePath : m_tempTrfPath;
+    int smoothing = m_stabilizeSmoothing > 0 ? m_stabilizeSmoothing : 15;
+    int tripod = m_stabilizeTripod ? 1 : 0;
+    QString filterDesc = QString("vidstabtransform=input='%1':zoom=15:smoothing=%2:tripod=%3")
+                             .arg(targetTrfPath)
+                             .arg(smoothing)
+                             .arg(tripod);
+    QByteArray filterStr = filterDesc.toUtf8();
+
+    AVFilterInOut *outputs = avfilter_inout_alloc();
+    AVFilterInOut *inputs = avfilter_inout_alloc();
+    if (!outputs || !inputs) {
+        if (outputs) avfilter_inout_free(&outputs);
+        if (inputs) avfilter_inout_free(&inputs);
+        teardownSwFilterGraph();
+        return false;
+    }
+
+    outputs->name = av_strdup("in");
+    outputs->filter_ctx = m_swFilterSrc;
+    outputs->pad_idx = 0;
+    outputs->next = nullptr;
+
+    inputs->name = av_strdup("out");
+    inputs->filter_ctx = m_swFilterSink;
+    inputs->pad_idx = 0;
+    inputs->next = nullptr;
+
+    int rc = avfilter_graph_parse_ptr(m_swFilterGraph, filterStr.constData(), &inputs, &outputs, nullptr);
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+
+    if (rc < 0 || avfilter_graph_config(m_swFilterGraph, nullptr) < 0) {
+        teardownSwFilterGraph();
+        return false;
+    }
+
+    m_swFilterW = width;
+    m_swFilterH = height;
+    m_swFilterFormat = pixFmt;
+    m_swFilterSmoothing = m_stabilizeSmoothing;
+    m_swFilterTripod = m_stabilizeTripod;
+    return true;
+}
+
 bool ClipReader::ensureHwScaler(const AVFrame *hwFrame, int targetWidth, int targetHeight)
 {
     if (m_hwScalerFailed || !hwFrame->hw_frames_ctx)
@@ -921,6 +1093,72 @@ bool ClipReader::transferHwFrameToImage(const AVFrame *hwFrame, QImage &out, int
     return true;
 }
 
+AVFrame* ClipReader::filterFrameInPlace(AVFrame *frame, int targetWidth, int targetHeight)
+{
+    if (m_stabilizePath.isEmpty() || !QFile::exists(m_stabilizePath))
+        return frame;
+
+    const AVStream *videoStream = m_fmt->streams[m_videoStream];
+    const AVRational timeBase = videoStream->time_base;
+    const drift::TimeUs framePtsUs = av_rescale_q(frame->pts, timeBase, {1, drift::kUsPerSecond});
+    drift::TimeUs startTimeUs = 0;
+    if (videoStream->start_time != AV_NOPTS_VALUE) {
+        startTimeUs = av_rescale_q(videoStream->start_time, videoStream->time_base, {1, drift::kUsPerSecond});
+    }
+    const drift::TimeUs relativePtsUs = framePtsUs - startTimeUs;
+    double fps = av_q2d(videoStream->r_frame_rate);
+    int frameIndex = qMax<int>(0, qRound(drift::usToSeconds(relativePtsUs) * fps));
+
+    AVFrame *swFrame = frame;
+    bool isHw = (m_hwAccelActive && frame->format == m_hwPixFmt)
+                || isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format));
+    if (isHw) {
+        swFrame = hwFrameToSoftware(frame, targetWidth, targetHeight);
+        if (!swFrame)
+            return frame;
+    }
+
+    if (m_expectedNextFrameIndex == -1 || frameIndex != m_expectedNextFrameIndex) {
+        if (m_tempTrfPath.isEmpty()) {
+            const QString root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+            const QString dir = QDir(root).filePath(QStringLiteral("stabilization_temp"));
+            QDir().mkpath(dir);
+            m_tempTrfPath = QDir(dir).filePath(QStringLiteral("temp-%1.trf").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        }
+        int nativeWidth = m_fmt->streams[m_videoStream]->codecpar->width;
+        int nativeHeight = m_fmt->streams[m_videoStream]->codecpar->height;
+        double scaleX = nativeWidth > 0 ? double(swFrame->width) / double(nativeWidth) : 1.0;
+        double scaleY = nativeHeight > 0 ? double(swFrame->height) / double(nativeHeight) : 1.0;
+        if (sliceTrfFile(m_stabilizePath, m_tempTrfPath, frameIndex, scaleX, scaleY)) {
+            teardownSwFilterGraph();
+        }
+    }
+
+    if (initSwFilterGraph(swFrame->width, swFrame->height, static_cast<AVPixelFormat>(swFrame->format))) {
+        int rc = av_buffersrc_add_frame_flags(m_swFilterSrc, swFrame, AV_BUFFERSRC_FLAG_KEEP_REF);
+        if (rc >= 0) {
+            AVFrame *filterOutFrame = av_frame_alloc();
+            if (filterOutFrame) {
+                rc = av_buffersink_get_frame(m_swFilterSink, filterOutFrame);
+                if (rc >= 0) {
+                    m_expectedNextFrameIndex = frameIndex + 1;
+                    if (isHw) {
+                        return filterOutFrame;
+                    } else {
+                        av_frame_unref(frame);
+                        av_frame_move_ref(frame, filterOutFrame);
+                        av_frame_free(&filterOutFrame);
+                        return frame;
+                    }
+                }
+                av_frame_free(&filterOutFrame);
+            }
+        }
+    }
+
+    return frame;
+}
+
 bool ClipReader::convertFrame(const AVFrame *frame, QImage &out, int targetWidth, int targetHeight)
 {
     if (!frame)
@@ -929,14 +1167,13 @@ bool ClipReader::convertFrame(const AVFrame *frame, QImage &out, int targetWidth
     if (m_hwAccelActive && frame->format == m_hwPixFmt)
         return transferHwFrameToImage(frame, out, targetWidth, targetHeight);
 
-    // If get_format fell back to software while hw_device_ctx is still set,
-    // treat the frame as a normal software frame.
     if (isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format)))
         return transferHwFrameToImage(frame, out, targetWidth, targetHeight);
 
     const QImage image = frameToRgba(frame, m_sws, targetWidth, targetHeight, m_sourceRotation);
     if (image.isNull())
         return false;
+
     out = image;
     return true;
 }
@@ -1075,24 +1312,25 @@ bool ClipReader::decodeVideoFrameAtOnce(drift::TimeUs sourceUs, QImage &out, int
                 break;
             }
 
-            const drift::TimeUs ptsUs = ptsToUs(frame, timeBase);
+            AVFrame *stabilized = filterFrameInPlace(frame, maxWidth, maxHeight);
+
+            const drift::TimeUs ptsUs = ptsToUs(stabilized, timeBase);
             m_lastVideoPtsUs = ptsUs;
             g_videoFramesDecoded.fetch_add(1, std::memory_order_relaxed);
             const drift::TimeUs delta = qAbs(ptsUs - sourceUs);
-            // Keep a reference to the best frame and convert only once, after the
-            // loop. Converting every frame between the keyframe and the target was
-            // an sws_scale + full copy per frame of the GOP, all but one discarded.
             if (delta < bestDelta) {
                 bestDelta = delta;
                 bestPtsUs = ptsUs;
                 av_frame_unref(best);
-                if (av_frame_ref(best, frame) < 0) {
+                if (av_frame_ref(best, stabilized) < 0) {
+                    if (stabilized != frame) av_frame_free(&stabilized);
                     av_frame_unref(frame);
                     done = true;
                     break;
                 }
                 found = true;
             }
+            if (stabilized != frame) av_frame_free(&stabilized);
             av_frame_unref(frame);
 
             if (ptsUs >= sourceUs) {
@@ -1248,7 +1486,9 @@ bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &o
                 break;
             }
 
-            const drift::TimeUs ptsUs = ptsToUs(frame, timeBase);
+            AVFrame *stabilized = filterFrameInPlace(frame, maxWidth, maxHeight);
+
+            const drift::TimeUs ptsUs = ptsToUs(stabilized, timeBase);
             m_lastVideoPtsUs = ptsUs;
             g_videoFramesDecoded.fetch_add(1, std::memory_order_relaxed);
             const drift::TimeUs delta = qAbs(ptsUs - sourceUs);
@@ -1256,13 +1496,15 @@ bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &o
                 bestDelta = delta;
                 bestPtsUs = ptsUs;
                 av_frame_unref(best);
-                if (av_frame_ref(best, frame) < 0) {
+                if (av_frame_ref(best, stabilized) < 0) {
+                    if (stabilized != frame) av_frame_free(&stabilized);
                     av_frame_unref(frame);
                     done = true;
                     break;
                 }
                 found = true;
             }
+            if (stabilized != frame) av_frame_free(&stabilized);
             av_frame_unref(frame);
 
             if (ptsUs >= sourceUs) {

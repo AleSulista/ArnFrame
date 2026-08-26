@@ -225,6 +225,80 @@ Item {
                 onClicked: EditorState.resetClipTransform(
                                EditorState.selectedTrack, EditorState.selectedClip)
             }
+
+            Text {
+                text: qsTr("Video Stabilization")
+                color: Theme.mutedForeground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+                font.weight: Font.Medium
+                visible: root.clipKind === "video"
+            }
+
+            Column {
+                width: parent.width
+                spacing: 8
+                visible: root.clipKind === "video"
+
+                ThemedSlider {
+                    id: stabilizeSmoothingSlider
+                    label: qsTr("Smoothing")
+                    width: parent.width
+                    from: 2
+                    to: 60
+                    stepSize: 1
+                    enabled: root.clipData ? !root.clipData.stabilizing : false
+                    Binding on value {
+                        when: !stabilizeSmoothingSlider.pressed
+                        value: (root.clipData && root.clipData.stabilizeSmoothing) ? root.clipData.stabilizeSmoothing : 15
+                    }
+                    onPressedChanged: {
+                        if (!pressed && root.clipData) {
+                            EditorState.setClipStabilizeSmoothing(
+                                 EditorState.selectedTrack, EditorState.selectedClip, value)
+                        }
+                    }
+                }
+
+                Row {
+                    width: parent.width
+                    height: Theme.controlHeightSm
+                    spacing: 8
+
+                    Text {
+                        text: qsTr("Tripod Mode (Freeze)")
+                        color: Theme.mutedForeground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeXs
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    ThemedSwitch {
+                        checked: root.clipData ? !!root.clipData.stabilizeTripod : false
+                        enabled: root.clipData ? !root.clipData.stabilizing : false
+                        onToggled: EditorState.setClipStabilizeTripod(
+                                       EditorState.selectedTrack, EditorState.selectedClip, checked)
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                Row {
+                    width: parent.width
+                    spacing: 8
+
+                    ThemedButton {
+                        text: (root.clipData && root.clipData.stabilizing) ? qsTr("Analyzing...") : ((root.clipData && root.clipData.stabilized) ? qsTr("Re-stabilize Video") : qsTr("Stabilize Video"))
+                        enabled: root.clipData ? !root.clipData.stabilizing : false
+                        onClicked: EditorState.stabilizeClip(EditorState.selectedTrack, EditorState.selectedClip)
+                    }
+
+                    ThemedButton {
+                        text: qsTr("Remove")
+                        visible: (root.clipData && root.clipData.stabilized) && !(root.clipData && root.clipData.stabilizing)
+                        onClicked: EditorState.removeClipStabilization(EditorState.selectedTrack, EditorState.selectedClip)
+                    }
+                }
+            }
         }
     }
 }

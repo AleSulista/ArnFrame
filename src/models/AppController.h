@@ -28,6 +28,8 @@
 #include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QProcess>
+#include <QMap>
 
 #include <memory>
 #include <optional>
@@ -579,6 +581,11 @@ public:
     Q_INVOKABLE void detectScenesForClip(int trackIndex, int clipIndex, bool withObjects,
                                          double minSceneSeconds = 0.0);
     Q_INVOKABLE void cancelSceneDetection();
+    Q_INVOKABLE void stabilizeClip(int trackIndex, int clipIndex);
+    Q_INVOKABLE void cancelStabilization();
+    Q_INVOKABLE void removeClipStabilization(int trackIndex, int clipIndex);
+    Q_INVOKABLE void setClipStabilizeSmoothing(int trackIndex, int clipIndex, int value);
+    Q_INVOKABLE void setClipStabilizeTripod(int trackIndex, int clipIndex, bool enabled);
     // Whether the optional object-labelling pass can run. False until the object-model
     // addon is installed, which is what the panel's toggle is gated on.
     Q_INVOKABLE bool objectDetectionAvailable() const;
@@ -1374,6 +1381,7 @@ protected:
     double m_sceneDetectProgress = 0.0;
     QString m_sceneDetectStatus;
     QAtomicInt m_sceneDetectCancel = 0;
+    QMap<QString, QProcess*> m_stabilizeProcesses;
     quint64 m_sceneGeneration = 0;
     bool m_segSessionActive = false;
     bool m_segForTemplate = false;

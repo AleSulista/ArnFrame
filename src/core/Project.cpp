@@ -221,6 +221,9 @@ QJsonObject clipToJson(const Clip &clip)
         {QStringLiteral("mask"), maskToJson(clip.mask)},
         {QStringLiteral("faceTrackPath"), clip.faceTrackPath},
         {QStringLiteral("faceTrackSrcOffsetUs"), qint64(clip.faceTrackSrcOffsetUs)},
+        {QStringLiteral("stabilizePath"), clip.stabilizePath},
+        {QStringLiteral("stabilizeSmoothing"), clip.stabilizeSmoothing},
+        {QStringLiteral("stabilizeTripod"), clip.stabilizeTripod},
         {QStringLiteral("fadeInUs"), static_cast<double>(clip.fadeInUs)},
         {QStringLiteral("fadeOutUs"), static_cast<double>(clip.fadeOutUs)},
         {QStringLiteral("fadeCurve"), fadeCurveToString(clip.fadeCurve)},
@@ -304,6 +307,9 @@ Clip clipFromJsonV2(const QJsonObject &object, int canvasW = 1920, int canvasH =
     clip.faceTrackPath = object.value(QStringLiteral("faceTrackPath")).toString();
     clip.faceTrackSrcOffsetUs =
         TimeUs(object.value(QStringLiteral("faceTrackSrcOffsetUs")).toInteger(0));
+    clip.stabilizePath = object.value(QStringLiteral("stabilizePath")).toString();
+    clip.stabilizeSmoothing = object.value(QStringLiteral("stabilizeSmoothing")).toInt(15);
+    clip.stabilizeTripod = object.value(QStringLiteral("stabilizeTripod")).toBool(false);
     clip.fadeInUs = static_cast<TimeUs>(object.value(QStringLiteral("fadeInUs")).toDouble());
     clip.fadeOutUs = static_cast<TimeUs>(object.value(QStringLiteral("fadeOutUs")).toDouble());
     clip.fadeCurve = fadeCurveFromString(object.value(QStringLiteral("fadeCurve")).toString());

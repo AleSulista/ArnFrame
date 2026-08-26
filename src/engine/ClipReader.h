@@ -190,6 +190,33 @@ private:
     int m_vppH = 0;
     bool m_hwScalerFailed = false;
 
+    QString m_stabilizePath;
+    int m_stabilizeSmoothing = 15;
+    bool m_stabilizeTripod = false;
+    int m_expectedNextFrameIndex = -1;
+    QString m_tempTrfPath;
+    struct AVFilterGraph *m_swFilterGraph = nullptr;
+    struct AVFilterContext *m_swFilterSrc = nullptr;
+    struct AVFilterContext *m_swFilterSink = nullptr;
+    int m_swFilterW = 0;
+    int m_swFilterH = 0;
+    AVPixelFormat m_swFilterFormat = AV_PIX_FMT_NONE;
+    int m_swFilterSmoothing = 15;
+    bool m_swFilterTripod = false;
+
+    bool initSwFilterGraph(int width, int height, AVPixelFormat pixFmt);
+    void teardownSwFilterGraph();
+    struct AVFrame* filterFrameInPlace(struct AVFrame *frame, int targetWidth, int targetHeight);
+
+public:
+    void setStabilizeParams(const QString &path, int smoothing, bool tripod) {
+        m_stabilizePath = path;
+        m_stabilizeSmoothing = smoothing;
+        m_stabilizeTripod = tripod;
+    }
+
+private:
+
     // Sequential-decode state: lets playback decode forward without re-seeking
     // to a keyframe on every frame. Only seek on a backward jump or a large gap.
     bool m_videoPositioned = false;
