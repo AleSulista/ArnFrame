@@ -48,6 +48,13 @@ packaging/arch/pkg/
 packaging/arch/*.pkg.tar.zst
 installer/windows/output/
 
+# Android native dependencies: third_party/build-android.sh clones FFmpeg, x264, zstd, OpenSSL and
+# SoundTouch into src/ and cross-builds them into prebuilt/android/<abi>/. Both are generated and
+# large (~450 MB of sources, ~270 MB of archives); CI restores prebuilt/ from a cache keyed on the
+# script instead. third_party/cgltf is vendored source and stays tracked.
+third_party/src/
+third_party/prebuilt/
+
 # OS
 .DS_Store
 

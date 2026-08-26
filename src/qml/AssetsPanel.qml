@@ -9,6 +9,18 @@ import "components/assets"
 PanelFrame {
     id: root
 
+    // When true (Android bottom sheet), hide the side tab rail — the phone
+    // bottom rail already picks the active library tab.
+    property bool sheetMode: false
+
+    // One of the click-to-add tabs (text, subtitles, stickers, shapes) put a clip
+    // on the timeline. The phone shell closes the sheet on this; desktop, where
+    // the panel is docked, simply leaves it unconnected.
+    signal addCompleted()
+    border.width: sheetMode ? 0 : 1
+    radius: sheetMode ? 0 : Theme.radiusSm
+    color: sheetMode ? "transparent" : Theme.panelBackground
+
     Component.onCompleted: AssetLibrary.ensureAllMedia()
 
     function addAssetToTimeline(assetIndex) {
@@ -25,26 +37,45 @@ PanelFrame {
     function importUrlsReporting(urls) {
         if (!urls || urls.length === 0)
             return
-        root.importing = true
+        // Async, because on Android reading a picked file means copying it out of the
+        // SAF stream first. Run inline, that copy blocked the GUI thread for the whole
+        // transfer — which also meant the "Importing…" overlay below was set and cleared
+        // inside one JS turn and never painted at all.
         const before = AssetLibrary.count
-        AssetLibrary.importUrls(urls)
-        const added = AssetLibrary.count - before
-        root.importing = false
+        if (!AssetLibrary.importUrlsAsync(urls)) {
+            Toasts.warning(qsTr("An import is already running."))
+            return
+        }
+        root._importRequested = urls.length
+        root._countBefore = before
+    }
 
-        const skipped = urls.length - added
-        if (added > 0 && skipped > 0)
-            Toasts.warning(qsTr("Imported %1 of %2 files. %3 could not be read.")
-                           .arg(added).arg(urls.length).arg(skipped))
-        else if (added > 0)
-            Toasts.success(qsTr("Imported %n files.", "", added))
-        else if (urls.length === 1)
-            Toasts.error(qsTr("Could not import that file — the format may be unsupported."))
-        else
-            Toasts.error(qsTr("Could not import any of the %n selected files.", "", urls.length))
+    property int _importRequested: 0
+    property int _countBefore: 0
+
+    Connections {
+        target: AssetLibrary
+        function onImportFinished(materialized, failed) {
+            const requested = root._importRequested
+            if (requested <= 0)
+                return
+            root._importRequested = 0
+            const added = AssetLibrary.count - root._countBefore
+            const skipped = requested - added
+            if (added > 0 && skipped > 0)
+                Toasts.warning(qsTr("Imported %1 of %2 files. %3 could not be read.")
+                               .arg(added).arg(requested).arg(skipped))
+            else if (added > 0)
+                Toasts.success(qsTr("Imported %n files.", "", added))
+            else if (requested === 1)
+                Toasts.error(qsTr("Could not import that file — the format may be unsupported."))
+            else
+                Toasts.error(qsTr("Could not import any of the %n selected files.", "", requested))
+        }
     }
 
     // True while an import is running, so the panel can show progress.
-    property bool importing: false
+    readonly property bool importing: AssetLibrary.importing
 
     // Asset awaiting confirmation in confirmAssetRemoval. The name is held
     // separately because the row is gone by the time the toast reports it.
@@ -201,6 +232,10 @@ PanelFrame {
         }
     }
 
+    function tabLabel(tabId) {
+        return tabLabels[tabId] || ""
+    }
+
     function kindsForTab(tabId) {
         if (tabId === "media") return ["video", "image", "audio"]
         return []
@@ -353,10 +388,12 @@ PanelFrame {
 
         // Vertical tab rail. Up/Down move between tabs once it has focus.
         // Flickable so short panel heights can still reach lower icons.
+        // Hidden in sheetMode — AndroidBottomRail drives showTab() instead.
         Flickable {
             id: tabRail
-            width: Theme.tabRailWidth
+            width: root.sheetMode ? 0 : Theme.tabRailWidth
             height: parent.height
+            visible: !root.sheetMode
             contentWidth: width
             contentHeight: tabRailColumn.height
             clip: true
@@ -429,14 +466,15 @@ PanelFrame {
         }
 
         Rectangle {
-            width: Theme.borderWidth
+            width: root.sheetMode ? 0 : Theme.borderWidth
             height: parent.height
+            visible: !root.sheetMode
             color: Theme.panelBorder
         }
 
         Column {
             id: assetsContent
-            width: parent.width - Theme.tabRailWidth - Theme.borderWidth
+            width: parent.width - (root.sheetMode ? 0 : (Theme.tabRailWidth + Theme.borderWidth))
             height: parent.height
             property bool gridMode: EditorState.mediaGridMode
 
@@ -459,6 +497,8 @@ PanelFrame {
                     anchors.left: parent.left
                     anchors.leftMargin: Theme.pagePadding
                     anchors.verticalCenter: parent.verticalCenter
+                    // Sheet chrome already shows the tab title.
+                    visible: !root.sheetMode
                     text: tabLabels[tabsModel.get(root.activeTab).tabId]
                     color: Theme.mutedForeground
                     font.family: Theme.fontFamily
@@ -533,6 +573,7 @@ PanelFrame {
                 x: Math.max(-Theme.tabRailWidth, assetsContent.width - width - 8)
                 y: Theme.panelHeaderHeight + 4
                 onAddonManagerRequested: root.Window.window.openAddonManager("stickers")
+                onAdded: root.addCompleted()
             }
 
             TextAssetsTab {
@@ -540,13 +581,7 @@ PanelFrame {
                 width: parent.width
                 opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
-            }
-
-            ScenesTab {
-                visible: tabsModel.get(activeTab).tabId === "scenes"
-                width: parent.width
-                opacity: root.tabOpacity
-                height: parent.height - Theme.panelHeaderHeight
+                onAdded: root.addCompleted()
             }
 
             SubtitlesTab {
@@ -554,6 +589,7 @@ PanelFrame {
                 width: parent.width
                 opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
+                onAdded: root.addCompleted()
             }
 
             SoundsTab {
@@ -568,10 +604,19 @@ PanelFrame {
                 width: parent.width
                 opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
+                onAdded: root.addCompleted()
             }
 
             ShapesTab {
                 visible: tabsModel.get(activeTab).tabId === "shapes"
+                width: parent.width
+                opacity: root.tabOpacity
+                height: parent.height - Theme.panelHeaderHeight
+                onAdded: root.addCompleted()
+            }
+
+            ScenesTab {
+                visible: tabsModel.get(activeTab).tabId === "scenes"
                 width: parent.width
                 opacity: root.tabOpacity
                 height: parent.height - Theme.panelHeaderHeight
@@ -663,7 +708,9 @@ PanelFrame {
                         horizontalAlignment: Text.AlignHCenter
                         maximumLineCount: 3
                         elide: Text.ElideRight
-                        text: qsTr("Drag onto where two clips overlap. They fade into each other by default.")
+                        text: Theme.touchUi
+                              ? qsTr("Touch and hold a transition, then drag it onto where two clips meet.")
+                              : qsTr("Drag onto where two clips overlap. They fade into each other by default.")
                         color: Theme.mutedForeground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeXs
@@ -770,8 +817,12 @@ PanelFrame {
                                 readonly property int frameIndex:
                                     Math.max(0, Math.min(frameCount - 1, Math.round(scrub * (frameCount - 1))))
 
+                                // Without hover there is no way to tell a crossfade from a dip
+                                // to black — both rest on the same middle frame — so on touch
+                                // every card scrubs continuously instead.
                                 NumberAnimation on scrub {
-                                    running: transitionHover.hovered && transitionCard.frameCount > 1
+                                    running: transitionCard.frameCount > 1
+                                             && (Theme.touchUi || transitionHover.hovered)
                                     from: 0
                                     to: 1
                                     duration: 1400
@@ -826,7 +877,20 @@ PanelFrame {
                                     DragHandler {
                                         id: transitionDrag
                                         target: null
+                                        // Touch lifts through TouchDrag instead: a platform
+                                        // drag has no touch gesture and cannot leave the sheet.
+                                        enabled: !Theme.touchUi
                                         acceptedButtons: Qt.LeftButton
+                                    }
+
+                                    // Hold to carry the transition onto the join between two
+                                    // clips. This used to be a tap that applied to whatever was
+                                    // selected, which gave no say over which boundary it landed on.
+                                    TouchLiftArea {
+                                        dragKind: "transition"
+                                        payload: transitionCard.modelData.kind
+                                        label: transitionCard.modelData.label
+                                        glyph: Theme.icons.chevronsRight
                                     }
 
                                     AssetFavoriteButton {

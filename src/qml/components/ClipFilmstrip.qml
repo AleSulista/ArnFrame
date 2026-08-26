@@ -33,6 +33,11 @@ Item {
     property real viewX: 0
     property real viewW: 0
 
+    // Bumped by the timeline when a pinch-zoom settles so tile Images rebind after the
+    // gesture stops dirtying the scene graph (Android was leaving them blank once idle).
+    // Desktop never bumps it, so the bindings below are inert there.
+    property int refreshEpoch: 0
+
     readonly property bool sourceMapped: sourceDuration > 0 && outPoint > inPoint && width > 0
 
     // Tiles are laid out on a virtual grid spanning the whole source, not the clip body, so
@@ -112,6 +117,7 @@ Item {
 
     function tileUrlForTile(tileIndex) {
         void tileRevision
+        void refreshEpoch
         if (!tilesEnabled)
             return ""
         var srcSec = (tileIndex + 0.5) * frameWidth / pxPerSourceSec
@@ -119,6 +125,11 @@ Item {
             return ""
         var interval = Math.pow(2, tileLevel)
         return EditorState.filmstripTileUrl(sourcePath, tileLevel, Math.floor(srcSec / interval))
+    }
+
+    function coarseUrlForTile(tileIndex) {
+        void refreshEpoch
+        return EditorState.filmstripFrameUrl(filmstripPath, frameForTile(tileIndex), frameCount)
     }
 
     Connections {
@@ -136,6 +147,12 @@ Item {
     clip: true
 
     onFilmstripPathChanged: firstFrameReady = false
+    onRefreshEpochChanged: {
+        // Re-request paint after pinch: clear the ready latch so a blank settle cannot
+        // leave the strip empty without a skeleton, then bump tile bindings.
+        firstFrameReady = false
+        tileRevision++
+    }
 
     SkeletonBox {
         anchors.fill: parent
@@ -159,9 +176,7 @@ Item {
             Image {
                 id: frame
                 anchors.fill: parent
-                source: EditorState.filmstripFrameUrl(root.filmstripPath,
-                                                      root.frameForTile(tile.tileIndex),
-                                                      root.frameCount)
+                source: root.coarseUrlForTile(tile.tileIndex)
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
                 // Keep GPU textures small regardless of item layout.

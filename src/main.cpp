@@ -2,12 +2,15 @@
 #include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
 #include "engine/ReverseProxyCache.h"
+#ifndef Q_OS_ANDROID
 #include "mcp/McpStdio.h"
+#endif
 #include "models/AddonManager.h"
 #include "models/AppController.h"
 #include "models/AssetLibrary.h"
 #include "models/EditorState.h"
 #include "models/FileDialogs.h"
+#include "models/Haptics.h"
 #include "models/LayoutStore.h"
 #include "models/UpdateChecker.h"
 #include "ClipPreviewImageProvider.h"
@@ -31,6 +34,16 @@
 #include <QSurfaceFormat>
 #include <QtQml/qqml.h>
 #include <QFile>
+
+#ifdef Q_OS_ANDROID
+#include "core/Project.h"
+#include "engine/FrameCompositor.h"
+
+#include <QDir>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QStandardPaths>
+#endif
 
 extern "C" {
 #include <libavutil/log.h>
@@ -88,12 +101,81 @@ private:
     AppController *m_controller = nullptr;
 };
 
+#ifdef Q_OS_ANDROID
+// On-device render check. With <AppDataLocation>/selftest.json in place, composite one frame and
+// write selftest.png beside it instead of starting the UI. This is tools/renderframe moved onto
+// the device: it exercises FFmpeg decode, the GLES offscreen context, the shader translation and
+// package discovery with no QML, no preview item and no clock in the way.
+bool runSelfTest()
+{
+    QString dir;
+    QString projectPath;
+    const QStringList candidates =
+        QStandardPaths::standardLocations(QStandardPaths::AppDataLocation);
+    for (const QString &candidate : candidates) {
+        const QString path = QDir(candidate).filePath(QStringLiteral("selftest.json"));
+        if (QFile::exists(path)) {
+            dir = candidate;
+            projectPath = path;
+            break;
+        }
+    }
+
+    if (projectPath.isEmpty()) {
+        qWarning("selftest: no selftest.json in any of: %s",
+                 qPrintable(candidates.join(QLatin1String(", "))));
+        return false;
+    }
+
+    qWarning("selftest: loading %s", qPrintable(projectPath));
+
+    QFile file(projectPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning("selftest: cannot open %s", qPrintable(projectPath));
+        return true;
+    }
+
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    if (!doc.isObject()) {
+        qWarning("selftest: not a JSON object");
+        return true;
+    }
+
+    QString error;
+    drift::Project project = drift::Project::fromJson(doc.object(), &error);
+    if (!error.isEmpty()) {
+        qWarning("selftest: project load failed: %s", qPrintable(error));
+        return true;
+    }
+
+    const drift::TimeUs timeUs = qEnvironmentVariableIntValue("DRIFT_SELFTEST_TIME_US");
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+    const QImage frame = compositor.compositeAt(timeUs);
+    if (frame.isNull()) {
+        qWarning("selftest: compositor returned an empty frame at %lld us",
+                 static_cast<long long>(timeUs));
+        return true;
+    }
+
+    const QString outPath = QDir(dir).filePath(QStringLiteral("selftest.png"));
+    if (!frame.save(outPath))
+        qWarning("selftest: failed to write %s", qPrintable(outPath));
+    else
+        qWarning("selftest: wrote %s (%dx%d)", qPrintable(outPath), frame.width(), frame.height());
+
+    return true;
+}
+#endif // Q_OS_ANDROID
+
 } // namespace
 
 int main(int argc, char *argv[])
 {
     applyLogLevel(verboseLoggingRequested(argc, argv));
 
+#ifndef Q_OS_ANDROID
     for (int i = 1; i < argc; ++i) {
         if (qstrcmp(argv[i], "--mcp-stdio") == 0) {
             QCoreApplication app(argc, argv);
@@ -102,7 +184,19 @@ int main(int argc, char *argv[])
             return drift::mcp::runStdioAttach();
         }
     }
+#endif
 
+#ifdef Q_OS_ANDROID
+    // Android is GLES-only; the desktop 3.3 core profile the engine asks for cannot be created
+    // here at all. Both contexts that matter — the Qt Quick scene graph's and the compositor's
+    // offscreen one in GlRuntime — must agree on the version before they can share textures.
+    QSurfaceFormat androidFormat;
+    androidFormat.setRenderableType(QSurfaceFormat::OpenGLES);
+    androidFormat.setVersion(3, 0);
+    androidFormat.setDepthBufferSize(0);
+    androidFormat.setStencilBufferSize(0);
+    QSurfaceFormat::setDefaultFormat(androidFormat);
+#else
     // On NVIDIA/Wayland, leaving the API unspecified makes EGL interpret 3.3
     // as an invalid GLES version and fail with EGL_BAD_MATCH. Start from the
     // default format to retain the platform-selected window-buffer attributes.
@@ -111,6 +205,7 @@ int main(int argc, char *argv[])
     format.setVersion(3, 3);
     format.setProfile(QSurfaceFormat::CoreProfile);
     QSurfaceFormat::setDefaultFormat(format);
+#endif
 
     // Keep Qt Quick on OpenGL and create its global share context before the
     // application, enabling zero-copy texture handoff from the compositor.
@@ -145,6 +240,24 @@ int main(int argc, char *argv[])
     // did not get to clean up after itself.
     drift::sweepDenoisePreviews();
 
+#ifdef Q_OS_ANDROID
+    // Every content:// write is staged through <cache>/staged and unlinked once the copy into the
+    // document finishes, so a file still here is debris from an encode that was killed.
+    {
+        QDir staged(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                    + QStringLiteral("/staged"));
+        const QFileInfoList leftovers = staged.entryInfoList(QDir::Files);
+        for (const QFileInfo &file : leftovers)
+            QFile::remove(file.absoluteFilePath());
+    }
+
+    qWarning("app data locations: %s",
+             qPrintable(QStandardPaths::standardLocations(QStandardPaths::AppDataLocation)
+                            .join(QLatin1String(", "))));
+    if (runSelfTest())
+        return 0;
+#endif
+
     // Reversed proxies are a pure cache: dropping one only costs the clip its smooth playback, so
     // they are pruned to a budget rather than kept forever the way mattes are.
     drift::ReverseProxyCache::instance().load();
@@ -158,6 +271,7 @@ int main(int argc, char *argv[])
     static AddonManager addonManager;
     static UpdateChecker updateChecker;
     static LayoutStore layoutStore;
+    static drift::Haptics haptics;
     qmlRegisterSingletonInstance("Drift", 1, 0, "AssetLibrary", &assetLibrary);
     qmlRegisterSingletonInstance("Drift", 1, 0, "EditorState", &editorState);
     qmlRegisterSingletonInstance("Drift", 1, 0, "AppController", &editorState);
@@ -165,6 +279,7 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("Drift", 1, 0, "Addons", &addonManager);
     qmlRegisterSingletonInstance("Drift", 1, 0, "Updates", &updateChecker);
     qmlRegisterSingletonInstance("Drift", 1, 0, "LayoutMemory", &layoutStore);
+    qmlRegisterSingletonInstance("Drift", 1, 0, "Haptics", &haptics);
 
     app.installEventFilter(new FileOpenFilter(&editorState, &app));
     editorState.queueExternalProject(
@@ -180,7 +295,13 @@ int main(int argc, char *argv[])
     engine.addImageProvider(QStringLiteral("textstyle"), new TextStylePreviewImageProvider());
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QGuiApplication::exit(-1); }, Qt::QueuedConnection);
+    // Main.qml is the desktop layout. AndroidMain.qml is the touch entry point; the desktop tree
+    // stays compiled so the touch port can reuse leaf components.
+#ifdef Q_OS_ANDROID
+    engine.loadFromModule("Drift", "AndroidMain");
+#else
     engine.loadFromModule("Drift", "Main");
+#endif
 
     return app.exec();
 }

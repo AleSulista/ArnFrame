@@ -3,6 +3,7 @@
 #include <QList>
 #include <QString>
 #include <QStringList>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -90,6 +91,43 @@ public:
     static ExportSettings defaultSettings();
     static ExportSettings settingsFromMap(const QVariantMap &map);
 
+    // Holds the process in the foreground for as long as it exists: an Android foreground service
+    // with a progress notification, plus FLAG_KEEP_SCREEN_ON. Without one, a backgrounded process
+    // is frozen and then killed, and a multi-minute render or ML pass is gone with nothing to
+    // resume from — so any job of that length wants one, not just the encode. Refcounted, so an
+    // outer hold spanning the copy into the user's document is not dropped when Exporter::run's own
+    // inner hold ends; the outermost hold's `title` is the one the notification shows. Constructing
+    // it on desktop does nothing at all.
+    class BackgroundHold
+    {
+    public:
+        // `cancellable` puts a Cancel action on the notification. Only the outermost hold's value
+        // counts, and only a job that actually polls cancelRequested() should pass true — the
+        // action stops nothing on its own.
+        explicit BackgroundHold(const QString &title, bool cancellable = false);
+        ~BackgroundHold();
+        BackgroundHold(const BackgroundHold &) = delete;
+        BackgroundHold &operator=(const BackgroundHold &) = delete;
+
+        // Progress in whole percent, clamped to 0..100. Static because the code that knows the
+        // percentage is rarely the code holding the outermost hold; repeats are dropped rather
+        // than re-posting the same notification once per frame.
+        static void setPercent(int percent);
+
+        // True once the notification's Cancel action has been tapped. Cleared when the outermost
+        // hold is taken, so it never carries into the next job. Always false off Android.
+        static bool cancelRequested();
+    };
+
+    // `outputPath` is a filesystem path, or — on Android — the fully encoded content:// URI of a
+    // document the save picker created (AndroidUri::filePath of what FileDialogs returned).
     static bool run(const drift::Project &project, const ExportSettings &settings, const QString &outputPath,
                     QString *errorOut, const ProgressFn &onProgress = {});
+
+    // Copies a finished export into the shared Movies (or Music) collection and returns the
+    // MediaStore URI it now lives at, so the gallery and the share sheet can see it: a file left
+    // in app storage is reachable from neither. Empty with *errorOut set on failure, and always
+    // empty on desktop, where an export already lands wherever the user pointed it.
+    static QUrl publishToGallery(const QUrl &source, const QString &displayName,
+                                 QString *errorOut = nullptr);
 };

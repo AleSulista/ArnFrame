@@ -93,6 +93,10 @@ QtObject {
     readonly property color scrollbarHandle: darkMode ? "#6a6a6a" : panelMuted
     readonly property color scrollbarHandleHover: darkMode ? "#888888" : mutedForeground
     readonly property color scrollbarHandlePressed: darkMode ? "#b8b8b8" : foreground
+    // Bottom-sheet drag pill. panelBorder put it at 1.28:1 against the sheet in both
+    // themes, so the one affordance saying "this sheet moves" was invisible; these
+    // clear the 3:1 non-text floor (3.1:1 dark, 3.0:1 light).
+    readonly property color sheetHandle: darkMode ? "#6a6a6a" : "#919191"
     readonly property color panelSecondaryBg: _palette.panelSecondaryBg
     readonly property color panelSecondaryBorder: _palette.panelSecondaryBorder
     readonly property color panelSecondaryForeground: _palette.panelSecondaryForeground
@@ -100,6 +104,12 @@ QtObject {
     // --- Colors: shared semantic (identical in both themes) -----------------------
     readonly property color primary: "#F8B81C"
     readonly property color primaryForeground: "#221900"
+    // `primary` as a *foreground* on a panel surface. The brand amber is a fill
+    // colour: on the light panel it lands at 1.69:1, so a selected tab tinted with
+    // it was effectively invisible. Dark mode keeps the amber (9.8:1); light mode
+    // uses the darkened brand tone (5.2:1). Only for text/glyphs on panels —
+    // fills, rings and progress arcs still use `primary` in both themes.
+    readonly property color accentOnPanel: darkMode ? primary : "#8a6300"
     readonly property color destructive: "#e91616"
     readonly property color constructive: "#23d160"
     readonly property color warning: "#f97316"
@@ -207,9 +217,17 @@ QtObject {
     // --- Control metrics -------------------------------------------------------
     // controlHeight is the alignment baseline: text fields, combo boxes and text
     // buttons all share it so adjacent controls in a Row line up.
-    readonly property real controlHeight: 30
-    readonly property real controlHeightSm: 26   // chips, segmented toggles
-    readonly property real iconButtonSize: 28
+    //
+    // The panels, inspectors and browsers are shared with the desktop build, and every
+    // one of them sizes its controls from these three tokens. Rather than fork each
+    // component for touch, the tokens themselves grow on Android: a 28px icon button
+    // sized for a mouse cursor is roughly a third of a fingertip, which made destructive
+    // controls (Remove sitting beside Disable in the effects list) genuinely risky.
+    // 44/36/40 are Android's minimum comfortable targets, not arbitrary bumps.
+    readonly property bool touchUi: Qt.platform.os === "android"
+    readonly property real controlHeight: touchUi ? 44 : 30
+    readonly property real controlHeightSm: touchUi ? 36 : 26   // chips, segmented toggles
+    readonly property real iconButtonSize: touchUi ? 40 : 28
     readonly property real borderWidth: 1
     readonly property real borderWidthFocus: 2
 
@@ -259,8 +277,8 @@ QtObject {
     readonly property real pagePadding: 12
 
     // --- Layout: assets panel -----------------------------------------------
-    readonly property real panelHeaderHeight: 44
-    readonly property real tabRailWidth: 40
+    readonly property real panelHeaderHeight: touchUi ? 52 : 44
+    readonly property real tabRailWidth: touchUi ? 52 : 40
     readonly property real assetCardWidth: 112
     readonly property real assetCardGap: 16
 
@@ -288,8 +306,8 @@ QtObject {
     readonly property real timelineBookmarkRowHeight: 18
     readonly property real trackHeightVideo: 65
     readonly property real trackHeightAudio: 50
-    readonly property real trackHeightText: 25
-    readonly property real trackHeightSubtitle: 25
+    readonly property real trackHeightText: touchUi ? 44 : 25
+    readonly property real trackHeightSubtitle: touchUi ? 44 : 25
     readonly property real trackHeightShape: 50
     readonly property real trackGap: 6
     // Invisible hit area above tracks (no visible UI) for new-track drops when timeline has clips.
@@ -316,6 +334,49 @@ QtObject {
     // Matches drift::kMinClipDurationUs (0.1s). Effective min duration is the
     // larger of this and clipMinWidth / pxPerSecond at the current zoom.
     readonly property real clipMinDurationSeconds: 0.1
+
+    // --- Layout: Android / touch -----------------------------------------------
+    // Used by AndroidMain / AndroidTimeline / AndroidPreview and the CapCut shell.
+    // Desktop chrome keeps the metrics above.
+    readonly property real androidIconButtonSize: 48
+    readonly property real androidTimelineToolbarHeight: 56
+    readonly property real androidPreviewTransportHeight: 56
+    readonly property real androidTopBarHeight: 56
+    // Four destinations plus the centred Add button. Taller than the old scrolling
+    // strip because the Add button is a 48dp target that has to sit inside it.
+    readonly property real androidBottomRailHeight: 64
+    readonly property real androidEditActionsHeight: 56
+    readonly property real androidSplitterHeight: 32
+    readonly property real androidSheetHeightFraction: 0.55
+    // The Edit sheet carries a tab strip the browsers do not, and its content is
+    // rows of label-plus-slider rather than a scrollable grid — at 55% it opened on
+    // barely two properties.
+    readonly property real androidEditSheetHeightFraction: 0.64
+    readonly property real androidSheetExpandedFraction: 0.92
+    readonly property real androidSheetHeaderHeight: 56
+    readonly property real androidSheetDismissFraction: 0.38
+    // Hold before an asset card lifts out of the sheet for a drag. Shorter than the
+    // 800ms platform long-press: the tap it competes with only opens a menu, and a
+    // gesture that has to be held for most of a second reads as an unresponsive app.
+    readonly property int touchLiftInterval: 320
+    // The rail's five slots divide its width, so destinations have no fixed width.
+    // The Add button is the one that does: a docked-FAB-sized target in the centre.
+    readonly property real androidRailFabSize: 48
+    // Add-menu row. A token rather than a literal because the sheet computes its own
+    // height from the row count, and the two must not drift apart.
+    readonly property real androidAddRowHeight: 64
+    // Mute/hide icons only — track type labels do not fit a phone. Wide enough for the
+    // two toggles to sit a dead band apart without their hit areas reaching the type
+    // caption on the left or the corner filmstrip toggle below it.
+    readonly property real androidTrackLabelsWidth: 88
+    readonly property real androidClipTrimHandleWidth: 20
+    readonly property real androidClipEdgeMargin: 22
+    readonly property real androidTrimHotspotExtra: 14
+    // Preview region cap so the timeline stays usable under a portrait canvas.
+    readonly property real androidPreviewMaxScreenFraction: 0.42
+    readonly property real androidHomeRecentCardWidth: 140
+    readonly property real androidHomeRecentCardHeight: 96
+
 
     // --- Layout: window --------------------------------------------------------
     // Floor for ApplicationWindow. Below this the split minimums cannot all be

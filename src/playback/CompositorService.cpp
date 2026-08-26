@@ -4,7 +4,17 @@
 #include <cmath>
 
 namespace {
+#ifdef Q_OS_ANDROID
+// How late a finished frame may be and still be worth showing. A phone can miss the
+// desktop 100 ms deadline on every single frame, and dropping them all leaves the
+// playhead running over a frozen canvas, which is worse than a late picture. The
+// adaptive-quality feedback below still measures against its own wall-clock budget,
+// so a phone that is actually behind still scales down — this only widens the window
+// for a frame that is late but not stale enough to be worse than nothing.
+constexpr drift::TimeUs kMaxPreviewFrameStalenessUs = 1'000'000;
+#else
 constexpr drift::TimeUs kMaxPreviewFrameStalenessUs = 100'000;
+#endif
 constexpr double kAdaptiveScaleMin = 0.25;
 constexpr double kAdaptiveScaleStepDown = 0.75;
 constexpr double kAdaptiveScaleStepUp = 1.25;

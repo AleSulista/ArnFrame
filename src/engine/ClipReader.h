@@ -122,6 +122,9 @@ private:
     bool openSoftwareVideoDecoder();
     bool openHardwareDecoderWith(drift::hwaccel::Backend backend);
     bool tryOpenHardwareDecoder();
+#ifdef Q_OS_ANDROID
+    bool tryOpenMediaCodecDecoder();
+#endif
     bool hardwareDecodeIsWorthIt() const;
     void teardownVideoDecoder();
     bool fallbackFromHardwareDecoder();
@@ -173,6 +176,12 @@ private:
     int m_outputSampleRate = 48000;
     bool m_hwAccelActive = false;
     bool m_hwAccelDisabled = false; // sticky after a failed hardware decode
+    // Android MediaCodec decoding into ordinary system-memory frames. Never a hwaccel in the
+    // AV_PIX_FMT_FLAG_HWACCEL sense — m_hwAccelActive and the surface scaler below stay
+    // hwaccel-only — but it changes two things the decode loop cannot infer: send_packet may
+    // legitimately return EAGAIN, and a decode error is recoverable by reopening in software.
+    // Always false off Android.
+    bool m_mediaCodecActive = false;
     drift::hwaccel::Backend m_hwBackend = drift::hwaccel::Backend::None;
     AVPixelFormat m_hwPixFmt = AV_PIX_FMT_NONE;
 

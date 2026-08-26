@@ -1,16 +1,70 @@
 #include "PlaybackEngine.h"
 
+#include "engine/AndroidUri.h"
 #include "engine/ClipReaderPool.h"
 #include "engine/HwAccel.h"
 
 #include <QSettings>
 #include <QVariantMap>
 
+#ifdef Q_OS_ANDROID
+#include <QJniEnvironment>
+#include <QJniObject>
+#include <QtCore/qcoreapplication_platform.h>
+#endif
+
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 
 namespace {
+
+#ifdef Q_OS_ANDROID
+
+constexpr const char *kAudioFocusClass = "org/cutwire/drift/AudioFocus";
+
+// The engine that owns preview audio. Focus loss and the headphone-unplug broadcast are dispatched
+// on the Android UI thread, so the pause cannot be run there: it is posted to the engine's own
+// thread instead. Playback is single-instance, so the last engine constructed is the right one.
+std::atomic<PlaybackEngine *> g_audioFocusEngine{nullptr};
+
+void nativePausePlayback(JNIEnv *, jclass)
+{
+    if (PlaybackEngine *engine = g_audioFocusEngine.load(std::memory_order_acquire))
+        QMetaObject::invokeMethod(engine, &PlaybackEngine::pause, Qt::QueuedConnection);
+}
+
+// Both calls hop to the Android UI thread: AudioFocus keeps its request and its receiver in static
+// fields that only that thread touches, which is also the thread the callbacks arrive on.
+void callAudioFocus(const char *method)
+{
+    QNativeInterface::QAndroidApplication::runOnAndroidMainThread([method] {
+        QJniObject context = QNativeInterface::QAndroidApplication::context();
+        if (!context.isValid())
+            return;
+        QJniObject::callStaticMethod<void>(kAudioFocusClass, method,
+                                           "(Landroid/content/Context;)V", context.object());
+        // Focus is advisory: the preview still plays if the request could not be made, it just
+        // plays over whatever else is running.
+        QJniEnvironment().checkAndClearExceptions();
+    });
+}
+
+void requestAudioFocus()
+{
+    callAudioFocus("request");
+}
+
+void abandonAudioFocus()
+{
+    callAudioFocus("abandon");
+}
+
+#else
+inline void requestAudioFocus() {}
+inline void abandonAudioFocus() {}
+#endif
 
 constexpr int kPlayheadUpdateMs = 16; // ~60 Hz UI updates, independent of video decode
 
@@ -126,10 +180,22 @@ PlaybackEngine::PlaybackEngine(QObject *parent)
     connect(&m_compositor, &CompositorService::frameReady, this, &PlaybackEngine::onFrameReady);
     connect(&m_compositor, &CompositorService::compositeFinished, this,
             &PlaybackEngine::onCompositeFinished);
+
+#ifdef Q_OS_ANDROID
+    g_audioFocusEngine.store(this, std::memory_order_release);
+    QJniEnvironment().registerNativeMethods(
+        kAudioFocusClass,
+        {{"nativePausePlayback", "()V", reinterpret_cast<void *>(nativePausePlayback)}});
+#endif
 }
 
 PlaybackEngine::~PlaybackEngine()
 {
+#ifdef Q_OS_ANDROID
+    // A focus change already in flight on the Android UI thread must not find this engine.
+    g_audioFocusEngine.store(nullptr, std::memory_order_release);
+    abandonAudioFocus();
+#endif
     m_playing = false;
     m_playheadTimer.stop();
     m_compositeTimer.stop();
@@ -199,6 +265,12 @@ QSize PlaybackEngine::previewTextureSize() const
 {
     QMutexLocker lock(&m_frameMutex);
     return m_currentFrame.size;
+}
+
+QImage PlaybackEngine::previewImage() const
+{
+    QMutexLocker lock(&m_frameMutex);
+    return m_currentFrame.image;
 }
 
 QString PlaybackEngine::previewQuality() const
@@ -382,6 +454,9 @@ void PlaybackEngine::play()
     m_clock.reset(m_playheadUs, m_sampleRate);
     m_playing = true;
     m_compositor.setPlaybackActive(true);
+    // Android dims and locks on its own idle timer, which would be wrong mid-playback even
+    // without touch input; no-op on desktop.
+    drift::android::acquireKeepScreenOn();
 
     if (isQualityMode()) {
         // Quality mode is not realtime: the playhead steps one frame per
@@ -393,6 +468,9 @@ void PlaybackEngine::play()
         return;
     }
 
+    // Only the realtime path makes sound — quality mode leaves the sink stopped — and taking
+    // focus for a silent render would interrupt whatever the user is listening to for nothing.
+    requestAudioFocus();
     ensureAudioSink();
     m_clock.start();
 
@@ -428,6 +506,8 @@ void PlaybackEngine::pause()
 
     m_playing = false;
     m_compositor.setPlaybackActive(false);
+    drift::android::releaseKeepScreenOn();
+    abandonAudioFocus();
     m_playheadTimer.stop();
     m_compositeTimer.stop();
     m_clock.pause();

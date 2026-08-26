@@ -5,6 +5,14 @@
 #include "engine/MediaProbe.h"
 #include "engine/MediaThumbnail.h"
 
+#ifdef Q_OS_ANDROID
+#include "engine/AndroidUri.h"
+#include <QCryptographicHash>
+#include <QStandardPaths>
+#endif
+
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QImageIOHandler>
 #include <QImageReader>
@@ -12,12 +20,117 @@
 #include <QMetaObject>
 #include <QUrl>
 #include <QUuid>
+#include <QFutureWatcher>
 #include <QtConcurrent>
 
 #include <algorithm>
 #include <optional>
 
 namespace {
+
+#ifdef Q_OS_ANDROID
+
+constexpr qint64 kImportChunkBytes = 1024 * 1024;
+
+// Copies of SAF documents. AppDataLocation and not CacheLocation: a saved project points
+// straight at these files, and Android reclaims the cache under storage pressure while
+// Settings > Clear cache wipes it outright.
+QString importsDir()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+           + QStringLiteral("/imports");
+}
+
+QString sanitizedImportFileName(QString name)
+{
+    name.replace(QLatin1Char('/'), QLatin1Char('_'));
+    name.replace(QLatin1Char('\\'), QLatin1Char('_'));
+    if (name.isEmpty() || name == QLatin1String(".") || name == QLatin1String(".."))
+        name = QStringLiteral("import.bin");
+    return name;
+}
+
+// FFmpeg and the rest of the media pipeline need real filesystem paths. On Android the SAF
+// picker returns content:// URIs; Qt can read them via QFile, but avformat cannot. Copy into
+// app storage once so the rest of the import pipeline stays path-based.
+QString materializeImportUrl(const QUrl &url)
+{
+    if (!AndroidUri::isContentUri(url))
+        return {};
+
+    const QString uri = url.toString(QUrl::FullyEncoded);
+    std::unique_ptr<QFile> src = AndroidUri::openForRead(url);
+    if (!src) {
+        qWarning("import: cannot open %s", qPrintable(uri));
+        return {};
+    }
+
+    // The grant that came with the picker result dies with the process, which would make the URI
+    // worthless if anything ever needs to re-read it after this session.
+    AndroidUri::takePersistableReadPermission(url);
+
+    // The same file picked through Photos, Files and a cloud provider arrives as three unrelated
+    // URIs, so the URI cannot key the copy: the head of the stream and its length can, and the
+    // head is a chunk of the copy that is about to happen anyway.
+    const QByteArray head = src->read(kImportChunkBytes);
+    if (head.isEmpty() && src->error() != QFile::NoError) {
+        qWarning("import: read failed for %s (%s)", qPrintable(uri), qPrintable(src->errorString()));
+        return {};
+    }
+    QCryptographicHash key(QCryptographicHash::Sha1);
+    key.addData(head);
+    key.addData(QByteArray::number(src->size()));
+
+    // One directory per file so the copy can keep the document's real name — the bin, the clip
+    // labels and the export default all show it, and provisionalKind reads the kind off its suffix.
+    const QString destDir = importsDir() + QLatin1Char('/')
+                            + QString::fromLatin1(key.result().left(8).toHex());
+    const QString destPath =
+        destDir + QLatin1Char('/') + sanitizedImportFileName(AndroidUri::displayName(url));
+    if (QFileInfo::exists(destPath))
+        return destPath;
+
+    if (!QDir().mkpath(destDir)) {
+        qWarning("import: cannot create %s", qPrintable(destDir));
+        return {};
+    }
+
+    // Copy aside and rename, so a process death mid-copy cannot leave a truncated file that a
+    // later import of the same media would reuse.
+    const QString partPath = destPath + QStringLiteral(".part");
+    QFile dst(partPath);
+    if (!dst.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning("import: cannot write %s (%s)", qPrintable(partPath), qPrintable(dst.errorString()));
+        return {};
+    }
+
+    QByteArray chunk = head;
+    while (!chunk.isEmpty()) {
+        if (dst.write(chunk) != chunk.size()) {
+            qWarning("import: write failed for %s (%s)", qPrintable(partPath),
+                     qPrintable(dst.errorString()));
+            dst.remove();
+            return {};
+        }
+        chunk = src->read(kImportChunkBytes);
+        if (chunk.isEmpty() && src->error() != QFile::NoError) {
+            qWarning("import: read failed for %s (%s)", qPrintable(uri),
+                     qPrintable(src->errorString()));
+            dst.remove();
+            return {};
+        }
+    }
+
+    dst.close();
+    if (!dst.rename(destPath)) {
+        qWarning("import: cannot finish %s (%s)", qPrintable(destPath), qPrintable(dst.errorString()));
+        dst.remove();
+        return {};
+    }
+    return destPath;
+}
+
+#endif // Q_OS_ANDROID
 
 bool isImagePath(const QString &path)
 {
@@ -839,22 +952,132 @@ void AssetLibrary::loadFromJsonArray(const QJsonArray &assets)
         refreshMediaAt(i);
 }
 
+// One URL through the copy stage. Returns the path the rest of the import pipeline should use,
+// or empty when the document could not be read. `sourceUri` comes back set only for a SAF
+// document, which is the only case that has anything to rehydrate from later.
+//
+// Free function rather than a member because importUrlsAsync runs it on a worker thread, where
+// touching the model would be a data race.
+namespace {
+
+// What the off-thread copy stage hands back to the GUI thread.
+struct Materialized
+{
+    QStringList paths;
+    // Absolute path -> the content:// URI it was copied out of.
+    QHash<QString, QString> sourceUris;
+    int failed = 0;
+};
+
+QString materializeOne(const QUrl &url, QString *sourceUri)
+{
+    sourceUri->clear();
+    if (url.isLocalFile())
+        return url.toLocalFile();
+    if (url.isEmpty())
+        return {};
+
+#ifdef Q_OS_ANDROID
+    // SAF hands back content:// URIs, which FFmpeg cannot open directly — materialize a
+    // real file first so the rest of the import pipeline stays path-based.
+    if (AndroidUri::isContentUri(url)) {
+        const QString materialized = materializeImportUrl(url);
+        if (materialized.isEmpty()) {
+            qWarning("import: skipped unreadable URL %s", qPrintable(url.toString()));
+            return {};
+        }
+        *sourceUri = url.toString(QUrl::FullyEncoded);
+        return materialized;
+    }
+#endif
+
+    const QString asString = url.toString();
+    if (asString.startsWith(QLatin1String("file://"), Qt::CaseInsensitive))
+        return QUrl(asString).toLocalFile();
+    return asString;
+}
+// What to show while this URL is being copied. A SAF document's URI carries only an opaque id,
+// so the provider has to be asked for the name the user knows the file by.
+QString importLabel(const QUrl &url)
+{
+#ifdef Q_OS_ANDROID
+    if (AndroidUri::isContentUri(url))
+        return AndroidUri::displayName(url);
+#endif
+    return url.fileName();
+}
+
+} // namespace
+
 void AssetLibrary::importUrls(const QList<QUrl> &urls)
 {
     QStringList paths;
+    QHash<QString, QString> sourceUris;
     paths.reserve(urls.size());
     for (const QUrl &url : urls) {
-        if (url.isLocalFile()) {
-            paths.append(url.toLocalFile());
-        } else if (!url.isEmpty()) {
-            const QString asString = url.toString();
-            if (asString.startsWith(QLatin1String("file://"), Qt::CaseInsensitive))
-                paths.append(QUrl(asString).toLocalFile());
-            else
-                paths.append(asString);
-        }
+        QString sourceUri;
+        const QString path = materializeOne(url, &sourceUri);
+        if (path.isEmpty())
+            continue;
+        paths.append(path);
+        if (!sourceUri.isEmpty())
+            sourceUris.insert(QFileInfo(path).absoluteFilePath(), sourceUri);
     }
-    importFiles(paths);
+    importFiles(paths, sourceUris);
+}
+
+bool AssetLibrary::importUrlsAsync(const QList<QUrl> &urls)
+{
+    if (m_importing)
+        return false;
+    if (urls.isEmpty()) {
+        emit importFinished(0, 0);
+        return true;
+    }
+
+    m_importing = true;
+    emit importingChanged();
+
+    const int total = urls.size();
+    auto *watcher = new QFutureWatcher<Materialized>(this);
+    connect(watcher, &QFutureWatcher<Materialized>::finished, this, [this, watcher]() {
+        watcher->deleteLater();
+        const Materialized result = watcher->result();
+
+        // The rows have to exist before importFinished lands: AndroidHome walks countBefore..count
+        // and turns every new asset into a clip the moment it sees the signal.
+        importFiles(result.paths, result.sourceUris);
+
+        m_importing = false;
+        emit importingChanged();
+        emit importFinished(result.paths.size(), result.failed);
+    });
+
+    watcher->setFuture(QtConcurrent::run([this, urls, total]() {
+        Materialized out;
+        out.paths.reserve(total);
+        for (int i = 0; i < total; ++i) {
+            const QUrl &url = urls.at(i);
+            // Reported before the copy, not after, so the name on screen is the file being worked
+            // on rather than the one that just finished.
+            const QString label = importLabel(url);
+            QMetaObject::invokeMethod(
+                this, [this, i, total, label]() { emit importProgress(i, total, label); },
+                Qt::QueuedConnection);
+
+            QString sourceUri;
+            const QString path = materializeOne(url, &sourceUri);
+            if (path.isEmpty()) {
+                ++out.failed;
+                continue;
+            }
+            out.paths.append(path);
+            if (!sourceUri.isEmpty())
+                out.sourceUris.insert(QFileInfo(path).absoluteFilePath(), sourceUri);
+        }
+        return out;
+    }));
+    return true;
 }
 
 QStringList AssetLibrary::importLocalPaths(const QStringList &paths)
@@ -883,12 +1106,13 @@ QString AssetLibrary::addGeneratedAsset(drift::MediaAsset asset)
     return id;
 }
 
-void AssetLibrary::importFiles(const QStringList &paths)
+void AssetLibrary::importFiles(const QStringList &paths, const QHash<QString, QString> &sourceUris)
 {
-    importFilesReturningIds(paths);
+    importFilesReturningIds(paths, sourceUris);
 }
 
-QStringList AssetLibrary::importFilesReturningIds(const QStringList &paths)
+QStringList AssetLibrary::importFilesReturningIds(const QStringList &paths,
+                                                  const QHash<QString, QString> &sourceUris)
 {
     QStringList ids;
     if (!m_project)
@@ -911,6 +1135,7 @@ QStringList AssetLibrary::importFilesReturningIds(const QStringList &paths)
         placeholder.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
         placeholder.name = fileInfo.fileName();
         placeholder.path = absolutePath;
+        placeholder.sourceUri = sourceUris.value(absolutePath);
         placeholder.kind = provisionalKind(absolutePath);
 
         const int row = m_project->assetOrder().size();

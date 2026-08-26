@@ -24,6 +24,7 @@ class PlaybackEngine : public QObject
     // texture directly rather than uploading a QImage every frame.
     Q_PROPERTY(int previewTextureId READ previewTextureId NOTIFY currentFrameChanged)
     Q_PROPERTY(QSize previewTextureSize READ previewTextureSize NOTIFY currentFrameChanged)
+    Q_PROPERTY(QImage previewImage READ previewImage NOTIFY currentFrameChanged)
     Q_PROPERTY(bool hasFrame READ hasFrame NOTIFY currentFrameChanged)
     Q_PROPERTY(bool playing READ isPlaying NOTIFY playingChanged)
     Q_PROPERTY(QString previewQuality READ previewQuality WRITE setPreviewQuality NOTIFY previewQualityChanged)
@@ -44,6 +45,9 @@ public:
 
     int previewTextureId() const;
     QSize previewTextureSize() const;
+    // Readback fallback for Android drivers that refuse to share the GL context with the scene
+    // graph (see GpuFrameTexture). Null whenever the texture path above is usable.
+    QImage previewImage() const;
     bool hasFrame() const;
     bool isPlaying() const { return m_playing; }
     QString previewQuality() const;

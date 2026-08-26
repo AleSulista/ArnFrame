@@ -28,6 +28,11 @@ find_path(OnnxRuntime_INCLUDE_DIR
         /usr/local/include
         /usr/local/include/onnxruntime
         /usr/local/include/onnxruntime/core/session
+    # Cross-compiling (Android) sets CMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY, which confines the
+    # search to the NDK sysroot and would ignore every HINT above — including the tree
+    # FetchOnnxRuntime just downloaded. These are headers compiled against, never a sysroot
+    # library, so escaping the root path is correct rather than a workaround.
+    NO_CMAKE_FIND_ROOT_PATH
 )
 
 # Optional, and deliberately not part of the found/not-found decision below: it exists only so

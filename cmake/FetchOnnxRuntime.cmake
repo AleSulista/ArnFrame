@@ -13,7 +13,17 @@ endif()
 
 set(_onnxruntime_version "1.27.0")
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(ANDROID)
+    # Only the headers are ever used here — the app links no ONNX Runtime at all and dlopens one at
+    # startup (src/engine/OrtRuntime.cpp), which on Android arrives as an Acceleration addon. The
+    # C and C++ API headers are identical across platforms and architectures, so the linux-x64
+    # tarball is a valid source for them; nothing from its lib/ directory is linked or staged
+    # (drift_bundle_onnxruntime is skipped on Android, and scripts/build.sh passes
+    # DRIFT_BUNDLE_ONNXRUNTIME=OFF). Using the official android AAR instead would mean unzipping a
+    # second archive format to obtain byte-identical headers.
+    set(_onnxruntime_archive "onnxruntime-linux-x64-${_onnxruntime_version}.tgz")
+    set(_onnxruntime_sha256 "547e40a48f1fe73e3f812d7c88a948612c23f896b91e4e2ee1e232d7b468246f")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
         set(_onnxruntime_archive "onnxruntime-linux-aarch64-${_onnxruntime_version}.tgz")
         set(_onnxruntime_sha256 "3e4d83ac06924a32a07b6d7f91ce6f852876153fc0bbdf931bf517a140bfbe48")

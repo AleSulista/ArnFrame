@@ -9,6 +9,10 @@ import ".."
 Item {
     id: root
 
+    // A clip landed on the timeline. The phone shell closes the sheet on this —
+    // the thing you came for is behind it.
+    signal added()
+
     readonly property var presets: EditorState.textPresets()
 
     // A QVariantList from an invokable is not reactive, so the section is refreshed by poking
@@ -133,7 +137,10 @@ Item {
                             TapHandler {
                                 id: userPress
                                 gesturePolicy: TapHandler.ReleaseWithinBounds
-                                onTapped: EditorState.addTextClip("", -1, userCard.modelData.id)
+                                onTapped: {
+                                    EditorState.addTextClip("", -1, userCard.modelData.id)
+                                    root.added()
+                                }
                             }
 
                             TapHandler {
@@ -242,7 +249,10 @@ Item {
                             TapHandler {
                                 id: packPress
                                 gesturePolicy: TapHandler.ReleaseWithinBounds
-                                onTapped: EditorState.addTextClip("", -1, packCard.modelData.id)
+                                onTapped: {
+                                    EditorState.addTextClip("", -1, packCard.modelData.id)
+                                    root.added()
+                                }
                             }
                         }
 

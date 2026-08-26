@@ -148,6 +148,10 @@ public:
     // True when a context could be created. Safe to call from any thread.
     bool available();
 
+    // True when this context landed in the Qt Quick scene graph's share group, so a
+    // texture *name* from here resolves in the scene graph's context.
+    bool sharesWithGuiContext();
+
     QOpenGLExtraFunctions *functions();
 
     // Compiled programs are cached by key + source signature.
@@ -184,6 +188,12 @@ public:
     QOpenGLShaderProgram *builtinProgram(const QString &id, const char *vertexSource,
                                          const char *fragmentSource, const char *geom);
 
+    // Drop the recyclable GPU memory — the uploaded-image texture cache and the framebuffer pool —
+    // without touching the context, the compiled programs or the live present ring. For the Android
+    // application-state handler; a no-op when GL was never brought up. Call from the GUI thread
+    // (or any non-GL thread) — exec() blocks on the GL thread.
+    void releaseCaches();
+
     // Tear down GL objects and stop the GL thread. Called at app exit.
     void shutdown();
 
@@ -196,6 +206,7 @@ private:
     QMutex m_initMutex;
     bool m_initTried = false;
     bool m_ok = false;
+    bool m_sharesWithGui = false;
     QThread *m_glThread = nullptr;
     QObject *m_glOwner = nullptr; // lives on m_glThread; the invoke target
 

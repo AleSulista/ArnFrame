@@ -4,6 +4,7 @@
 
 #include <QAbstractListModel>
 #include <QJsonArray>
+#include <QHash>
 #include <QSet>
 #include <QStringList>
 #include <QUrl>
@@ -19,6 +20,10 @@ class AssetLibrary : public QAbstractListModel
     // Read-only row count, so QML can tell an empty bin from a populated one
     // (drives the empty state) and can detect imports that produced no asset.
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    // True while importUrlsAsync's copy stage is running. The Android home screen disables its
+    // CTAs and raises a progress overlay on it; on desktop it is never true for long enough to
+    // see, because nothing has to be copied.
+    Q_PROPERTY(bool importing READ importing NOTIFY importingChanged)
 
 public:
     enum Role {
@@ -45,6 +50,13 @@ public:
     int count() const { return rowCount(); }
 
     Q_INVOKABLE void importUrls(const QList<QUrl> &urls);
+    // Same import, with the SAF copy moved off the GUI thread. On Android a picked document has to
+    // be streamed out of the content provider before FFmpeg can open it, and doing that inline
+    // froze the app for minutes on a handful of 4K clips. Returns false when an import is already
+    // running; progress arrives as importProgress and the rows exist by the time importFinished
+    // is emitted.
+    Q_INVOKABLE bool importUrlsAsync(const QList<QUrl> &urls);
+    bool importing() const { return m_importing; }
     // Import local paths and return the asset ids involved (new or already-present).
     QStringList importLocalPaths(const QStringList &paths);
     bool isImportPending(const QString &assetId) const;
@@ -86,6 +98,9 @@ public:
 
 signals:
     void countChanged();
+    void importingChanged();
+    void importProgress(int done, int total, const QString &name);
+    void importFinished(int materialized, int failed);
     // Fired when probe/thumb/audio metadata lands so unlink affordances can refresh.
     void assetMetadataChanged(const QString &assetId);
     // Result of startReplaceProbe. Nothing has been applied yet; the caller decides whether the
@@ -93,8 +108,11 @@ signals:
     void assetSourceProbed(const QString &assetId, const drift::MediaAsset &filled, bool ok);
 
 private:
-    void importFiles(const QStringList &paths);
-    QStringList importFilesReturningIds(const QStringList &paths);
+    // `sourceUris` maps an absolute path to the content:// URI it was materialized from, so the
+    // asset can be rehydrated after its copy is gone. Empty on desktop.
+    void importFiles(const QStringList &paths, const QHash<QString, QString> &sourceUris = {});
+    QStringList importFilesReturningIds(const QStringList &paths,
+                                        const QHash<QString, QString> &sourceUris = {});
     bool containsPath(const QString &path) const;
     void refreshMediaAt(int index);
     void startImportJob(const QString &assetId, const QString &absolutePath, bool imageOnly);
@@ -113,6 +131,7 @@ private:
     drift::MediaAsset *assetAtIndex(int index);
 
     drift::Project *m_project = nullptr;
+    bool m_importing = false;
     // Asset order and per-row source paths as of the last change this model itself made, so
     // syncToProject() can tell an undone asset edit from every other undo. A replaced source
     // leaves the order alone and only moves a path, which is why both are tracked.

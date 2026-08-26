@@ -93,18 +93,27 @@ QString osReleasePretty(const QString &path)
 
 QString cpuModel()
 {
-#if defined(Q_OS_LINUX)
+#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
+    // /proc/cpuinfo on Android rarely carries "model name" (that field is x86-only in
+    // practice); "Hardware" is the SoC/board name most ARM kernels report instead, so it
+    // is kept as a fallback rather than dropping straight to the raw architecture string.
     QFile cpu(QStringLiteral("/proc/cpuinfo"));
     if (cpu.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QString hardware;
         while (!cpu.atEnd()) {
             const QByteArray line = cpu.readLine();
-            if (!line.startsWith("model name"))
-                continue;
             const int colon = line.indexOf(':');
             if (colon < 0)
                 continue;
-            return QString::fromUtf8(line.mid(colon + 1).trimmed());
+            const QByteArray key = line.left(colon).trimmed();
+            const QString value = QString::fromUtf8(line.mid(colon + 1).trimmed());
+            if (key == "model name" && !value.isEmpty())
+                return value;
+            if (key == "Hardware" && hardware.isEmpty())
+                hardware = value;
         }
+        if (!hardware.isEmpty())
+            return hardware;
     }
 #endif
     return QSysInfo::currentCpuArchitecture();
@@ -116,6 +125,8 @@ QString packageKind()
     return QStringLiteral("Windows");
 #elif defined(Q_OS_MACOS)
     return QStringLiteral("macOS");
+#elif defined(Q_OS_ANDROID)
+    return QStringLiteral("Android");
 #else
     if (qEnvironmentVariableIsSet("FLATPAK_ID") || QFile::exists(QStringLiteral("/.flatpak-info")))
         return QStringLiteral("Flatpak");
@@ -360,6 +371,48 @@ const AVCodec *findNamedEncoder(const char *const *names)
     return nullptr;
 }
 
+// MediaCodec is Android's only hardware decode path — it is not one of HwAccel's device
+// backends (those are the desktop VAAPI/NVDEC/D3D11VA/VideoToolbox families), so it needs
+// its own probe purely for this report. ClipReader's own decode routing is unaffected.
+const AVCodec *findMediaCodecDecoder(AVCodecID id)
+{
+    const char *name = nullptr;
+    switch (id) {
+    case AV_CODEC_ID_H264:
+        name = "h264_mediacodec";
+        break;
+    case AV_CODEC_ID_HEVC:
+        name = "hevc_mediacodec";
+        break;
+    case AV_CODEC_ID_VP9:
+        name = "vp9_mediacodec";
+        break;
+    case AV_CODEC_ID_VP8:
+        name = "vp8_mediacodec";
+        break;
+    case AV_CODEC_ID_AV1:
+        name = "av1_mediacodec";
+        break;
+    default:
+        return nullptr;
+    }
+    return avcodec_find_decoder_by_name(name);
+}
+
+bool mediaCodecDecodeAvailable()
+{
+#if defined(Q_OS_ANDROID)
+    if (qEnvironmentVariableIsSet("DRIFT_NO_MEDIACODEC"))
+        return false;
+    return findMediaCodecDecoder(AV_CODEC_ID_H264) != nullptr
+           || findMediaCodecDecoder(AV_CODEC_ID_HEVC) != nullptr
+           || findMediaCodecDecoder(AV_CODEC_ID_VP9) != nullptr
+           || findMediaCodecDecoder(AV_CODEC_ID_AV1) != nullptr;
+#else
+    return false;
+#endif
+}
+
 QString decodeModeLabel()
 {
     switch (ClipReader::hardwareDecodeMode()) {
@@ -375,6 +428,12 @@ QString decodeModeLabel()
     case ClipReader::HardwareDecodeMode::Auto:
         break;
     }
+#if defined(Q_OS_ANDROID)
+    // Auto on Android means the MediaCodec heuristic, not the HwAccel backend probe — naming it
+    // is what distinguishes "no hardware path exists here" from "the heuristic declined".
+    if (mediaCodecDecodeAvailable())
+        return trReport("Auto (MediaCodec)");
+#endif
     return trReport("Auto");
 }
 
@@ -441,7 +500,10 @@ QVariantMap DebugReport::collect()
     const QString package = packageKind();
     const drift::hwaccel::Backend backend = activeDecodeBackend();
     const AVHWDeviceType backendType = drift::hwaccel::deviceType(backend);
-    const bool hwDecodeOk = backend != drift::hwaccel::Backend::None;
+    // HwAccel's backend list never includes MediaCodec, so on Android it always resolves to
+    // None here even when the device decodes in hardware — check that path separately.
+    const bool mediaCodecOk = mediaCodecDecodeAvailable();
+    const bool hwDecodeOk = backend != drift::hwaccel::Backend::None || mediaCodecOk;
 
     struct CodecSpec {
         const char *name;
@@ -459,6 +521,8 @@ QVariantMap DebugReport::collect()
     for (const CodecSpec &spec : kCodecs) {
         const AVCodec *software = avcodec_find_decoder(spec.id);
         const AVCodec *hardware = drift::hwaccel::findDecoder(spec.id, backendType, nullptr);
+        if (!hardware && mediaCodecOk)
+            hardware = findMediaCodecDecoder(spec.id);
         QVariantMap row;
         row.insert(QStringLiteral("name"), QString::fromLatin1(spec.name));
         row.insert(QStringLiteral("software"), software != nullptr);
@@ -560,8 +624,10 @@ QVariantMap DebugReport::collect()
     system.append(systemRow(trReport("Qt"), QString::fromLatin1(qVersion())));
     system.append(systemRow(trReport("FFmpeg"), QString::fromUtf8(av_version_info())));
     system.append(systemRow(trReport("Hardware decode"),
-                            hwDecodeOk ? QString::fromLatin1(drift::hwaccel::name(backend))
-                                       : trReport("Not available")));
+                            backend != drift::hwaccel::Backend::None
+                                ? QString::fromLatin1(drift::hwaccel::name(backend))
+                            : mediaCodecOk ? QStringLiteral("MediaCodec")
+                                           : trReport("Not available")));
     const QList<drift::ort::RuntimeInfo> ortRuntimes = drift::ort::installedRuntimes();
     if (ortRuntimes.isEmpty()) {
         system.append(systemRow(trReport("ONNX Runtime"), trReport("Not installed")));
@@ -577,6 +643,10 @@ QVariantMap DebugReport::collect()
     system.append(systemRow(trReport("Locale"), QLocale::system().name()));
     if (drift::hwaccel::disabledByEnv())
         system.append(systemRow(QStringLiteral("DRIFT_NO_HWACCEL"), trReport("Set")));
+#if defined(Q_OS_ANDROID)
+    if (qEnvironmentVariableIsSet("DRIFT_NO_MEDIACODEC"))
+        system.append(systemRow(QStringLiteral("DRIFT_NO_MEDIACODEC"), trReport("Set")));
+#endif
 
     QVariantList hints;
     if (package == QLatin1String("Flatpak")) {
@@ -620,7 +690,10 @@ QVariantMap DebugReport::collect()
     info.insert(QStringLiteral("package"), package);
     info.insert(QStringLiteral("hardwareDecodeAvailable"), hwDecodeOk);
     info.insert(QStringLiteral("hardwareDecodeBackend"),
-                QString::fromLatin1(drift::hwaccel::name(backend)));
+                backend != drift::hwaccel::Backend::None
+                    ? QString::fromLatin1(drift::hwaccel::name(backend))
+                : mediaCodecOk ? QStringLiteral("mediacodec")
+                               : QString::fromLatin1(drift::hwaccel::name(backend)));
     return info;
 }
 

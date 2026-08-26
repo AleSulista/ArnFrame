@@ -351,7 +351,9 @@ GlModelGpu *acquireGlModel(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QStri
         gl->glGenTextures(1, &tex);
         gl->glBindTexture(GL_TEXTURE_2D, tex);
         const QImage &img = cpu->images.at(i);
-        gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, img.width(), img.height(), 0, GL_RGBA,
+        // GLES 3.0 headers (what QOpenGLExtraFunctions sees on Android) do not define
+        // GL_RGBA8. Unsized GL_RGBA is the same upload GlRuntime already uses for 2D textures.
+        gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width(), img.height(), 0, GL_RGBA,
                          GL_UNSIGNED_BYTE, img.constBits());
         gl->glGenerateMipmap(GL_TEXTURE_2D);
         // Wrap modes come from the first material that references this image; default REPEAT.
