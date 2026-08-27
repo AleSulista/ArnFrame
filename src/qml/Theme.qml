@@ -417,6 +417,7 @@ QtObject {
         rewind: "rewind",
         fastForward: "fast-forward",
         maximize: "maximize",
+        locateFixed: "locate-fixed",
         minimize: "minimize",
         folder: "folder",
         folderInput: "folder-input",

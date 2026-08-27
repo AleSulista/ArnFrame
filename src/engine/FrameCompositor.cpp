@@ -1,5 +1,4 @@
 #include "FrameCompositor.h"
-#include <QFile>
 
 #include "ClipReaderPool.h"
 #include "CompositorFrameHistory.h"
@@ -276,9 +275,8 @@ QImage decodeClipMediaFrame(const drift::Clip &clip, drift::TimeUs timelineUs, i
 
     if (clip.type == drift::ClipType::Video) {
         const drift::VideoRead read = drift::resolveVideoRead(clip, timelineUs);
-        const QString videoPath = (!clip.stabilizePath.isEmpty() && QFile::exists(clip.stabilizePath)) ? clip.stabilizePath : read.path;
         return ClipReaderPool::instance().readVideoFrame(
-            videoPath, ClipReaderPool::streamIdForClip(clip.id), read.sourceUs, maxWidth, maxHeight);
+            read.path, ClipReaderPool::streamIdForClip(clip.id), read.sourceUs, maxWidth, maxHeight);
     }
 
     return {};
@@ -561,9 +559,8 @@ void fillGpuLayerPixels(GpuLayer &layer, const drift::Clip &clip, drift::TimeUs 
     const drift::Effect *timeEcho = findTimeEchoEffect(clip.effects);
     if (!timeEcho && clip.type == drift::ClipType::Video) {
         const drift::VideoRead read = drift::resolveVideoRead(clip, timelineUs);
-        const QString videoPath = (!clip.stabilizePath.isEmpty() && QFile::exists(clip.stabilizePath)) ? clip.stabilizePath : read.path;
         const Nv12Frame nv12 = ClipReaderPool::instance().readVideoFrameNv12(
-            videoPath, ClipReaderPool::streamIdForClip(clip.id), read.sourceUs, maxWidth, maxHeight);
+            read.path, ClipReaderPool::streamIdForClip(clip.id), read.sourceUs, maxWidth, maxHeight);
         if (nv12.isValid()) {
             layer.nv12 = nv12.data;
             layer.nv12Width = nv12.width;

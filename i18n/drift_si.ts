@@ -1542,10 +1542,6 @@
         <translation>මුහුණු ට්‍රැකය හිස් කරන්න</translation>
     </message>
     <message>
-        <source>Analyzing video for stabilization (Pass 1)…</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Face detection already in progress</source>
         <translation>මුහුණු හඳුනාගැනීම දැනටමත් සිදුවෙමින් පවතී</translation>
     </message>
@@ -1752,10 +1748,6 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Rendering stabilized video (Pass 2)…</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Video stabilized successfully!</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1840,6 +1832,46 @@
     </message>
     <message>
         <source>Media edited</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Building keyframes…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rendering stabilized video…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Analyzing camera motion…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilization cancelled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilization analysis file is missing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not read camera motion from the analysis file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilize with Keyframes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilization keyframes applied.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not store the stabilized video.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change Stabilization Mode</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5334,6 +5366,10 @@ If playback stutters, try another.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Stabilization</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Animation</source>
         <translation type="unfinished">සජීවිකරණය</translation>
     </message>
@@ -6641,6 +6677,89 @@ If playback stutters, try another.</source>
     <message>
         <source>Could not write subtitle file</source>
         <translation>උපසිරැසි ගොනුව ලිවීමට නොහැකි විය</translation>
+    </message>
+</context>
+<context>
+    <name>StabilizeInspector</name>
+    <message>
+        <source>Bake a new video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Animate with keyframes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update stabilization</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Re-apply keyframes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilize with keyframes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Re-stabilize video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilize video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Smooths camera shake by writing position keyframes. Linear pans stay as two keys far apart; only direction changes get extra keys. Changing smoothness or tripod does not update the preview until you apply.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Smooths camera shake. Drift scans the clip once, then renders a new video. Changing smoothness or tripod does not update the preview until you apply.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bake a new file, or animate the clip with sparse transform keys</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Smoothing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>How many frames the smoother looks ahead and behind. Higher values hide more shake but crop the picture more.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tripod mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Locks the framing as if the camera were on a tripod. Crops more aggressively than smoothing alone.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Position keys still use the last run. Update to apply these settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview still uses the last run. Update to apply these settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation type="unfinished">ඉවත් කරන්න</translation>
+    </message>
+    <message>
+        <source>Stabilizing…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">අවලංගු කරන්න</translation>
     </message>
 </context>
 <context>
@@ -8020,34 +8139,6 @@ If playback stutters, try another.</source>
     <message>
         <source>Reset position &amp; size</source>
         <translation>පිහිටීම සහ ප්‍රමාණය යළි සකසන්න</translation>
-    </message>
-    <message>
-        <source>Video Stabilization</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Analyzing...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Stabilize Video</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Re-stabilize Video</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remove</source>
-        <translation type="unfinished">ඉවත් කරන්න</translation>
-    </message>
-    <message>
-        <source>Smoothing</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Tripod Mode (Freeze)</source>
-        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

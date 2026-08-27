@@ -222,8 +222,18 @@ QJsonObject clipToJson(const Clip &clip)
         {QStringLiteral("faceTrackPath"), clip.faceTrackPath},
         {QStringLiteral("faceTrackSrcOffsetUs"), qint64(clip.faceTrackSrcOffsetUs)},
         {QStringLiteral("stabilizePath"), clip.stabilizePath},
+        {QStringLiteral("stabilizeMode"), stabilizeModeToString(clip.stabilizeMode)},
         {QStringLiteral("stabilizeSmoothing"), clip.stabilizeSmoothing},
         {QStringLiteral("stabilizeTripod"), clip.stabilizeTripod},
+        {QStringLiteral("stabilizeAppliedSmoothing"), clip.stabilizeAppliedSmoothing},
+        {QStringLiteral("stabilizeAppliedTripod"), clip.stabilizeAppliedTripod},
+        {QStringLiteral("stabilizeAppliedMode"), stabilizeModeToString(clip.stabilizeAppliedMode)},
+        {QStringLiteral("stabilizeHasRestPose"), clip.stabilizeHasRestPose},
+        {QStringLiteral("stabilizeRestX"), clip.stabilizeRestX},
+        {QStringLiteral("stabilizeRestY"), clip.stabilizeRestY},
+        {QStringLiteral("stabilizeRestW"), clip.stabilizeRestW},
+        {QStringLiteral("stabilizeRestH"), clip.stabilizeRestH},
+        {QStringLiteral("stabilizeRestRot"), clip.stabilizeRestRot},
         {QStringLiteral("fadeInUs"), static_cast<double>(clip.fadeInUs)},
         {QStringLiteral("fadeOutUs"), static_cast<double>(clip.fadeOutUs)},
         {QStringLiteral("fadeCurve"), fadeCurveToString(clip.fadeCurve)},
@@ -308,8 +318,27 @@ Clip clipFromJsonV2(const QJsonObject &object, int canvasW = 1920, int canvasH =
     clip.faceTrackSrcOffsetUs =
         TimeUs(object.value(QStringLiteral("faceTrackSrcOffsetUs")).toInteger(0));
     clip.stabilizePath = object.value(QStringLiteral("stabilizePath")).toString();
+    clip.stabilizeMode =
+        stabilizeModeFromString(object.value(QStringLiteral("stabilizeMode")).toString());
     clip.stabilizeSmoothing = object.value(QStringLiteral("stabilizeSmoothing")).toInt(15);
     clip.stabilizeTripod = object.value(QStringLiteral("stabilizeTripod")).toBool(false);
+    clip.stabilizeAppliedSmoothing = object.value(QStringLiteral("stabilizeAppliedSmoothing")).toInt(-1);
+    clip.stabilizeAppliedTripod = object.value(QStringLiteral("stabilizeAppliedTripod")).toBool(false);
+    clip.stabilizeAppliedMode =
+        stabilizeModeFromString(object.value(QStringLiteral("stabilizeAppliedMode")).toString());
+    clip.stabilizeHasRestPose = object.value(QStringLiteral("stabilizeHasRestPose")).toBool(false);
+    clip.stabilizeRestX = object.value(QStringLiteral("stabilizeRestX")).toDouble(0.0);
+    clip.stabilizeRestY = object.value(QStringLiteral("stabilizeRestY")).toDouble(0.0);
+    clip.stabilizeRestW = object.value(QStringLiteral("stabilizeRestW")).toDouble(0.0);
+    clip.stabilizeRestH = object.value(QStringLiteral("stabilizeRestH")).toDouble(0.0);
+    clip.stabilizeRestRot = object.value(QStringLiteral("stabilizeRestRot")).toDouble(0.0);
+    // Older projects stored a bake without recording which settings produced it.
+    // Treat the current sliders as applied so the inspector does not warn spuriously.
+    if (!clip.stabilizePath.isEmpty() && clip.stabilizeAppliedSmoothing < 0) {
+        clip.stabilizeAppliedSmoothing = clip.stabilizeSmoothing;
+        clip.stabilizeAppliedTripod = clip.stabilizeTripod;
+        clip.stabilizeAppliedMode = StabilizeMode::Bake;
+    }
     clip.fadeInUs = static_cast<TimeUs>(object.value(QStringLiteral("fadeInUs")).toDouble());
     clip.fadeOutUs = static_cast<TimeUs>(object.value(QStringLiteral("fadeOutUs")).toDouble());
     clip.fadeCurve = fadeCurveFromString(object.value(QStringLiteral("fadeCurve")).toString());

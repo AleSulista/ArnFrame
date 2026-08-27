@@ -5,12 +5,14 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QPointF>
 #include <QSet>
 #include <QStandardPaths>
 
 #include "core/ClipAnimation.h"
 #include "core/Keyframe.h"
 #include "core/Project.h"
+#include "core/Stabilize.h"
 #include "core/ShapePath.h"
 #include "core/SrtIO.h"
 #include "core/SubtitleCue.h"
@@ -70,6 +72,11 @@ private slots:
     void rgbSplitEffectParametersSerialization();
     void blockGlitchEffectParametersSerialization();
     void clipSpeedSourceMapping();
+    void piecewiseLinearBreakpointsCompressLinearMotion();
+    void stabilizePlanDoesNotKeyEveryFrame();
+    void stabilizeApplyPlanScalesOffsetsByZoom();
+    void stabilizeTrfAsciiAndBinaryParse();
+    void stabilizeModeSerialization();
     void speedCurveMatchesConstantSpeed();
     void speedCurveRampRetimesDuration();
     void speedCurveMappingIsMonotonic();
@@ -1523,6 +1530,197 @@ void CoreTest::clipSpeedSourceMapping()
     // At timeline start → near srcOut; at +1s timeline with speed 2 → srcOut - 2s
     QCOMPARE(clip.timelineToSourceUs(drift::secondsToUs(1.0)), clip.srcOut);
     QCOMPARE(clip.timelineToSourceUs(drift::secondsToUs(2.0)), clip.srcOut - drift::secondsToUs(2.0));
+
+    clip.reverse = false;
+    const drift::TimeUs local = drift::secondsToUs(1.5);
+    QCOMPARE(clip.sourceUsToClipLocalUs(clip.timelineToSourceUs(clip.timelineStart + local)), local);
+}
+
+void CoreTest::piecewiseLinearBreakpointsCompressLinearMotion()
+{
+    QVector<QPointF> line;
+    for (int i = 0; i < 80; ++i)
+        line.append(QPointF(i * 2.0, i * 0.5));
+    const QVector<int> linear = drift::piecewiseLinearBreakpoints(line, 0.5);
+    QCOMPARE(linear.size(), 2);
+    QCOMPARE(linear.first(), 0);
+    QCOMPARE(linear.last(), 79);
+
+    QVector<QPointF> corner;
+    for (int i = 0; i <= 40; ++i)
+        corner.append(QPointF(i, 0));
+    for (int i = 41; i <= 80; ++i)
+        corner.append(QPointF(40.0, i - 40.0));
+    const QVector<int> broken = drift::piecewiseLinearBreakpoints(corner, 0.5);
+    QCOMPARE(broken.size(), 3);
+    QCOMPARE(broken.first(), 0);
+    QCOMPARE(broken.last(), 80);
+}
+
+void CoreTest::stabilizePlanDoesNotKeyEveryFrame()
+{
+    const QString path = QDir::temp().filePath(QStringLiteral("drift-stab-plan-test.trf"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write("VID.STAB 1\n");
+    const int frames = 60;
+    for (int i = 0; i < frames; ++i) {
+        // Constant 2px/frame pan: one linear segment after accumulation.
+        file.write(QStringLiteral("Frame %1 (List 1 [(LM 2 0 10 10 16 0.5 0.9)])\n")
+                       .arg(i)
+                       .toLatin1());
+    }
+    file.close();
+
+    drift::Clip clip;
+    clip.srcIn = 0;
+    clip.srcOut = drift::secondsToUs(2.0);
+    clip.timelineDuration = clip.srcOut;
+    clip.speed = 1.0;
+    clip.transformX.setKeyframe(0, 0.0);
+    clip.transformY.setKeyframe(0, 0.0);
+    clip.transformW.setKeyframe(0, 1280.0);
+    clip.transformH.setKeyframe(0, 720.0);
+
+    const drift::StabilizePlan pan = drift::planStabilizeKeyframes(
+        path, clip, 30.0, 1.0, 1.0, /*smoothing=*/15, /*tripod=*/true, /*epsilon=*/1.0);
+    QVERIFY(pan.keys.size() >= 2);
+    QVERIFY(pan.keys.size() < frames / 4);
+
+    const drift::StabilizePlan smoothed = drift::planStabilizeKeyframes(
+        path, clip, 30.0, 1.0, 1.0, /*smoothing=*/15, /*tripod=*/false, /*epsilon=*/1.0);
+    QVERIFY(smoothed.keys.size() < frames / 2);
+
+    // vid.stab applies C - S (tripod: the accumulated path). A +x local motion
+    // must produce a +x clip offset; the old S - C sign doubled the shake.
+    QVERIFY(!pan.keys.isEmpty());
+    QVERIFY(pan.keys.last().dx > 1.0);
+
+    // Smoothing's moving average is one-sided at t=0, so C-S starts with a DC
+    // offset. We subtract that so the first key sits on the rest pose.
+    QCOMPARE(smoothed.keys.first().timeUs, 0);
+    QVERIFY(qAbs(smoothed.keys.first().dx) < 0.5);
+    QVERIFY(qAbs(smoothed.keys.first().dy) < 0.5);
+    QCOMPARE(pan.keys.first().timeUs, 0);
+    QVERIFY(qAbs(pan.keys.first().dx) < 0.5);
+    QVERIFY(qAbs(pan.keys.first().dy) < 0.5);
+
+    QFile::remove(path);
+}
+
+void CoreTest::stabilizeApplyPlanScalesOffsetsByZoom()
+{
+    drift::Clip clip;
+    clip.transformX.setKeyframe(0, 100.0);
+    clip.transformY.setKeyframe(0, 200.0);
+    clip.transformW.setKeyframe(0, 400.0);
+    clip.transformH.setKeyframe(0, 400.0);
+
+    drift::StabilizePlan plan;
+    plan.keys.append({0, 0.0, 0.0});
+    plan.keys.append({1'000'000, 20.0, -10.0});
+    drift::applyStabilizePlan(clip, plan);
+
+    // maxAbs=20 → zoom = 1 + 2*20/400 = 1.1. W/H grow around the rest center,
+    // and X/Y offsets are in that zoomed pixel grid.
+    const double zoom = 1.1;
+    const double originX = 100.0 + 200.0 - 400.0 * zoom * 0.5;
+    const double originY = 200.0 + 200.0 - 400.0 * zoom * 0.5;
+    QCOMPARE(clip.transformX.evaluateAt(0), originX);
+    QCOMPARE(clip.transformY.evaluateAt(0), originY);
+    QCOMPARE(clip.transformX.evaluateAt(1'000'000), originX + 20.0 * zoom);
+    QCOMPARE(clip.transformY.evaluateAt(1'000'000), originY - 10.0 * zoom);
+    QCOMPARE(clip.transformW.evaluateAt(0), 400.0 * zoom);
+    QCOMPARE(clip.transformH.evaluateAt(0), 400.0 * zoom);
+}
+
+void CoreTest::stabilizeTrfAsciiAndBinaryParse()
+{
+    const QString asciiPath = QDir::temp().filePath(QStringLiteral("drift-stab-ascii.trf"));
+    QFile ascii(asciiPath);
+    QVERIFY(ascii.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    ascii.write("VID.STAB 1\n");
+    ascii.write("Frame 0 (List 0 [])\n");
+    ascii.write("Frame 1 (List 1 [(LM 4 -2 8 12 16 0.5 0.9)])\n");
+    ascii.close();
+
+    const QVector<QPointF> asciiFrames = drift::readTrfFrameTranslations(asciiPath);
+    QVERIFY(asciiFrames.size() >= 2);
+    QCOMPARE(asciiFrames.at(1).x(), 4.0);
+    QCOMPARE(asciiFrames.at(1).y(), -2.0);
+
+    const QString binaryPath = QDir::temp().filePath(QStringLiteral("drift-stab-binary.trf"));
+    QFile binary(binaryPath);
+    QVERIFY(binary.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    binary.write("TRF1", 4);
+    const qint32 accuracy = 15, shakiness = 5, stepSize = 6;
+    const double contrast = 0.25;
+    binary.write(reinterpret_cast<const char *>(&accuracy), sizeof(accuracy));
+    binary.write(reinterpret_cast<const char *>(&shakiness), sizeof(shakiness));
+    binary.write(reinterpret_cast<const char *>(&stepSize), sizeof(stepSize));
+    binary.write(reinterpret_cast<const char *>(&contrast), sizeof(contrast));
+    const qint32 frameNum = 1;
+    const qint32 count = 1;
+    binary.write(reinterpret_cast<const char *>(&frameNum), sizeof(frameNum));
+    binary.write(reinterpret_cast<const char *>(&count), sizeof(count));
+    const qint16 vx = 7, vy = 3, fx = 10, fy = 20, size = 16;
+    const double fieldContrast = 0.4, match = 0.8;
+    binary.write(reinterpret_cast<const char *>(&vx), sizeof(vx));
+    binary.write(reinterpret_cast<const char *>(&vy), sizeof(vy));
+    binary.write(reinterpret_cast<const char *>(&fx), sizeof(fx));
+    binary.write(reinterpret_cast<const char *>(&fy), sizeof(fy));
+    binary.write(reinterpret_cast<const char *>(&size), sizeof(size));
+    binary.write(reinterpret_cast<const char *>(&fieldContrast), sizeof(fieldContrast));
+    binary.write(reinterpret_cast<const char *>(&match), sizeof(match));
+    binary.close();
+
+    const QVector<QPointF> binaryFrames = drift::readTrfFrameTranslations(binaryPath);
+    QVERIFY(binaryFrames.size() >= 2);
+    QCOMPARE(binaryFrames.at(1).x(), 7.0);
+    QCOMPARE(binaryFrames.at(1).y(), 3.0);
+
+    QFile::remove(asciiPath);
+    QFile::remove(binaryPath);
+}
+
+void CoreTest::stabilizeModeSerialization()
+{
+    drift::Project project;
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("clip-stab");
+    clip.type = drift::ClipType::Video;
+    clip.stabilizeMode = drift::StabilizeMode::Keyframes;
+    clip.stabilizeSmoothing = 22;
+    clip.stabilizeTripod = true;
+    clip.stabilizeAppliedSmoothing = 22;
+    clip.stabilizeAppliedTripod = true;
+    clip.stabilizeAppliedMode = drift::StabilizeMode::Keyframes;
+    clip.stabilizeHasRestPose = true;
+    clip.stabilizeRestX = 12.0;
+    clip.stabilizeRestY = 34.0;
+    clip.stabilizeRestW = 640.0;
+    clip.stabilizeRestH = 360.0;
+    clip.stabilizeRestRot = 5.0;
+    project.tracks()[0].clips.append(clip);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+    QVERIFY(error.isEmpty());
+    const drift::Clip &loadedClip = loaded.tracks()[0].clips[0];
+    QCOMPARE(loadedClip.stabilizeMode, drift::StabilizeMode::Keyframes);
+    QCOMPARE(loadedClip.stabilizeSmoothing, 22);
+    QCOMPARE(loadedClip.stabilizeTripod, true);
+    QCOMPARE(loadedClip.stabilizeAppliedMode, drift::StabilizeMode::Keyframes);
+    QCOMPARE(loadedClip.stabilizeHasRestPose, true);
+    QCOMPARE(loadedClip.stabilizeRestX, 12.0);
+    QCOMPARE(loadedClip.stabilizeRestY, 34.0);
+    QCOMPARE(loadedClip.stabilizeRestW, 640.0);
+    QCOMPARE(loadedClip.stabilizeRestH, 360.0);
+    QCOMPARE(loadedClip.stabilizeRestRot, 5.0);
 }
 
 namespace {

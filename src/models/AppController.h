@@ -605,10 +605,11 @@ public:
                                          double minSceneSeconds = 0.0);
     Q_INVOKABLE void cancelSceneDetection();
     Q_INVOKABLE void stabilizeClip(int trackIndex, int clipIndex);
-    Q_INVOKABLE void cancelStabilization();
+    Q_INVOKABLE void cancelClipStabilization(int trackIndex, int clipIndex);
     Q_INVOKABLE void removeClipStabilization(int trackIndex, int clipIndex);
     Q_INVOKABLE void setClipStabilizeSmoothing(int trackIndex, int clipIndex, int value);
     Q_INVOKABLE void setClipStabilizeTripod(int trackIndex, int clipIndex, bool enabled);
+    Q_INVOKABLE void setClipStabilizeMode(int trackIndex, int clipIndex, const QString &mode);
     // Whether the optional object-labelling pass can run. False until the object-model
     // addon is installed, which is what the panel's toggle is gated on.
     Q_INVOKABLE bool objectDetectionAvailable() const;
@@ -1240,6 +1241,11 @@ protected:
     void finalizeGeneratedSubtitles(drift::TimeUs timelineStart, drift::TimeUs timelineDuration,
                                     const QList<drift::SubtitleCue> &cues);
     void finalizeDenoise(const QString &clipId, const QString &audioPath);
+    void watchStabilizeProgress(QProcess *process, const QString &clipId, qint64 durationUs,
+                                double rangeFrom, double rangeTo);
+    void setStabilizeProgress(const QString &clipId, double progress, const QString &status,
+                              bool force);
+    void clearStabilizeProgress(const QString &clipId);
     // Shared body of the two denoise jobs: decodes [srcIn, srcIn + span) of `path` at the model's
     // rate, runs each channel through it, and writes the result. Runs on a worker thread.
     // `originalPathOut` is written only when non-empty, for the preview's A/B source.
@@ -1451,6 +1457,10 @@ protected:
     QString m_sceneDetectStatus;
     QAtomicInt m_sceneDetectCancel = 0;
     QMap<QString, QProcess*> m_stabilizeProcesses;
+    QMap<QString, double> m_stabilizeProgress;
+    QMap<QString, QString> m_stabilizeStatus;
+    QMap<QString, qint64> m_stabilizeLastProgressEmit;
+    QSet<QString> m_stabilizeCancelRequested;
     quint64 m_sceneGeneration = 0;
     bool m_segSessionActive = false;
     bool m_segForTemplate = false;

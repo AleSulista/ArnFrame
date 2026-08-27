@@ -1746,10 +1746,6 @@
         <translation>Impossible de créer le dossier de cache de stabilisation</translation>
     </message>
     <message>
-        <source>Rendering stabilized video (Pass 2)…</source>
-        <translation>Rendu de la vidéo stabilisée (Passe 2)...</translation>
-    </message>
-    <message>
         <source>Stabilize Video</source>
         <translation>Stabiliser la vidéo</translation>
     </message>
@@ -1760,10 +1756,6 @@
     <message>
         <source>Stabilization rendering failed or cancelled.</source>
         <translation>Échec ou annulation du rendu de stabilisation.</translation>
-    </message>
-    <message>
-        <source>Analyzing video for stabilization (Pass 1)…</source>
-        <translation>Analyse de la vidéo pour stabilisation (Passe 1)...</translation>
     </message>
     <message>
         <source>Stabilization analysis failed or cancelled.</source>
@@ -1846,6 +1838,46 @@
     </message>
     <message>
         <source>Media edited</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Building keyframes…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rendering stabilized video…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Analyzing camera motion…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilization cancelled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilization analysis file is missing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not read camera motion from the analysis file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilize with Keyframes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilization keyframes applied.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not store the stabilized video.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change Stabilization Mode</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5341,6 +5373,10 @@ En cas de saccades à la lecture, essayez un autre mode.</translation>
         <translation>Transformation</translation>
     </message>
     <message>
+        <source>Stabilization</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Animation</source>
         <translation>Animation</translation>
     </message>
@@ -6648,6 +6684,89 @@ En cas de saccades à la lecture, essayez un autre mode.</translation>
     <message>
         <source>Could not write subtitle file</source>
         <translation>Impossible d&apos;écrire le fichier de sous-titres</translation>
+    </message>
+</context>
+<context>
+    <name>StabilizeInspector</name>
+    <message>
+        <source>Bake a new video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Animate with keyframes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update stabilization</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Re-apply keyframes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilize with keyframes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Re-stabilize video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stabilize video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Smooths camera shake by writing position keyframes. Linear pans stay as two keys far apart; only direction changes get extra keys. Changing smoothness or tripod does not update the preview until you apply.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Smooths camera shake. Drift scans the clip once, then renders a new video. Changing smoothness or tripod does not update the preview until you apply.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bake a new file, or animate the clip with sparse transform keys</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Smoothing</source>
+        <translation type="unfinished">Lissage</translation>
+    </message>
+    <message>
+        <source>How many frames the smoother looks ahead and behind. Higher values hide more shake but crop the picture more.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tripod mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Locks the framing as if the camera were on a tripod. Crops more aggressively than smoothing alone.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Position keys still use the last run. Update to apply these settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview still uses the last run. Update to apply these settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation type="unfinished">Supprimer</translation>
+    </message>
+    <message>
+        <source>Stabilizing…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Annuler</translation>
     </message>
 </context>
 <context>
@@ -8029,34 +8148,6 @@ En cas de saccades à la lecture, essayez un autre mode.</translation>
     <message>
         <source>Reset position &amp; size</source>
         <translation>Réinitialiser position &amp; taille</translation>
-    </message>
-    <message>
-        <source>Video Stabilization</source>
-        <translation>Stabilisation vidéo</translation>
-    </message>
-    <message>
-        <source>Smoothing</source>
-        <translation>Lissage</translation>
-    </message>
-    <message>
-        <source>Tripod Mode (Freeze)</source>
-        <translation>Mode Trépied (Fixe)</translation>
-    </message>
-    <message>
-        <source>Analyzing...</source>
-        <translation>Analyse en cours...</translation>
-    </message>
-    <message>
-        <source>Re-stabilize Video</source>
-        <translation>Restabiliser la vidéo</translation>
-    </message>
-    <message>
-        <source>Stabilize Video</source>
-        <translation>Stabiliser la vidéo</translation>
-    </message>
-    <message>
-        <source>Remove</source>
-        <translation>Supprimer</translation>
     </message>
 </context>
 <context>

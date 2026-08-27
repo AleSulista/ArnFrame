@@ -5,6 +5,7 @@
 #include "core/Clip.h"
 #include "core/Mask.h"
 #include "core/SpeedCurve.h"
+#include "core/Stabilize.h"
 #include "core/ShapePath.h"
 #include "core/SubtitleCue.h"
 #include "core/SrtIO.h"
@@ -129,6 +130,86 @@ QString newStabilizePath()
         return {};
     const QString name = QStringLiteral("stabilize-%1.trf").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
     return QDir(dir).filePath(name);
+}
+
+bool findClipById(const drift::Project &project, const QString &clipId, int *trackOut, int *clipOut)
+{
+    for (int t = 0; t < project.tracks().size(); ++t) {
+        const QList<drift::Clip> &clips = project.tracks().at(t).clips;
+        for (int c = 0; c < clips.size(); ++c) {
+            if (clips.at(c).id == clipId) {
+                if (trackOut)
+                    *trackOut = t;
+                if (clipOut)
+                    *clipOut = c;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+qint64 parseFfmpegOutTimeUs(const QByteArray &chunk)
+{
+    qint64 fromUs = -1;
+    qint64 fromMs = -1;
+    const QList<QByteArray> lines = chunk.split('\n');
+    for (QByteArray raw : lines) {
+        const QByteArray line = raw.trimmed();
+        if (line.startsWith("out_time_us=")) {
+            bool ok = false;
+            const qint64 v = line.mid(12).toLongLong(&ok);
+            if (ok && v >= 0)
+                fromUs = v;
+        } else if (line.startsWith("out_time_ms=")) {
+            bool ok = false;
+            const qint64 v = line.mid(12).toLongLong(&ok);
+            if (ok && v >= 0)
+                fromMs = v * 1000;
+        }
+    }
+    if (fromUs >= 0)
+        return fromUs;
+    return fromMs;
+}
+
+QString ffmpegFilterPathArg(const QString &path)
+{
+    QString escaped = path;
+    escaped.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+    escaped.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+    escaped.replace(QLatin1Char(':'), QStringLiteral("\\:"));
+    return escaped;
+}
+
+// vidstabdetect fileformat=ascii writes a text dump that vidstabtransform only
+// consumes for the first frame; binary is the format both filters agree on.
+bool stabilizeTrfIsAscii(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    const QByteArray head = file.read(16);
+    return head.startsWith('#') || head.startsWith("Frame") || head.startsWith("VID.STAB");
+}
+
+// ffmpeg's filtergraph parser chokes on spaces inside input=/result= even when the
+// argument is already a single QProcess token. The app data dir is "CutWire Drift",
+// so detect/transform always write and read a no-space path in /tmp, then we copy
+// the analysis file into the cache for the next run.
+QString stabilizeFfmpegTrfPath(const QString &clipId)
+{
+    return QDir::temp().filePath(QStringLiteral("drift-stab-%1.trf").arg(clipId));
+}
+
+bool copyStabilizeTrf(const QString &from, const QString &to)
+{
+    if (from == to)
+        return QFile::exists(to);
+    if (!QFile::exists(from))
+        return false;
+    QFile::remove(to);
+    return QFile::copy(from, to);
 }
 
 QTranslator g_appTranslator;
@@ -2029,10 +2110,17 @@ QVariantMap AppController::clipToMap(const drift::Clip &clip) const
         {QStringLiteral("hasFaceTrack"), !clip.faceTrackPath.isEmpty()},
         {QStringLiteral("faceTrackHasContours"), faceTrackHasContours(clip.faceTrackPath)},
         {QStringLiteral("faceTrackHasMesh"), faceTrackHasMesh(clip.faceTrackPath)},
-        {QStringLiteral("stabilized"), !clip.stabilizePath.isEmpty()},
+        {QStringLiteral("stabilized"), clip.stabilizeAppliedSmoothing >= 0},
         {QStringLiteral("stabilizing"), clip.stabilizing},
+        {QStringLiteral("stabilizeMode"), drift::stabilizeModeToString(clip.stabilizeMode)},
         {QStringLiteral("stabilizeSmoothing"), clip.stabilizeSmoothing},
         {QStringLiteral("stabilizeTripod"), clip.stabilizeTripod},
+        {QStringLiteral("stabilizeStale"), clip.stabilizeAppliedSmoothing >= 0
+             && (clip.stabilizeSmoothing != clip.stabilizeAppliedSmoothing
+                 || clip.stabilizeTripod != clip.stabilizeAppliedTripod
+                 || clip.stabilizeMode != clip.stabilizeAppliedMode)},
+        {QStringLiteral("stabilizeProgress"), m_stabilizeProgress.value(clip.id, 0.0)},
+        {QStringLiteral("stabilizeStatus"), m_stabilizeStatus.value(clip.id)},
         {QStringLiteral("start"), drift::usToSeconds(clip.timelineStart)},
         {QStringLiteral("duration"), drift::usToSeconds(clip.timelineDuration)},
         {QStringLiteral("inPoint"), drift::usToSeconds(clip.srcIn)},
@@ -5991,6 +6079,56 @@ void AppController::clearFaceTrack(int trackIndex, int clipIndex)
     finishEdit(tr("Clear Face Track"));
 }
 
+void AppController::setStabilizeProgress(const QString &clipId, double progress, const QString &status,
+                                         bool force)
+{
+    const double clamped = qBound(0.0, progress, 1.0);
+    const bool statusChanged = !status.isEmpty() && m_stabilizeStatus.value(clipId) != status;
+    m_stabilizeProgress.insert(clipId, clamped);
+    if (!status.isEmpty())
+        m_stabilizeStatus.insert(clipId, status);
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!force && !statusChanged && now - m_stabilizeLastProgressEmit.value(clipId, 0) < 100)
+        return;
+    m_stabilizeLastProgressEmit.insert(clipId, now);
+
+    int selectedTrack = -1;
+    int selectedClip = -1;
+    if (m_selectedTrack >= 0 && m_selectedTrack < m_project.tracks().size()) {
+        selectedTrack = m_selectedTrack;
+        selectedClip = m_selectedClip;
+    }
+    if (selectedTrack >= 0 && selectedClip >= 0
+        && selectedClip < m_project.tracks().at(selectedTrack).clips.size()
+        && m_project.tracks().at(selectedTrack).clips.at(selectedClip).id == clipId) {
+        emit selectedClipDataChanged();
+    }
+}
+
+void AppController::clearStabilizeProgress(const QString &clipId)
+{
+    m_stabilizeProgress.remove(clipId);
+    m_stabilizeStatus.remove(clipId);
+    m_stabilizeLastProgressEmit.remove(clipId);
+    m_stabilizeCancelRequested.remove(clipId);
+}
+
+void AppController::watchStabilizeProgress(QProcess *process, const QString &clipId, qint64 durationUs,
+                                           double rangeFrom, double rangeTo)
+{
+    connect(process, &QProcess::readyReadStandardOutput, this,
+            [this, process, clipId, durationUs, rangeFrom, rangeTo]() {
+                const qint64 outUs = parseFfmpegOutTimeUs(process->readAllStandardOutput());
+                if (outUs < 0)
+                    return;
+                const double frac = durationUs > 0
+                                        ? qBound(0.0, double(outUs) / double(durationUs), 1.0)
+                                        : 0.0;
+                setStabilizeProgress(clipId, rangeFrom + (rangeTo - rangeFrom) * frac, QString(), false);
+            });
+}
+
 void AppController::stabilizeClip(int trackIndex, int clipIndex)
 {
     if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
@@ -6010,7 +6148,7 @@ void AppController::stabilizeClip(int trackIndex, int clipIndex)
     }
 
     const QString clipId = clip.id;
-    if (m_stabilizeProcesses.contains(clipId)) {
+    if (clip.stabilizing || m_stabilizeProcesses.contains(clipId)) {
         setLastMessage(tr("Stabilization already in progress for this clip"), QStringLiteral("warning"));
         return;
     }
@@ -6029,140 +6167,311 @@ void AppController::stabilizeClip(int trackIndex, int clipIndex)
         return;
     }
 
-    const QString trfPath = QDir(dir).filePath(QStringLiteral("stabilize-%1.trf").arg(clipId));
+    const QString cacheTrfPath = QDir(dir).filePath(QStringLiteral("stabilize-%1.trf").arg(clipId));
+    const QString ffmpegTrfPath = stabilizeFfmpegTrfPath(clipId);
     const QString stabilizedVideoPath = QDir(dir).filePath(QStringLiteral("stabilized-%1-%2.mp4")
                                                 .arg(clipId)
                                                 .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
 
+    qint64 durationUs = 0;
+    if (const drift::MediaAsset *sourceAsset = m_project.asset(clip.assetId))
+        durationUs = sourceAsset->durationUs;
+    if (durationUs <= 0)
+        durationUs = clip.srcOut;
+
+    m_stabilizeCancelRequested.remove(clipId);
     m_project.tracks()[trackIndex].clips[clipIndex].stabilizing = true;
+    if (QFile::exists(cacheTrfPath) && stabilizeTrfIsAscii(cacheTrfPath))
+        QFile::remove(cacheTrfPath);
+    const bool skipDetect = QFile::exists(cacheTrfPath);
+    const bool keyframeMode = clip.stabilizeMode == drift::StabilizeMode::Keyframes;
+    const QString startStatus = skipDetect
+                                    ? (keyframeMode ? tr("Building keyframes…")
+                                                    : tr("Rendering stabilized video…"))
+                                    : tr("Analyzing camera motion…");
+    setStabilizeProgress(clipId, 0.0, startStatus, true);
     emit selectedClipDataChanged();
 
-    auto runPass2 = [this, clipId, trfPath, stabilizedVideoPath, ffmpeg]() {
-        setLastMessage(tr("Rendering stabilized video (Pass 2)…"));
+    auto finishStabilizeFailure = [this, clipId](const QString &message, const QString &severity) {
+        int foundTrack = -1;
+        int foundClip = -1;
+        if (findClipById(m_project, clipId, &foundTrack, &foundClip)) {
+            m_project.tracks()[foundTrack].clips[foundClip].stabilizing = false;
+        }
+        clearStabilizeProgress(clipId);
+        emit selectedClipDataChanged();
+        setLastMessage(message, severity);
+    };
 
-        QProcess *processPass2 = new QProcess(this);
-        m_stabilizeProcesses.insert(clipId, processPass2);
+    auto runKeyframes = [this, clipId, cacheTrfPath, ffmpegTrfPath, skipDetect,
+                         finishStabilizeFailure]() {
+        if (m_stabilizeCancelRequested.contains(clipId)) {
+            finishStabilizeFailure(tr("Stabilization cancelled."), QStringLiteral("info"));
+            return;
+        }
 
         int foundTrack = -1;
         int foundClip = -1;
-        for (int t = 0; t < m_project.tracks().size(); ++t) {
-            for (int c = 0; c < m_project.tracks()[t].clips.size(); ++c) {
-                if (m_project.tracks()[t].clips[c].id == clipId) {
-                    foundTrack = t;
-                    foundClip = c;
-                    break;
-                }
-            }
-        }
-
-        if (foundTrack == -1) {
-            QFile::remove(stabilizedVideoPath);
-            m_stabilizeProcesses.remove(clipId);
+        if (!findClipById(m_project, clipId, &foundTrack, &foundClip)) {
+            clearStabilizeProgress(clipId);
             return;
         }
+
+        const QString trfPath = QFile::exists(ffmpegTrfPath) ? ffmpegTrfPath : cacheTrfPath;
+        if (!QFile::exists(trfPath)) {
+            finishStabilizeFailure(tr("Stabilization analysis file is missing."),
+                                   QStringLiteral("error"));
+            return;
+        }
+
+        setStabilizeProgress(clipId, skipDetect ? 0.15 : 0.85, tr("Building keyframes…"), true);
+
+        drift::Clip clipCopy = m_project.tracks()[foundTrack].clips[foundClip];
+        double fps = 30.0;
+        int sourceW = 0;
+        int sourceH = 0;
+        if (const drift::MediaAsset *asset = m_project.asset(clipCopy.assetId)) {
+            if (asset->fps > 1.0)
+                fps = asset->fps;
+            sourceW = asset->width;
+            sourceH = asset->height;
+        }
+        const double layoutW = clipCopy.stabilizeHasRestPose
+                                   ? clipCopy.stabilizeRestW
+                                   : (clipCopy.transformW.isEmpty() ? sourceW
+                                                                    : clipCopy.transformW.evaluateAt(0));
+        const double layoutH = clipCopy.stabilizeHasRestPose
+                                   ? clipCopy.stabilizeRestH
+                                   : (clipCopy.transformH.isEmpty() ? sourceH
+                                                                    : clipCopy.transformH.evaluateAt(0));
+        const double scaleX = (sourceW > 0 && layoutW > 0.0) ? layoutW / sourceW : 1.0;
+        const double scaleY = (sourceH > 0 && layoutH > 0.0) ? layoutH / sourceH : 1.0;
+        const int smoothing = clipCopy.stabilizeSmoothing;
+        const bool tripod = clipCopy.stabilizeTripod;
+
+        (void)QtConcurrent::run([this, clipId, trfPath, clipCopy, fps, scaleX, scaleY, smoothing,
+                                 tripod, finishStabilizeFailure]() {
+            const drift::StabilizePlan plan = drift::planStabilizeKeyframes(
+                trfPath, clipCopy, fps, scaleX, scaleY, smoothing, tripod);
+            QMetaObject::invokeMethod(
+                this,
+                [this, clipId, plan, finishStabilizeFailure]() {
+                    if (m_stabilizeCancelRequested.contains(clipId)) {
+                        finishStabilizeFailure(tr("Stabilization cancelled."), QStringLiteral("info"));
+                        return;
+                    }
+
+                    int foundTrack2 = -1;
+                    int foundClip2 = -1;
+                    if (!findClipById(m_project, clipId, &foundTrack2, &foundClip2)) {
+                        clearStabilizeProgress(clipId);
+                        return;
+                    }
+
+                    if (plan.keys.isEmpty()) {
+                        finishStabilizeFailure(tr("Could not read camera motion from the analysis file."),
+                                               QStringLiteral("error"));
+                        return;
+                    }
+
+                    drift::Clip &outClip = m_project.tracks()[foundTrack2].clips[foundClip2];
+                    outClip.stabilizing = false;
+                    const QString oldBake = outClip.stabilizePath;
+                    const drift::Project before = m_project;
+                    if (!oldBake.isEmpty()) {
+                        QFile::remove(oldBake);
+                        outClip.stabilizePath.clear();
+                    }
+                    drift::applyStabilizePlan(outClip, plan);
+                    outClip.stabilizeAppliedSmoothing = outClip.stabilizeSmoothing;
+                    outClip.stabilizeAppliedTripod = outClip.stabilizeTripod;
+                    outClip.stabilizeAppliedMode = drift::StabilizeMode::Keyframes;
+                    pushProjectEdit(before, tr("Stabilize with Keyframes"));
+                    clearStabilizeProgress(clipId);
+                    finishEdit(tr("Stabilize with Keyframes"));
+                    setLastMessage(tr("Stabilization keyframes applied."));
+                },
+                Qt::QueuedConnection);
+        });
+    };
+
+    auto runPass2 = [this, clipId, cacheTrfPath, ffmpegTrfPath, stabilizedVideoPath, ffmpeg,
+                     durationUs, skipDetect, finishStabilizeFailure, runKeyframes]() {
+        if (m_stabilizeCancelRequested.contains(clipId)) {
+            QFile::remove(stabilizedVideoPath);
+            finishStabilizeFailure(tr("Stabilization cancelled."), QStringLiteral("info"));
+            return;
+        }
+
+        int foundTrack = -1;
+        int foundClip = -1;
+        if (!findClipById(m_project, clipId, &foundTrack, &foundClip)) {
+            QFile::remove(stabilizedVideoPath);
+            clearStabilizeProgress(clipId);
+            return;
+        }
+
+        if (m_project.tracks()[foundTrack].clips[foundClip].stabilizeMode
+            == drift::StabilizeMode::Keyframes) {
+            runKeyframes();
+            return;
+        }
+
+        if (!QFile::exists(ffmpegTrfPath) && !copyStabilizeTrf(cacheTrfPath, ffmpegTrfPath)) {
+            finishStabilizeFailure(tr("Stabilization analysis file is missing."),
+                                   QStringLiteral("error"));
+            return;
+        }
+
+        const QString renderStatus = tr("Rendering stabilized video…");
+        const double rangeFrom = skipDetect ? 0.0 : 0.5;
+        setStabilizeProgress(clipId, rangeFrom, renderStatus, true);
+
+        QProcess *processPass2 = new QProcess(this);
+        m_stabilizeProcesses.insert(clipId, processPass2);
+        processPass2->setProcessChannelMode(QProcess::SeparateChannels);
 
         int smoothing = m_project.tracks()[foundTrack].clips[foundClip].stabilizeSmoothing;
         int tripod = m_project.tracks()[foundTrack].clips[foundClip].stabilizeTripod ? 1 : 0;
 
+        const QString tmpVideoPath =
+            QDir::temp().filePath(QStringLiteral("drift-stab-out-%1.mp4").arg(clipId));
+        QFile::remove(tmpVideoPath);
+
         QStringList args2;
         args2 << QStringLiteral("-y")
+              << QStringLiteral("-nostats")
+              << QStringLiteral("-progress") << QStringLiteral("pipe:1")
               << QStringLiteral("-i") << m_project.tracks()[foundTrack].clips[foundClip].path
-              << QStringLiteral("-vf") << QStringLiteral("vidstabtransform=input=%1:smoothing=%2:tripod=%3:optzoom=1").arg(trfPath).arg(smoothing).arg(tripod)
+              << QStringLiteral("-vf") << QStringLiteral("vidstabtransform=input='%1':smoothing=%2:tripod=%3:optzoom=1")
+                     .arg(ffmpegFilterPathArg(ffmpegTrfPath)).arg(smoothing).arg(tripod)
               << QStringLiteral("-map") << QStringLiteral("0:v")
               << QStringLiteral("-c:v") << QStringLiteral("libx264")
               << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p")
               << QStringLiteral("-map") << QStringLiteral("0:a?")
               << QStringLiteral("-c:a") << QStringLiteral("copy")
-              << stabilizedVideoPath;
+              << tmpVideoPath;
+
+        watchStabilizeProgress(processPass2, clipId, durationUs, rangeFrom, 1.0);
 
         connect(processPass2, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-                [this, processPass2, clipId, stabilizedVideoPath](int exitCode2, QProcess::ExitStatus exitStatus2) {
+                [this, processPass2, clipId, stabilizedVideoPath, tmpVideoPath, finishStabilizeFailure](int exitCode2, QProcess::ExitStatus exitStatus2) {
                     processPass2->deleteLater();
                     m_stabilizeProcesses.remove(clipId);
+                    const bool cancelled = m_stabilizeCancelRequested.contains(clipId);
+                    const QByteArray err = processPass2->readAllStandardError();
+                    const bool transformFailed = err.contains("cannot open")
+                        || err.contains("error parsing")
+                        || err.contains("calculating transformations failed");
 
                     int foundTrack2 = -1;
                     int foundClip2 = -1;
-                    for (int t = 0; t < m_project.tracks().size(); ++t) {
-                        for (int c = 0; c < m_project.tracks()[t].clips.size(); ++c) {
-                            if (m_project.tracks()[t].clips[c].id == clipId) {
-                                foundTrack2 = t;
-                                foundClip2 = c;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (foundTrack2 == -1) {
+                    if (!findClipById(m_project, clipId, &foundTrack2, &foundClip2)) {
+                        QFile::remove(tmpVideoPath);
                         QFile::remove(stabilizedVideoPath);
+                        clearStabilizeProgress(clipId);
                         return;
                     }
 
-                    m_project.tracks()[foundTrack2].clips[foundClip2].stabilizing = false;
-                    if (exitStatus2 == QProcess::NormalExit && exitCode2 == 0 && QFile::exists(stabilizedVideoPath)) {
-                        const drift::Project before = m_project;
-                        const QString oldPath = m_project.tracks()[foundTrack2].clips[foundClip2].stabilizePath;
-                        m_project.tracks()[foundTrack2].clips[foundClip2].stabilizePath = stabilizedVideoPath;
-                        pushProjectEdit(before, tr("Stabilize Video"));
-                        if (!oldPath.isEmpty() && oldPath != stabilizedVideoPath) {
-                            QFile::remove(oldPath);
+                    drift::Clip &outClip = m_project.tracks()[foundTrack2].clips[foundClip2];
+                    outClip.stabilizing = false;
+                    const bool wrote = exitStatus2 == QProcess::NormalExit && exitCode2 == 0
+                        && QFile::exists(tmpVideoPath) && !transformFailed;
+                    if (wrote) {
+                        QFile::remove(stabilizedVideoPath);
+                        if (!copyStabilizeTrf(tmpVideoPath, stabilizedVideoPath)) {
+                            QFile::remove(tmpVideoPath);
+                            finishStabilizeFailure(tr("Could not store the stabilized video."),
+                                                   QStringLiteral("error"));
+                            return;
                         }
+                        const QString oldPath = outClip.stabilizePath;
+                        const drift::Project before = m_project;
+                        drift::restoreStabilizeRestPose(outClip);
+                        if (outClip.transformX.keyframes().size() > 1
+                            || outClip.transformY.keyframes().size() > 1) {
+                            const double x = outClip.transformX.isEmpty()
+                                                 ? 0.0
+                                                 : outClip.transformX.evaluateAt(0);
+                            const double y = outClip.transformY.isEmpty()
+                                                 ? 0.0
+                                                 : outClip.transformY.evaluateAt(0);
+                            outClip.transformX = {};
+                            outClip.transformY = {};
+                            outClip.transformX.setKeyframe(0, x);
+                            outClip.transformY.setKeyframe(0, y);
+                        }
+                        outClip.stabilizePath = stabilizedVideoPath;
+                        outClip.stabilizeAppliedSmoothing = outClip.stabilizeSmoothing;
+                        outClip.stabilizeAppliedTripod = outClip.stabilizeTripod;
+                        outClip.stabilizeAppliedMode = drift::StabilizeMode::Bake;
+                        pushProjectEdit(before, tr("Stabilize Video"));
+                        if (!oldPath.isEmpty() && oldPath != stabilizedVideoPath)
+                            QFile::remove(oldPath);
+                        clearStabilizeProgress(clipId);
+                        finishEdit(tr("Stabilize Video"));
                         setLastMessage(tr("Video stabilized successfully!"));
                     } else {
+                        QFile::remove(tmpVideoPath);
                         QFile::remove(stabilizedVideoPath);
-                        setLastMessage(tr("Stabilization rendering failed or cancelled."), QStringLiteral("error"));
+                        clearStabilizeProgress(clipId);
+                        emit selectedClipDataChanged();
+                        if (cancelled)
+                            setLastMessage(tr("Stabilization cancelled."));
+                        else
+                            setLastMessage(tr("Stabilization rendering failed or cancelled."), QStringLiteral("error"));
                     }
-                    emit selectedClipDataChanged();
-                    finishEdit(tr("Stabilize Video"));
                 });
 
         processPass2->start(ffmpeg, args2);
     };
 
-    if (QFile::exists(trfPath)) {
+    if (skipDetect) {
+        copyStabilizeTrf(cacheTrfPath, ffmpegTrfPath);
         runPass2();
     } else {
-        setLastMessage(tr("Analyzing video for stabilization (Pass 1)…"));
-
         QProcess *processPass1 = new QProcess(this);
         m_stabilizeProcesses.insert(clipId, processPass1);
 
+        QFile::remove(ffmpegTrfPath);
         QStringList args1;
         args1 << QStringLiteral("-y")
+              << QStringLiteral("-nostats")
+              << QStringLiteral("-progress") << QStringLiteral("pipe:1")
               << QStringLiteral("-i") << clip.path
-              << QStringLiteral("-vf") << QStringLiteral("vidstabdetect=shakiness=5:accuracy=15:fileformat=ascii:result=%1").arg(trfPath)
+              << QStringLiteral("-vf") << QStringLiteral("vidstabdetect=shakiness=5:accuracy=15:result='%1'")
+                     .arg(ffmpegFilterPathArg(ffmpegTrfPath))
               << QStringLiteral("-f") << QStringLiteral("null")
               << QStringLiteral("-");
 
+        watchStabilizeProgress(processPass1, clipId, durationUs, 0.0, keyframeMode ? 0.8 : 0.5);
+
         connect(processPass1, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-                [this, processPass1, clipId, trfPath, runPass2](int exitCode, QProcess::ExitStatus exitStatus) {
+                [this, processPass1, clipId, cacheTrfPath, ffmpegTrfPath, runPass2,
+                 finishStabilizeFailure](int exitCode, QProcess::ExitStatus exitStatus) {
                     processPass1->deleteLater();
                     m_stabilizeProcesses.remove(clipId);
+                    const bool cancelled = m_stabilizeCancelRequested.contains(clipId);
 
                     int foundTrack = -1;
                     int foundClip = -1;
-                    for (int t = 0; t < m_project.tracks().size(); ++t) {
-                        for (int c = 0; c < m_project.tracks()[t].clips.size(); ++c) {
-                            if (m_project.tracks()[t].clips[c].id == clipId) {
-                                foundTrack = t;
-                                foundClip = c;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (foundTrack == -1) {
-                        QFile::remove(trfPath);
+                    if (!findClipById(m_project, clipId, &foundTrack, &foundClip)) {
+                        QFile::remove(ffmpegTrfPath);
+                        clearStabilizeProgress(clipId);
                         return;
                     }
 
-                    if (exitStatus != QProcess::NormalExit || exitCode != 0 || !QFile::exists(trfPath)) {
-                        m_project.tracks()[foundTrack].clips[foundClip].stabilizing = false;
-                        emit selectedClipDataChanged();
-                        QFile::remove(trfPath);
-                        setLastMessage(tr("Stabilization analysis failed or cancelled."), QStringLiteral("error"));
+                    if (exitStatus != QProcess::NormalExit || exitCode != 0 || !QFile::exists(ffmpegTrfPath)) {
+                        QFile::remove(ffmpegTrfPath);
+                        if (cancelled)
+                            finishStabilizeFailure(tr("Stabilization cancelled."), QStringLiteral("info"));
+                        else
+                            finishStabilizeFailure(tr("Stabilization analysis failed or cancelled."),
+                                                    QStringLiteral("error"));
                         return;
                     }
 
+                    copyStabilizeTrf(ffmpegTrfPath, cacheTrfPath);
                     runPass2();
                 });
 
@@ -6170,11 +6479,23 @@ void AppController::stabilizeClip(int trackIndex, int clipIndex)
     }
 }
 
-void AppController::cancelStabilization()
+void AppController::cancelClipStabilization(int trackIndex, int clipIndex)
 {
-    for (QProcess *p : m_stabilizeProcesses.values()) {
-        p->kill();
-    }
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::Clip &clip = track.clips.at(clipIndex);
+    const QString clipId = clip.id;
+    if (!clip.stabilizing && !m_stabilizeProcesses.contains(clipId))
+        return;
+
+    m_stabilizeCancelRequested.insert(clipId);
+    QProcess *process = m_stabilizeProcesses.value(clipId, nullptr);
+    if (process)
+        process->kill();
 }
 
 void AppController::removeClipStabilization(int trackIndex, int clipIndex)
@@ -6186,18 +6507,22 @@ void AppController::removeClipStabilization(int trackIndex, int clipIndex)
         return;
 
     const drift::Clip clip = track.clips.at(clipIndex);
-    if (!clip.stabilizePath.isEmpty()) {
+    if (!clip.stabilizePath.isEmpty())
         QFile::remove(clip.stabilizePath);
-    }
 
     const QString dir = stabilizationCacheDir();
-    if (!dir.isEmpty()) {
+    if (!dir.isEmpty())
         QFile::remove(QDir(dir).filePath(QStringLiteral("stabilize-%1.trf").arg(clip.id)));
-    }
+    QFile::remove(stabilizeFfmpegTrfPath(clip.id));
 
     const drift::Project before = m_project;
-    m_project.tracks()[trackIndex].clips[clipIndex].stabilizePath.clear();
-    m_project.tracks()[trackIndex].clips[clipIndex].stabilizing = false;
+    drift::Clip &outClip = m_project.tracks()[trackIndex].clips[clipIndex];
+    outClip.stabilizePath.clear();
+    outClip.stabilizing = false;
+    outClip.stabilizeAppliedSmoothing = -1;
+    outClip.stabilizeAppliedTripod = false;
+    outClip.stabilizeAppliedMode = drift::StabilizeMode::Bake;
+    drift::restoreStabilizeRestPose(outClip);
     pushProjectEdit(before, tr("Remove Stabilization"));
     emit selectedClipDataChanged();
     finishEdit(tr("Remove Stabilization"));
@@ -6220,10 +6545,6 @@ void AppController::setClipStabilizeSmoothing(int trackIndex, int clipIndex, int
     pushProjectEdit(before, tr("Change Stabilization Smoothing"));
     emit selectedClipDataChanged();
     finishEdit(tr("Change Stabilization Smoothing"));
-
-    if (!clip.stabilizePath.isEmpty()) {
-        stabilizeClip(trackIndex, clipIndex);
-    }
 }
 
 void AppController::setClipStabilizeTripod(int trackIndex, int clipIndex, bool enabled)
@@ -6243,10 +6564,26 @@ void AppController::setClipStabilizeTripod(int trackIndex, int clipIndex, bool e
     pushProjectEdit(before, tr("Change Stabilization Tripod Mode"));
     emit selectedClipDataChanged();
     finishEdit(tr("Change Stabilization Tripod Mode"));
+}
 
-    if (!clip.stabilizePath.isEmpty()) {
-        stabilizeClip(trackIndex, clipIndex);
-    }
+void AppController::setClipStabilizeMode(int trackIndex, int clipIndex, const QString &mode)
+{
+    if (trackIndex < 0 || trackIndex >= m_project.tracks().size())
+        return;
+    const drift::Track &track = m_project.tracks().at(trackIndex);
+    if (clipIndex < 0 || clipIndex >= track.clips.size())
+        return;
+
+    const drift::StabilizeMode parsed = drift::stabilizeModeFromString(mode);
+    drift::Clip &clip = m_project.tracks()[trackIndex].clips[clipIndex];
+    if (clip.stabilizeMode == parsed)
+        return;
+
+    const drift::Project before = m_project;
+    clip.stabilizeMode = parsed;
+    pushProjectEdit(before, tr("Change Stabilization Mode"));
+    emit selectedClipDataChanged();
+    finishEdit(tr("Change Stabilization Mode"));
 }
 
 void AppController::detectFacesForClip(int trackIndex, int clipIndex)

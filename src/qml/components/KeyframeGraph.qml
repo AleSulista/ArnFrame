@@ -285,7 +285,8 @@ Item {
     height: visible ? laneHeight : 0
     // Open whenever the clip has an animation to show, even if every curve is currently folded
     // away — otherwise hiding the last one would take the chips with it.
-    visible: (propertiesTab === "transform" || propertiesTab === "effects")
+    visible: (propertiesTab === "transform" || propertiesTab === "effects"
+              || propertiesTab === "stabilize")
              && hasClip && clip && allSeries.length > 0
 
     // Curve editing focuses one series: it gets tangent handles and owns the value axis,

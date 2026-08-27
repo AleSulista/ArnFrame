@@ -1614,6 +1614,13 @@ void EngineTest::resolveVideoReadMirrorsTheClipOntoTheProxy()
     QCOMPARE(read.sourceUs, coverOut - clip.srcIn);
 
     QCOMPARE(drift::videoReadPath(clip), proxyPath);
+
+    clip.reverse = false;
+    clip.stabilizePath = proxyPath;
+    read = drift::resolveVideoRead(clip, clip.timelineStart);
+    QCOMPARE(read.path, proxyPath);
+    QCOMPARE(read.sourceUs, clip.srcIn);
+    QCOMPARE(drift::videoReadPath(clip), proxyPath);
 }
 
 void EngineTest::effectProcessorPassthroughWithoutEffects()

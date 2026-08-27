@@ -21,6 +21,29 @@ QString indexPath()
     return dir.isEmpty() ? QString() : QDir(dir).filePath(QStringLiteral("index.json"));
 }
 
+// The bake lives under AppDataLocation, which on this app is "CutWire Drift" —
+// spaces. avformat_open_input is fine with spaces; some decode backends are not.
+// Keep a no-space copy in /tmp named by clip id so preview always has a clean path.
+QString bakePathForDecode(const Clip &clip)
+{
+    if (clip.stabilizePath.isEmpty() || !QFile::exists(clip.stabilizePath))
+        return {};
+    const QString &path = clip.stabilizePath;
+    if (!path.contains(QLatin1Char(' ')) && !path.contains(QLatin1Char('\'')))
+        return path;
+
+    const QString tmp =
+        QDir::temp().filePath(QStringLiteral("drift-stab-out-%1.mp4").arg(clip.id));
+    const QFileInfo src(path);
+    const QFileInfo dst(tmp);
+    if (!dst.exists() || dst.size() != src.size() || dst.lastModified() < src.lastModified()) {
+        QFile::remove(tmp);
+        if (!QFile::copy(path, tmp) || !QFile::exists(tmp))
+            return path;
+    }
+    return tmp;
+}
+
 } // namespace
 
 ReverseProxyCache &ReverseProxyCache::instance()
@@ -207,23 +230,30 @@ void ReverseProxyCache::sweep(qint64 maxBytes)
 VideoRead resolveVideoRead(const Clip &clip, TimeUs timelineUs)
 {
     const TimeUs sourceUs = clip.timelineToSourceUs(timelineUs);
-    if (!clip.reverse || clip.type != ClipType::Video || clip.path.isEmpty())
-        return {clip.path, sourceUs};
+    VideoRead read{clip.path, sourceUs};
+    if (clip.reverse && clip.type == ClipType::Video && !clip.path.isEmpty()) {
+        TimeUs coverEndUs = 0;
+        const QString proxy =
+            ReverseProxyCache::instance().lookup(clip.path, clip.srcIn, clip.srcOut, &coverEndUs);
+        // The proxy holds [coverIn, coverOut] flipped end-for-end, so a source time maps to its
+        // mirror. timelineToSourceUs already walked down from srcOut, and this undoes that walk —
+        // the composite reads the proxy strictly forwards.
+        if (!proxy.isEmpty())
+            read = {proxy, coverEndUs - sourceUs};
+    }
 
-    TimeUs coverEndUs = 0;
-    const QString proxy =
-        ReverseProxyCache::instance().lookup(clip.path, clip.srcIn, clip.srcOut, &coverEndUs);
-    if (proxy.isEmpty())
-        return {clip.path, sourceUs};
-
-    // The proxy holds [coverIn, coverOut] flipped end-for-end, so a source time maps to its
-    // mirror. timelineToSourceUs already walked down from srcOut, and this undoes that walk —
-    // the composite reads the proxy strictly forwards.
-    return {proxy, coverEndUs - sourceUs};
+    // A baked stabilize file is the original source, already transformed. Prefer it over the
+    // live path (and over a reverse proxy of the unstabilized file).
+    if (const QString baked = bakePathForDecode(clip); !baked.isEmpty())
+        read.path = baked;
+    return read;
 }
 
 QString videoReadPath(const Clip &clip)
 {
+    if (const QString baked = bakePathForDecode(clip); !baked.isEmpty())
+        return baked;
+
     if (!clip.reverse || clip.type != ClipType::Video || clip.path.isEmpty())
         return clip.path;
 

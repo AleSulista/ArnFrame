@@ -74,4 +74,18 @@ BlendMode blendModeFromString(const QString &mode)
     return BlendMode::Normal;
 }
 
+QString stabilizeModeToString(StabilizeMode mode)
+{
+    if (mode == StabilizeMode::Keyframes)
+        return QStringLiteral("keyframes");
+    return QStringLiteral("bake");
+}
+
+StabilizeMode stabilizeModeFromString(const QString &mode)
+{
+    if (mode == QLatin1String("keyframes"))
+        return StabilizeMode::Keyframes;
+    return StabilizeMode::Bake;
+}
+
 } // namespace drift

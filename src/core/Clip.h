@@ -27,6 +27,11 @@ enum class BlendMode { Normal, Multiply, Screen, Overlay, Add, Darken, Lighten }
 QString blendModeToString(BlendMode mode);
 BlendMode blendModeFromString(const QString &mode);
 
+enum class StabilizeMode { Bake, Keyframes };
+
+QString stabilizeModeToString(StabilizeMode mode);
+StabilizeMode stabilizeModeFromString(const QString &mode);
+
 struct Clip
 {
     QString id;
@@ -74,11 +79,25 @@ struct Clip
     QString faceTrackPath;
     TimeUs faceTrackSrcOffsetUs = 0;
 
-    // Path to the .trf video stabilization file and UI progress states
+    // Baked stabilized video written by the two-pass ffmpeg job, plus the settings
+    // last used to produce it. `stabilizing` is transient UI state and is not saved.
+    // Keyframe mode writes sparse transformX/Y keys instead of a new video.
     QString stabilizePath;
     bool stabilizing = false;
+    StabilizeMode stabilizeMode = StabilizeMode::Bake;
     int stabilizeSmoothing = 15;
     bool stabilizeTripod = false;
+    int stabilizeAppliedSmoothing = -1;
+    bool stabilizeAppliedTripod = false;
+    StabilizeMode stabilizeAppliedMode = StabilizeMode::Bake;
+    // Layout snapshot taken before keyframe stabilize, so Update/Remove can
+    // rebuild or restore without stacking offsets on an already-shifted pose.
+    bool stabilizeHasRestPose = false;
+    double stabilizeRestX = 0.0;
+    double stabilizeRestY = 0.0;
+    double stabilizeRestW = 0.0;
+    double stabilizeRestH = 0.0;
+    double stabilizeRestRot = 0.0;
 
     // Fades are edge-relative ramps applied multiplicatively on top of opacity
     // (visual clips) or volume (audio). They auto-follow trims and speed changes.
@@ -133,6 +152,19 @@ struct Clip
             return srcIn;
         const TimeUs range = srcOut - srcIn;
         return srcOut - qMin(offset, range);
+    }
+
+    // Inverse of timelineToSourceUs relative to timelineStart: source time → clip-local time.
+    TimeUs sourceUsToClipLocalUs(TimeUs sourceUs) const
+    {
+        const TimeUs range = srcOut - srcIn;
+        if (range <= 0)
+            return 0;
+        TimeUs offset = reverse ? (srcOut - sourceUs) : (sourceUs - srcIn);
+        offset = qBound(TimeUs{0}, offset, range);
+        if (hasSpeedCurve())
+            return speedCurve.timelineOffsetForSourceOffset(offset, range);
+        return static_cast<TimeUs>(llround(static_cast<double>(offset) / effectiveSpeed()));
     }
 
     void syncSrcOutFromSpeed(TimeUs maxSourceUs)

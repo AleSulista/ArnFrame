@@ -62,6 +62,7 @@ PanelFrame {
             root.syncShapeTab()
             root.syncTextTab()
             root.syncAnimationTab()
+            root.syncStabilizeTab()
         }
         function onSelectedClipDataChanged() {
             root.clipDataRevision++
@@ -88,6 +89,7 @@ PanelFrame {
         "shape": qsTr("Shape"),
         "subtitles": qsTr("Subtitles"),
         "transform": qsTr("Transform"),
+        "stabilize": qsTr("Stabilization"),
         "animation": qsTr("Animation"),
         "audio": qsTr("Audio"),
         "speed": qsTr("Speed"),
@@ -109,14 +111,15 @@ PanelFrame {
         ListElement { tabId: "shape"; icon: 2; group: 0 }
         ListElement { tabId: "subtitles"; icon: 3; group: 0 }
         ListElement { tabId: "transform"; icon: 4; group: 1 }
-        ListElement { tabId: "animation"; icon: 5; group: 1 }
-        ListElement { tabId: "audio"; icon: 6; group: 1 }
-        ListElement { tabId: "speed"; icon: 7; group: 1 }
-        ListElement { tabId: "blending"; icon: 8; group: 2 }
-        ListElement { tabId: "masks"; icon: 9; group: 2 }
-        ListElement { tabId: "effects"; icon: 10; group: 2 }
-        ListElement { tabId: "audioEffects"; icon: 11; group: 2 }
-        ListElement { tabId: "transition"; icon: 12; group: 2 }
+        ListElement { tabId: "stabilize"; icon: 5; group: 1 }
+        ListElement { tabId: "animation"; icon: 6; group: 1 }
+        ListElement { tabId: "audio"; icon: 7; group: 1 }
+        ListElement { tabId: "speed"; icon: 8; group: 1 }
+        ListElement { tabId: "blending"; icon: 9; group: 2 }
+        ListElement { tabId: "masks"; icon: 10; group: 2 }
+        ListElement { tabId: "effects"; icon: 11; group: 2 }
+        ListElement { tabId: "audioEffects"; icon: 12; group: 2 }
+        ListElement { tabId: "transition"; icon: 13; group: 2 }
     }
     property var tabIcons: [
         Theme.icons.info,
@@ -124,6 +127,7 @@ PanelFrame {
         Theme.icons.shapes,
         Theme.icons.captions,
         Theme.icons.maximize,
+        Theme.icons.locateFixed,
         Theme.icons.sparkles,
         Theme.icons.volumeHigh,
         Theme.icons.gauge,
@@ -145,6 +149,8 @@ PanelFrame {
             return root.clipKind === "video" || root.clipKind === "image"
                    || root.clipKind === "shape" || root.clipKind === "text"
                    || root.clipKind === "audio"
+        if (tabId === "stabilize")
+            return root.clipKind === "video"
         return true
     }
 
@@ -173,6 +179,7 @@ PanelFrame {
     readonly property int shapeTabIndex: tabIndexOf("shape")
     readonly property int textTabIndex: tabIndexOf("text")
     readonly property int animationTabIndex: tabIndexOf("animation")
+    readonly property int stabilizeTabIndex: tabIndexOf("stabilize")
 
     // The Subtitles tab only exists for subtitle clips, so leaving it selected would show a blank
     // pane once the selection moves off one. Selecting a subtitle clip never opens the tab by
@@ -200,6 +207,12 @@ PanelFrame {
     function syncAnimationTab() {
         if (root.animationTabIndex >= 0 && root.activeTab === root.animationTabIndex
                 && !root.tabVisible("animation"))
+            root.activeTab = 0
+    }
+
+    function syncStabilizeTab() {
+        if (root.stabilizeTabIndex >= 0 && root.activeTab === root.stabilizeTabIndex
+                && !root.tabVisible("stabilize"))
             root.activeTab = 0
     }
 
@@ -593,6 +606,11 @@ PanelFrame {
                 TransformInspector {
                     width: tabColumn.width
                     visible: root.currentTabId === "transform"
+                }
+
+                StabilizeInspector {
+                    width: tabColumn.width
+                    visible: root.currentTabId === "stabilize"
                 }
 
                 AnimationInspector {
