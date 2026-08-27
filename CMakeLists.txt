@@ -650,9 +650,9 @@ set_source_files_properties(src/qml/Toasts.qml PROPERTIES QT_QML_SINGLETON_TYPE 
 # AndroidBottomSheet and the drop is performed by AndroidTimeline.
 set_source_files_properties(src/qml/TouchDrag.qml PROPERTIES QT_QML_SINGLETON_TYPE true)
 
-# Lucide icons: SVG sources in resources/icons/ (from lucide-icons-1.25.0), PNGs for QML.
+# Lucide icons: use the original scalable SVG sources in QML.
 file(GLOB DRIFT_LUCIDE_ICONS RELATIVE "${CMAKE_SOURCE_DIR}" CONFIGURE_DEPENDS
-     "resources/icons/*.png")
+     "resources/icons/*.svg")
 
 qt_add_qml_module(drift
     URI Drift
