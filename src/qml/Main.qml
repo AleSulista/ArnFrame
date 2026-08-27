@@ -236,7 +236,9 @@ ApplicationWindow {
     function togglePreviewFullscreen() {
         if (previewFullscreen) {
             previewFullscreen = false
-            visibility = _preFullscreenVisibility
+            // KDE Plasma doesn't handle Fullscreen -> Maximized for some reason
+            visibility = _preFullscreenVisibility // Fullscreen -> Windowed
+            visibility = _preFullscreenVisibility // Windowed -> Maximized (if it was previously maximized)
         } else {
             _preFullscreenVisibility = visibility
             previewFullscreen = true
