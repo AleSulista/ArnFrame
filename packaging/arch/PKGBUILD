@@ -7,7 +7,7 @@ arch=('x86_64')
 url="https://github.com/CutWire-Studios/Drift"
 license=('GPL-3.0-or-later')
 depends=(
-    'qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-multimedia-ffmpeg'
+    'qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-multimedia' 'qt6-multimedia-ffmpeg'
     'ffmpeg' 'zstd' 'openssl' 'soundtouch'
 )
 # qt6-tools is LinguistTools (lupdate/lrelease): without it CMake skips qt_add_translations and

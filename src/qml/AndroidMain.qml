@@ -296,6 +296,7 @@ ApplicationWindow {
     SpeedCurveWindow { id: speedCurveWindow }
     FadeCurveWindow { id: fadeCurveWindow }
     MulticamWindow { id: multicamWindow }
+    MediaPreviewWindow { id: mediaPreviewWindow }
 
     // Every inspector reaches these through Window.window.<name>() — the same contract
     // Main.qml offers on desktop. A missing one is a runtime TypeError, not a dead button.
@@ -313,6 +314,10 @@ ApplicationWindow {
 
     function openFadeCurve(track, clip) {
         fadeCurveWindow.openFor(track, clip)
+    }
+
+    function openMediaPreview(assetIndex) {
+        mediaPreviewWindow.openFor(assetIndex)
     }
 
     function openMulticam() {
@@ -350,7 +355,7 @@ ApplicationWindow {
     // Back handling defers to them instead of popping the stack behind them.
     readonly property bool toolWindowOpen: segmentationWindow.visible || denoiseWindow.visible
                                            || speedCurveWindow.visible || fadeCurveWindow.visible
-                                           || multicamWindow.visible
+                                           || multicamWindow.visible || mediaPreviewWindow.visible
 
     function closeTopToolWindow() {
         if (segmentationWindow.visible)
@@ -363,6 +368,8 @@ ApplicationWindow {
             fadeCurveWindow.close()
         else if (multicamWindow.visible)
             multicamWindow.close()
+        else if (mediaPreviewWindow.visible)
+            mediaPreviewWindow.close()
     }
 
     Timer {

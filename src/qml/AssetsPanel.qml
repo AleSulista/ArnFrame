@@ -23,14 +23,6 @@ PanelFrame {
 
     Component.onCompleted: AssetLibrary.ensureAllMedia()
 
-    function addAssetToTimeline(assetIndex) {
-        if (typeof Window !== "undefined" && Window.window && Window.window.configureAndAddAsset) {
-            Window.window.configureAndAddAsset(assetIndex, () => EditorState.addClipFromAsset(assetIndex))
-        } else {
-            EditorState.addClipFromAsset(assetIndex)
-        }
-    }
-
     // Imports and reports the outcome. `importUrls` skips anything it cannot
     // probe, so a bad file used to just never appear with no explanation at all.
     // Comparing the row count before and after tells us how many were rejected.
@@ -210,6 +202,14 @@ PanelFrame {
                                     "", adjustedClips).arg(message))
             } else {
                 Toasts.success(qsTr("Replaced with “%1”.").arg(message))
+            }
+        }
+        function onAssetEditFinished(ok, message) {
+            if (!ok) {
+                if (message && message.length > 0)
+                    Toasts.warning(message)
+            } else {
+                Toasts.success(qsTr("Saved “%1”. Drag it onto the timeline.").arg(message))
             }
         }
     }
@@ -962,7 +962,10 @@ PanelFrame {
                 gridMode: assetsContent.gridMode
                 importing: root.importing
                 assetVisibleFn: function(kind) { return root.assetVisible(kind) }
-                onAddRequested: (assetIndex) => root.addAssetToTimeline(assetIndex)
+                onPreviewRequested: (assetIndex) => {
+                    if (typeof Window !== "undefined" && Window.window && Window.window.openMediaPreview)
+                        Window.window.openMediaPreview(assetIndex)
+                }
                 onRemoveRequested: (assetIndex) => root.requestRemoveAsset(assetIndex)
                 onReplaceRequested: (assetIndex) => root.requestReplaceAsset(assetIndex)
                 onRenameRequested: (assetIndex) => root.requestRenameAsset(assetIndex)

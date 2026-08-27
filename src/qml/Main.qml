@@ -382,6 +382,10 @@ ApplicationWindow {
         id: fadeCurveWindow
     }
 
+    MediaPreviewWindow {
+        id: mediaPreviewWindow
+    }
+
     // Opened from the clip inspector; a window rather than a dialog so the timeline stays visible.
     function openSegmentation(track, clip, startSeconds, durationSeconds) {
         segmentationWindow.openFor(track, clip, startSeconds, durationSeconds)
@@ -397,6 +401,10 @@ ApplicationWindow {
 
     function openFadeCurve(track, clip) {
         fadeCurveWindow.openFor(track, clip)
+    }
+
+    function openMediaPreview(assetIndex) {
+        mediaPreviewWindow.openFor(assetIndex)
     }
 
     // Opened from the header and from the "multicam" shortcut. Unlike the windows above it is

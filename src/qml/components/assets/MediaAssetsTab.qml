@@ -5,7 +5,7 @@ import ".."
 
 // Shared media browser: the kinds-filtered AssetLibrary grid/list used by the
 // Media tab. The parent owns width/height/visible and the import orchestration,
-// wiring add/import intents back through the callbacks below.
+// wiring preview/import intents back through the callbacks below.
 Item {
     id: root
 
@@ -18,8 +18,8 @@ Item {
     property var assetVisibleFn: function(kind) { return true }
     readonly property string query: search.text.trim().toLowerCase()
 
-    // Emitted when a card/row is clicked or tapped to add its asset.
-    signal addRequested(int assetIndex)
+    // Emitted from the card/row context menu. Opens the preview/edit window.
+    signal previewRequested(int assetIndex)
     // Emitted from the card/row context menu. The parent owns the in-use
     // check and the confirmation.
     signal removeRequested(int assetIndex)
@@ -100,11 +100,11 @@ Item {
             // cursor, while the list rows had both.
             HoverHandler {
                 id: cardHover
-                cursorShape: Qt.PointingHandCursor
+                cursorShape: assetDrag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
             }
 
             ThemedToolTip {
-                text: name
+                text: qsTr("%1 — drag to the timeline, right-click to preview").arg(name)
                 visible: cardHover.hovered
             }
 
@@ -228,10 +228,9 @@ Item {
                 // property active", and the drag dies mid-flight.
                 // EffectBrowser and ShapesTab already nest them this way.
                 TapHandler {
-                    // Unguarded, the tap competes with the drag for the
-                    // grab and fires an add on release after a drag.
+                    acceptedButtons: Qt.LeftButton
                     enabled: !assetDrag.active
-                    onTapped: root.addRequested(assetIndex)
+                    onLongPressed: cardMenu.popup()
                 }
                 DragHandler {
                     id: assetDrag
@@ -258,6 +257,11 @@ Item {
                 ThemedContextMenu {
                     id: cardMenu
 
+                    ThemedMenuItem {
+                        text: qsTr("Preview and edit…")
+                        icon.name: Theme.icons.eye
+                        onTriggered: root.previewRequested(assetIndex)
+                    }
                     ThemedMenuItem {
                         text: qsTr("Rename…")
                         icon.name: Theme.icons.pencil
@@ -300,11 +304,19 @@ Item {
             width: listColumn.width
             height: visible ? 48 : 0
             radius: Theme.radiusSm
-            color: rowMouse.containsMouse ? Theme.popoverHover : Theme.panelAccent
+            color: rowHover.hovered ? Theme.popoverHover : Theme.panelAccent
             visible: root.assetMatches(name, kind)
+            opacity: rowDrag.active ? 0.85 : 1
+            scale: rowDrag.active ? 1.02 : 1.0
 
             Behavior on color {
                 ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+            }
+            Behavior on opacity {
+                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+            }
+            Behavior on scale {
+                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
             }
 
             required property int index
@@ -317,6 +329,19 @@ Item {
             readonly property bool replaceBusy:
                 EditorState.replacingAssetId.length > 0
                 && EditorState.replacingAssetId === AssetLibrary.assetIdAt(assetIndex)
+
+            Drag.active: rowDrag.active
+            Drag.dragType: Drag.Automatic
+            Drag.supportedActions: Qt.CopyAction
+            Drag.keys: ["text/plain"]
+            Drag.mimeData: { "text/plain": assetIndex.toString() }
+            Drag.hotSpot.x: width / 2
+            Drag.hotSpot.y: height / 2
+
+            HoverHandler {
+                id: rowHover
+                cursorShape: rowDrag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+            }
 
             Row {
                 id: listRowContent
@@ -408,30 +433,48 @@ Item {
             }
 
             ThemedToolTip {
-                text: name
-                visible: rowMouse.containsMouse
+                text: qsTr("%1 — drag to the timeline, right-click to preview").arg(name)
+                visible: rowHover.hovered
             }
 
-            MouseArea {
-                id: rowMouse
+            Item {
                 anchors.fill: parent
-                hoverEnabled: true
-                // Adding to the timeline mid-swap would bind a clip to media that is
-                // about to change under it; the right-click menu goes with it.
                 enabled: !replaceBusy
-                cursorShape: Qt.PointingHandCursor
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                onClicked: (mouse) => {
-                    if (mouse.button === Qt.RightButton)
-                        rowMenu.popup()
-                    else
-                        root.addRequested(assetIndex)
+
+                TapHandler {
+                    acceptedButtons: Qt.LeftButton
+                    enabled: !rowDrag.active
+                    onLongPressed: rowMenu.popup()
+                }
+                DragHandler {
+                    id: rowDrag
+                    target: null
+                    acceptedButtons: Qt.LeftButton
+                    onActiveChanged: {
+                        if (active) {
+                            EditorState.draggingAssetIndex = assetIndex
+                        } else {
+                            Qt.callLater(function() {
+                                if (!rowDrag.active)
+                                    EditorState.draggingAssetIndex = -1
+                            })
+                        }
+                    }
+                }
+                TapHandler {
+                    acceptedButtons: Qt.RightButton
+                    onTapped: rowMenu.popup()
                 }
             }
 
             ThemedContextMenu {
                 id: rowMenu
 
+                ThemedMenuItem {
+                    text: qsTr("Preview and edit…")
+                    icon.name: Theme.icons.eye
+                    onTriggered: root.previewRequested(assetIndex)
+                }
                 ThemedMenuItem {
                     text: qsTr("Rename…")
                     icon.name: Theme.icons.pencil
@@ -466,7 +509,7 @@ Item {
         visible: AssetLibrary.count === 0 && !root.importing
         glyph: Theme.icons.film
         title: qsTr("No media yet")
-        hint: qsTr("Drag video, audio or images here, or use Import.")
+        hint: qsTr("Import video, audio or images, then drag them onto the timeline. Right-click a clip to preview and trim it first.")
         actionText: qsTr("Import media")
         actionVariant: "primary"
         onActionTriggered: root.importRequested()

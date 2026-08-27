@@ -1811,6 +1811,38 @@
         <translation>ප්‍රතිදාන ගොනුවක් සෑදීමට නොහැකි විය</translation>
     </message>
     <message>
+        <source>An edit is already saving</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not open the media file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Saving…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Saving media…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Couldn’t save that edit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Updating the library…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Couldn’t update the library</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media edited</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source> (denoised)</source>
         <translation> (ඝෝෂා ඉවත් කළ)</translation>
     </message>
@@ -2753,6 +2785,10 @@
     <message>
         <source>Replaced with “%1”.</source>
         <translation>“%1” සමඟ ප්‍රතිස්ථාපනය විය.</translation>
+    </message>
+    <message>
+        <source>Saved “%1”. Drag it onto the timeline.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Import Media</source>
@@ -4636,10 +4672,6 @@
         <translation>තවමත් මාධ්‍ය කිසිවක් නැත</translation>
     </message>
     <message>
-        <source>Drag video, audio or images here, or use Import.</source>
-        <translation>වීඩියෝ, ශ්‍රව්‍ය හෝ පින්තූර මෙතැනට අදින්න, නැතහොත් ආයාත කිරීම භාවිත කරන්න.</translation>
-    </message>
-    <message>
         <source>Import media</source>
         <translation>මාධ්‍ය ආයාත කරන්න</translation>
     </message>
@@ -4660,6 +4692,14 @@
         <translation>නම වෙනස් කරන්න…</translation>
     </message>
     <message>
+        <source>%1 — drag to the timeline, right-click to preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview and edit…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Replace media…</source>
         <translation>මාධ්‍ය ප්‍රතිස්ථාපනය කරන්න…</translation>
     </message>
@@ -4670,6 +4710,77 @@
     <message>
         <source>Remove from project</source>
         <translation>ව්‍යාපෘතියෙන් ඉවත් කරන්න</translation>
+    </message>
+    <message>
+        <source>Import video, audio or images, then drag them onto the timeline. Right-click a clip to preview and trim it first.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MediaPreviewWindow</name>
+    <message>
+        <source>Preview — %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play the clip and drag the ends to keep only the part you want. Save replaces this item in the media bin.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Drag the frame to crop. Save replaces this item in the media bin — then drag it onto the timeline.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play, crop, and drag the ends to keep a range. Save replaces this item in the media bin — then drag it onto the timeline.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation type="unfinished">විරාමය</translation>
+    </message>
+    <message>
+        <source>Play</source>
+        <translation type="unfinished">ධාවනය කරන්න</translation>
+    </message>
+    <message>
+        <source>Set In</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Set Out</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset</source>
+        <translation type="unfinished">යළි සකසන්න</translation>
+    </message>
+    <message>
+        <source>Saving…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save writes a new file over this item in the bin.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nothing to save — drag this item onto the timeline when you are ready.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">අවලංගු කරන්න</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">වසන්න</translation>
+    </message>
+    <message>
+        <source>Save</source>
+        <translation type="unfinished">සුරකින්න</translation>
     </message>
 </context>
 <context>

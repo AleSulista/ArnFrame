@@ -35,6 +35,7 @@
 #include "engine/ObjectDetector.h"
 #include "engine/OrtRuntime.h"
 #include "engine/MatteWriter.h"
+#include "engine/MediaEditor.h"
 #include "engine/AudioOnsets.h"
 #include "engine/MediaWaveform.h"
 #include "engine/FaceLandmarker.h"
@@ -2217,6 +2218,113 @@ bool AppController::exportAssetImage(int assetIndex, const QUrl &url)
     return image.save(destPath, "PNG");
 }
 
+void AppController::cancelAssetEdit()
+{
+    if (m_editingAsset)
+        m_assetEditCancel.storeRelaxed(1);
+}
+
+bool AppController::saveAssetEdit(int assetIndex, double inSeconds, double outSeconds,
+                                  double cropX, double cropY, double cropW, double cropH)
+{
+    if (m_editingAsset) {
+        setLastMessage(tr("An edit is already saving"), QStringLiteral("warning"));
+        return false;
+    }
+    if (!m_assetLibrary)
+        return false;
+
+    const QVariantMap asset = m_assetLibrary->assetAt(assetIndex);
+    if (asset.isEmpty())
+        return false;
+
+    const QString kind = asset.value(QStringLiteral("kind")).toString();
+    const QString path = asset.value(QStringLiteral("path")).toString();
+    const QString name = asset.value(QStringLiteral("name")).toString();
+    const QString assetId = m_assetLibrary->assetIdAt(assetIndex);
+    if (path.isEmpty() || assetId.isEmpty() || !QFileInfo(path).isFile()) {
+        setLastMessage(tr("Could not open the media file"), QStringLiteral("error"));
+        return false;
+    }
+
+    const QString outPath = drift::newEditedMediaPath(m_project.id(), kind);
+    if (outPath.isEmpty()) {
+        setLastMessage(tr("Could not create an output file"), QStringLiteral("error"));
+        return false;
+    }
+
+    setPlaying(false);
+
+    m_assetEditCancel.storeRelaxed(0);
+    m_assetEditProgress = 0.0;
+    m_assetEditStatus = tr("Saving…");
+    m_editingAsset = true;
+    m_editingAssetId = assetId;
+    m_assetEditKeepName = name;
+    emit assetEditChanged();
+    setLastMessage(tr("Saving media…"));
+
+    drift::MediaEditSpec spec;
+    spec.inputPath = path;
+    spec.outputPath = outPath;
+    spec.kind = kind;
+    spec.inSeconds = inSeconds;
+    spec.outSeconds = outSeconds;
+    spec.cropX = cropX;
+    spec.cropY = cropY;
+    spec.cropW = cropW;
+    spec.cropH = cropH;
+
+    (void)QtConcurrent::run([this, spec, assetIndex]() {
+        QString error;
+        const bool ok = drift::editMedia(spec, &error, [this](double fraction) {
+            if (m_assetEditCancel.loadRelaxed() != 0)
+                return false;
+            QMetaObject::invokeMethod(
+                this,
+                [this, fraction]() {
+                    m_assetEditProgress = fraction;
+                    emit assetEditChanged();
+                },
+                Qt::QueuedConnection);
+            return true;
+        });
+
+        QMetaObject::invokeMethod(
+            this,
+            [this, ok, error, spec, assetIndex]() {
+                if (!ok) {
+                    QFile::remove(spec.outputPath);
+                    m_editingAsset = false;
+                    m_editingAssetId.clear();
+                    m_assetEditKeepName.clear();
+                    m_assetEditProgress = 0.0;
+                    m_assetEditStatus = error;
+                    emit assetEditChanged();
+                    setLastMessage(error.isEmpty() ? tr("Couldn’t save that edit") : error,
+                                   QStringLiteral("error"));
+                    emit assetEditFinished(false, error);
+                    return;
+                }
+
+                m_assetEditStatus = tr("Updating the library…");
+                emit assetEditChanged();
+                if (!replaceAssetSource(assetIndex, QUrl::fromLocalFile(spec.outputPath))) {
+                    QFile::remove(spec.outputPath);
+                    m_editingAsset = false;
+                    m_editingAssetId.clear();
+                    m_assetEditKeepName.clear();
+                    m_assetEditProgress = 0.0;
+                    m_assetEditStatus = tr("Couldn’t update the library");
+                    emit assetEditChanged();
+                    emit assetEditFinished(false, m_assetEditStatus);
+                }
+            },
+            Qt::QueuedConnection);
+    });
+    return true;
+}
+
 void AppController::finalizeAssetReplace(const QString &assetId, const drift::MediaAsset &filled,
                                          bool ok)
 {
@@ -2230,42 +2338,69 @@ void AppController::finalizeAssetReplace(const QString &assetId, const drift::Me
     // whichever replace runs next.
     const QString replacementSourceUri = std::exchange(m_replacingAssetSourceUri, QString());
 
+    const bool fromEdit = (m_editingAssetId == assetId);
+    const QString keptEditName = fromEdit ? m_assetEditKeepName : QString();
+    auto finishEditJob = [&](bool editOk, const QString &message) {
+        if (!fromEdit)
+            return;
+        m_editingAsset = false;
+        m_editingAssetId.clear();
+        m_assetEditKeepName.clear();
+        m_assetEditProgress = editOk ? 1.0 : 0.0;
+        m_assetEditStatus = message;
+        emit assetEditChanged();
+        emit assetEditFinished(editOk, message);
+    };
+
     const drift::MediaAsset *current = m_project.asset(assetId);
     if (!current) {
         // The row was removed while the probe ran.
-        emit assetReplaceFinished(false, tr("That media is no longer in this project."), 0);
+        const QString message = tr("That media is no longer in this project.");
+        finishEditJob(false, message);
+        if (!fromEdit)
+            emit assetReplaceFinished(false, message, 0);
         return;
     }
 
     if (!ok) {
-        emit assetReplaceFinished(false, tr("That file could not be read."), 0);
+        const QString message = tr("That file could not be read.");
+        finishEditJob(false, message);
+        if (!fromEdit)
+            emit assetReplaceFinished(false, message, 0);
         return;
     }
 
     // A clip's type is fixed when it is created and decides which track it may sit on, so media
     // of another kind would leave e.g. a video clip on a video track with nothing to draw.
     if (filled.kind != current->kind) {
-        emit assetReplaceFinished(false,
-                                  tr("“%1” is %2, but this slot holds %3.")
-                                      .arg(filled.name, drift::mediaKindToString(filled.kind),
-                                           drift::mediaKindToString(current->kind)),
-                                  0);
+        const QString message = tr("“%1” is %2, but this slot holds %3.")
+                                    .arg(filled.name, drift::mediaKindToString(filled.kind),
+                                         drift::mediaKindToString(current->kind));
+        finishEditJob(false, message);
+        if (!fromEdit)
+            emit assetReplaceFinished(false, message, 0);
         return;
     }
 
-    const QString newName = filled.name;
+    const QString newName = keptEditName.isEmpty() ? filled.name : keptEditName;
     const drift::Project before = m_project;
     drift::MediaAsset replacement = filled;
+    replacement.name = newName;
     replacement.sourceUri = replacementSourceUri;
     if (!m_assetLibrary->applyProbedSource(assetId, replacement)) {
-        emit assetReplaceFinished(false, tr("That media is no longer in this project."), 0);
+        const QString message = tr("That media is no longer in this project.");
+        finishEditJob(false, message);
+        if (!fromEdit)
+            emit assetReplaceFinished(false, message, 0);
         return;
     }
 
     const int adjusted = rebindClipsToAsset(assetId, replacement);
-    pushProjectEdit(before, tr("Media replaced"));
-    finishEdit(tr("Media replaced"));
-    emit assetReplaceFinished(true, newName, adjusted);
+    pushProjectEdit(before, fromEdit ? tr("Media edited") : tr("Media replaced"));
+    finishEdit(fromEdit ? tr("Media edited") : tr("Media replaced"));
+    finishEditJob(true, newName);
+    if (!fromEdit)
+        emit assetReplaceFinished(true, newName, adjusted);
 }
 
 int AppController::rebindClipsToAsset(const QString &assetId, const drift::MediaAsset &asset)

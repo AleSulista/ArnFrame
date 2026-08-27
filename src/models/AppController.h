@@ -143,6 +143,10 @@ class AppController : public QObject
     // goes busy: the rest of the panel stays usable, and the wait belongs to the row the user
     // right-clicked.
     Q_PROPERTY(QString replacingAssetId READ replacingAssetId NOTIFY replacingAssetIdChanged)
+    // True while a bin-row crop/trim is encoding. Progress belongs to MediaPreviewWindow.
+    Q_PROPERTY(bool editingAsset READ editingAsset NOTIFY assetEditChanged)
+    Q_PROPERTY(double assetEditProgress READ assetEditProgress NOTIFY assetEditChanged)
+    Q_PROPERTY(QString assetEditStatus READ assetEditStatus NOTIFY assetEditChanged)
     Q_PROPERTY(double subtitleGenProgress READ subtitleGenProgress NOTIFY subtitleGenProgressChanged)
     Q_PROPERTY(QString subtitleGenStatus READ subtitleGenStatus NOTIFY subtitleGenStatusChanged)
     Q_PROPERTY(bool segmenting READ segmenting NOTIFY segmentingChanged)
@@ -310,6 +314,9 @@ public:
     bool canShareExport() const;
     bool subtitleGenerating() const { return m_subtitleGenerating; }
     QString replacingAssetId() const { return m_replacingAssetId; }
+    bool editingAsset() const { return m_editingAsset; }
+    double assetEditProgress() const { return m_assetEditProgress; }
+    QString assetEditStatus() const { return m_assetEditStatus; }
     double subtitleGenProgress() const { return m_subtitleGenProgress; }
     QString subtitleGenStatus() const { return m_subtitleGenStatus; }
     bool segmenting() const { return m_segmenting; }
@@ -474,6 +481,12 @@ public:
     // Writes an image asset (a freeze frame, typically) out to `url`. The format follows the
     // destination's extension, so the picker's name filter never has to be reported back.
     Q_INVOKABLE bool exportAssetImage(int assetIndex, const QUrl &url);
+    // Rewrites the bin row: trim [inSeconds, outSeconds] and crop in display-normalized 0..1.
+    // outSeconds < 0 means through the end. The original name is kept. Asynchronous; the
+    // outcome arrives as assetEditFinished, and the row is then rebound via replace.
+    Q_INVOKABLE bool saveAssetEdit(int assetIndex, double inSeconds, double outSeconds,
+                                   double cropX, double cropY, double cropW, double cropH);
+    Q_INVOKABLE void cancelAssetEdit();
     Q_INVOKABLE bool trackAcceptsAsset(int trackIndex, int assetIndex) const;
     Q_INVOKABLE QString trackTypeForAsset(int assetIndex) const;
     // presetId applies a built-in style pack on create; empty keeps the default text style.
@@ -1148,6 +1161,8 @@ signals:
     // the replacement and was pulled back to it.
     void assetReplaceFinished(bool ok, const QString &message, int adjustedClips);
     void replacingAssetIdChanged();
+    void assetEditChanged();
+    void assetEditFinished(bool ok, const QString &message);
     // File actions from the shortcut layer — QML owns dialogs and unsaved prompts.
     void newProjectRequested();
     void openRequested();
@@ -1342,6 +1357,12 @@ protected:
     // The content:// URI the in-flight replace picked, held across the probe so it can be put back
     // on the asset once applyProbedSource has overwritten the struct.
     QString m_replacingAssetSourceUri;
+    bool m_editingAsset = false;
+    double m_assetEditProgress = 0.0;
+    QString m_assetEditStatus;
+    QString m_assetEditKeepName;
+    QString m_editingAssetId;
+    QAtomicInt m_assetEditCancel = 0;
     double m_subtitleGenProgress = 0.0;
     QString m_subtitleGenStatus;
     QAtomicInt m_subtitleGenCancel = 0;

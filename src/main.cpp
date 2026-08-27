@@ -27,6 +27,7 @@
 #include <QEvent>
 #include <QFileOpenEvent>
 #include <QIcon>
+#include <QImageReader>
 #include <QLoggingCategory>
 #include <QQmlApplicationEngine>
 #include <QQmlEngine>
@@ -219,6 +220,11 @@ int main(int argc, char *argv[])
     AppController::applyStoredUiScale();
 
     QApplication app(argc, argv);
+    if (!QImageReader::supportedImageFormats().contains("svg")) {
+        qWarning("SVG icons will not display: Qt's SVG image plugin is missing or built "
+                 "for a different Qt version than this binary. Install a matching qt6-svg "
+                 "(same version as qt6-base).");
+    }
     // Associates the window with the installed .desktop entry so shells (notably
     // Wayland) can find its icon and app metadata.
     QGuiApplication::setDesktopFileName(QStringLiteral("org.cutwire.Drift"));

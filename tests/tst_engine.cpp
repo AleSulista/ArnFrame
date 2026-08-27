@@ -61,6 +61,7 @@
 #include "engine/MatteWriter.h"
 #include "engine/ReverseProxyCache.h"
 #include "engine/ReverseRenderer.h"
+#include "engine/MediaEditor.h"
 #include "engine/ClipReaderPool.h"
 #include "engine/MediaProbe.h"
 #include "engine/TransitionCatalog.h"
@@ -82,6 +83,7 @@ private slots:
     void initTestCase();
     void matteWriterRoundTripsThroughClipReader();
     void reverseRendererPlaysSourceBackwards();
+    void mediaEditorCropsAnImage();
     void reverseProxyLookupIsByContainmentAndSourceIdentity();
     void resolveVideoReadMirrorsTheClipOntoTheProxy();
     void faceTrackRoundTripsAndInterpolates();
@@ -1482,6 +1484,41 @@ void EngineTest::reverseRendererPlaysSourceBackwards()
         }
         QCOMPARE(band, frames - j);
     }
+}
+
+void EngineTest::mediaEditorCropsAnImage()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString sourcePath = dir.filePath(QStringLiteral("source.png"));
+    const QString outPath = dir.filePath(QStringLiteral("cropped.png"));
+
+    QImage source(80, 40, QImage::Format_ARGB32);
+    source.fill(Qt::blue);
+    QPainter p(&source);
+    p.fillRect(QRect(40, 0, 40, 40), Qt::red);
+    p.end();
+    QVERIFY(source.save(sourcePath, "PNG"));
+
+    drift::MediaEditSpec spec;
+    spec.inputPath = sourcePath;
+    spec.outputPath = outPath;
+    spec.kind = QStringLiteral("image");
+    spec.cropX = 0.5;
+    spec.cropY = 0;
+    spec.cropW = 0.5;
+    spec.cropH = 1.0;
+
+    QString error;
+    QVERIFY2(drift::editMedia(spec, &error, {}), qPrintable(error));
+    QVERIFY(QFileInfo::exists(outPath));
+    QVERIFY(!QFileInfo::exists(outPath + QStringLiteral(".part")));
+
+    const QImage cropped(outPath);
+    QVERIFY(!cropped.isNull());
+    QCOMPARE(cropped.width(), 40);
+    QCOMPARE(cropped.height(), 40);
+    QCOMPARE(qRed(cropped.pixel(cropped.width() / 2, cropped.height() / 2)) > 128, true);
 }
 
 // A proxy stays usable while the clip it was rendered for is trimmed inward, split or copied, and

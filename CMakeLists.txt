@@ -73,8 +73,18 @@ set(DRIFT_ADDON_CLIENT_TOKEN "79a388bba9301cacc81cc6eb0724c81e948e1b27c69aee1b"
 set(DRIFT_UPDATE_FEED_URL "https://api.github.com/repos/CutWire-Studios/Drift/releases/latest"
     CACHE STRING "Release feed polled for updates; empty disables the update check")
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets OpenGL Network QuickEffects)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Multimedia Test Concurrent Widgets OpenGL Network QuickEffects Svg)
 find_package(Qt6 COMPONENTS LinguistTools QUIET)
+
+# IconImage loads Lucide SVGs from qrc. The SVG imageformat plugin is refused when it was
+# built for a different Qt minor (6.10 plugin into 6.11 → "Unsupported image format", blank icons).
+string(REGEX REPLACE "^([0-9]+\\.[0-9]+).*" "\\1" _drift_qt_mm "${Qt6_VERSION}")
+string(REGEX REPLACE "^([0-9]+\\.[0-9]+).*" "\\1" _drift_svg_mm "${Qt6Svg_VERSION}")
+if(NOT _drift_qt_mm STREQUAL _drift_svg_mm)
+    message(FATAL_ERROR
+        "Qt SVG ${Qt6Svg_VERSION} does not match Qt ${Qt6_VERSION}. "
+        "Install a qt6-svg package built for the same Qt as qt6-base, or toolbar icons will not render.")
+endif()
 
 # --- Android prebuilt dependencies -------------------------------------------
 # Cross-compiling to Android has no pkg-config and no system prefix, so FFmpeg, zstd, OpenSSL and
@@ -501,6 +511,8 @@ add_library(driftengine STATIC
     src/engine/ReverseProxyCache.cpp
     src/engine/ReverseRenderer.h
     src/engine/ReverseRenderer.cpp
+    src/engine/MediaEditor.h
+    src/engine/MediaEditor.cpp
     src/engine/AudioFileWriter.h
     src/engine/AudioFileWriter.cpp
     src/engine/ProjectBundle.h
@@ -687,6 +699,7 @@ qt_add_qml_module(drift
         src/qml/DenoiseWindow.qml
         src/qml/SpeedCurveWindow.qml
         src/qml/FadeCurveWindow.qml
+        src/qml/MediaPreviewWindow.qml
         src/qml/PropertiesPanel.qml
         src/qml/components/properties/GeneralInspector.qml
         src/qml/components/properties/TextInspector.qml
@@ -791,6 +804,7 @@ target_link_libraries(drift PRIVATE
     Qt6::QuickEffects
     Qt6::Multimedia
     Qt6::Gui
+    Qt6::Svg
     Qt6::Widgets
     Qt6::Concurrent
     Qt6::Network
@@ -896,6 +910,7 @@ if(Qt6LinguistTools_FOUND)
             src/engine/TransitionCatalog.cpp
             src/engine/FontCatalog.cpp
             src/engine/ReverseRenderer.cpp
+            src/engine/MediaEditor.cpp
             src/engine/ProjectBundle.cpp
             src/core/Project.cpp
             src/core/SrtIO.cpp
