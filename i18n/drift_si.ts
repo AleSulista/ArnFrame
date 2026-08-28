@@ -479,29 +479,6 @@
 <context>
     <name>AndroidHome</name>
     <message>
-        <source>Media files (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.mp3 *.wav *.aac *.flac *.ogg *.m4a *.png *.jpg *.jpeg *.gif *.webp *.bmp)</source>
-        <translation type="unfinished">මාධ්‍ය ගොනු (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.mp3 *.wav *.aac *.flac *.ogg *.m4a *.png *.jpg *.jpeg *.gif *.webp *.bmp)</translation>
-    </message>
-    <message>
-        <source>Import Media</source>
-        <translation type="unfinished">මාධ්‍ය ආයාත කරන්න</translation>
-    </message>
-    <message>
-        <source>An import is already running.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message numerus="yes">
-        <source>Imported %n file(s).</source>
-        <translation type="unfinished">
-            <numerusform></numerusform>
-            <numerusform></numerusform>
-        </translation>
-    </message>
-    <message>
-        <source>Could not import the selected file(s).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Create polished videos fast</source>
         <translation type="unfinished"></translation>
     </message>
@@ -550,20 +527,12 @@
         <translation type="unfinished">නව ව්‍යාපෘතිය</translation>
     </message>
     <message>
-        <source>Import media &amp; edit</source>
+        <source>Start with this layout</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Start blank</source>
+        <source>Decide layout later</source>
         <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Importing %1 of %2…</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Importing…</source>
-        <translation type="unfinished">ආයාත කරමින්…</translation>
     </message>
 </context>
 <context>

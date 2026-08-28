@@ -87,10 +87,10 @@ if(NOT _drift_qt_mm STREQUAL _drift_svg_mm)
 endif()
 
 # --- Android prebuilt dependencies -------------------------------------------
-# Cross-compiling to Android has no pkg-config and no system prefix, so FFmpeg, zstd, OpenSSL and
-# SoundTouch come from static PIC archives under third_party/prebuilt/android/<abi>, built by
-# third_party/build-android.sh. They are declared here as the same targets the host branches below
-# produce, so nothing downstream needs to know which way it was satisfied.
+# Cross-compiling to Android has no pkg-config and no system prefix, so FFmpeg, dav1d, zstd,
+# OpenSSL and SoundTouch come from static PIC archives under third_party/prebuilt/android/<abi>,
+# built by third_party/build-android.sh. They are declared here as the same targets the host
+# branches below produce, so nothing downstream needs to know which way it was satisfied.
 #
 # Static, not shared: the app is a single .so that QtLoader dlopens, and every extra shared library
 # would have to be listed in ANDROID_EXTRA_LIBS and bundled by hand. PIC is mandatory for the same
@@ -115,6 +115,8 @@ if(ANDROID)
         "${DRIFT_PREBUILT}/lib/libswresample.a"
         "${DRIFT_PREBUILT}/lib/libavutil.a"
         "${DRIFT_PREBUILT}/lib/libx264.a"
+        # libavcodec's only software AV1 decoder — the native "av1" decoder needs a hwaccel.
+        "${DRIFT_PREBUILT}/lib/libdav1d.a"
         # mediandk resolves the AMediaCodec_*/AMediaFormat_* the --enable-mediacodec decoders call.
         m z mediandk)
 

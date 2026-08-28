@@ -831,8 +831,8 @@ bool ClipReader::tryOpenHardwareDecoder()
 // Restricted to content where that trade is not close. MediaCodec costs a codec instance (phones
 // share a small pool of them), a pipeline fill after every flush, and it cannot downscale on the
 // way out, so the preview's full-resolution sws downscale is unchanged. Below 4K H.264 / 1080p
-// HEVC-AV1-VP9 the software decoder is not the bottleneck on a phone and this path has no
-// on-device measurements behind it.
+// HEVC-VP9 the software decoder is not the bottleneck on a phone and this path has no on-device
+// measurements behind it. AV1 is the exception and is offered at every resolution — see below.
 //
 // Seek cost is handled by the reader's existing sequential-decode state, not by anything new
 // here: playback and export walk forward and never flush, and a scrub already has to decode from
@@ -851,10 +851,17 @@ bool ClipReader::tryOpenMediaCodecDecoder()
     default: return false;
     }
 
-    const int64_t pixels = int64_t(par->width) * par->height;
-    const int64_t floor = par->codec_id == AV_CODEC_ID_H264 ? 3840LL * 2160 : 1920LL * 1080;
-    if (pixels < floor)
-        return false;
+    // AV1 has no floor: MediaCodec is the fast path for it, not the only one — libdav1d decodes it
+    // in software — but dav1d on a phone is expensive enough at any size that the trade above is
+    // no longer close, and prebuilts predating --enable-libdav1d have no software AV1 at all
+    // (FFmpeg's native "av1" decoder is a hwaccel shell that returns ENOSYS per frame). There,
+    // declining on resolution alone is a black preview.
+    if (par->codec_id != AV_CODEC_ID_AV1) {
+        const int64_t pixels = int64_t(par->width) * par->height;
+        const int64_t floor = par->codec_id == AV_CODEC_ID_H264 ? 3840LL * 2160 : 1920LL * 1080;
+        if (pixels < floor)
+            return false;
+    }
 
     // Null when FFmpeg was built without --enable-mediacodec, which is the only state the
     // prebuilt libraries have shipped in so far.

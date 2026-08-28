@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Cross-builds the native dependencies Drift links that have no Android package: FFmpeg, x264,
-# zstd, OpenSSL (libcrypto) and SoundTouch. Output goes to
+# dav1d, zstd, OpenSSL (libcrypto) and SoundTouch. Output goes to
 # third_party/prebuilt/android/<abi>/{include,lib}, which is where the root CMakeLists looks.
 #
 # JUCE and the ONNX Runtime headers are NOT here: JUCE is a FetchContent source tree CMake builds
@@ -29,6 +29,7 @@ FFMPEG_TAG="n8.1.2"
 X264_TAG="stable"
 ZSTD_TAG="v1.5.7"
 OPENSSL_TAG="openssl-3.6.3"
+DAV1D_TAG="1.5.4"
 # Upstream tags this release "2.4.1"; there is no plain "2.4.0".
 SOUNDTOUCH_TAG="2.4.1"
 
@@ -42,13 +43,19 @@ SOUNDTOUCH_TAG="2.4.1"
 # vfpv3-d16, but the NDK CMake toolchain the app itself is built with sets ANDROID_ARM_NEON on by
 # default — so without this, FFmpeg and x264 are compiled for a weaker CPU than the code calling
 # them, and every hand-written NEON path in libswscale/libswresample is compiled out.
+#
+# MESON_CPU_FAMILY/MESON_CPU are dav1d's half of the same contract: meson cross files name the
+# host CPU themselves rather than deriving it from the compiler.
 ARM_CFLAGS=""
 case "$ABI" in
-  arm64-v8a)   FF_ARCH=aarch64; TRIPLE=aarch64-linux-android;    OSSL_TARGET=android-arm64 ;;
+  arm64-v8a)   FF_ARCH=aarch64; TRIPLE=aarch64-linux-android;    OSSL_TARGET=android-arm64
+               MESON_CPU_FAMILY=aarch64; MESON_CPU=aarch64 ;;
   armeabi-v7a) FF_ARCH=arm;     TRIPLE=armv7a-linux-androideabi; OSSL_TARGET=android-arm
                CONFIG_TRIPLE=arm-linux-androideabi
+               MESON_CPU_FAMILY=arm; MESON_CPU=armv7a
                ARM_CFLAGS="-march=armv7-a -mfloat-abi=softfp -mfpu=neon" ;;
-  x86_64)      FF_ARCH=x86_64;  TRIPLE=x86_64-linux-android;     OSSL_TARGET=android-x86_64 ;;
+  x86_64)      FF_ARCH=x86_64;  TRIPLE=x86_64-linux-android;     OSSL_TARGET=android-x86_64
+               MESON_CPU_FAMILY=x86_64; MESON_CPU=x86_64 ;;
   *) echo "unsupported ABI: $ABI (expected arm64-v8a, armeabi-v7a or x86_64)" >&2; exit 1 ;;
 esac
 : "${CONFIG_TRIPLE:=$TRIPLE}"
@@ -83,6 +90,41 @@ clone https://code.videolan.org/videolan/x264.git "$X264_TAG" x264
       --extra-cflags="$ARM_CFLAGS"
   make -j"$JOBS" && make install )
 
+# --- dav1d -------------------------------------------------------------------
+# The only software AV1 decoder in this build. FFmpeg's native "av1" decoder is a hwaccel shell:
+# with no hwaccel attached, av1dec's get_format logs "Your platform doesn't support hardware
+# accelerated AV1 decoding" and returns ENOSYS for every frame — avcodec_open2 still succeeds, so
+# ClipReader gets a decoder that silently never produces a picture (a black preview, not an error).
+# av1_mediacodec only covers devices that expose an AV1 MediaCodec, and only above ClipReader's
+# resolution floor, so without dav1d a large share of AV1 clips do not decode at all.
+# meson is dav1d's only build system; it needs a cross file because it does not read $CC alone.
+clone https://code.videolan.org/videolan/dav1d.git "$DAV1D_TAG" dav1d
+MESON_C_ARGS=""
+for f in $ARM_CFLAGS; do MESON_C_ARGS="$MESON_C_ARGS'$f', "; done
+cat > "$SRC/dav1d/cross-$ABI.txt" <<EOF
+[binaries]
+c = '$CC'
+cpp = '$CXX'
+ar = '$AR'
+strip = '$STRIP'
+pkg-config = 'pkg-config'
+
+[built-in options]
+c_args = [$MESON_C_ARGS]
+c_link_args = [$MESON_C_ARGS]
+
+[host_machine]
+system = 'android'
+cpu_family = '$MESON_CPU_FAMILY'
+cpu = '$MESON_CPU'
+endian = 'little'
+EOF
+rm -rf "$SRC/dav1d/build-$ABI"
+meson setup "$SRC/dav1d/build-$ABI" "$SRC/dav1d" --cross-file "$SRC/dav1d/cross-$ABI.txt" \
+  --prefix="$OUT" --libdir=lib --buildtype=release --default-library=static \
+  -Db_staticpic=true -Denable_tools=false -Denable_tests=false
+ninja -C "$SRC/dav1d/build-$ABI" install
+
 # --- FFmpeg ------------------------------------------------------------------
 # No --disable-postproc: libpostproc was removed in FFmpeg 8.0 and configure hard-errors on the
 # option. avformat and avcodec are always built, so they have no --enable- switch either.
@@ -99,6 +141,9 @@ clone https://code.videolan.org/videolan/x264.git "$X264_TAG" x264
 # it to have anything to offer. MediaCodec gives ClipReader the h264/hevc/av1/vp9 decoders it asks
 # for by name on large frames; --enable-jni is what it is built on, not an extra. Prebuilts made
 # before these flags simply have no such decoder and ClipReader stays on software.
+#
+# --enable-libdav1d is what makes AV1 decode at all here; see the dav1d section above. FFmpeg picks
+# libdav1d over the native av1 shell for AV1 streams, so nothing in the app has to ask for it.
 clone https://git.ffmpeg.org/ffmpeg.git "$FFMPEG_TAG" ffmpeg
 ( cd "$SRC/ffmpeg" && make distclean >/dev/null 2>&1 || true
   PKG_CONFIG_LIBDIR="$OUT/lib/pkgconfig" ./configure \
@@ -107,7 +152,7 @@ clone https://git.ffmpeg.org/ffmpeg.git "$FFMPEG_TAG" ffmpeg
     --sysroot="$TC/sysroot" \
     --cc="$CC" --cxx="$CXX" --ar="$AR" --nm="$NM" --ranlib="$RANLIB" --strip="$STRIP" \
     --enable-static --disable-shared --enable-pic \
-    --enable-gpl --enable-version3 --enable-libx264 \
+    --enable-gpl --enable-version3 --enable-libx264 --enable-libdav1d \
     --extra-cflags="-I$OUT/include -fvisibility=hidden $ARM_CFLAGS" --extra-ldflags="-L$OUT/lib" \
     --disable-programs --disable-doc --disable-avdevice \
     --disable-vaapi --disable-vdpau --disable-v4l2-m2m --disable-cuda-llvm \
