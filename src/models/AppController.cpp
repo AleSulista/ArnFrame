@@ -1,5 +1,6 @@
 #include "AppController.h"
 
+#include "AddonManager.h"
 #include "AssetLibrary.h"
 #include "FileDialogs.h"
 #include "core/Clip.h"
@@ -38,6 +39,7 @@
 #include "engine/MatteWriter.h"
 #include "engine/MediaEditor.h"
 #include "engine/AudioOnsets.h"
+#include "engine/LoudnessMeter.h"
 #include "engine/MediaWaveform.h"
 #include "engine/FaceLandmarker.h"
 #include "engine/FaceSwapSource.h"
@@ -80,6 +82,7 @@
 #include <QLibraryInfo>
 #include <QLocale>
 #include <QAudioDevice>
+#include <QSaveFile>
 #include <QSettings>
 #include <QByteArray>
 #include <QTranslator>
@@ -14711,7 +14714,8 @@ QVariantMap AppController::mcpCompactClip(int trackIndex, int clipIndex, bool in
     return out;
 }
 
-QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision, bool detail) const
+QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision, bool detail,
+                                      bool includeCues) const
 {
     using namespace drift::mcp;
     if (sinceRevision >= 0 && sinceRevision == m_mcpEditRevision)
@@ -14751,7 +14755,19 @@ QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision, bool
                         clips.append(QJsonObject::fromVariantMap(clipList.at(c).toMap()));
                 } else {
                     const QVariantMap compact = mcpCompactClip(t, c, false);
-                    clips.append(QJsonObject::fromVariantMap(compact));
+                    QJsonObject row = QJsonObject::fromVariantMap(compact);
+                    if (includeCues) {
+                        QJsonArray cues;
+                        for (const drift::SubtitleCue &cue : track.clips.at(c).subtitleCues) {
+                            cues.append(QJsonObject{
+                                {QStringLiteral("start"), drift::usToSeconds(cue.startUs)},
+                                {QStringLiteral("end"), drift::usToSeconds(cue.endUs)},
+                                {QStringLiteral("text"), cue.text},
+                            });
+                        }
+                        row.insert(QStringLiteral("subtitleCues"), cues);
+                    }
+                    clips.append(row);
                 }
             }
             row.insert(QStringLiteral("items"), clips);
@@ -14846,6 +14862,32 @@ QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision, bool
                              m_beatAudioFingerprint != audioLayoutFingerprint());
         }
         extra.insert(QStringLiteral("beats"), beatState);
+    }
+    if (m_selectedTrack >= 0 && m_selectedClip >= 0
+        && isValidClipIndex(m_selectedTrack, m_selectedClip)) {
+        extra.insert(QStringLiteral("selection"),
+                     QJsonObject{
+                         {QStringLiteral("track"), m_selectedTrack},
+                         {QStringLiteral("index"), m_selectedClip},
+                         {QStringLiteral("clip"),
+                          m_project.tracks().at(m_selectedTrack).clips.at(m_selectedClip).id},
+                     });
+    }
+    extra.insert(QStringLiteral("undo"),
+                 QJsonObject{{QStringLiteral("can"), m_undoStack.canUndo()},
+                             {QStringLiteral("canRedo"), m_undoStack.canRedo()},
+                             {QStringLiteral("depth"), m_undoStack.count()},
+                             {QStringLiteral("index"), m_undoStack.index()},
+                             {QStringLiteral("hash"), historyHashAt(m_undoStack.index())}});
+    if (detail && m_multicamActive) {
+        extra.insert(QStringLiteral("multicam"),
+                     QJsonObject{
+                         {QStringLiteral("active"), true},
+                         {QStringLiteral("activeAngle"), multicamActiveAngle()},
+                         {QStringLiteral("angles"), QJsonArray::fromVariantList(multicamAngles())},
+                         {QStringLiteral("program"),
+                          QJsonArray::fromVariantList(multicamProgramClips())},
+                     });
     }
     if (m_project.hasWorkArea()) {
         extra.insert(QStringLiteral("work_in"), workAreaInSeconds());
@@ -15766,8 +15808,8 @@ QJsonObject AppController::mcpAiCapabilities() const
     return ok({{QStringLiteral("models"), models},
                {QStringLiteral("runtime"), variant.isEmpty() ? QStringLiteral("none") : variant},
                {QStringLiteral("hint"),
-                QStringLiteral("Missing pieces install from the Extras / Addon Manager in the "
-                               "app; there is no MCP op that installs them.")}});
+                QStringLiteral("Missing pieces install with list_addons / install_addon, or from "
+                               "Extras in the app.")}});
 }
 
 QJsonObject AppController::mcpSetClipVolume(int trackIndex, int clipIndex, double value,
@@ -15913,4 +15955,780 @@ void AppController::mcpEndBatch(const QString &text, bool pushUndo)
         pushProjectEdit(m_mcpBatchBefore, text);
     finishEdit(text);
     m_mcpBatchBefore = {};
+}
+
+namespace {
+
+struct SilenceRange
+{
+    double start = 0.0;
+    double end = 0.0;
+};
+
+QVector<float> blockingSpeechPeaks(const drift::Project &snap, double startSeconds, double durSeconds,
+                                   int buckets)
+{
+    const int rate = 8000;
+    const qint64 frames = static_cast<qint64>(durSeconds * rate);
+    if (frames <= 0 || buckets <= 0)
+        return {};
+    const drift::TimeUs startUs = drift::secondsToUs(startSeconds);
+    auto raw = std::make_shared<QVector<float>>();
+    QEventLoop loop;
+    (void)QtConcurrent::run([snap, startUs, frames, rate, buckets, raw, &loop]() {
+        AudioMixer mixer;
+        mixer.setProject(&snap);
+        *raw = MediaWaveform::speechPeaks(
+            frames, rate, buckets,
+            [&mixer, startUs, rate](float *out, qint64 frameOffset, int maxFrames) {
+                const drift::TimeUs at = startUs + frameOffset * drift::kUsPerSecond / rate;
+                mixer.mix(at, maxFrames, rate, out);
+                return maxFrames;
+            });
+        QMetaObject::invokeMethod(&loop, &QEventLoop::quit, Qt::QueuedConnection);
+    });
+    loop.exec();
+    return *raw;
+}
+
+drift::LoudnessResult blockingLoudness(const drift::Project &snap, double startSeconds,
+                                       double durSeconds)
+{
+    const int rate = 48000;
+    const qint64 frames = static_cast<qint64>(durSeconds * rate);
+    if (frames <= 0)
+        return {};
+    const drift::TimeUs startUs = drift::secondsToUs(startSeconds);
+    auto result = std::make_shared<drift::LoudnessResult>();
+    QEventLoop loop;
+    (void)QtConcurrent::run([snap, startUs, frames, rate, result, &loop]() {
+        AudioMixer mixer;
+        mixer.setProject(&snap);
+        *result = drift::measureLoudness(
+            frames, rate, [&mixer, startUs, rate](float *out, qint64 frameOffset, int maxFrames) {
+                const drift::TimeUs at = startUs + frameOffset * drift::kUsPerSecond / rate;
+                mixer.mix(at, maxFrames, rate, out);
+                return maxFrames;
+            });
+        QMetaObject::invokeMethod(&loop, &QEventLoop::quit, Qt::QueuedConnection);
+    });
+    loop.exec();
+    return *result;
+}
+
+void muteAllButClip(drift::Project &snap, const QString &clipId)
+{
+    for (drift::Track &track : snap.tracks()) {
+        bool has = false;
+        for (drift::Clip &clip : track.clips) {
+            if (clip.id == clipId) {
+                has = true;
+                continue;
+            }
+            clip.volume.setKeyframe(0, 0.0);
+            clip.suppressEmbeddedAudio = true;
+        }
+        if (!has)
+            track.muted = true;
+    }
+}
+
+QList<SilenceRange> rangesFromPeaks(const QVector<float> &peaks, double startSeconds,
+                                    double durSeconds, double threshold, double minDuration,
+                                    double padding)
+{
+    QList<SilenceRange> ranges;
+    if (peaks.isEmpty() || durSeconds <= 0.0)
+        return ranges;
+    const double bucket = durSeconds / double(peaks.size());
+    int run = -1;
+    for (int i = 0; i <= peaks.size(); ++i) {
+        const bool silent = i < peaks.size() && peaks.at(i) < threshold;
+        if (silent && run < 0)
+            run = i;
+        if (!silent && run >= 0) {
+            SilenceRange r;
+            r.start = startSeconds + run * bucket + padding;
+            r.end = startSeconds + i * bucket - padding;
+            if (r.end - r.start >= minDuration)
+                ranges.append(r);
+            run = -1;
+        }
+    }
+    return ranges;
+}
+
+} // namespace
+
+namespace {
+
+const drift::ProjectSnapshotCommand *historyCommand(const QUndoStack &stack, int commandIndex)
+{
+    return dynamic_cast<const drift::ProjectSnapshotCommand *>(stack.command(commandIndex));
+}
+
+QString shortHash(const QString &hash)
+{
+    return hash.left(12);
+}
+
+} // namespace
+
+QString AppController::historyHashAt(int stackIndex) const
+{
+    if (stackIndex < 0 || stackIndex > m_undoStack.count())
+        return {};
+    if (stackIndex == 0) {
+        if (m_undoStack.count() == 0)
+            return m_project.contentHash();
+        const auto *cmd = historyCommand(m_undoStack, 0);
+        return cmd ? cmd->beforeHash() : m_project.contentHash();
+    }
+    const auto *cmd = historyCommand(m_undoStack, stackIndex - 1);
+    return cmd ? cmd->afterHash() : QString();
+}
+
+int AppController::historyIndexForHash(const QString &prefix) const
+{
+    const QString needle = prefix.trimmed().toLower();
+    if (needle.size() < 8)
+        return -1;
+    int exact = -1;
+    int found = -1;
+    int matches = 0;
+    for (int i = 0; i <= m_undoStack.count(); ++i) {
+        const QString hash = historyHashAt(i).toLower();
+        if (hash == needle)
+            exact = i;
+        if (hash.startsWith(needle)) {
+            ++matches;
+            found = i;
+        }
+    }
+    if (exact >= 0)
+        return exact;
+    return matches == 1 ? found : -1;
+}
+
+QString AppController::historySnapshotDir()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+           + QStringLiteral("/history");
+}
+
+void AppController::pruneHistorySnapshots()
+{
+    constexpr int kMax = 32;
+    QDir dir(historySnapshotDir());
+    if (!dir.exists())
+        return;
+    QFileInfoList files = dir.entryInfoList({QStringLiteral("*.json")}, QDir::Files, QDir::Time);
+    for (int i = kMax; i < files.size(); ++i)
+        QFile::remove(files.at(i).absoluteFilePath());
+}
+
+QByteArray AppController::historyJsonAt(int stackIndex) const
+{
+    if (stackIndex < 0 || stackIndex > m_undoStack.count())
+        return {};
+    if (stackIndex == 0) {
+        if (m_undoStack.count() == 0)
+            return m_project.toCompactJson();
+        const auto *cmd = historyCommand(m_undoStack, 0);
+        return cmd ? cmd->before().toCompactJson() : m_project.toCompactJson();
+    }
+    const auto *cmd = historyCommand(m_undoStack, stackIndex - 1);
+    return cmd ? cmd->after().toCompactJson() : m_project.toCompactJson();
+}
+
+QJsonObject AppController::mcpListHistory() const
+{
+    using namespace drift::mcp;
+    QJsonArray entries;
+    const QString dir = historySnapshotDir();
+    for (int i = 0; i <= m_undoStack.count(); ++i) {
+        const QString hash = historyHashAt(i);
+        const QString label = (i == 0)
+                                  ? QStringLiteral("Origin")
+                                  : m_undoStack.text(i - 1);
+        const bool snapshotted =
+            QFile::exists(dir + QLatin1Char('/') + hash + QStringLiteral(".json"));
+        entries.append(QJsonObject{{QStringLiteral("index"), i},
+                                   {QStringLiteral("label"), label},
+                                   {QStringLiteral("hash"), hash},
+                                   {QStringLiteral("short"), shortHash(hash)},
+                                   {QStringLiteral("snapshot"), snapshotted}});
+    }
+    const int current = m_undoStack.index();
+    return ok({{QStringLiteral("entries"), entries},
+               {QStringLiteral("current"), current},
+               {QStringLiteral("hash"), historyHashAt(current)},
+               {QStringLiteral("linear"), true}});
+}
+
+QJsonObject AppController::mcpUndoTo(int index, const QString &hash)
+{
+    using namespace drift::mcp;
+    int target = index;
+    if (!hash.trimmed().isEmpty()) {
+        target = historyIndexForHash(hash);
+        if (target < 0)
+            return err("not_found", QStringLiteral("No history entry matches that hash"));
+    } else if (index < 0) {
+        return err("bad_args", QStringLiteral("index or hash required"));
+    }
+    if (target < 0 || target > m_undoStack.count())
+        return err("bad_args", QStringLiteral("index out of range"));
+    m_undoStack.setIndex(target);
+    ++m_mcpEditRevision;
+    const QString at = historyHashAt(m_undoStack.index());
+    return ok({{QStringLiteral("index"), m_undoStack.index()},
+               {QStringLiteral("hash"), at},
+               {QStringLiteral("short"), shortHash(at)}});
+}
+
+QJsonObject AppController::mcpTakeSnapshot(const QString &label)
+{
+    using namespace drift::mcp;
+    const int current = m_undoStack.index();
+    const QByteArray json = historyJsonAt(current);
+    const QString hash = historyHashAt(current);
+    if (json.isEmpty() || hash.isEmpty())
+        return err("bad_args", QStringLiteral("Nothing to snapshot"));
+
+    const QString dir = historySnapshotDir();
+    if (!QDir().mkpath(dir))
+        return err("bad_args", QStringLiteral("Could not create history folder"));
+    const QString path = dir + QLatin1Char('/') + hash + QStringLiteral(".json");
+    bool existed = QFile::exists(path);
+    if (!existed) {
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly))
+            return err("bad_args", QStringLiteral("Could not write snapshot"));
+        file.write(json);
+        if (!file.commit())
+            return err("bad_args", QStringLiteral("Could not write snapshot"));
+        pruneHistorySnapshots();
+    }
+    QJsonObject extra{{QStringLiteral("hash"), hash},
+                      {QStringLiteral("short"), shortHash(hash)},
+                      {QStringLiteral("path"), path},
+                      {QStringLiteral("index"), current},
+                      {QStringLiteral("existed"), existed},
+                      {QStringLiteral("bytes"), json.size()}};
+    if (!label.trimmed().isEmpty())
+        extra.insert(QStringLiteral("label"), label.trimmed());
+    else if (current > 0)
+        extra.insert(QStringLiteral("label"), m_undoStack.text(current - 1));
+    else
+        extra.insert(QStringLiteral("label"), QStringLiteral("Origin"));
+    return ok(extra);
+}
+
+QJsonObject AppController::mcpListSnapshots() const
+{
+    using namespace drift::mcp;
+    QJsonArray snapshots;
+    QDir dir(historySnapshotDir());
+    const QFileInfoList files =
+        dir.entryInfoList({QStringLiteral("*.json")}, QDir::Files, QDir::Time);
+    for (const QFileInfo &info : files) {
+        const QString hash = info.completeBaseName();
+        snapshots.append(QJsonObject{
+            {QStringLiteral("hash"), hash},
+            {QStringLiteral("short"), shortHash(hash)},
+            {QStringLiteral("path"), info.absoluteFilePath()},
+            {QStringLiteral("bytes"), info.size()},
+            {QStringLiteral("savedAt"), info.lastModified().toUTC().toString(Qt::ISODate)},
+        });
+    }
+    return ok({{QStringLiteral("snapshots"), snapshots}, {QStringLiteral("n"), snapshots.size()}});
+}
+
+QJsonObject AppController::mcpRestoreSnapshot(const QString &hash)
+{
+    using namespace drift::mcp;
+    const QString needle = hash.trimmed();
+    if (needle.size() < 8)
+        return err("bad_args", QStringLiteral("hash required"));
+
+    const int onStack = historyIndexForHash(needle);
+    if (onStack >= 0)
+        return mcpUndoTo(onStack, {});
+
+    QDir dir(historySnapshotDir());
+    QString path;
+    int matches = 0;
+    const QFileInfoList files =
+        dir.entryInfoList({QStringLiteral("*.json")}, QDir::Files, QDir::Name);
+    for (const QFileInfo &info : files) {
+        const QString name = info.completeBaseName();
+        if (name.startsWith(needle, Qt::CaseInsensitive) || needle.startsWith(name, Qt::CaseInsensitive)) {
+            ++matches;
+            path = info.absoluteFilePath();
+            if (name.compare(needle, Qt::CaseInsensitive) == 0) {
+                path = info.absoluteFilePath();
+                matches = 1;
+                break;
+            }
+        }
+    }
+    if (matches != 1 || path.isEmpty())
+        return err("not_found", QStringLiteral("No snapshot matches that hash"));
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return err("bad_args", QStringLiteral("Could not read snapshot"));
+    const QByteArray json = file.readAll();
+    const QString fileHash = QString::fromLatin1(
+        QCryptographicHash::hash(json, QCryptographicHash::Sha256).toHex());
+    QString error;
+    if (!applyProjectJson(json, &error))
+        return err("bad_args", error.isEmpty() ? QStringLiteral("Snapshot refused") : error);
+    ++m_mcpEditRevision;
+    return ok({{QStringLiteral("index"), 0},
+               {QStringLiteral("hash"), fileHash},
+               {QStringLiteral("short"), shortHash(fileHash)},
+               {QStringLiteral("reset"), true}});
+}
+
+QJsonObject AppController::mcpDetectSilence(int trackIndex, int clipIndex, double startSeconds,
+                                            double durSeconds, double threshold, double minDuration,
+                                            double padding) const
+{
+    using namespace drift::mcp;
+    drift::Project snap = m_project.detachedCopy();
+    QString source = QStringLiteral("timeline");
+    double start = startSeconds;
+    double dur = durSeconds;
+
+    if (trackIndex >= 0 && clipIndex >= 0) {
+        if (!isValidClipIndex(trackIndex, clipIndex))
+            return err("not_found", QStringLiteral("Unknown clip"));
+        const drift::Clip &clip = m_project.tracks().at(trackIndex).clips.at(clipIndex);
+        muteAllButClip(snap, clip.id);
+        start = drift::usToSeconds(clip.timelineStart);
+        dur = drift::usToSeconds(clip.timelineDuration);
+        source = QStringLiteral("clip");
+    } else {
+        if (dur <= 0.0)
+            return err("bad_args", QStringLiteral("clip, or start+duration, required"));
+        start = qMax(0.0, start);
+    }
+    if (dur <= 0.0)
+        return err("bad_args", QStringLiteral("Nothing to analyse"));
+
+    const int buckets = qBound(8, int(qCeil(dur * 50.0)), 4096);
+    const QVector<float> peaks = blockingSpeechPeaks(snap, start, dur, buckets);
+    const QList<SilenceRange> ranges =
+        rangesFromPeaks(peaks, start, dur, threshold, minDuration, padding);
+    QJsonArray out;
+    for (const SilenceRange &r : ranges) {
+        out.append(QJsonObject{{QStringLiteral("start"), r.start}, {QStringLiteral("end"), r.end}});
+    }
+    return ok({{QStringLiteral("ranges"), out},
+               {QStringLiteral("threshold"), threshold},
+               {QStringLiteral("source"), source},
+               {QStringLiteral("n"), out.size()}});
+}
+
+QJsonObject AppController::mcpRemoveSilence(int trackIndex, int clipIndex, double threshold,
+                                            double minDuration, double padding)
+{
+    using namespace drift::mcp;
+    QList<QPair<int, int>> targets;
+    if (clipIndex >= 0 && trackIndex >= 0) {
+        if (!isValidClipIndex(trackIndex, clipIndex))
+            return err("not_found", QStringLiteral("Unknown clip"));
+        targets.append({trackIndex, clipIndex});
+    } else if (trackIndex >= 0 && trackIndex < m_project.tracks().size()) {
+        const drift::Track &track = m_project.tracks().at(trackIndex);
+        for (int c = 0; c < track.clips.size(); ++c)
+            targets.append({trackIndex, c});
+    } else {
+        return err("bad_args", QStringLiteral("clip or track required"));
+    }
+
+    QJsonArray removed;
+    mcpBeginBatch();
+    const bool wasRipple = m_rippleEnabled;
+    m_rippleEnabled = true;
+
+    // Back to front so splits don't invalidate later ranges.
+    for (int t = targets.size() - 1; t >= 0; --t) {
+        const QPair<int, int> pair = targets.at(t);
+        if (!isValidClipIndex(pair.first, pair.second))
+            continue;
+        const QString clipId = m_project.tracks().at(pair.first).clips.at(pair.second).id;
+        const QJsonObject detected =
+            mcpDetectSilence(pair.first, pair.second, 0, 0, threshold, minDuration, padding);
+        const QJsonArray ranges = detected.value(QStringLiteral("ranges")).toArray();
+        for (int r = ranges.size() - 1; r >= 0; --r) {
+            const QJsonObject range = ranges.at(r).toObject();
+            const double s = range.value(QStringLiteral("start")).toDouble();
+            const double e = range.value(QStringLiteral("end")).toDouble();
+            int tr = -1, cl = -1;
+            if (!findClipById(m_project, clipId, &tr, &cl))
+                break;
+            const drift::Clip &clip = m_project.tracks().at(tr).clips.at(cl);
+            const double cs = drift::usToSeconds(clip.timelineStart);
+            const double ce = drift::usToSeconds(clip.timelineStart + clip.timelineDuration);
+            const double cutS = qMax(s, cs);
+            const double cutE = qMin(e, ce);
+            if (cutE - cutS < minDuration)
+                continue;
+            removed.append(QJsonObject{{QStringLiteral("start"), cutS}, {QStringLiteral("end"), cutE}});
+            const bool fromStart = cutS <= cs + 0.001;
+            const bool toEnd = cutE >= ce - 0.001;
+            if (fromStart && toEnd) {
+                selectClip(tr, cl);
+                deleteSelectedClip();
+                closeGap(tr, cutS);
+                break;
+            }
+            if (fromStart) {
+                splitClipLeftAt(tr, cl, cutE);
+            } else if (toEnd) {
+                splitClipRightAt(tr, cl, cutS);
+            } else {
+                splitClipAt(tr, cl, cutS);
+                int tr2 = -1, cl2 = -1;
+                if (findClipById(m_project, clipId, &tr2, &cl2))
+                    splitClipLeftAt(tr2, cl2 + 1, cutE);
+            }
+        }
+    }
+
+    m_rippleEnabled = wasRipple;
+    mcpEndBatch(QStringLiteral("Remove silence"), true);
+
+    QJsonArray surviving;
+    const auto tracks = this->tracks();
+    for (int t = 0; t < tracks.size(); ++t) {
+        const auto clips = tracks.at(t).toMap().value(QStringLiteral("clips")).toList();
+        for (const QVariant &c : clips)
+            surviving.append(c.toMap().value(QStringLiteral("id")).toString());
+    }
+    return ok({{QStringLiteral("removed"), removed},
+               {QStringLiteral("clips"), surviving},
+               {QStringLiteral("n"), removed.size()}});
+}
+
+QJsonObject AppController::mcpAnalyzeLoudness(int trackIndex, int clipIndex, double startSeconds,
+                                              double durSeconds) const
+{
+    using namespace drift::mcp;
+    drift::Project snap = m_project.detachedCopy();
+    double start = startSeconds;
+    double dur = durSeconds;
+    if (trackIndex >= 0 && clipIndex >= 0) {
+        if (!isValidClipIndex(trackIndex, clipIndex))
+            return err("not_found", QStringLiteral("Unknown clip"));
+        const drift::Clip &clip = m_project.tracks().at(trackIndex).clips.at(clipIndex);
+        muteAllButClip(snap, clip.id);
+        start = drift::usToSeconds(clip.timelineStart);
+        dur = drift::usToSeconds(clip.timelineDuration);
+    } else if (dur <= 0.0) {
+        return err("bad_args", QStringLiteral("clip, or start+duration, required"));
+    }
+    if (dur <= 0.0)
+        return err("bad_args", QStringLiteral("Nothing to measure"));
+    const drift::LoudnessResult measured = blockingLoudness(snap, start, dur);
+    if (!measured.ok)
+        return err("bad_args", QStringLiteral("No audio in range"));
+    return ok({{QStringLiteral("lufs"), measured.integratedLufs},
+               {QStringLiteral("true_peak_db"), measured.truePeakDb},
+               {QStringLiteral("duration"), measured.durationSeconds}});
+}
+
+QJsonObject AppController::mcpNormalizeVolume(int trackIndex, int clipIndex, double targetLufs)
+{
+    using namespace drift::mcp;
+    if (!isValidClipIndex(trackIndex, clipIndex))
+        return err("not_found", QStringLiteral("Unknown clip"));
+    const QJsonObject measured = mcpAnalyzeLoudness(trackIndex, clipIndex, 0, 0);
+    if (!measured.value(QStringLiteral("ok")).toBool())
+        return measured;
+    const double lufs = measured.value(QStringLiteral("lufs")).toDouble();
+    const double deltaDb = targetLufs - lufs;
+    const double gain = qPow(10.0, deltaDb / 20.0);
+    const QJsonObject set = mcpSetClipVolume(trackIndex, clipIndex, gain, false, 0);
+    QJsonObject out = set;
+    out.insert(QStringLiteral("measured_lufs"), lufs);
+    out.insert(QStringLiteral("target_lufs"), targetLufs);
+    return out;
+}
+
+QJsonObject AppController::mcpDuckUnder(int musicTrack, int musicClip, int overTrack,
+                                        const QStringList &overClips, double amount, double attack,
+                                        double release)
+{
+    using namespace drift::mcp;
+    if (!isValidClipIndex(musicTrack, musicClip))
+        return err("not_found", QStringLiteral("Unknown music clip"));
+    const double amt = qBound(0.0, amount, 1.0);
+    const double rest = propertyValueAt(musicTrack, musicClip, QStringLiteral("volume"),
+                                        playheadSeconds(), 1.0);
+    const double ducked = rest * amt;
+
+    QList<SilenceRange> speech;
+    auto addSpeech = [&](int tr, int cl) {
+        const QJsonObject det = mcpDetectSilence(tr, cl, 0, 0, 0.02, 0.12, 0.0);
+        if (!det.value(QStringLiteral("ok")).toBool())
+            return;
+        const drift::Clip &clip = m_project.tracks().at(tr).clips.at(cl);
+        const double cs = drift::usToSeconds(clip.timelineStart);
+        const double ce = drift::usToSeconds(clip.timelineStart + clip.timelineDuration);
+        // Invert silence → speech, clipped to the clip.
+        double cursor = cs;
+        const QJsonArray silences = det.value(QStringLiteral("ranges")).toArray();
+        for (const QJsonValue &v : silences) {
+            const QJsonObject r = v.toObject();
+            const double s = r.value(QStringLiteral("start")).toDouble();
+            const double e = r.value(QStringLiteral("end")).toDouble();
+            if (s > cursor)
+                speech.append({cursor, s});
+            cursor = qMax(cursor, e);
+        }
+        if (ce > cursor)
+            speech.append({cursor, ce});
+    };
+
+    if (!overClips.isEmpty()) {
+        for (const QString &id : overClips) {
+            int tr = -1, cl = -1;
+            if (findClipById(m_project, id, &tr, &cl))
+                addSpeech(tr, cl);
+        }
+    } else if (overTrack >= 0 && overTrack < m_project.tracks().size()) {
+        const drift::Track &track = m_project.tracks().at(overTrack);
+        for (int c = 0; c < track.clips.size(); ++c)
+            addSpeech(overTrack, c);
+    } else {
+        return err("bad_args", QStringLiteral("over_track or over_clips required"));
+    }
+
+    mcpBeginBatch();
+    int keys = 0;
+    for (const SilenceRange &span : speech) {
+        if (span.end - span.start < 0.05)
+            continue;
+        setClipKeyframe(musicTrack, musicClip, QStringLiteral("volume"),
+                        span.start - attack, rest);
+        setClipKeyframe(musicTrack, musicClip, QStringLiteral("volume"), span.start, ducked);
+        setClipKeyframe(musicTrack, musicClip, QStringLiteral("volume"), span.end, ducked);
+        setClipKeyframe(musicTrack, musicClip, QStringLiteral("volume"),
+                        span.end + release, rest);
+        keys += 4;
+    }
+    mcpEndBatch(QStringLiteral("Duck under speech"), keys > 0);
+    return ok({{QStringLiteral("keys"), keys},
+               {QStringLiteral("speech"), speech.size()},
+               {QStringLiteral("rest"), rest},
+               {QStringLiteral("ducked"), ducked}});
+}
+
+QJsonObject AppController::mcpListFaceTrack(int trackIndex, int clipIndex) const
+{
+    using namespace drift::mcp;
+    if (!isValidClipIndex(trackIndex, clipIndex))
+        return err("not_found", QStringLiteral("Unknown clip"));
+    const drift::Clip &clip = m_project.tracks().at(trackIndex).clips.at(clipIndex);
+    if (clip.faceTrackPath.isEmpty())
+        return err("not_found", QStringLiteral("No face track — call detect_faces first"));
+    const std::shared_ptr<const drift::FaceTrack> track = drift::loadFaceTrackCached(clip.faceTrackPath);
+    if (!track || track->isEmpty())
+        return err("not_found", QStringLiteral("Face track file is missing or empty"));
+
+    const int total = track->frames.size();
+    const int cap = 200;
+    const int step = qMax(1, (total + cap - 1) / cap);
+    QJsonArray frames;
+    for (int i = 0; i < total; i += step) {
+        const drift::TimeUs relUs = track->fps > 0
+                                        ? drift::TimeUs(i * drift::kUsPerSecond / track->fps)
+                                        : 0;
+        QJsonArray faces;
+        for (const drift::FaceAnchors &face : track->frames.at(i).faces) {
+            faces.append(QJsonObject{
+                {QStringLiteral("cx"), face.faceCenter.x()},
+                {QStringLiteral("cy"), face.faceCenter.y()},
+                {QStringLiteral("rx"), face.faceRx},
+                {QStringLiteral("ry"), face.faceRy},
+                {QStringLiteral("valid"), face.valid},
+            });
+        }
+        frames.append(QJsonObject{{QStringLiteral("t"), drift::usToSeconds(relUs)},
+                                  {QStringLiteral("faces"), faces}});
+    }
+    return ok({{QStringLiteral("fps"), track->fps},
+               {QStringLiteral("n"), total},
+               {QStringLiteral("frames"), frames},
+               {QStringLiteral("truncated"), step > 1}});
+}
+
+QJsonObject AppController::mcpAutoReframe(int trackIndex, int clipIndex, double aspect,
+                                          const QString &mode)
+{
+    using namespace drift::mcp;
+    if (!isValidClipIndex(trackIndex, clipIndex))
+        return err("not_found", QStringLiteral("Unknown clip"));
+    drift::Clip &clip = m_project.tracks()[trackIndex].clips[clipIndex];
+    if (clip.type == drift::ClipType::Audio)
+        return err("type_mismatch", QStringLiteral("Cannot reframe an audio clip"));
+
+    const double canvasW = m_project.width();
+    const double canvasH = m_project.height();
+    double targetAspect = aspect > 0.01 ? aspect : (9.0 / 16.0);
+    const QString m = mode.toLower();
+
+    struct Sample {
+        double t = 0.0;
+        double cx = 0.5;
+        double cy = 0.5;
+        double rx = 0.2;
+        double ry = 0.25;
+    };
+    QList<Sample> samples;
+    if (m != QLatin1String("center") && !clip.faceTrackPath.isEmpty()) {
+        const std::shared_ptr<const drift::FaceTrack> track =
+            drift::loadFaceTrackCached(clip.faceTrackPath);
+        if (track && !track->isEmpty() && track->fps > 0) {
+            const int total = track->frames.size();
+            const int cap = 120;
+            const int step = qMax(1, (total + cap - 1) / cap);
+            for (int i = 0; i < total; i += step) {
+                Sample s;
+                s.t = double(i) / double(track->fps);
+                for (const drift::FaceAnchors &face : track->frames.at(i).faces) {
+                    if (!face.valid)
+                        continue;
+                    s.cx = face.faceCenter.x();
+                    s.cy = face.faceCenter.y();
+                    s.rx = qMax(0.05, face.faceRx);
+                    s.ry = qMax(0.05, face.faceRy);
+                    break;
+                }
+                samples.append(s);
+            }
+        }
+    }
+    if (samples.isEmpty()) {
+        Sample s;
+        s.t = 0.0;
+        samples.append(s);
+        Sample e;
+        e.t = drift::usToSeconds(clip.timelineDuration);
+        samples.append(e);
+    }
+
+    const int radius = (m == QLatin1String("motion")) ? 4 : 2;
+    QList<Sample> smoothed = samples;
+    for (int i = 0; i < samples.size(); ++i) {
+        double cx = 0, cy = 0, n = 0;
+        for (int j = qMax(0, i - radius); j <= qMin(samples.size() - 1, i + radius); ++j) {
+            cx += samples.at(j).cx;
+            cy += samples.at(j).cy;
+            n += 1;
+        }
+        smoothed[i].cx = cx / n;
+        smoothed[i].cy = cy / n;
+    }
+
+    mcpBeginBatch();
+    int keys = 0;
+    for (const Sample &s : smoothed) {
+        // Crop window of targetAspect centred on the face, in normalised source coords.
+        double cropH = qMin(1.0, qMax(s.ry * 2.4, 0.35));
+        double cropW = cropH * targetAspect;
+        if (cropW > 1.0) {
+            cropW = 1.0;
+            cropH = cropW / targetAspect;
+        }
+        double cropX = qBound(0.0, s.cx - cropW * 0.5, 1.0 - cropW);
+        double cropY = qBound(0.0, s.cy - cropH * 0.5, 1.0 - cropH);
+        const double w = canvasW / cropW;
+        const double h = canvasH / cropH;
+        const double x = -cropX * w;
+        const double y = -cropY * h;
+        const double at = drift::usToSeconds(clip.timelineStart) + s.t;
+        setClipKeyframe(trackIndex, clipIndex, QStringLiteral("x"), at, x);
+        setClipKeyframe(trackIndex, clipIndex, QStringLiteral("y"), at, y);
+        setClipKeyframe(trackIndex, clipIndex, QStringLiteral("width"), at, w);
+        setClipKeyframe(trackIndex, clipIndex, QStringLiteral("height"), at, h);
+        keys += 4;
+    }
+    mcpEndBatch(QStringLiteral("Auto-reframe"), keys > 0);
+    return ok({{QStringLiteral("keys"), keys},
+               {QStringLiteral("aspect"), targetAspect},
+               {QStringLiteral("mode"), m.isEmpty() ? QStringLiteral("face") : m}});
+}
+
+QJsonObject AppController::mcpListAddons() const
+{
+    using namespace drift::mcp;
+    QJsonArray addons;
+    QSet<QString> seen;
+    if (m_addonManager) {
+        for (const QVariant &v : m_addonManager->catalog()) {
+            const QVariantMap row = v.toMap();
+            const QString id = row.value(QStringLiteral("id")).toString();
+            if (id.isEmpty())
+                continue;
+            seen.insert(id);
+            const QString state = row.value(QStringLiteral("state")).toString();
+            addons.append(QJsonObject{
+                {QStringLiteral("id"), id},
+                {QStringLiteral("name"), row.value(QStringLiteral("name")).toString()},
+                {QStringLiteral("kind"), row.value(QStringLiteral("kind")).toString()},
+                {QStringLiteral("version"), row.value(QStringLiteral("version")).toString()},
+                {QStringLiteral("state"), state},
+                {QStringLiteral("installed"),
+                 state == QLatin1String("installed") || state == QLatin1String("update-available")},
+            });
+        }
+    }
+    for (const drift::addon::InstalledAddon &inst : drift::addon::installedAddons()) {
+        if (seen.contains(inst.id))
+            continue;
+        addons.append(QJsonObject{
+            {QStringLiteral("id"), inst.id},
+            {QStringLiteral("name"), inst.name},
+            {QStringLiteral("version"), inst.version},
+            {QStringLiteral("state"), QStringLiteral("installed")},
+            {QStringLiteral("installed"), true},
+        });
+    }
+    return ok({{QStringLiteral("addons"), addons}});
+}
+
+QJsonObject AppController::mcpInstallAddon(const QString &id)
+{
+    using namespace drift::mcp;
+    if (!m_addonManager)
+        return err("bad_args", QStringLiteral("Addon manager is only available in the running editor"));
+    if (id.trimmed().isEmpty())
+        return err("bad_args", QStringLiteral("id required"));
+    m_addonManager->install(id);
+    return ok({{QStringLiteral("started"), true}, {QStringLiteral("id"), id}});
+}
+
+QJsonObject AppController::mcpCancelAddonInstall(const QString &id)
+{
+    using namespace drift::mcp;
+    if (!m_addonManager)
+        return err("bad_args", QStringLiteral("Addon manager is only available in the running editor"));
+    m_addonManager->cancel(id);
+    return ok({{QStringLiteral("cancelled"), true}, {QStringLiteral("id"), id}});
+}
+
+QJsonObject AppController::mcpSetAcceleration(const QString &variant)
+{
+    using namespace drift::mcp;
+    if (!m_addonManager)
+        return err("bad_args", QStringLiteral("Addon manager is only available in the running editor"));
+    if (variant.trimmed().isEmpty())
+        return err("bad_args", QStringLiteral("variant required"));
+    m_addonManager->setAcceleration(variant);
+    return ok({{QStringLiteral("variant"), m_addonManager->acceleration()}});
 }

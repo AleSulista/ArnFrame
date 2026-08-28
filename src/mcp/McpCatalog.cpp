@@ -57,8 +57,9 @@ QJsonObject animPropProp()
 {
     return stringProp(QStringLiteral(
         "Animated property: x, y, width, height, rotation, opacity, volume, or fx.<effectIndex>.<paramKey> "
-        "(e.g. fx.0.amount). Note width/height here vs w/h in set_transform. "
-        "list_animated_properties returns the properties already animated on the clip."));
+        "(e.g. fx.0.amount). Note width/height here vs w/h in set_transform. Spellings live in this "
+        "schema — list_animated_properties returns only properties that already have keys (empty on a "
+        "fresh clip), so do not use it to learn names."));
 }
 
 // Which grid detect_beats' result is read through. Repeated across four ops.
@@ -198,16 +199,22 @@ const QList<Op> &ops()
 {
     static const QList<Op> k = {
         { "import_media", "media", "Bring files into the bin",
-          "Import local media files and block until each probe finishes (15s cap). Returns "
-          "{assets:[{id, index, name, kind, dur, pending}]}, plus missing:[paths that do not exist] and "
-          "refreshed:[paths already in the bin]. On timeout returns error import_timeout with the same "
-          "assets array and pending:true on the stragglers. Not undoable.",
+          "Import local media files and block until each probe finishes (15s cap). Paths must be "
+          "absolute (or file://). There is no directory-listing op: if the user named a file loosely "
+          "(\"GX010023.mp4 in Downloads\", \"the wedding clip\"), glob or search with YOUR own "
+          "filesystem tools, then pass the hits here. Returns {assets:[{id, index, name, kind, dur, "
+          "pending}]}, plus missing:[paths that do not exist] and refreshed:[paths already in the bin] "
+          "— treat a non-empty missing as \"search again\", not as a bin problem. On timeout returns "
+          "error import_timeout with the same assets array and pending:true on the stragglers. Not "
+          "undoable.",
           objectSchema({{QStringLiteral("paths"),
                          arrayProp({{QStringLiteral("type"), QStringLiteral("string")}},
-                                   QStringLiteral("Absolute file paths"))}},
+                                   QStringLiteral("Absolute file paths from your own filesystem search"))}},
                        {QStringLiteral("paths")}) },
         { "list_assets", "media", "See what is in the bin",
-          "List imported assets. Returns {assets:[{index, id, name, kind, dur, w, h}]}.",
+          "List imported assets. Returns {assets:[{index, id, name, kind, dur, w, h}]}. There is no "
+          "recording timestamp — \"in the order I shot them\" cannot be recovered from this list; "
+          "sort by name or by the order they were imported.",
           objectSchema({}), true, false, true },
         { "rename_asset", "media", "Rename a bin row",
           "Rename an asset in the bin. Does not rename the file on disk.",
@@ -286,12 +293,42 @@ const QList<Op> &ops()
           objectSchema(clipRefProps()) },
         { "undo", "timeline", "Revert the last edit",
           "Undo the last project edit; one apply batch is one step. Fails bad_args when the stack is "
-          "empty. Does not cover import_media, save_project, set_overlap, set_theme, set_shortcut, or "
-          "reset_shortcuts — those are applied outside the undo stack.",
+          "empty. Does not cover the ops in catalog.limitations (import, save, playback, export, "
+          "view-state toggles). set_beat_layers is the dangerous one: it changes the user's own "
+          "snapping and cannot be undone. Use list_history and undo_to to jump further back.",
           objectSchema({}) },
         { "redo", "timeline", "Re-apply an undone edit",
           "Redo the last undone edit. Fails bad_args when there is nothing to redo.",
           objectSchema({}) },
+        { "list_history", "timeline", "Read the undo stack",
+          "Linear history (no branches). Returns {entries:[{index, label, hash, short, snapshot}], "
+          "current, hash, linear:true}. index 0 is Origin (empty/loaded project); each later entry is "
+          "one undo step. hash is SHA-256 of that version's compact project JSON — the same bytes "
+          "take_snapshot writes to <hash>.json. current is the HEAD index. Read-only.",
+          objectSchema({}), true, false, true },
+        { "undo_to", "timeline", "Jump to a history version",
+          "Restore the project to a linear history version. Pass index (from list_history) or hash "
+          "(full SHA-256 or unique 8+ char prefix). Redo of later steps remains until the next edit, "
+          "which discards them — there is no branching. Not itself undoable.",
+          objectSchema({{QStringLiteral("index"),
+                         integerProp(QStringLiteral("Target index from list_history (0 = Origin)"))},
+                        {QStringLiteral("hash"),
+                         stringProp(QStringLiteral("Content hash from list_history, or a unique prefix"))}}) },
+        { "take_snapshot", "timeline", "Keep a JSON copy of HEAD",
+          "Write the current history version as compact project JSON named <hash>.json under the app "
+          "history folder. The file's SHA-256 is the same hash list_history reports. Does not change "
+          "the project. Caps at 32 files (oldest dropped). Not undoable.",
+          objectSchema({{QStringLiteral("label"),
+                         stringProp(QStringLiteral("Optional note stored only in the reply"))}}) },
+        { "list_snapshots", "timeline", "On-disk history JSON files",
+          "Snapshots written by take_snapshot. Returns {snapshots:[{hash, short, path, bytes, savedAt}]}.",
+          objectSchema({}), true, false, true },
+        { "restore_snapshot", "timeline", "Reset to a saved JSON",
+          "If hash is still on the undo stack, same as undo_to. Otherwise load the on-disk JSON and "
+          "clear the stack (new Origin). Linear — redo history is discarded. Not undoable.",
+          objectSchema({{QStringLiteral("hash"),
+                         stringProp(QStringLiteral("Snapshot hash or unique prefix"))}},
+                       {QStringLiteral("hash")}) },
         { "set_overlap", "timeline", "Allow clips to overlap",
           "Project setting. Off (default): place/move push to the next gap. On: requested start is kept.",
           objectSchema({{QStringLiteral("enabled"), boolProp(QStringLiteral("Allow overlapping clips"))}},
@@ -434,7 +471,9 @@ const QList<Op> &ops()
           false, true },
 
         { "set_project_setup", "project", "Change canvas size or frame rate",
-          "Set project width, height, and fps.",
+          "Set project width, height, and fps. Changing width/height rebases every clip's canvas "
+          "transform onto the new size (same helper apply_canvas_crop uses) so existing clips stay "
+          "visually in place rather than jumping; fps does not retime clips.",
           objectSchema({{QStringLiteral("width"), integerProp(QStringLiteral("Canvas width pixels"))},
                         {QStringLiteral("height"), integerProp(QStringLiteral("Canvas height pixels"))},
                         {QStringLiteral("fps"), integerProp(QStringLiteral("Frames per second"))}},
@@ -452,11 +491,13 @@ const QList<Op> &ops()
                         {QStringLiteral("author"), stringProp(QStringLiteral("Author name"))},
                         {QStringLiteral("description"), stringProp(QStringLiteral("Project description"))}}) },
         { "save_project", "project", "Save the project file",
-          "Save to an absolute path, creating parent folders as needed. Returns ok once the save is "
-          "dispatched — it does NOT report a failed write. Confirm with inspect: dirty should be false "
-          "and path should match.",
-          objectSchema({{QStringLiteral("path"), stringProp(QStringLiteral("Absolute .dcut path"))}},
-                       {QStringLiteral("path")}) },
+          "Save the open project. With path omitted, saves to the current project path (inspect.path); "
+          "fails bad_args when the project has never been saved. With path given, writes a .drift "
+          "bundle there, creating parent folders as needed. Returns ok once the save is dispatched — "
+          "it does NOT report a failed write. Confirm with inspect: dirty should be false and path "
+          "should match.",
+          objectSchema({{QStringLiteral("path"),
+                         stringProp(QStringLiteral("Absolute .drift path; omit to save to the current path"))}}) },
         { "list_export_options", "project", "See codecs, scales, and fps choices",
           "Returns {scales:[{id,w,h}], fps:[{id}], video:[{id,label}], audio:[{id,label}], gif, folder} "
           "— only codecs available on this machine are listed. Does not list rate or preset values; "
@@ -477,9 +518,10 @@ const QList<Op> &ops()
           "Returns {busy, progress 0..1, message}. Same data as inspect().export.",
           objectSchema({}), true, false, true },
 
-        { "list_animated_properties", "keyframes", "See what animates on a clip",
-          "Returns {props:[…]} — only the properties that already carry keyframes on this clip. Start "
-          "here before any other keyframes op to learn the exact property spellings.",
+        { "list_animated_properties", "keyframes", "See what already has keys",
+          "Returns {props:[…]} — only the properties that already carry keyframes on this clip. Empty "
+          "on a fresh clip. Property spellings live in the `prop` schema of the other keyframes ops "
+          "(x, y, width, height, rotation, opacity, volume, fx.<i>.<key>), not here.",
           objectSchema(clipRefProps()), true, false, true },
         { "list_keyframes", "keyframes", "Read keys for one property",
           "Returns {prop, enabled, keys:[{seconds, value, inDx, inDy, outDx, outDy, corner, hold, "
@@ -555,9 +597,10 @@ const QList<Op> &ops()
           objectSchema(clipRefProps()), false, false, true },
         { "set_speed_curve", "speed", "Apply a custom speed ramp",
           "Replace the clip with a retimed copy carrying the curve. Needs at least two points. Returns "
-          "{id, track, index, retimedDuration} with a NEW id — the old clip UUID is dead, so later ops "
-          "in the same apply batch must use the returned id. Fails bad_args on clips that cannot carry "
-          "a curve.",
+          "{id, track, index, retimedDuration} with a NEW id — the old clip UUID is dead. An ops array "
+          "cannot reference an id produced earlier in the same batch, so END THE BATCH after this op "
+          "and use the returned id in the next apply. Fails bad_args on clips that cannot carry a "
+          "curve.",
           objectSchema(mergeProps(
               {{QStringLiteral("points"),
                 arrayProp(speedPointSchema(), QStringLiteral("Speed curve control points, at least two, ordered by pos"))}},
@@ -623,7 +666,40 @@ QStringList toolboxNames()
             QStringLiteral("project"),   QStringLiteral("keyframes"), QStringLiteral("speed"),
             QStringLiteral("ui"),        QStringLiteral("shapes"),   QStringLiteral("subtitles"),
             QStringLiteral("segmentation"), QStringLiteral("ai"),   QStringLiteral("audio"),
-            QStringLiteral("scene")};
+            QStringLiteral("scene"),     QStringLiteral("multicam")};
+}
+
+QStringList undoExemptOps()
+{
+    static const QStringList k = {
+        QStringLiteral("import_media"),        QStringLiteral("import_media_bytes"),
+        QStringLiteral("seek"),                QStringLiteral("play"),
+        QStringLiteral("pause"),               QStringLiteral("undo"),
+        QStringLiteral("redo"),                QStringLiteral("undo_to"),
+        QStringLiteral("take_snapshot"),       QStringLiteral("restore_snapshot"),
+        QStringLiteral("set_overlap"),         QStringLiteral("set_ripple"),
+        QStringLiteral("set_snap"),            QStringLiteral("set_guides"),
+        QStringLiteral("set_loop_work_area"),  QStringLiteral("export_video"),
+        QStringLiteral("save_project"),        QStringLiteral("set_theme"),
+        QStringLiteral("set_shortcut"),        QStringLiteral("reset_shortcuts"),
+        QStringLiteral("set_beat_layers"),     QStringLiteral("detect_beats"),
+        QStringLiteral("list_speed_curve"),    QStringLiteral("list_fade_curve"),
+        QStringLiteral("install_addon"),       QStringLiteral("cancel_addon_install"),
+        QStringLiteral("set_acceleration"),    QStringLiteral("switch_angle"),
+        QStringLiteral("end_multicam"),
+    };
+    return k;
+}
+
+QStringList selectionBasedOps()
+{
+    static const QStringList k = {
+        QStringLiteral("separate_audio"), QStringLiteral("unlink_audio"),
+        QStringLiteral("merge_clips"),    QStringLiteral("align_clip_left"),
+        QStringLiteral("align_clip_right"), QStringLiteral("copy_selection"),
+        QStringLiteral("cut_selection"),
+    };
+    return k;
 }
 
 QString agentGuideText()
@@ -635,7 +711,11 @@ QString agentGuideText()
         "1. Call catalog on POST /mcp (homepage).\n"
         "2. Call toolbox({name}) for JSON schemas of ops in that toolbox.\n"
         "3. Call apply({ops:[{tool, args}, …]}) to run one or many mutations in one undo step.\n"
-        "4. Call inspect({clips:true, detail:true}) for clip UUIDs, effect stacks, and job state.\n"
+        "4. Call inspect({clips:true, detail:true}) for clip UUIDs, effect stacks, mask/fade/speed, "
+        "subtitle cues, face-track/stabilize fields, and job state. inspect always reports "
+        "selection:{track,index,clip} (omitted when nothing is selected) and "
+        "undo:{can,canRedo,depth,index,hash}. inspect({clips:true,cues:true}) adds subtitleCues without "
+        "the rest of detail.\n"
         "5. Call capture() for a composition still (JPEG by default).\n"
         "\n"
         "Pinned endpoints (/mcp/media, /mcp/timeline, …) list toolbox ops directly. "
@@ -657,8 +737,15 @@ QString agentGuideText()
         "- apply is not atomic: on failure the ops before it stay applied. Check stopped/failed.\n"
         "\n"
         "Selection-based ops take no clip argument and act on the current selection — call\n"
-        "select_clip first: separate_audio, unlink_audio, merge_clips, align_clip_left,\n"
-        "align_clip_right, copy_selection, cut_selection, paste_at_playhead, freeze_frame.\n"
+        "select_clip or select_clips first: separate_audio, unlink_audio, merge_clips,\n"
+        "align_clip_left, align_clip_right, copy_selection, cut_selection.\n"
+        "freeze_frame and paste_at_playhead are playhead-based, not selection-based — seek first.\n"
+        "\n"
+        "History is linear, like git without branches. list_history returns every version (index 0 =\n"
+        "Origin) with a SHA-256 hash of that version's compact project JSON. undo_to({hash}) or\n"
+        "undo_to({index}) jumps; the next edit discards redo. take_snapshot writes <hash>.json whose\n"
+        "bytes hash to the same value; restore_snapshot loads a disk copy only if it has fallen off\n"
+        "the stack (and resets Origin).\n"
         "\n"
         "Async jobs return {started:true} immediately. Poll these fields, all of which need\n"
         "inspect({detail:true}) except export:\n"
@@ -691,10 +778,16 @@ QString agentGuideText()
         "4. split_on_scenes cuts a clip at its boundaries; bookmark_scenes marks them instead.\n"
         "Unlike beats this analysis is NOT transient: it describes the source file and is cached\n"
         "against that file's timestamp, so it survives edits, undo and reload. with_objects needs\n"
-        "the object-model addon — ai_capabilities reports what is installed.\n"
+        "the object-model addon — ai_capabilities reports what is installed; list_addons /\n"
+        "install_addon can install a missing model from the addon store.\n"
+        "\n"
+        "Finding media: import_media takes absolute paths only. Drift will not list folders. When\n"
+        "the user gives a partial name, glob or search the host with YOUR own tools (find, ls,\n"
+        "whatever the client exposes), then pass those absolute paths to import_media and confirm\n"
+        "missing:[] is empty.\n"
         "\n"
         "Toolboxes: media, timeline, canvas, playback, text, effects, project, keyframes, speed, ui, "
-        "shapes, subtitles, segmentation, ai, audio, scene.\n");
+        "shapes, subtitles, segmentation, ai, audio, scene, multicam.\n");
 }
 
 QJsonObject catalogPayload()
@@ -704,22 +797,27 @@ QJsonObject catalogPayload()
         const char *when;
     };
     static const Box boxes[] = {
-        {"media", "Import and inspect the media bin before placing clips."},
-        {"timeline", "Tracks, place/move/trim/split/delete clips, overlap toggle, undo."},
-        {"canvas", "On-screen position, size, rotation, opacity."},
+        {"media", "Import (absolute paths only — resolve fuzzy names with your own filesystem tools) "
+                   "and inspect the media bin before placing clips."},
+        {"timeline", "Tracks, place/move/trim/split/delete clips, ripple/gap, overlap, selection, undo."},
+        {"canvas", "Transform, flip, blend, mask, fade, speed, reverse, animation, and stabilisation. "
+                   "Constant speed is set_clip_speed here; ramps are set_speed_curve in speed. "
+                   "Write fade curves with set_fade_curve here; read a custom curve with list_fade_curve in speed."},
         {"playback", "Seek, play, pause, In/Out work area. Use capture (homepage) to see the frame."},
         {"text", "Add and edit title/caption clips."},
         {"effects", "Video/audio effects and transitions."},
         {"project", "Canvas size, background, metadata, save, and export."},
         {"keyframes", "Animate clip and effect properties over time."},
-        {"speed", "Variable playback speed (retimed clips)."},
+        {"speed", "Variable playback speed (retimed clips). Constant speed is set_clip_speed in canvas. "
+                  "list_fade_curve lives here; write fades with set_fade_curve in canvas."},
         {"ui", "Editor theme and keyboard shortcuts."},
         {"shapes", "Builtin shapes, stickers, emoji, fonts."},
         {"subtitles", "Subtitle clips, import/export, Whisper generation."},
         {"segmentation", "SAM-style cutout and mask output."},
-        {"ai", "Denoise, face detection, and which model add-ons are installed."},
-        {"audio", "Read waveforms, detect beats, and cut or quantise to them."},
+        {"ai", "Denoise, face detection, auto-reframe, model add-ons (list/install), acceleration."},
+        {"audio", "Waveforms, silence, loudness, ducking, beat detection, beat-synced cuts, clip volume."},
         {"scene", "Detect shots, read what is in them, and cut or assemble against them."},
+        {"multicam", "Multi-camera session: set up angles, switch at the playhead, save separate or combined."},
     };
 
     QJsonArray toolboxes;
@@ -751,20 +849,27 @@ QJsonObject catalogPayload()
          QStringLiteral("catalog → toolbox({name}) → apply({ops:[{tool,args}…]})")},
         {QStringLiteral("hint"),
          QStringLiteral("toolbox({name}) then apply({ops:[{tool,args}…]}) for a batch. "
-                        "inspect({clips:true,detail:true}) for full clip rows, effect stacks, "
-                        "transition ids, and async job state. capture() for a still.")},
+                        "inspect({clips:true,detail:true}) for full clip rows: effect stacks, "
+                        "transitions, mask/fade/speed/reverse/animation, subtitleCues, volume, "
+                        "keyframes, hasFaceTrack, stabilize* fields, and async job state. "
+                        "inspect always includes selection and undo. capture() for a still.")},
         {QStringLiteral("limitations"),
          QJsonArray{
              QStringLiteral("apply is not atomic — on failure the ops before it stay applied; check stopped/failed."),
              QStringLiteral("apply cannot run catalog, toolbox, inspect, capture, or apply; call those directly on /mcp."),
-             QStringLiteral("Clip-ref ops need clip, or track+index — they never fall back to the current selection."),
+             QStringLiteral("Clip-ref ops need clip, or track+index — they never fall back to the current selection. Read the current selection from inspect.selection."),
              QStringLiteral("Effect, transition, and bookmark indices/ids are only discoverable via inspect({clips:true,detail:true})."),
              QStringLiteral("set_effect_param, set_audio_effect_param, and set_transition_param do not validate key or index; verify with inspect."),
              QStringLiteral("set_transform writes at the playhead and becomes a keyframe when the property is animated or autoKey is on."),
-             QStringLiteral("set_mask replaces the whole mask; omitted keys revert to defaults."),
+             QStringLiteral("set_mask replaces the whole mask; omitted keys revert to defaults. Read inspect({clips:true,detail:true}).tracks[].items[].mask first."),
+             QStringLiteral("set_subtitle_cues replaces every cue. Read inspect({clips:true,cues:true}) or detail rows' subtitleCues first."),
              QStringLiteral("Segmentation, denoise, and face detection expose no progress field — diff inspect to detect completion."),
-             QStringLiteral("import_media, save_project, set_overlap, set_theme, set_shortcut, and reset_shortcuts are outside the undo stack."),
-             QStringLiteral("set_speed_curve returns a new clip id; the previous UUID stops resolving."),
+             QStringLiteral("These ops sit outside the undo stack (and so do all read-only ops): %1. "
+                            "set_beat_layers is the dangerous one: it changes the user's own snapping and cannot be undone.")
+                 .arg(undoExemptOps().join(QStringLiteral(", "))),
+             QStringLiteral("set_speed_curve returns a new clip id and the previous UUID stops resolving — end the apply batch after it."),
+             QStringLiteral("generate_subtitles must run AFTER remove_silence; silence removal shifts the timeline and would invalidate cue times."),
+             QStringLiteral("import_media takes absolute paths only. There is no directory listing — when the user names a file loosely, glob/search with your own filesystem tools, then import and check missing:[]."),
          }},
         {QStringLiteral("guide"), agentGuideText()},
     });
@@ -799,16 +904,30 @@ QJsonArray homepageTools()
                      {QStringLiteral("name")})));
     tools.append(toolDef(
         QStringLiteral("inspect"),
-        QStringLiteral("When: Read state. Returns revision, name, w, h, fps, dur, playhead, playing, overlap, clips (count), tracks, assets, path, dirty, background, export {active, progress}; work_in/work_out appear only when a work area is set. clips=true adds per-clip rows (id, start, duration, trim) under tracks[].items. detail=true is REQUIRED to see effect stacks, transition ids, per-track waveform/height, bookmarks, and the package/subtitleGen/reverseRender job state — most index and id arguments used elsewhere can only be discovered this way. since=<revision> returns {unchanged:true, revision} when nothing changed since that revision."),
+        QStringLiteral("When: Read state. Returns revision, name, w, h, fps, dur, playhead, playing, overlap, "
+                       "clips (count), tracks, assets, path, dirty, background, export {active, progress}, "
+                       "selection {track, index, clip} (absent when nothing is selected), and "
+                       "undo {can, canRedo, depth, index, hash}. work_in/work_out appear only when a work area is set. "
+                       "clips=true adds per-clip rows (id, start, duration, trim) under tracks[].items. "
+                       "cues=true adds subtitleCues [{start,end,text}] to those rows without the rest of detail. "
+                       "detail=true is REQUIRED to see the full QML clip map: effect stacks, transition ids, "
+                       "per-track waveform/height, bookmarks, mask, fade/fadeCurve/fadeShape, speed, reverse, "
+                       "blend, animIn/animOut, volume, keyframes, subtitleCues, hasFaceTrack, "
+                       "stabilized/stabilizing/stabilizeMode/stabilizeSmoothing/stabilizeTripod/stabilizeStale/"
+                       "stabilizeProgress/stabilizeStatus, and the package/subtitleGen/reverseRender/sceneDetect/"
+                       "beats job state. since=<revision> returns {unchanged:true, revision} when nothing changed."),
         objectSchema({{QStringLiteral("clips"), boolProp(QStringLiteral("Include per-clip rows under tracks[].items"))},
                       {QStringLiteral("detail"),
-                       boolProp(QStringLiteral("Expand to full rows: effect stacks, transitions, mask/fade/speed, bookmarks, and async job state. Combine with clips=true."))},
+                       boolProp(QStringLiteral("Expand to full clip maps: effects, transitions, mask/fade/speed, "
+                                               "cues, face track, stabilize*, bookmarks, and async job state. Combine with clips=true."))},
+                      {QStringLiteral("cues"),
+                       boolProp(QStringLiteral("Include subtitleCues on clip rows without requiring detail. Use this for an hour-long transcript index."))},
                       {QStringLiteral("since"),
                        integerProp(QStringLiteral("Revision from a prior inspect; returns {unchanged:true} when current"))}}),
         toolAnnotations(true, false, true)));
     tools.append(toolDef(
         QStringLiteral("apply"),
-        QStringLiteral("When: Mutate. Runs ops in order and stops at the first failure. NOT atomic — ops before the failure stay applied; the reply is {ok:false, error:\"apply_failed\", stopped:<index>, failed:<that op's error>, done:[results so far]}. On success: {ok:true, n, done}. Successful mutations collapse into a single undo step, except import_media, save_project, set_overlap, set_theme, set_shortcut, and reset_shortcuts, which undo cannot revert. Only toolbox ops go here — catalog, toolbox, inspect, capture, and apply itself return unknown_op, so call those directly."),
+        QStringLiteral("When: Mutate. Runs ops in order and stops at the first failure. NOT atomic — ops before the failure stay applied; the reply is {ok:false, error:\"apply_failed\", stopped:<index>, failed:<that op's error>, done:[results so far]}. On success: {ok:true, n, done}. Successful mutations collapse into a single undo step labelled from the op names, except the ops listed in catalog.limitations (import, save, playback, export, view-state toggles including set_beat_layers), which undo cannot revert. Only toolbox ops go here — catalog, toolbox, inspect, capture, and apply itself return unknown_op, so call those directly. An ops array cannot reference an id produced earlier in the same batch — end the batch after set_speed_curve or any op that mints a clip id you need next."),
         objectSchema({{QStringLiteral("ops"),
                        arrayProp(objectSchema({{QStringLiteral("tool"), stringProp(QStringLiteral("Toolbox op name, e.g. place_clip"))},
                                                {QStringLiteral("args"),

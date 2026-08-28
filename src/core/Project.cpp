@@ -4,6 +4,7 @@
 #include "SubtitleCue.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QUuid>
@@ -772,6 +773,17 @@ QJsonObject Project::toJson() const
         root.insert(QStringLiteral("workAreaOutUs"), static_cast<double>(m_workAreaOutUs));
     }
     return root;
+}
+
+QByteArray Project::toCompactJson() const
+{
+    return QJsonDocument(toJson()).toJson(QJsonDocument::Compact);
+}
+
+QString Project::contentHash() const
+{
+    return QString::fromLatin1(
+        QCryptographicHash::hash(toCompactJson(), QCryptographicHash::Sha256).toHex());
 }
 
 } // namespace drift

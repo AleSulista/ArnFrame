@@ -2,6 +2,8 @@
 
 #include <QAbstractSocket>
 #include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QDir>
 #include <QEventLoop>
 #include <QFile>
 #include <QJsonArray>
@@ -69,6 +71,21 @@ private slots:
     void setVolumeRoundTrips();
     void audioReadOpsAreNotUndoable();
     void armedBeatGridMakesMoveClipSnap();
+    void undoExemptOpsMatchCatalogLimitations();
+    void selectionBasedOpsExcludePlayheadOps();
+    void inspectReportsSelectionAndUndo();
+    void listHistoryLabelsApplyBatch();
+    void undoToRestoresSnapshot();
+    void setRippleIsNotUndoable();
+    void closeGapClosesOneHole();
+    void saveProjectWithoutPathUsesCurrent();
+    void detectSilenceFindsInjectedGap();
+    void setEffectStringParamSetsFileParam();
+    void addShapeReturnsMintedId();
+    void historyEntriesHaveHashes();
+    void undoToByHash();
+    void snapshotFileHashMatchesHistory();
+    void linearHistoryDropsRedo();
 };
 
 static QJsonObject rpc(const QString &method, const QJsonObject &params = {}, int id = 1)
@@ -144,7 +161,7 @@ void McpTest::catalogListsToolboxes()
     const QJsonObject cat = drift::mcp::catalogPayload();
     QVERIFY(cat.value(QStringLiteral("ok")).toBool());
     const QJsonArray boxes = cat.value(QStringLiteral("toolboxes")).toArray();
-    QCOMPARE(boxes.size(), 16);
+    QCOMPARE(boxes.size(), 17);
     QStringList names;
     for (const QJsonValue &v : boxes)
         names.append(v.toObject().value(QStringLiteral("name")).toString());
@@ -154,6 +171,7 @@ void McpTest::catalogListsToolboxes()
     QVERIFY(names.contains(QStringLiteral("project")));
     QVERIFY(names.contains(QStringLiteral("audio")));
     QVERIFY(names.contains(QStringLiteral("scene")));
+    QVERIFY(names.contains(QStringLiteral("multicam")));
 }
 
 void McpTest::catalogOpsIncludeWhen()
@@ -164,6 +182,12 @@ void McpTest::catalogOpsIncludeWhen()
     QVERIFY(cat.contains(QStringLiteral("units")));
     QVERIFY(cat.contains(QStringLiteral("workflow")));
     QVERIFY(cat.contains(QStringLiteral("guide")));
+    const QString guide = cat.value(QStringLiteral("guide")).toString();
+    QVERIFY(guide.contains(QStringLiteral("YOUR own tools")));
+    QString limitations;
+    for (const QJsonValue &v : cat.value(QStringLiteral("limitations")).toArray())
+        limitations += v.toString();
+    QVERIFY(limitations.contains(QStringLiteral("filesystem tools")));
     for (const QJsonValue &v : boxes) {
         const QJsonArray ops = v.toObject().value(QStringLiteral("ops")).toArray();
         QVERIFY(!ops.isEmpty());
@@ -602,7 +626,7 @@ void McpTest::projectSetupRoundTrip()
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
-    const QString path = dir.filePath(QStringLiteral("test.dcut"));
+    const QString path = dir.filePath(QStringLiteral("test.drift"));
     const QJsonObject saved = dispatcher.applyOne(
         QStringLiteral("save_project"), {{QStringLiteral("path"), path}});
     QVERIFY(saved.value(QStringLiteral("ok")).toBool());
@@ -738,7 +762,7 @@ void McpTest::audioToolboxReturnsSchemas()
     const QJsonObject payload = drift::mcp::toolboxPayload(QStringLiteral("audio"));
     QVERIFY(payload.value(QStringLiteral("ok")).toBool());
     const QJsonArray tools = payload.value(QStringLiteral("tools")).toArray();
-    QCOMPARE(tools.size(), 8);
+    QCOMPARE(tools.size(), 14);
 
     QStringList names;
     for (const QJsonValue &v : tools) {
@@ -751,6 +775,12 @@ void McpTest::audioToolboxReturnsSchemas()
     QVERIFY(names.contains(QStringLiteral("split_on_beats")));
     QVERIFY(names.contains(QStringLiteral("snap_clips_to_beats")));
     QVERIFY(names.contains(QStringLiteral("set_volume")));
+    QVERIFY(names.contains(QStringLiteral("detect_silence")));
+    QVERIFY(names.contains(QStringLiteral("remove_silence")));
+    QVERIFY(names.contains(QStringLiteral("analyze_loudness")));
+    QVERIFY(names.contains(QStringLiteral("normalize_volume")));
+    QVERIFY(names.contains(QStringLiteral("duck_under")));
+    QVERIFY(names.contains(QStringLiteral("clear_beat_analysis")));
 
     // detect_beats is on /mcp/audio, not the homepage.
     QCOMPARE(drift::mcp::toolboxForOp(QStringLiteral("detect_beats")), QStringLiteral("audio"));
@@ -1352,6 +1382,437 @@ void McpTest::aiCapabilitiesReportsMissingModels()
     // The runtime matters as much as the models: a model with nothing to execute it is not a
     // capability, so the report must name one either way.
     QVERIFY(!result.value(QStringLiteral("runtime")).toString().isEmpty());
+}
+
+void McpTest::undoExemptOpsMatchCatalogLimitations()
+{
+    const QJsonObject cat = drift::mcp::catalogPayload();
+    QString blob;
+    for (const QJsonValue &v : cat.value(QStringLiteral("limitations")).toArray())
+        blob += v.toString() + QLatin1Char(' ');
+    for (const QString &op : drift::mcp::undoExemptOps())
+        QVERIFY2(blob.contains(op), qPrintable(op));
+}
+
+void McpTest::selectionBasedOpsExcludePlayheadOps()
+{
+    const QStringList ops = drift::mcp::selectionBasedOps();
+    QVERIFY(ops.contains(QStringLiteral("separate_audio")));
+    QVERIFY(ops.contains(QStringLiteral("copy_selection")));
+    QVERIFY(!ops.contains(QStringLiteral("freeze_frame")));
+    QVERIFY(!ops.contains(QStringLiteral("paste_at_playhead")));
+
+    const QJsonObject cat = drift::mcp::catalogPayload();
+    const QString guide = cat.value(QStringLiteral("guide")).toString();
+    QVERIFY(guide.contains(QStringLiteral("freeze_frame and paste_at_playhead are playhead-based")));
+}
+
+void McpTest::inspectReportsSelectionAndUndo()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject empty = dispatcher.inspect({});
+    QVERIFY(empty.value(QStringLiteral("ok")).toBool());
+    QVERIFY(!empty.contains(QStringLiteral("selection")));
+    const QJsonObject undo0 = empty.value(QStringLiteral("undo")).toObject();
+    QCOMPARE(undo0.value(QStringLiteral("can")).toBool(), false);
+    QCOMPARE(undo0.value(QStringLiteral("depth")).toInt(), 0);
+
+    const QJsonObject added = dispatcher.applyOne(
+        QStringLiteral("add_text"),
+        {{QStringLiteral("text"), QStringLiteral("Hello")}, {QStringLiteral("at"), 0.0}});
+    QVERIFY(added.value(QStringLiteral("ok")).toBool());
+    const QString id = added.value(QStringLiteral("id")).toString();
+    QVERIFY(!id.isEmpty());
+
+    const QJsonObject withSel = dispatcher.inspect({});
+    const QJsonObject sel = withSel.value(QStringLiteral("selection")).toObject();
+    QCOMPARE(sel.value(QStringLiteral("clip")).toString(), id);
+    QVERIFY(sel.contains(QStringLiteral("track")));
+    QVERIFY(sel.contains(QStringLiteral("index")));
+    const QJsonObject undo1 = withSel.value(QStringLiteral("undo")).toObject();
+    QCOMPARE(undo1.value(QStringLiteral("can")).toBool(), true);
+    QVERIFY(undo1.value(QStringLiteral("depth")).toInt() >= 1);
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("clear_selection"), {}).value(QStringLiteral("ok")).toBool());
+    QVERIFY(!dispatcher.inspect({}).contains(QStringLiteral("selection")));
+}
+
+void McpTest::listHistoryLabelsApplyBatch()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject batch = dispatcher.apply(
+        {{QStringLiteral("ops"),
+          QJsonArray{QJsonObject{{QStringLiteral("tool"), QStringLiteral("add_text")},
+                                 {QStringLiteral("args"),
+                                  QJsonObject{{QStringLiteral("text"), QStringLiteral("A")},
+                                              {QStringLiteral("at"), 0.0}}}}}}});
+    QVERIFY(batch.value(QStringLiteral("ok")).toBool());
+
+    const QJsonObject history = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    QVERIFY(history.value(QStringLiteral("ok")).toBool());
+    const QJsonArray entries = history.value(QStringLiteral("entries")).toArray();
+    QCOMPARE(entries.size(), 2);
+    QCOMPARE(entries.at(0).toObject().value(QStringLiteral("label")).toString(),
+             QStringLiteral("Origin"));
+    QCOMPARE(history.value(QStringLiteral("current")).toInt(), 1);
+    const QString label = entries.last().toObject().value(QStringLiteral("label")).toString();
+    QVERIFY2(label.contains(QStringLiteral("add_text")), qPrintable(label));
+    const QString hash = entries.last().toObject().value(QStringLiteral("hash")).toString();
+    QCOMPARE(hash.size(), 64);
+    QCOMPARE(history.value(QStringLiteral("hash")).toString(), hash);
+}
+
+void McpTest::undoToRestoresSnapshot()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("A")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("B")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+
+    const QJsonObject history = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    QCOMPARE(history.value(QStringLiteral("current")).toInt(), 2);
+    QCOMPARE(dispatcher.inspect({}).value(QStringLiteral("clips")).toInt(), 2);
+
+    const QJsonObject jumped = dispatcher.applyOne(QStringLiteral("undo_to"),
+                                                   {{QStringLiteral("index"), 1}});
+    QVERIFY(jumped.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(jumped.value(QStringLiteral("index")).toInt(), 1);
+    QCOMPARE(dispatcher.inspect({}).value(QStringLiteral("clips")).toInt(), 1);
+}
+
+void McpTest::setRippleIsNotUndoable()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject result = dispatcher.applyOne(QStringLiteral("set_ripple"),
+                                                   {{QStringLiteral("enabled"), true}});
+    QVERIFY(result.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(result.value(QStringLiteral("ripple")).toBool(), true);
+    QCOMPARE(state.rippleEnabled(), true);
+    QVERIFY(!state.undoAvailable());
+}
+
+void McpTest::closeGapClosesOneHole()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("set_overlap"), {{QStringLiteral("enabled"), true}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+
+    const QJsonObject a = dispatcher.applyOne(
+        QStringLiteral("add_text"),
+        {{QStringLiteral("text"), QStringLiteral("A")}, {QStringLiteral("at"), 0.0}});
+    QVERIFY(a.value(QStringLiteral("ok")).toBool());
+    const QJsonObject b = dispatcher.applyOne(
+        QStringLiteral("add_text"),
+        {{QStringLiteral("text"), QStringLiteral("B")}, {QStringLiteral("at"), 10.0}});
+    QVERIFY(b.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(b.value(QStringLiteral("start")).toDouble(), 10.0);
+
+    const int track = b.value(QStringLiteral("track")).toInt();
+    const double gapAt = a.value(QStringLiteral("start")).toDouble()
+                         + a.value(QStringLiteral("dur")).toDouble();
+    const QJsonObject closed = dispatcher.applyOne(
+        QStringLiteral("close_gap"),
+        {{QStringLiteral("track"), track}, {QStringLiteral("at"), gapAt}});
+    QVERIFY(closed.value(QStringLiteral("ok")).toBool());
+
+    const QJsonObject inspect = dispatcher.inspect({{QStringLiteral("clips"), true}});
+    const QJsonArray items = inspect.value(QStringLiteral("tracks")).toArray().at(track).toObject()
+                                 .value(QStringLiteral("items")).toArray();
+    QVERIFY(items.size() >= 2);
+    const QString bid = b.value(QStringLiteral("id")).toString();
+    bool found = false;
+    for (const QJsonValue &v : items) {
+        const QJsonObject clip = v.toObject();
+        if (clip.value(QStringLiteral("id")).toString() != bid)
+            continue;
+        found = true;
+        QCOMPARE(clip.value(QStringLiteral("start")).toDouble(), gapAt);
+    }
+    QVERIFY(found);
+}
+
+void McpTest::saveProjectWithoutPathUsesCurrent()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject neverSaved = dispatcher.applyOne(QStringLiteral("save_project"), {});
+    QCOMPARE(neverSaved.value(QStringLiteral("ok")).toBool(), false);
+    QCOMPARE(neverSaved.value(QStringLiteral("error")).toString(), QStringLiteral("bad_args"));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("named.drift"));
+    QVERIFY(dispatcher.applyOne(QStringLiteral("save_project"), {{QStringLiteral("path"), path}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+
+    const QJsonObject again = dispatcher.applyOne(QStringLiteral("save_project"), {});
+    QVERIFY2(again.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(again).toJson(QJsonDocument::Compact)));
+    QCOMPARE(again.value(QStringLiteral("path")).toString(), path);
+}
+
+void McpTest::detectSilenceFindsInjectedGap()
+{
+    if (ffmpegPath().isEmpty())
+        QSKIP("ffmpeg not available to generate a test clip");
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.filePath(QStringLiteral("half-tone.wav"));
+    QVERIFY(writeHalfSilentTone(source));
+
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+    const QString clip = importAndPlace(dispatcher, source, 0.0);
+    QVERIFY(!clip.isEmpty());
+
+    const QJsonObject result = dispatcher.applyOne(
+        QStringLiteral("detect_silence"),
+        {{QStringLiteral("clip"), clip},
+         {QStringLiteral("threshold"), 0.02},
+         {QStringLiteral("min_duration"), 0.35}});
+    QVERIFY2(result.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(result).toJson(QJsonDocument::Compact)));
+    QCOMPARE(result.value(QStringLiteral("source")).toString(), QStringLiteral("clip"));
+    const QJsonArray ranges = result.value(QStringLiteral("ranges")).toArray();
+    QVERIFY2(!ranges.isEmpty(), qPrintable(QJsonDocument(result).toJson(QJsonDocument::Compact)));
+    const QJsonObject gap = ranges.last().toObject();
+    QVERIFY(gap.value(QStringLiteral("start")).toDouble() > 1.5);
+    QVERIFY(gap.value(QStringLiteral("end")).toDouble() > 3.0);
+}
+
+void McpTest::setEffectStringParamSetsFileParam()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    bool hasFaceSwap = false;
+    const QJsonObject listed = dispatcher.applyOne(QStringLiteral("list_effects"), {});
+    for (const QJsonValue &v : listed.value(QStringLiteral("effects")).toArray()) {
+        if (v.toObject().value(QStringLiteral("id")).toString() == QLatin1String("face_swap"))
+            hasFaceSwap = true;
+    }
+    if (!hasFaceSwap)
+        QSKIP("face_swap effect is not in the test catalog");
+
+    const QJsonObject added = dispatcher.applyOne(
+        QStringLiteral("add_text"),
+        {{QStringLiteral("text"), QStringLiteral("Face")}, {QStringLiteral("at"), 0.0}});
+    QVERIFY(added.value(QStringLiteral("ok")).toBool());
+    const QString clip = added.value(QStringLiteral("id")).toString();
+
+    const QJsonObject fx = dispatcher.applyOne(
+        QStringLiteral("add_effect"),
+        {{QStringLiteral("clip"), clip}, {QStringLiteral("effect"), QStringLiteral("face_swap")}});
+    QVERIFY2(fx.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(fx).toJson(QJsonDocument::Compact)));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString image = dir.filePath(QStringLiteral("face.png"));
+    {
+        QFile f(image);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QByteArray::fromHex("89504e470d0a1a0a"));
+    }
+
+    const QJsonObject set = dispatcher.applyOne(
+        QStringLiteral("set_effect_string_param"),
+        {{QStringLiteral("clip"), clip},
+         {QStringLiteral("index"), 0},
+         {QStringLiteral("key"), QStringLiteral("sourceImage")},
+         {QStringLiteral("value"), image}});
+    QVERIFY2(set.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(set).toJson(QJsonDocument::Compact)));
+}
+
+void McpTest::addShapeReturnsMintedId()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject shapes = dispatcher.applyOne(QStringLiteral("list_shapes"), {});
+    QVERIFY(shapes.value(QStringLiteral("ok")).toBool());
+    const QJsonArray list = shapes.value(QStringLiteral("shapes")).toArray();
+    if (list.isEmpty())
+        QSKIP("no builtin shapes");
+    const QString shapeId = list.at(0).toObject().value(QStringLiteral("id")).toString();
+    QVERIFY(!shapeId.isEmpty());
+
+    const QJsonObject added = dispatcher.applyOne(
+        QStringLiteral("add_shape"),
+        {{QStringLiteral("shape"), shapeId}, {QStringLiteral("at"), 0.0}});
+    QVERIFY2(added.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(added).toJson(QJsonDocument::Compact)));
+    QVERIFY(!added.value(QStringLiteral("id")).toString().isEmpty());
+    QCOMPARE(added.value(QStringLiteral("n")).toInt(), 1);
+}
+
+void McpTest::historyEntriesHaveHashes()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject empty = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    QCOMPARE(empty.value(QStringLiteral("entries")).toArray().size(), 1);
+    QCOMPARE(empty.value(QStringLiteral("current")).toInt(), 0);
+    QCOMPARE(empty.value(QStringLiteral("hash")).toString().size(), 64);
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("A")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+    const QJsonObject hist = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    const QJsonArray entries = hist.value(QStringLiteral("entries")).toArray();
+    QCOMPARE(entries.size(), 2);
+    QVERIFY(entries.at(0).toObject().value(QStringLiteral("hash")).toString()
+            != entries.at(1).toObject().value(QStringLiteral("hash")).toString());
+    QCOMPARE(dispatcher.inspect({}).value(QStringLiteral("undo")).toObject()
+                 .value(QStringLiteral("hash")).toString(),
+             hist.value(QStringLiteral("hash")).toString());
+}
+
+void McpTest::undoToByHash()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("A")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("B")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+
+    const QJsonObject history = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    const QJsonArray entries = history.value(QStringLiteral("entries")).toArray();
+    QCOMPARE(entries.size(), 3);
+    const QString mid = entries.at(1).toObject().value(QStringLiteral("hash")).toString();
+    const QString prefix = mid.left(12);
+
+    const QJsonObject jumped = dispatcher.applyOne(QStringLiteral("undo_to"),
+                                                   {{QStringLiteral("hash"), prefix}});
+    QVERIFY2(jumped.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(jumped).toJson(QJsonDocument::Compact)));
+    QCOMPARE(jumped.value(QStringLiteral("index")).toInt(), 1);
+    QCOMPARE(jumped.value(QStringLiteral("hash")).toString(), mid);
+    QCOMPARE(dispatcher.inspect({}).value(QStringLiteral("clips")).toInt(), 1);
+}
+
+void McpTest::snapshotFileHashMatchesHistory()
+{
+    QStandardPaths::setTestModeEnabled(true);
+    const auto restore = qScopeGuard([] { QStandardPaths::setTestModeEnabled(false); });
+
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("Snap")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+
+    const QJsonObject history = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    const QString hash = history.value(QStringLiteral("hash")).toString();
+    QVERIFY(hash.size() == 64);
+
+    const QJsonObject snap = dispatcher.applyOne(QStringLiteral("take_snapshot"),
+                                                 {{QStringLiteral("label"), QStringLiteral("keep")}});
+    QVERIFY2(snap.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(snap).toJson(QJsonDocument::Compact)));
+    QCOMPARE(snap.value(QStringLiteral("hash")).toString(), hash);
+    const QString path = snap.value(QStringLiteral("path")).toString();
+    QVERIFY(QFile::exists(path));
+
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QByteArray json = file.readAll();
+    QCOMPARE(QString::fromLatin1(QCryptographicHash::hash(json, QCryptographicHash::Sha256).toHex()),
+             hash);
+
+    const QJsonObject listed = dispatcher.applyOne(QStringLiteral("list_snapshots"), {});
+    QVERIFY(listed.value(QStringLiteral("ok")).toBool());
+    QVERIFY(listed.value(QStringLiteral("n")).toInt() >= 1);
+}
+
+void McpTest::linearHistoryDropsRedo()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("A")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("B")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+
+    const QJsonObject before = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    const QString dropped = before.value(QStringLiteral("entries")).toArray().at(2).toObject()
+                                .value(QStringLiteral("hash")).toString();
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("undo_to"), {{QStringLiteral("index"), 1}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("C")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+
+    const QJsonObject after = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    QCOMPARE(after.value(QStringLiteral("current")).toInt(), 2);
+    QCOMPARE(after.value(QStringLiteral("entries")).toArray().size(), 3);
+    QStringList hashes;
+    for (const QJsonValue &v : after.value(QStringLiteral("entries")).toArray())
+        hashes.append(v.toObject().value(QStringLiteral("hash")).toString());
+    QVERIFY(!hashes.contains(dropped));
+    const QJsonObject missing = dispatcher.applyOne(QStringLiteral("undo_to"),
+                                                    {{QStringLiteral("hash"), dropped}});
+    QCOMPARE(missing.value(QStringLiteral("ok")).toBool(), false);
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("not_found"));
 }
 
 QTEST_MAIN(McpTest)
