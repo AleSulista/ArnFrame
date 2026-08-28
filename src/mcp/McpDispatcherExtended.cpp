@@ -1435,9 +1435,25 @@ QJsonObject McpDispatcher::applyOneExtended(const QString &tool, const QJsonObje
         return m_controller->mcpListHistory();
 
     if (tool == QLatin1String("undo_to")) {
+        const QString hash = argString(args, QStringLiteral("hash"));
+        if (!hash.isEmpty())
+            return m_controller->mcpUndoTo(-1, hash);
         if (!args.contains(QStringLiteral("index")))
-            return err("bad_args", QStringLiteral("index required"));
-        return m_controller->mcpUndoTo(jsonInt(args.value(QStringLiteral("index")), -1));
+            return err("bad_args", QStringLiteral("index or hash required"));
+        return m_controller->mcpUndoTo(jsonInt(args.value(QStringLiteral("index")), -1), {});
+    }
+
+    if (tool == QLatin1String("take_snapshot"))
+        return m_controller->mcpTakeSnapshot(argString(args, QStringLiteral("label")));
+
+    if (tool == QLatin1String("list_snapshots"))
+        return m_controller->mcpListSnapshots();
+
+    if (tool == QLatin1String("restore_snapshot")) {
+        const QString hash = argString(args, QStringLiteral("hash"));
+        if (hash.isEmpty())
+            return err("bad_args", QStringLiteral("hash required"));
+        return m_controller->mcpRestoreSnapshot(hash);
     }
 
     if (tool == QLatin1String("set_ripple")) {

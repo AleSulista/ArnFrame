@@ -8,6 +8,8 @@ ProjectSnapshotCommand::ProjectSnapshotCommand(Project *project, Project before,
     , m_project(project)
     , m_before(std::move(before))
     , m_after(std::move(after))
+    , m_beforeHash(m_before.contentHash())
+    , m_afterHash(m_after.contentHash())
 {
 }
 

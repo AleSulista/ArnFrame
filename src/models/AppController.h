@@ -464,7 +464,10 @@ public:
     void mcpBeginBatch();
     void mcpEndBatch(const QString &text, bool pushUndo);
     QJsonObject mcpListHistory() const;
-    QJsonObject mcpUndoTo(int index);
+    QJsonObject mcpUndoTo(int index, const QString &hash);
+    QJsonObject mcpTakeSnapshot(const QString &label);
+    QJsonObject mcpListSnapshots() const;
+    QJsonObject mcpRestoreSnapshot(const QString &hash);
     QJsonObject mcpDetectSilence(int trackIndex, int clipIndex, double startSeconds,
                                  double durSeconds, double threshold, double minDuration,
                                  double padding) const;
@@ -1372,6 +1375,11 @@ protected:
     void deleteRecoveryFile();
     void detectRecoveryFile();
     static QString recoveryFilePath();
+    QString historyHashAt(int stackIndex) const;
+    int historyIndexForHash(const QString &prefix) const;
+    QByteArray historyJsonAt(int stackIndex) const;
+    static QString historySnapshotDir();
+    static void pruneHistorySnapshots();
 
     AssetLibrary *m_assetLibrary = nullptr;
     AddonManager *m_addonManager = nullptr;

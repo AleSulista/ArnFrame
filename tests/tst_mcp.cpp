@@ -2,6 +2,8 @@
 
 #include <QAbstractSocket>
 #include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QDir>
 #include <QEventLoop>
 #include <QFile>
 #include <QJsonArray>
@@ -80,6 +82,10 @@ private slots:
     void detectSilenceFindsInjectedGap();
     void setEffectStringParamSetsFileParam();
     void addShapeReturnsMintedId();
+    void historyEntriesHaveHashes();
+    void undoToByHash();
+    void snapshotFileHashMatchesHistory();
+    void linearHistoryDropsRedo();
 };
 
 static QJsonObject rpc(const QString &method, const QJsonObject &params = {}, int id = 1)
@@ -1451,9 +1457,15 @@ void McpTest::listHistoryLabelsApplyBatch()
     const QJsonObject history = dispatcher.applyOne(QStringLiteral("list_history"), {});
     QVERIFY(history.value(QStringLiteral("ok")).toBool());
     const QJsonArray entries = history.value(QStringLiteral("entries")).toArray();
-    QVERIFY(!entries.isEmpty());
+    QCOMPARE(entries.size(), 2);
+    QCOMPARE(entries.at(0).toObject().value(QStringLiteral("label")).toString(),
+             QStringLiteral("Origin"));
+    QCOMPARE(history.value(QStringLiteral("current")).toInt(), 1);
     const QString label = entries.last().toObject().value(QStringLiteral("label")).toString();
     QVERIFY2(label.contains(QStringLiteral("add_text")), qPrintable(label));
+    const QString hash = entries.last().toObject().value(QStringLiteral("hash")).toString();
+    QCOMPARE(hash.size(), 64);
+    QCOMPARE(history.value(QStringLiteral("hash")).toString(), hash);
 }
 
 void McpTest::undoToRestoresSnapshot()
@@ -1662,6 +1674,145 @@ void McpTest::addShapeReturnsMintedId()
              qPrintable(QJsonDocument(added).toJson(QJsonDocument::Compact)));
     QVERIFY(!added.value(QStringLiteral("id")).toString().isEmpty());
     QCOMPARE(added.value(QStringLiteral("n")).toInt(), 1);
+}
+
+void McpTest::historyEntriesHaveHashes()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    const QJsonObject empty = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    QCOMPARE(empty.value(QStringLiteral("entries")).toArray().size(), 1);
+    QCOMPARE(empty.value(QStringLiteral("current")).toInt(), 0);
+    QCOMPARE(empty.value(QStringLiteral("hash")).toString().size(), 64);
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("A")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+    const QJsonObject hist = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    const QJsonArray entries = hist.value(QStringLiteral("entries")).toArray();
+    QCOMPARE(entries.size(), 2);
+    QVERIFY(entries.at(0).toObject().value(QStringLiteral("hash")).toString()
+            != entries.at(1).toObject().value(QStringLiteral("hash")).toString());
+    QCOMPARE(dispatcher.inspect({}).value(QStringLiteral("undo")).toObject()
+                 .value(QStringLiteral("hash")).toString(),
+             hist.value(QStringLiteral("hash")).toString());
+}
+
+void McpTest::undoToByHash()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("A")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("B")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+
+    const QJsonObject history = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    const QJsonArray entries = history.value(QStringLiteral("entries")).toArray();
+    QCOMPARE(entries.size(), 3);
+    const QString mid = entries.at(1).toObject().value(QStringLiteral("hash")).toString();
+    const QString prefix = mid.left(12);
+
+    const QJsonObject jumped = dispatcher.applyOne(QStringLiteral("undo_to"),
+                                                   {{QStringLiteral("hash"), prefix}});
+    QVERIFY2(jumped.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(jumped).toJson(QJsonDocument::Compact)));
+    QCOMPARE(jumped.value(QStringLiteral("index")).toInt(), 1);
+    QCOMPARE(jumped.value(QStringLiteral("hash")).toString(), mid);
+    QCOMPARE(dispatcher.inspect({}).value(QStringLiteral("clips")).toInt(), 1);
+}
+
+void McpTest::snapshotFileHashMatchesHistory()
+{
+    QStandardPaths::setTestModeEnabled(true);
+    const auto restore = qScopeGuard([] { QStandardPaths::setTestModeEnabled(false); });
+
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("Snap")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+
+    const QJsonObject history = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    const QString hash = history.value(QStringLiteral("hash")).toString();
+    QVERIFY(hash.size() == 64);
+
+    const QJsonObject snap = dispatcher.applyOne(QStringLiteral("take_snapshot"),
+                                                 {{QStringLiteral("label"), QStringLiteral("keep")}});
+    QVERIFY2(snap.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(snap).toJson(QJsonDocument::Compact)));
+    QCOMPARE(snap.value(QStringLiteral("hash")).toString(), hash);
+    const QString path = snap.value(QStringLiteral("path")).toString();
+    QVERIFY(QFile::exists(path));
+
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QByteArray json = file.readAll();
+    QCOMPARE(QString::fromLatin1(QCryptographicHash::hash(json, QCryptographicHash::Sha256).toHex()),
+             hash);
+
+    const QJsonObject listed = dispatcher.applyOne(QStringLiteral("list_snapshots"), {});
+    QVERIFY(listed.value(QStringLiteral("ok")).toBool());
+    QVERIFY(listed.value(QStringLiteral("n")).toInt() >= 1);
+}
+
+void McpTest::linearHistoryDropsRedo()
+{
+    AssetLibrary library;
+    AppController state(&library);
+    drift::mcp::McpDispatcher dispatcher(&state);
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("A")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("B")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+
+    const QJsonObject before = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    const QString dropped = before.value(QStringLiteral("entries")).toArray().at(2).toObject()
+                                .value(QStringLiteral("hash")).toString();
+
+    QVERIFY(dispatcher.applyOne(QStringLiteral("undo_to"), {{QStringLiteral("index"), 1}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+    QVERIFY(dispatcher.applyOne(QStringLiteral("add_text"),
+                                {{QStringLiteral("text"), QStringLiteral("C")},
+                                 {QStringLiteral("at"), 0.0}})
+                .value(QStringLiteral("ok"))
+                .toBool());
+
+    const QJsonObject after = dispatcher.applyOne(QStringLiteral("list_history"), {});
+    QCOMPARE(after.value(QStringLiteral("current")).toInt(), 2);
+    QCOMPARE(after.value(QStringLiteral("entries")).toArray().size(), 3);
+    QStringList hashes;
+    for (const QJsonValue &v : after.value(QStringLiteral("entries")).toArray())
+        hashes.append(v.toObject().value(QStringLiteral("hash")).toString());
+    QVERIFY(!hashes.contains(dropped));
+    const QJsonObject missing = dispatcher.applyOne(QStringLiteral("undo_to"),
+                                                    {{QStringLiteral("hash"), dropped}});
+    QCOMPARE(missing.value(QStringLiteral("ok")).toBool(), false);
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("not_found"));
 }
 
 QTEST_MAIN(McpTest)

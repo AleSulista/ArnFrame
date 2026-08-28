@@ -301,15 +301,34 @@ const QList<Op> &ops()
           "Redo the last undone edit. Fails bad_args when there is nothing to redo.",
           objectSchema({}) },
         { "list_history", "timeline", "Read the undo stack",
-          "Returns {entries:[{index, label}], current} from the project's undo stack. current is the "
-          "next redo index (0 = everything undone). Read-only.",
+          "Linear history (no branches). Returns {entries:[{index, label, hash, short, snapshot}], "
+          "current, hash, linear:true}. index 0 is Origin (empty/loaded project); each later entry is "
+          "one undo step. hash is SHA-256 of that version's compact project JSON — the same bytes "
+          "take_snapshot writes to <hash>.json. current is the HEAD index. Read-only.",
           objectSchema({}), true, false, true },
-        { "undo_to", "timeline", "Jump to an earlier snapshot",
-          "Restore the project to undo-stack index `index` (from list_history). Commands are "
-          "whole-project snapshots, so this is safe. Not itself undoable.",
+        { "undo_to", "timeline", "Jump to a history version",
+          "Restore the project to a linear history version. Pass index (from list_history) or hash "
+          "(full SHA-256 or unique 8+ char prefix). Redo of later steps remains until the next edit, "
+          "which discards them — there is no branching. Not itself undoable.",
           objectSchema({{QStringLiteral("index"),
-                         integerProp(QStringLiteral("Target stack index from list_history.current"))}},
-                       {QStringLiteral("index")}) },
+                         integerProp(QStringLiteral("Target index from list_history (0 = Origin)"))},
+                        {QStringLiteral("hash"),
+                         stringProp(QStringLiteral("Content hash from list_history, or a unique prefix"))}}) },
+        { "take_snapshot", "timeline", "Keep a JSON copy of HEAD",
+          "Write the current history version as compact project JSON named <hash>.json under the app "
+          "history folder. The file's SHA-256 is the same hash list_history reports. Does not change "
+          "the project. Caps at 32 files (oldest dropped). Not undoable.",
+          objectSchema({{QStringLiteral("label"),
+                         stringProp(QStringLiteral("Optional note stored only in the reply"))}}) },
+        { "list_snapshots", "timeline", "On-disk history JSON files",
+          "Snapshots written by take_snapshot. Returns {snapshots:[{hash, short, path, bytes, savedAt}]}.",
+          objectSchema({}), true, false, true },
+        { "restore_snapshot", "timeline", "Reset to a saved JSON",
+          "If hash is still on the undo stack, same as undo_to. Otherwise load the on-disk JSON and "
+          "clear the stack (new Origin). Linear — redo history is discarded. Not undoable.",
+          objectSchema({{QStringLiteral("hash"),
+                         stringProp(QStringLiteral("Snapshot hash or unique prefix"))}},
+                       {QStringLiteral("hash")}) },
         { "set_overlap", "timeline", "Allow clips to overlap",
           "Project setting. Off (default): place/move push to the next gap. On: requested start is kept.",
           objectSchema({{QStringLiteral("enabled"), boolProp(QStringLiteral("Allow overlapping clips"))}},
@@ -657,6 +676,7 @@ QStringList undoExemptOps()
         QStringLiteral("seek"),                QStringLiteral("play"),
         QStringLiteral("pause"),               QStringLiteral("undo"),
         QStringLiteral("redo"),                QStringLiteral("undo_to"),
+        QStringLiteral("take_snapshot"),       QStringLiteral("restore_snapshot"),
         QStringLiteral("set_overlap"),         QStringLiteral("set_ripple"),
         QStringLiteral("set_snap"),            QStringLiteral("set_guides"),
         QStringLiteral("set_loop_work_area"),  QStringLiteral("export_video"),
@@ -694,7 +714,7 @@ QString agentGuideText()
         "4. Call inspect({clips:true, detail:true}) for clip UUIDs, effect stacks, mask/fade/speed, "
         "subtitle cues, face-track/stabilize fields, and job state. inspect always reports "
         "selection:{track,index,clip} (omitted when nothing is selected) and "
-        "undo:{can,canRedo,depth,index}. inspect({clips:true,cues:true}) adds subtitleCues without "
+        "undo:{can,canRedo,depth,index,hash}. inspect({clips:true,cues:true}) adds subtitleCues without "
         "the rest of detail.\n"
         "5. Call capture() for a composition still (JPEG by default).\n"
         "\n"
@@ -720,6 +740,12 @@ QString agentGuideText()
         "select_clip or select_clips first: separate_audio, unlink_audio, merge_clips,\n"
         "align_clip_left, align_clip_right, copy_selection, cut_selection.\n"
         "freeze_frame and paste_at_playhead are playhead-based, not selection-based — seek first.\n"
+        "\n"
+        "History is linear, like git without branches. list_history returns every version (index 0 =\n"
+        "Origin) with a SHA-256 hash of that version's compact project JSON. undo_to({hash}) or\n"
+        "undo_to({index}) jumps; the next edit discards redo. take_snapshot writes <hash>.json whose\n"
+        "bytes hash to the same value; restore_snapshot loads a disk copy only if it has fallen off\n"
+        "the stack (and resets Origin).\n"
         "\n"
         "Async jobs return {started:true} immediately. Poll these fields, all of which need\n"
         "inspect({detail:true}) except export:\n"
@@ -881,7 +907,7 @@ QJsonArray homepageTools()
         QStringLiteral("When: Read state. Returns revision, name, w, h, fps, dur, playhead, playing, overlap, "
                        "clips (count), tracks, assets, path, dirty, background, export {active, progress}, "
                        "selection {track, index, clip} (absent when nothing is selected), and "
-                       "undo {can, canRedo, depth, index}. work_in/work_out appear only when a work area is set. "
+                       "undo {can, canRedo, depth, index, hash}. work_in/work_out appear only when a work area is set. "
                        "clips=true adds per-clip rows (id, start, duration, trim) under tracks[].items. "
                        "cues=true adds subtitleCues [{start,end,text}] to those rows without the rest of detail. "
                        "detail=true is REQUIRED to see the full QML clip map: effect stacks, transition ids, "

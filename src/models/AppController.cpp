@@ -82,6 +82,7 @@
 #include <QLibraryInfo>
 #include <QLocale>
 #include <QAudioDevice>
+#include <QSaveFile>
 #include <QSettings>
 #include <QByteArray>
 #include <QTranslator>
@@ -14876,7 +14877,8 @@ QJsonObject AppController::mcpInspect(bool includeClips, int sinceRevision, bool
                  QJsonObject{{QStringLiteral("can"), m_undoStack.canUndo()},
                              {QStringLiteral("canRedo"), m_undoStack.canRedo()},
                              {QStringLiteral("depth"), m_undoStack.count()},
-                             {QStringLiteral("index"), m_undoStack.index()}});
+                             {QStringLiteral("index"), m_undoStack.index()},
+                             {QStringLiteral("hash"), historyHashAt(m_undoStack.index())}});
     if (detail && m_multicamActive) {
         extra.insert(QStringLiteral("multicam"),
                      QJsonObject{
@@ -16058,26 +16060,236 @@ QList<SilenceRange> rangesFromPeaks(const QVector<float> &peaks, double startSec
 
 } // namespace
 
+namespace {
+
+const drift::ProjectSnapshotCommand *historyCommand(const QUndoStack &stack, int commandIndex)
+{
+    return dynamic_cast<const drift::ProjectSnapshotCommand *>(stack.command(commandIndex));
+}
+
+QString shortHash(const QString &hash)
+{
+    return hash.left(12);
+}
+
+} // namespace
+
+QString AppController::historyHashAt(int stackIndex) const
+{
+    if (stackIndex < 0 || stackIndex > m_undoStack.count())
+        return {};
+    if (stackIndex == 0) {
+        if (m_undoStack.count() == 0)
+            return m_project.contentHash();
+        const auto *cmd = historyCommand(m_undoStack, 0);
+        return cmd ? cmd->beforeHash() : m_project.contentHash();
+    }
+    const auto *cmd = historyCommand(m_undoStack, stackIndex - 1);
+    return cmd ? cmd->afterHash() : QString();
+}
+
+int AppController::historyIndexForHash(const QString &prefix) const
+{
+    const QString needle = prefix.trimmed().toLower();
+    if (needle.size() < 8)
+        return -1;
+    int exact = -1;
+    int found = -1;
+    int matches = 0;
+    for (int i = 0; i <= m_undoStack.count(); ++i) {
+        const QString hash = historyHashAt(i).toLower();
+        if (hash == needle)
+            exact = i;
+        if (hash.startsWith(needle)) {
+            ++matches;
+            found = i;
+        }
+    }
+    if (exact >= 0)
+        return exact;
+    return matches == 1 ? found : -1;
+}
+
+QString AppController::historySnapshotDir()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+           + QStringLiteral("/history");
+}
+
+void AppController::pruneHistorySnapshots()
+{
+    constexpr int kMax = 32;
+    QDir dir(historySnapshotDir());
+    if (!dir.exists())
+        return;
+    QFileInfoList files = dir.entryInfoList({QStringLiteral("*.json")}, QDir::Files, QDir::Time);
+    for (int i = kMax; i < files.size(); ++i)
+        QFile::remove(files.at(i).absoluteFilePath());
+}
+
+QByteArray AppController::historyJsonAt(int stackIndex) const
+{
+    if (stackIndex < 0 || stackIndex > m_undoStack.count())
+        return {};
+    if (stackIndex == 0) {
+        if (m_undoStack.count() == 0)
+            return m_project.toCompactJson();
+        const auto *cmd = historyCommand(m_undoStack, 0);
+        return cmd ? cmd->before().toCompactJson() : m_project.toCompactJson();
+    }
+    const auto *cmd = historyCommand(m_undoStack, stackIndex - 1);
+    return cmd ? cmd->after().toCompactJson() : m_project.toCompactJson();
+}
+
 QJsonObject AppController::mcpListHistory() const
 {
     using namespace drift::mcp;
     QJsonArray entries;
-    for (int i = 0; i < m_undoStack.count(); ++i) {
+    const QString dir = historySnapshotDir();
+    for (int i = 0; i <= m_undoStack.count(); ++i) {
+        const QString hash = historyHashAt(i);
+        const QString label = (i == 0)
+                                  ? QStringLiteral("Origin")
+                                  : m_undoStack.text(i - 1);
+        const bool snapshotted =
+            QFile::exists(dir + QLatin1Char('/') + hash + QStringLiteral(".json"));
         entries.append(QJsonObject{{QStringLiteral("index"), i},
-                                   {QStringLiteral("label"), m_undoStack.text(i)}});
+                                   {QStringLiteral("label"), label},
+                                   {QStringLiteral("hash"), hash},
+                                   {QStringLiteral("short"), shortHash(hash)},
+                                   {QStringLiteral("snapshot"), snapshotted}});
     }
+    const int current = m_undoStack.index();
     return ok({{QStringLiteral("entries"), entries},
-               {QStringLiteral("current"), m_undoStack.index()}});
+               {QStringLiteral("current"), current},
+               {QStringLiteral("hash"), historyHashAt(current)},
+               {QStringLiteral("linear"), true}});
 }
 
-QJsonObject AppController::mcpUndoTo(int index)
+QJsonObject AppController::mcpUndoTo(int index, const QString &hash)
 {
     using namespace drift::mcp;
-    if (index < 0 || index > m_undoStack.count())
+    int target = index;
+    if (!hash.trimmed().isEmpty()) {
+        target = historyIndexForHash(hash);
+        if (target < 0)
+            return err("not_found", QStringLiteral("No history entry matches that hash"));
+    } else if (index < 0) {
+        return err("bad_args", QStringLiteral("index or hash required"));
+    }
+    if (target < 0 || target > m_undoStack.count())
         return err("bad_args", QStringLiteral("index out of range"));
-    m_undoStack.setIndex(index);
+    m_undoStack.setIndex(target);
     ++m_mcpEditRevision;
-    return ok({{QStringLiteral("index"), m_undoStack.index()}});
+    const QString at = historyHashAt(m_undoStack.index());
+    return ok({{QStringLiteral("index"), m_undoStack.index()},
+               {QStringLiteral("hash"), at},
+               {QStringLiteral("short"), shortHash(at)}});
+}
+
+QJsonObject AppController::mcpTakeSnapshot(const QString &label)
+{
+    using namespace drift::mcp;
+    const int current = m_undoStack.index();
+    const QByteArray json = historyJsonAt(current);
+    const QString hash = historyHashAt(current);
+    if (json.isEmpty() || hash.isEmpty())
+        return err("bad_args", QStringLiteral("Nothing to snapshot"));
+
+    const QString dir = historySnapshotDir();
+    if (!QDir().mkpath(dir))
+        return err("bad_args", QStringLiteral("Could not create history folder"));
+    const QString path = dir + QLatin1Char('/') + hash + QStringLiteral(".json");
+    bool existed = QFile::exists(path);
+    if (!existed) {
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly))
+            return err("bad_args", QStringLiteral("Could not write snapshot"));
+        file.write(json);
+        if (!file.commit())
+            return err("bad_args", QStringLiteral("Could not write snapshot"));
+        pruneHistorySnapshots();
+    }
+    QJsonObject extra{{QStringLiteral("hash"), hash},
+                      {QStringLiteral("short"), shortHash(hash)},
+                      {QStringLiteral("path"), path},
+                      {QStringLiteral("index"), current},
+                      {QStringLiteral("existed"), existed},
+                      {QStringLiteral("bytes"), json.size()}};
+    if (!label.trimmed().isEmpty())
+        extra.insert(QStringLiteral("label"), label.trimmed());
+    else if (current > 0)
+        extra.insert(QStringLiteral("label"), m_undoStack.text(current - 1));
+    else
+        extra.insert(QStringLiteral("label"), QStringLiteral("Origin"));
+    return ok(extra);
+}
+
+QJsonObject AppController::mcpListSnapshots() const
+{
+    using namespace drift::mcp;
+    QJsonArray snapshots;
+    QDir dir(historySnapshotDir());
+    const QFileInfoList files =
+        dir.entryInfoList({QStringLiteral("*.json")}, QDir::Files, QDir::Time);
+    for (const QFileInfo &info : files) {
+        const QString hash = info.completeBaseName();
+        snapshots.append(QJsonObject{
+            {QStringLiteral("hash"), hash},
+            {QStringLiteral("short"), shortHash(hash)},
+            {QStringLiteral("path"), info.absoluteFilePath()},
+            {QStringLiteral("bytes"), info.size()},
+            {QStringLiteral("savedAt"), info.lastModified().toUTC().toString(Qt::ISODate)},
+        });
+    }
+    return ok({{QStringLiteral("snapshots"), snapshots}, {QStringLiteral("n"), snapshots.size()}});
+}
+
+QJsonObject AppController::mcpRestoreSnapshot(const QString &hash)
+{
+    using namespace drift::mcp;
+    const QString needle = hash.trimmed();
+    if (needle.size() < 8)
+        return err("bad_args", QStringLiteral("hash required"));
+
+    const int onStack = historyIndexForHash(needle);
+    if (onStack >= 0)
+        return mcpUndoTo(onStack, {});
+
+    QDir dir(historySnapshotDir());
+    QString path;
+    int matches = 0;
+    const QFileInfoList files =
+        dir.entryInfoList({QStringLiteral("*.json")}, QDir::Files, QDir::Name);
+    for (const QFileInfo &info : files) {
+        const QString name = info.completeBaseName();
+        if (name.startsWith(needle, Qt::CaseInsensitive) || needle.startsWith(name, Qt::CaseInsensitive)) {
+            ++matches;
+            path = info.absoluteFilePath();
+            if (name.compare(needle, Qt::CaseInsensitive) == 0) {
+                path = info.absoluteFilePath();
+                matches = 1;
+                break;
+            }
+        }
+    }
+    if (matches != 1 || path.isEmpty())
+        return err("not_found", QStringLiteral("No snapshot matches that hash"));
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return err("bad_args", QStringLiteral("Could not read snapshot"));
+    const QByteArray json = file.readAll();
+    const QString fileHash = QString::fromLatin1(
+        QCryptographicHash::hash(json, QCryptographicHash::Sha256).toHex());
+    QString error;
+    if (!applyProjectJson(json, &error))
+        return err("bad_args", error.isEmpty() ? QStringLiteral("Snapshot refused") : error);
+    ++m_mcpEditRevision;
+    return ok({{QStringLiteral("index"), 0},
+               {QStringLiteral("hash"), fileHash},
+               {QStringLiteral("short"), shortHash(fileHash)},
+               {QStringLiteral("reset"), true}});
 }
 
 QJsonObject AppController::mcpDetectSilence(int trackIndex, int clipIndex, double startSeconds,

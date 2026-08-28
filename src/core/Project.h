@@ -108,6 +108,10 @@ public:
 
     static Project fromJson(const QJsonObject &object, QString *errorOut = nullptr);
     QJsonObject toJson() const;
+    // Compact JSON of toJson(); SHA-256 hex of those bytes. Undo history and on-disk
+    // history snapshots share this so a file named <hash>.json hashes back to <hash>.
+    QByteArray toCompactJson() const;
+    QString contentHash() const;
 
 private:
     QString m_name = QStringLiteral("Untitled Project");
