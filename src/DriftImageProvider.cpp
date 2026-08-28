@@ -58,10 +58,13 @@ QImage DriftImageProvider::requestImage(const QString &id, QSize *size, const QS
         image = image.scaled(requestedSize, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
     }
 
-    // Soft-alpha package thumbs (e.g. audio-effect AuraBlur PNGs) need premultiplied ARGB or
-    // Qt Quick can blend them as nearly invisible mud against the card background.
-    if (image.hasAlphaChannel())
-        image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    // Everything leaves here premultiplied ARGB, whatever it was read as. Two reasons, and the
+    // second one only shows up on a device: soft-alpha package thumbs (e.g. audio-effect AuraBlur
+    // PNGs) blend as nearly invisible mud against the card background without it, and Android
+    // draws a Format_RGB32 provider image — which is every JPEG in the thumbnail cache — as fully
+    // transparent, so bin cards and filmstrips came up blank while the Image itself reported
+    // Ready. convertToFormat is a no-op when the format already matches.
+    image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
 
     if (size)
         *size = image.size();

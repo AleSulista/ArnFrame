@@ -229,7 +229,9 @@ Item {
                 // EffectBrowser and ShapesTab already nest them this way.
                 TapHandler {
                     acceptedButtons: Qt.LeftButton
-                    enabled: !assetDrag.active
+                    // Touch keeps press-and-hold for the lift below — the menu
+                    // is a tap there.
+                    enabled: !Theme.touchUi && !assetDrag.active
                     onLongPressed: cardMenu.popup()
                 }
                 DragHandler {
@@ -237,6 +239,9 @@ Item {
                     // Without target: null the handler moves the card itself,
                     // clobbering the Grid positioner's x/y.
                     target: null
+                    // Touch lifts through TouchDrag instead: a platform drag has
+                    // no touch gesture and cannot leave the sheet.
+                    enabled: !Theme.touchUi
                     acceptedButtons: Qt.LeftButton
                     onActiveChanged: {
                         if (active) {
@@ -252,6 +257,20 @@ Item {
                 TapHandler {
                     acceptedButtons: Qt.RightButton
                     onTapped: cardMenu.popup()
+                }
+
+                // Hold to carry the asset onto the timeline, tap for the menu.
+                // The phone's asset browser is a modal sheet, which the platform
+                // drag above cannot leave, so touch gets the lift instead.
+                TouchLiftArea {
+                    dragKind: "media"
+                    payload: assetIndex
+                    label: name
+                    thumbnail: thumbnailPath
+                    glyph: kind === "audio" ? Theme.icons.music
+                            : kind === "image" ? Theme.icons.image
+                            : Theme.icons.film
+                    onLiftTapped: cardMenu.popup()
                 }
 
                 ThemedContextMenu {
@@ -443,12 +462,13 @@ Item {
 
                 TapHandler {
                     acceptedButtons: Qt.LeftButton
-                    enabled: !rowDrag.active
+                    enabled: !Theme.touchUi && !rowDrag.active
                     onLongPressed: rowMenu.popup()
                 }
                 DragHandler {
                     id: rowDrag
                     target: null
+                    enabled: !Theme.touchUi
                     acceptedButtons: Qt.LeftButton
                     onActiveChanged: {
                         if (active) {
@@ -464,6 +484,18 @@ Item {
                 TapHandler {
                     acceptedButtons: Qt.RightButton
                     onTapped: rowMenu.popup()
+                }
+
+                // See the grid card: hold lifts, tap opens the menu.
+                TouchLiftArea {
+                    dragKind: "media"
+                    payload: assetIndex
+                    label: name
+                    thumbnail: thumbnailPath
+                    glyph: kind === "audio" ? Theme.icons.music
+                            : kind === "image" ? Theme.icons.image
+                            : Theme.icons.film
+                    onLiftTapped: rowMenu.popup()
                 }
             }
 
