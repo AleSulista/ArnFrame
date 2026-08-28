@@ -4,7 +4,7 @@ import QtQuick.Window
 import Drift
 import "components"
 
-// Combined start page: recent projects + layout picker + import / blank CTAs.
+// Combined start page: recent projects + layout picker + new-project CTAs.
 Item {
     id: root
 
@@ -12,81 +12,22 @@ Item {
     signal openProjectRequested()
     signal openRecentRequested(string path)
 
-    readonly property var mediaFilter: [
-        qsTr("Media files (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.mp3 *.wav *.aac *.flac *.ogg *.m4a *.png *.jpg *.jpeg *.gif *.webp *.bmp)")
-    ]
-
     readonly property bool needsAttention: {
         const win = root.Window.window
         return (win ? win.addonAttentionNeeded : false) || Updates.updateAvailable
     }
 
-    function applyLayoutAndPrepare() {
+    function startWithLayout() {
         EditorState.newProject()
         layoutPicker.apply()
+        root.enterEditor()
     }
 
-    // Bookkeeping for the async import below. `countBefore` is captured before the copy
-    // starts so the completion handler knows which rows are new. `importOwned` exists
-    // because StackView keeps this page alive underneath the editor: without it, an
-    // import started from the editor's Media tab would also land here and shove the user
-    // back into the editor with a second copy of the clips.
-    property bool importOwned: false
-    property int countBefore: 0
-    property int importDone: 0
-    property int importTotal: 0
-    property string importName: ""
-
-    function importAndEdit() {
-        applyLayoutAndPrepare()
-        const urls = FileDialogs.openFiles(qsTr("Import Media"), root.mediaFilter)
-        if (!urls || urls.length === 0) {
-            // User cancelled the picker — still enter the blank project they just created.
-            root.enterEditor()
-            return
-        }
-        // A picked file is a content:// document, and reading one means copying it out of
-        // the SAF stream first. Doing that inline froze the whole app for as long as the
-        // copy took — minutes for a few 4K clips, long past the point Android offers to
-        // kill it. The copy runs off-thread now and this screen shows its progress.
-        const before = AssetLibrary.count
-        if (!AssetLibrary.importUrlsAsync(urls)) {
-            Toasts.warning(qsTr("An import is already running."))
-            return
-        }
-        root.importOwned = true
-        root.countBefore = before
-        root.importDone = 0
-        root.importTotal = urls.length
-        root.importName = ""
-    }
-
-    Connections {
-        target: AssetLibrary
-        function onImportProgress(done, total, name) {
-            if (!root.importOwned)
-                return
-            root.importDone = done
-            root.importTotal = total
-            root.importName = name
-        }
-        function onImportFinished(materialized, failed) {
-            if (!root.importOwned)
-                return
-            root.importOwned = false
-            for (var i = root.countBefore; i < AssetLibrary.count; ++i)
-                EditorState.addClipFromAsset(i)
-            const added = AssetLibrary.count - root.countBefore
-            if (added > 0)
-                Toasts.success(qsTr("Imported %n file(s).", "", added))
-            else
-                Toasts.error(qsTr("Could not import the selected file(s)."))
-            root.enterEditor()
-        }
-    }
-
-    function startBlank() {
-        applyLayoutAndPrepare()
+    // Leaves the canvas undecided so the first video/image dropped on the timeline opens
+    // ProjectSetupDialog, the same route the desktop's "Decide later" takes. newProject()
+    // resets projectLayoutChosen, so it is enough to just not apply the picker here.
+    function startUndecided() {
+        EditorState.newProject()
         root.enterEditor()
     }
 
@@ -369,74 +310,19 @@ Item {
 
                 ThemedButton {
                     width: parent.width
-                    text: qsTr("Import media & edit")
-                    glyph: Theme.icons.upload
+                    text: qsTr("Start with this layout")
+                    glyph: Theme.icons.plus
                     variant: "primary"
-                    enabled: !AssetLibrary.importing
-                    onClicked: root.importAndEdit()
+                    onClicked: root.startWithLayout()
                 }
 
                 ThemedButton {
                     width: parent.width
-                    text: qsTr("Start blank")
-                    glyph: Theme.icons.plus
+                    text: qsTr("Decide layout later")
+                    glyph: Theme.icons.clock
                     variant: "secondary"
-                    enabled: !AssetLibrary.importing
-                    onClicked: root.startBlank()
+                    onClicked: root.startUndecided()
                 }
-            }
-        }
-    }
-
-    // Copying a picked document out of the SAF stream is the one part of import that
-    // takes real time, so it gets a real progress surface rather than a frozen screen.
-    Rectangle {
-        anchors.fill: parent
-        visible: root.importOwned && AssetLibrary.importing
-        color: Qt.rgba(Theme.appBackground.r, Theme.appBackground.g, Theme.appBackground.b, 0.92)
-
-        // Swallow taps so nothing behind the overlay can be started mid-copy.
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.AllButtons
-        }
-
-        Column {
-            anchors.centerIn: parent
-            width: Math.min(280, parent.width - Theme.spacing3xl * 2)
-            spacing: Theme.spacingLg
-
-            CircularProgress {
-                anchors.horizontalCenter: parent.horizontalCenter
-                size: 48
-                strokeWidth: 4
-                indeterminate: root.importTotal <= 0
-                value: root.importTotal > 0 ? root.importDone / root.importTotal : 0
-            }
-
-            Text {
-                width: parent.width
-                horizontalAlignment: Text.AlignHCenter
-                text: root.importTotal > 1
-                      ? qsTr("Importing %1 of %2…").arg(root.importDone + 1).arg(root.importTotal)
-                      : qsTr("Importing…")
-                color: Theme.foreground
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeBase
-                font.weight: Font.Medium
-            }
-
-            Text {
-                width: parent.width
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.WrapAnywhere
-                maximumLineCount: 2
-                elide: Text.ElideMiddle
-                visible: root.importName.length > 0
-                text: root.importName
-                color: Theme.mutedForeground
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSm
             }
         }
     }
