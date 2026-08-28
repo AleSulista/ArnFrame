@@ -5,74 +5,74 @@
     <name>AddonManager</name>
     <message>
         <source>Automatic (recommended)</source>
-        <translation type="unfinished"></translation>
+        <translation>自动（推荐）</translation>
     </message>
     <message>
         <source>This computer</source>
-        <translation type="unfinished"></translation>
+        <translation>此电脑</translation>
     </message>
     <message>
         <source>NVIDIA graphics (faster)</source>
-        <translation type="unfinished"></translation>
+        <translation>英伟达显卡（快速）</translation>
     </message>
     <message>
         <source>Graphics card (faster)</source>
-        <translation type="unfinished"></translation>
+        <translation>显卡（快速）</translation>
     </message>
 </context>
 <context>
     <name>AddonManagerDialog</name>
     <message>
         <source>Extras</source>
-        <translation type="unfinished"></translation>
+        <translation>附加项</translation>
     </message>
     <message>
         <source>Close</source>
-        <translation type="unfinished"></translation>
+        <translation>关闭</translation>
     </message>
     <message>
         <source>Remove this pack?</source>
-        <translation type="unfinished"></translation>
+        <translation>要移除这个包吗？</translation>
     </message>
     <message>
         <source>Remove</source>
-        <translation type="unfinished"></translation>
+        <translation>移除</translation>
     </message>
     <message>
         <source>“%1” and its downloaded data will be deleted. You can install it again later.</source>
-        <translation type="unfinished"></translation>
+        <translation>“%1” 和它下载的数据将被删除。你可以稍后再重新安装。</translation>
     </message>
     <message>
         <source>All</source>
-        <translation type="unfinished"></translation>
+        <translation>所有</translation>
     </message>
     <message>
         <source>Effects</source>
-        <translation type="unfinished"></translation>
+        <translation>效果</translation>
     </message>
     <message>
         <source>Transitions</source>
-        <translation type="unfinished"></translation>
+        <translation>转场</translation>
     </message>
     <message>
         <source>Audio FX</source>
-        <translation type="unfinished"></translation>
+        <translation>音效</translation>
     </message>
     <message>
         <source>Fonts</source>
-        <translation type="unfinished"></translation>
+        <translation>字体</translation>
     </message>
     <message>
         <source>Stickers</source>
-        <translation type="unfinished"></translation>
+        <translation>贴纸</translation>
     </message>
     <message>
         <source>AI tools</source>
-        <translation type="unfinished"></translation>
+        <translation>AI 工具</translation>
     </message>
     <message>
         <source>AI engine</source>
-        <translation type="unfinished"></translation>
+        <translation>AI 引擎</translation>
     </message>
     <message>
         <source>Checking for extras…</source>
@@ -80,7 +80,7 @@
     </message>
     <message>
         <source>How AI runs</source>
-        <translation type="unfinished"></translation>
+        <translation>AI 如何运行</translation>
     </message>
     <message>
         <source>Automatic picks the fastest option you have installed, and uses this computer if the graphics card can&apos;t help.</source>
@@ -92,11 +92,11 @@
     </message>
     <message>
         <source>Restart Drift for this to take effect.</source>
-        <translation type="unfinished"></translation>
+        <translation>重启 Drift 以生效。</translation>
     </message>
     <message>
         <source>Can&apos;t reach the download store</source>
-        <translation type="unfinished"></translation>
+        <translation>无法抓取下载商店</translation>
     </message>
     <message>
         <source>Nothing in this category</source>
@@ -104,7 +104,7 @@
     </message>
     <message>
         <source>Check your connection and try again.</source>
-        <translation type="unfinished"></translation>
+        <translation>请检查您的连接并重试。</translation>
     </message>
     <message>
         <source>Pick another category above.</source>
@@ -112,19 +112,19 @@
     </message>
     <message>
         <source>Retry</source>
-        <translation type="unfinished"></translation>
+        <translation>重试</translation>
     </message>
     <message>
         <source>Technical details</source>
-        <translation type="unfinished"></translation>
+        <translation>技术原因</translation>
     </message>
     <message>
         <source>%1 → %2</source>
-        <translation type="unfinished"></translation>
+        <translation>%1 → %2</translation>
     </message>
     <message>
         <source>%1… %2%</source>
-        <translation type="unfinished"></translation>
+        <translation>%1… %2%</translation>
     </message>
     <message>
         <source>%1 download</source>
