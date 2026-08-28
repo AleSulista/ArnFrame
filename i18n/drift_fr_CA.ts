@@ -727,6 +727,69 @@
     </message>
 </context>
 <context>
+    <name>AndroidMediaPreview</name>
+    <message>
+        <source>Back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save</source>
+        <translation type="unfinished">Enregistrer</translation>
+    </message>
+    <message>
+        <source>Audio only — trim it below</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Trim</source>
+        <translation type="unfinished">Raccourcir</translation>
+    </message>
+    <message>
+        <source>Crop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keeping %1 to %2  ·  %3s</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>End here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Undo trim</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Drag inside the box to move it, corners to resize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Undo crop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Saving…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save keeps your changes as a new file in this project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nothing changed yet. Trim or crop above, or go back and drag this onto the timeline.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Annuler</translation>
+    </message>
+</context>
+<context>
     <name>AndroidPreview</name>
     <message>
         <source>Audio only</source>

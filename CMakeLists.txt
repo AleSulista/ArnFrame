@@ -691,6 +691,7 @@ qt_add_qml_module(drift
         src/qml/AndroidBottomSheet.qml
         src/qml/AndroidAddMenu.qml
         src/qml/AndroidEditActions.qml
+        src/qml/AndroidMediaPreview.qml
         src/qml/Theme.qml
         src/qml/Toasts.qml
         src/qml/TouchDrag.qml
