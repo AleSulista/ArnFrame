@@ -9,10 +9,12 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QSet>
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QUrl>
+#include <QVariantList>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -92,6 +94,35 @@ QString findNewClipId(const QSet<QString> &before, const QSet<QString> &after)
             return id;
     }
     return {};
+}
+
+QJsonObject replyMintedClips(AppController *c, const QSet<QString> &before)
+{
+    QJsonArray ids;
+    QString first;
+    int track = -1;
+    int index = -1;
+    const QSet<QString> after = clipIdSet(c);
+    for (const QString &id : after) {
+        if (before.contains(id))
+            continue;
+        ids.append(id);
+        if (first.isEmpty()) {
+            first = id;
+            const QPair<int, int> loc = c->mcpLocateClip(id);
+            track = loc.first;
+            index = loc.second;
+        }
+    }
+    QJsonObject extra;
+    if (!first.isEmpty()) {
+        extra.insert(QStringLiteral("id"), first);
+        extra.insert(QStringLiteral("track"), track);
+        extra.insert(QStringLiteral("index"), index);
+    }
+    extra.insert(QStringLiteral("ids"), ids);
+    extra.insert(QStringLiteral("n"), ids.size());
+    return ok(extra);
 }
 
 QString localPath(const QString &raw)
@@ -615,8 +646,9 @@ QJsonObject McpDispatcher::applyOneExtended(const QString &tool, const QJsonObje
     }
 
     if (tool == QLatin1String("paste_at_playhead")) {
+        const QSet<QString> before = clipIdSet(m_controller);
         m_controller->pasteAtPlayhead();
-        return ok({});
+        return replyMintedClips(m_controller, before);
     }
 
     if (tool == QLatin1String("separate_audio")) {
@@ -701,8 +733,9 @@ QJsonObject McpDispatcher::applyOneExtended(const QString &tool, const QJsonObje
     }
 
     if (tool == QLatin1String("freeze_frame")) {
+        const QSet<QString> before = clipIdSet(m_controller);
         m_controller->freezeFrameAtPlayhead();
-        return ok({});
+        return replyMintedClips(m_controller, before);
     }
 
     // --- canvas ---
@@ -857,11 +890,12 @@ QJsonObject McpDispatcher::applyOneExtended(const QString &tool, const QJsonObje
         const double at = args.contains(QStringLiteral("at"))
                               ? jsonNumber(args.value(QStringLiteral("at")), m_controller->playheadSeconds())
                               : m_controller->playheadSeconds();
+        const QSet<QString> before = clipIdSet(m_controller);
         if (args.contains(QStringLiteral("track")))
             m_controller->addShapeClipAt(shapeId, jsonInt(args.value(QStringLiteral("track"))), at);
         else
             m_controller->addShapeClip(shapeId, at);
-        return ok({{QStringLiteral("shape"), shapeId}, {QStringLiteral("at"), at}});
+        return replyMintedClips(m_controller, before);
     }
 
     if (tool == QLatin1String("add_sticker")) {
@@ -871,8 +905,9 @@ QJsonObject McpDispatcher::applyOneExtended(const QString &tool, const QJsonObje
         const double at = args.contains(QStringLiteral("at"))
                               ? jsonNumber(args.value(QStringLiteral("at")), m_controller->playheadSeconds())
                               : m_controller->playheadSeconds();
+        const QSet<QString> before = clipIdSet(m_controller);
         m_controller->addStickerClip(stickerId, at);
-        return ok({{QStringLiteral("sticker"), stickerId}, {QStringLiteral("at"), at}});
+        return replyMintedClips(m_controller, before);
     }
 
     if (tool == QLatin1String("add_emoji")) {
@@ -883,8 +918,9 @@ QJsonObject McpDispatcher::applyOneExtended(const QString &tool, const QJsonObje
         const double at = args.contains(QStringLiteral("at"))
                               ? jsonNumber(args.value(QStringLiteral("at")), m_controller->playheadSeconds())
                               : m_controller->playheadSeconds();
+        const QSet<QString> before = clipIdSet(m_controller);
         m_controller->addEmojiClip(emoji, name, at);
-        return ok({{QStringLiteral("emoji"), emoji}, {QStringLiteral("at"), at}});
+        return replyMintedClips(m_controller, before);
     }
 
     // --- subtitles ---
@@ -892,8 +928,9 @@ QJsonObject McpDispatcher::applyOneExtended(const QString &tool, const QJsonObje
         const double at = args.contains(QStringLiteral("at"))
                               ? jsonNumber(args.value(QStringLiteral("at")), m_controller->playheadSeconds())
                               : m_controller->playheadSeconds();
+        const QSet<QString> before = clipIdSet(m_controller);
         m_controller->addSubtitleClip(at);
-        return ok({{QStringLiteral("at"), at}});
+        return replyMintedClips(m_controller, before);
     }
 
     if (tool == QLatin1String("import_subtitle_file")) {
@@ -903,9 +940,10 @@ QJsonObject McpDispatcher::applyOneExtended(const QString &tool, const QJsonObje
         const double at = args.contains(QStringLiteral("at"))
                               ? jsonNumber(args.value(QStringLiteral("at")), -1.0)
                               : -1.0;
+        const QSet<QString> before = clipIdSet(m_controller);
         if (!m_controller->importSubtitleFile(QUrl::fromLocalFile(path), at))
             return err("bad_args", QStringLiteral("Import refused"));
-        return ok({{QStringLiteral("path"), path}});
+        return replyMintedClips(m_controller, before);
     }
 
     if (tool == QLatin1String("import_subtitle_into_clip")) {
@@ -1391,6 +1429,380 @@ QJsonObject McpDispatcher::applyOneExtended(const QString &tool, const QJsonObje
              QJsonObject{{QStringLiteral("overridden"), m_controller->darkModeOverridden()},
                          {QStringLiteral("dark"), m_controller->darkModePreferred()}}},
         });
+    }
+
+    if (tool == QLatin1String("list_history"))
+        return m_controller->mcpListHistory();
+
+    if (tool == QLatin1String("undo_to")) {
+        if (!args.contains(QStringLiteral("index")))
+            return err("bad_args", QStringLiteral("index required"));
+        return m_controller->mcpUndoTo(jsonInt(args.value(QStringLiteral("index")), -1));
+    }
+
+    if (tool == QLatin1String("set_ripple")) {
+        if (!args.contains(QStringLiteral("enabled")))
+            return err("bad_args", QStringLiteral("enabled required"));
+        m_controller->setRippleEnabled(jsonBool(args.value(QStringLiteral("enabled"))));
+        return ok({{QStringLiteral("ripple"), m_controller->rippleEnabled()}});
+    }
+
+    if (tool == QLatin1String("close_gap")) {
+        if (!args.contains(QStringLiteral("track")) || !args.contains(QStringLiteral("at")))
+            return err("bad_args", QStringLiteral("track and at required"));
+        m_controller->closeGap(jsonInt(args.value(QStringLiteral("track"))),
+                               jsonNumber(args.value(QStringLiteral("at")), 0.0));
+        return ok({});
+    }
+
+    if (tool == QLatin1String("set_snap")) {
+        if (!args.contains(QStringLiteral("enabled")))
+            return err("bad_args", QStringLiteral("enabled required"));
+        m_controller->setSnapEnabled(jsonBool(args.value(QStringLiteral("enabled"))));
+        return ok({{QStringLiteral("snap"), m_controller->snapEnabled()}});
+    }
+
+    if (tool == QLatin1String("set_guides")) {
+        if (!args.contains(QStringLiteral("enabled")) && !args.contains(QStringLiteral("type")))
+            return err("bad_args", QStringLiteral("enabled or type required"));
+        if (args.contains(QStringLiteral("enabled")))
+            m_controller->setGuidesEnabled(jsonBool(args.value(QStringLiteral("enabled"))));
+        if (args.contains(QStringLiteral("type")))
+            m_controller->setGuideType(argString(args, QStringLiteral("type")));
+        return ok({{QStringLiteral("enabled"), m_controller->guidesEnabled()},
+                   {QStringLiteral("type"), m_controller->guideType()}});
+    }
+
+    if (tool == QLatin1String("set_loop_work_area")) {
+        if (!args.contains(QStringLiteral("enabled")))
+            return err("bad_args", QStringLiteral("enabled required"));
+        m_controller->setLoopWorkAreaEnabled(jsonBool(args.value(QStringLiteral("enabled"))));
+        return ok({{QStringLiteral("loop"), m_controller->loopWorkAreaEnabled()}});
+    }
+
+    if (tool == QLatin1String("select_clips")) {
+        const QJsonArray ids = args.value(QStringLiteral("clips")).toArray();
+        if (ids.isEmpty())
+            return err("bad_args", QStringLiteral("clips required"));
+        QVariantList pairs;
+        for (const QJsonValue &v : ids) {
+            const QString id = v.toString().trimmed();
+            const QPair<int, int> loc = m_controller->mcpLocateClip(id);
+            if (loc.first < 0)
+                return err("not_found", QStringLiteral("Unknown clip"));
+            pairs.append(QVariantMap{{QStringLiteral("track"), loc.first},
+                                     {QStringLiteral("clip"), loc.second}});
+        }
+        m_controller->setSelection(pairs);
+        return ok({{QStringLiteral("n"), pairs.size()}});
+    }
+
+    if (tool == QLatin1String("copy_clip_effects")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        m_controller->copyClipEffectsToClipboard(ref.track, ref.clip);
+        return ok(clipFeedback(ref));
+    }
+
+    if (tool == QLatin1String("paste_clip_effects")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        if (!m_controller->clipboardHasEffects())
+            return err("bad_args", QStringLiteral("Effect clipboard is empty"));
+        m_controller->pasteEffectsFromClipboard(ref.track, ref.clip);
+        return ok(clipFeedback(ref));
+    }
+
+    if (tool == QLatin1String("set_effect_string_param")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        const QString key = argString(args, QStringLiteral("key"));
+        if (key.isEmpty() || !args.contains(QStringLiteral("index")))
+            return err("bad_args", QStringLiteral("index and key required"));
+        const QString value = argString(args, QStringLiteral("value"));
+        const QUrl url = value.isEmpty() ? QUrl() : QUrl::fromLocalFile(localPath(value));
+        m_controller->setEffectStringParam(ref.track, ref.clip,
+                                           jsonInt(args.value(QStringLiteral("index"))), key, url);
+        return ok(clipFeedback(ref));
+    }
+
+    if (tool == QLatin1String("apply_text_preset") || tool == QLatin1String("apply_user_text_preset")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        const QString preset = argString(args, QStringLiteral("preset"));
+        if (preset.isEmpty())
+            return err("bad_args", QStringLiteral("preset required"));
+        m_controller->applyTextPreset(ref.track, ref.clip, preset);
+        return ok(clipFeedback(ref, {{QStringLiteral("preset"), preset}}));
+    }
+
+    if (tool == QLatin1String("list_user_text_presets"))
+        return ok({{QStringLiteral("presets"), compactCatalogList(m_controller->userTextPresets())}});
+
+    if (tool == QLatin1String("save_text_preset")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        const QString label = argString(args, QStringLiteral("label"));
+        if (label.isEmpty())
+            return err("bad_args", QStringLiteral("label required"));
+        const QString id = m_controller->saveTextStyleAsPreset(ref.track, ref.clip, label);
+        if (id.isEmpty())
+            return err("bad_args", QStringLiteral("Could not save text preset"));
+        return ok({{QStringLiteral("id"), id}, {QStringLiteral("label"), label}});
+    }
+
+    if (tool == QLatin1String("list_user_effect_presets")) {
+        QJsonArray presets;
+        for (const QVariant &v : m_controller->userEffectPresets()) {
+            const QVariantMap m = v.toMap();
+            presets.append(QJsonObject{
+                {QStringLiteral("id"), m.value(QStringLiteral("id")).toString()},
+                {QStringLiteral("label"), m.value(QStringLiteral("label")).toString()},
+                {QStringLiteral("effectCount"), m.value(QStringLiteral("effectCount")).toInt()},
+                {QStringLiteral("audioEffectCount"), m.value(QStringLiteral("audioEffectCount")).toInt()},
+                {QStringLiteral("labels"),
+                 QJsonArray::fromStringList(m.value(QStringLiteral("labels")).toStringList())},
+            });
+        }
+        return ok({{QStringLiteral("presets"), presets}});
+    }
+
+    if (tool == QLatin1String("apply_effect_preset")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        const QString preset = argString(args, QStringLiteral("preset"));
+        if (preset.isEmpty())
+            return err("bad_args", QStringLiteral("preset required"));
+        m_controller->applyEffectPreset(ref.track, ref.clip, preset);
+        return ok(clipFeedback(ref, {{QStringLiteral("preset"), preset}}));
+    }
+
+    if (tool == QLatin1String("save_effect_preset")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        const QString label = argString(args, QStringLiteral("label"));
+        if (label.isEmpty())
+            return err("bad_args", QStringLiteral("label required"));
+        const QString id = m_controller->saveClipEffectsAsPreset(ref.track, ref.clip, label);
+        if (id.isEmpty())
+            return err("bad_args", QStringLiteral("Could not save effect preset"));
+        return ok({{QStringLiteral("id"), id}, {QStringLiteral("label"), label}});
+    }
+
+    if (tool == QLatin1String("list_export_presets"))
+        return ok({{QStringLiteral("presets"), compactCatalogList(m_controller->exportPresets())}});
+
+    if (tool == QLatin1String("export_with_preset")) {
+        if (m_controller->exportInProgress())
+            return err("export_busy", QStringLiteral("Export already in progress"));
+        const QString path = localPath(argString(args, QStringLiteral("path")));
+        const QString preset = argString(args, QStringLiteral("preset"));
+        if (path.isEmpty() || preset.isEmpty())
+            return err("bad_args", QStringLiteral("path and preset required"));
+        m_controller->exportWithPreset(QUrl::fromLocalFile(path), preset);
+        return ok({{QStringLiteral("started"), true},
+                   {QStringLiteral("path"), path},
+                   {QStringLiteral("preset"), preset}});
+    }
+
+    if (tool == QLatin1String("stabilize_clip")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        if (args.contains(QStringLiteral("smoothing")))
+            m_controller->setClipStabilizeSmoothing(ref.track, ref.clip,
+                                                    jsonInt(args.value(QStringLiteral("smoothing")), 15));
+        if (args.contains(QStringLiteral("tripod")))
+            m_controller->setClipStabilizeTripod(ref.track, ref.clip,
+                                                 jsonBool(args.value(QStringLiteral("tripod"))));
+        if (args.contains(QStringLiteral("mode")))
+            m_controller->setClipStabilizeMode(ref.track, ref.clip,
+                                               argString(args, QStringLiteral("mode")));
+        m_controller->stabilizeClip(ref.track, ref.clip);
+        return ok(clipFeedback(ref, {{QStringLiteral("started"), true}}));
+    }
+
+    if (tool == QLatin1String("cancel_stabilize")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        m_controller->cancelClipStabilization(ref.track, ref.clip);
+        return ok(clipFeedback(ref));
+    }
+
+    if (tool == QLatin1String("remove_stabilize")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        m_controller->removeClipStabilization(ref.track, ref.clip);
+        return ok(clipFeedback(ref));
+    }
+
+    if (tool == QLatin1String("list_addons"))
+        return m_controller->mcpListAddons();
+
+    if (tool == QLatin1String("install_addon"))
+        return m_controller->mcpInstallAddon(argString(args, QStringLiteral("id")));
+
+    if (tool == QLatin1String("cancel_addon_install"))
+        return m_controller->mcpCancelAddonInstall(argString(args, QStringLiteral("id")));
+
+    if (tool == QLatin1String("set_acceleration"))
+        return m_controller->mcpSetAcceleration(argString(args, QStringLiteral("variant")));
+
+    if (tool == QLatin1String("list_face_track")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        return m_controller->mcpListFaceTrack(ref.track, ref.clip);
+    }
+
+    if (tool == QLatin1String("auto_reframe")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        double aspect = jsonNumber(args.value(QStringLiteral("aspect")), 0.0);
+        if (aspect <= 0.01) {
+            const double h = jsonNumber(args.value(QStringLiteral("height")), 0.0);
+            if (h > 0.0)
+                aspect = jsonNumber(args.value(QStringLiteral("width")), 0.0) / h;
+        }
+        const QString mode = args.contains(QStringLiteral("mode"))
+                                 ? argString(args, QStringLiteral("mode"))
+                                 : QStringLiteral("face");
+        return m_controller->mcpAutoReframe(ref.track, ref.clip, aspect, mode);
+    }
+
+    if (tool == QLatin1String("set_scene_threshold")) {
+        if (!args.contains(QStringLiteral("threshold")))
+            return err("bad_args", QStringLiteral("threshold required"));
+        m_controller->setSceneThreshold(jsonNumber(args.value(QStringLiteral("threshold")), 0.0));
+        return ok({{QStringLiteral("threshold"), jsonNumber(args.value(QStringLiteral("threshold")), 0.0)}});
+    }
+
+    if (tool == QLatin1String("clear_scenes")) {
+        m_controller->clearScenes();
+        return ok({});
+    }
+
+    if (tool == QLatin1String("cancel_scene_detection")) {
+        m_controller->cancelSceneDetection();
+        return ok({});
+    }
+
+    if (tool == QLatin1String("clear_beat_analysis")) {
+        m_controller->clearBeatAnalysis();
+        return ok({});
+    }
+
+    if (tool == QLatin1String("detect_silence")) {
+        const ClipRef ref = resolveClip(args);
+        const double threshold = jsonNumber(args.value(QStringLiteral("threshold")), 0.02);
+        const double minDuration = jsonNumber(args.value(QStringLiteral("min_duration")), 0.35);
+        const double padding = jsonNumber(args.value(QStringLiteral("padding")), 0.08);
+        if (ref.valid()) {
+            return m_controller->mcpDetectSilence(ref.track, ref.clip, 0, 0, threshold, minDuration,
+                                                  padding);
+        }
+        if (!args.contains(QStringLiteral("start")) || !args.contains(QStringLiteral("duration")))
+            return err("bad_args", QStringLiteral("clip, or start+duration, required"));
+        return m_controller->mcpDetectSilence(-1, -1,
+                                              jsonNumber(args.value(QStringLiteral("start")), 0.0),
+                                              jsonNumber(args.value(QStringLiteral("duration")), 0.0),
+                                              threshold, minDuration, padding);
+    }
+
+    if (tool == QLatin1String("remove_silence")) {
+        const ClipRef ref = resolveClip(args);
+        const double threshold = jsonNumber(args.value(QStringLiteral("threshold")), 0.02);
+        const double minDuration = jsonNumber(args.value(QStringLiteral("min_duration")), 0.35);
+        const double padding = jsonNumber(args.value(QStringLiteral("padding")), 0.08);
+        if (ref.valid())
+            return m_controller->mcpRemoveSilence(ref.track, ref.clip, threshold, minDuration, padding);
+        if (!args.contains(QStringLiteral("track")))
+            return err("bad_args", QStringLiteral("clip or track required"));
+        return m_controller->mcpRemoveSilence(jsonInt(args.value(QStringLiteral("track"))), -1,
+                                              threshold, minDuration, padding);
+    }
+
+    if (tool == QLatin1String("analyze_loudness")) {
+        const ClipRef ref = resolveClip(args);
+        if (ref.valid())
+            return m_controller->mcpAnalyzeLoudness(ref.track, ref.clip, 0, 0);
+        if (!args.contains(QStringLiteral("start")) || !args.contains(QStringLiteral("duration")))
+            return err("bad_args", QStringLiteral("clip, or start+duration, required"));
+        return m_controller->mcpAnalyzeLoudness(-1, -1,
+                                                jsonNumber(args.value(QStringLiteral("start")), 0.0),
+                                                jsonNumber(args.value(QStringLiteral("duration")), 0.0));
+    }
+
+    if (tool == QLatin1String("normalize_volume")) {
+        const ClipRef ref = resolveClip(args);
+        if (!ref.valid())
+            return err("not_found", QStringLiteral("Unknown clip"));
+        return m_controller->mcpNormalizeVolume(
+            ref.track, ref.clip, jsonNumber(args.value(QStringLiteral("target_lufs")), -16.0));
+    }
+
+    if (tool == QLatin1String("duck_under")) {
+        const ClipRef music = resolveClip(args);
+        if (!music.valid())
+            return err("not_found", QStringLiteral("Unknown music clip"));
+        QStringList overClips;
+        for (const QJsonValue &v : args.value(QStringLiteral("over_clips")).toArray())
+            overClips.append(v.toString().trimmed());
+        const int overTrack = args.contains(QStringLiteral("over_track"))
+                                  ? jsonInt(args.value(QStringLiteral("over_track")))
+                                  : -1;
+        return m_controller->mcpDuckUnder(
+            music.track, music.clip, overTrack, overClips,
+            jsonNumber(args.value(QStringLiteral("amount")), 0.3),
+            jsonNumber(args.value(QStringLiteral("attack")), 0.12),
+            jsonNumber(args.value(QStringLiteral("release")), 0.25));
+    }
+
+    if (tool == QLatin1String("setup_multicam")) {
+        if (!m_controller->beginMulticamSession())
+            return err("bad_args",
+                       QStringLiteral("Need two video clips on different tracks, or two video assets"));
+        if (m_controller->multicamAngles().size() < 2)
+            m_controller->setUpMulticamFromAssets();
+        if (!m_controller->multicamActive() || m_controller->multicamAngles().size() < 2) {
+            return err("bad_args",
+                       QStringLiteral("Need two video clips on different tracks, or two video assets"));
+        }
+        return ok({{QStringLiteral("active"), true},
+                   {QStringLiteral("angles"),
+                    QJsonArray::fromVariantList(m_controller->multicamAngles())}});
+    }
+
+    if (tool == QLatin1String("switch_angle")) {
+        if (!args.contains(QStringLiteral("angle")))
+            return err("bad_args", QStringLiteral("angle required"));
+        m_controller->switchMulticamAngle(jsonInt(args.value(QStringLiteral("angle"))));
+        return ok({{QStringLiteral("angle"), m_controller->multicamActiveAngle()}});
+    }
+
+    if (tool == QLatin1String("end_multicam")) {
+        m_controller->endMulticamSession();
+        return ok({{QStringLiteral("active"), m_controller->multicamActive()}});
+    }
+
+    if (tool == QLatin1String("save_multicam_separate")) {
+        m_controller->saveMulticamAsSeparateTracks();
+        return ok({{QStringLiteral("active"), m_controller->multicamActive()}});
+    }
+
+    if (tool == QLatin1String("save_multicam_combined")) {
+        m_controller->saveMulticamCombined();
+        return ok({{QStringLiteral("active"), m_controller->multicamActive()}});
     }
 
     return err("unknown_op", tool);

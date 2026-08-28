@@ -575,3 +575,37 @@ QVector<float> MediaWaveform::mixedPeaks(qint64 totalFrames, int sampleRate, int
 
     return peaks;
 }
+
+QVector<float> MediaWaveform::speechPeaks(qint64 totalFrames, int sampleRate, int buckets,
+                                          const FillChunk &fill)
+{
+    if (totalFrames <= 0 || buckets <= 0 || sampleRate <= 0 || !fill)
+        return {};
+
+    Biquad highPass1 = makeBiquad(300.0, sampleRate, kButterQ1, true);
+    Biquad highPass2 = makeBiquad(300.0, sampleRate, kButterQ2, true);
+    Biquad lowPass1 = makeBiquad(3000.0, sampleRate, kButterQ1, false);
+    Biquad lowPass2 = makeBiquad(3000.0, sampleRate, kButterQ2, false);
+
+    QVector<float> peaks(buckets, 0.0f);
+    QVector<float> chunk(static_cast<qsizetype>(kVoiceChunkFrames) * 2);
+    for (qint64 done = 0; done < totalFrames;) {
+        const int want = static_cast<int>(qMin<qint64>(kVoiceChunkFrames, totalFrames - done));
+        const int got = fill(chunk.data(), done, want);
+        if (got <= 0)
+            break;
+        for (int i = 0; i < got; ++i) {
+            const double mono = 0.5 * (static_cast<double>(chunk[i * 2])
+                                       + static_cast<double>(chunk[i * 2 + 1]));
+            double voice = highPass2.process(highPass1.process(mono));
+            voice = lowPass2.process(lowPass1.process(voice));
+            const int bucket = qBound(
+                0, static_cast<int>(((done + i) * buckets) / totalFrames), buckets - 1);
+            const float amp = static_cast<float>(qAbs(voice));
+            if (amp > peaks[bucket])
+                peaks[bucket] = amp;
+        }
+        done += got;
+    }
+    return peaks;
+}

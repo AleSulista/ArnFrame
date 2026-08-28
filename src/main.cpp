@@ -278,6 +278,7 @@ int main(int argc, char *argv[])
     static UpdateChecker updateChecker;
     static LayoutStore layoutStore;
     static drift::Haptics haptics;
+    editorState.setAddonManager(&addonManager);
     qmlRegisterSingletonInstance("Drift", 1, 0, "AssetLibrary", &assetLibrary);
     qmlRegisterSingletonInstance("Drift", 1, 0, "EditorState", &editorState);
     qmlRegisterSingletonInstance("Drift", 1, 0, "AppController", &editorState);

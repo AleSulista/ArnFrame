@@ -37,6 +37,7 @@
 struct EffectTemplateEntry;
 
 class QTimer;
+class AddonManager;
 
 #ifndef Q_OS_ANDROID
 namespace drift::mcp {
@@ -417,7 +418,8 @@ public:
     QPair<int, int> mcpLocateClip(const QString &id) const;
     QString mcpClipId(int trackIndex, int clipIndex) const;
     QVariantMap mcpCompactClip(int trackIndex, int clipIndex, bool includeCanvas = true) const;
-    QJsonObject mcpInspect(bool includeClips, int sinceRevision = -1, bool detail = false) const;
+    QJsonObject mcpInspect(bool includeClips, int sinceRevision = -1, bool detail = false,
+                           bool includeCues = false) const;
     int mcpRevision() const { return m_mcpEditRevision; }
     bool mcpSetClipCanvas(int trackIndex, int clipIndex, const QVariantMap &patch);
     QJsonObject mcpCaptureFrame(double atSeconds, bool full);
@@ -461,6 +463,27 @@ public:
     void mcpRememberExportSettings(const QVariantMap &settings);
     void mcpBeginBatch();
     void mcpEndBatch(const QString &text, bool pushUndo);
+    QJsonObject mcpListHistory() const;
+    QJsonObject mcpUndoTo(int index);
+    QJsonObject mcpDetectSilence(int trackIndex, int clipIndex, double startSeconds,
+                                 double durSeconds, double threshold, double minDuration,
+                                 double padding) const;
+    QJsonObject mcpRemoveSilence(int trackIndex, int clipIndex, double threshold,
+                                 double minDuration, double padding);
+    QJsonObject mcpAnalyzeLoudness(int trackIndex, int clipIndex, double startSeconds,
+                                   double durSeconds) const;
+    QJsonObject mcpNormalizeVolume(int trackIndex, int clipIndex, double targetLufs);
+    QJsonObject mcpDuckUnder(int musicTrack, int musicClip, int overTrack,
+                             const QStringList &overClips, double amount, double attack,
+                             double release);
+    QJsonObject mcpListFaceTrack(int trackIndex, int clipIndex) const;
+    QJsonObject mcpAutoReframe(int trackIndex, int clipIndex, double aspect, const QString &mode);
+    QJsonObject mcpListAddons() const;
+    QJsonObject mcpInstallAddon(const QString &id);
+    QJsonObject mcpCancelAddonInstall(const QString &id);
+    QJsonObject mcpSetAcceleration(const QString &variant);
+    void setAddonManager(AddonManager *manager) { m_addonManager = manager; }
+    AddonManager *addonManager() const { return m_addonManager; }
     void setUiLanguage(const QString &code);
     void setUiScale(double scale);
     // Strip chip click — folds `prop`'s curve away, or brings it back. Purely a view filter: the
@@ -1351,6 +1374,7 @@ protected:
     static QString recoveryFilePath();
 
     AssetLibrary *m_assetLibrary = nullptr;
+    AddonManager *m_addonManager = nullptr;
     TimelineModel m_timelineModel;
     ClipListModel m_clipListModel;
     // These trees must outlive m_playback: the compositor thread holds a bare

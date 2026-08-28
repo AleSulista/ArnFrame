@@ -26,7 +26,7 @@ Drift can expose a localhost MCP server so Cursor, Claude Code, or other agents 
 1. **`catalog`** — toolboxes, per-op “when” hints, endpoints, units, limitations (no schemas).
 2. **`toolbox({name})`** — full JSON schemas for ops in that toolbox.
 3. **`apply({ops:[{tool, args}, …]})`** — run mutations in order; one undo step for the batch.
-4. **`inspect({clips:true, detail:true})`** — project state, clip UUIDs, effects, transitions, bookmarks, async jobs.
+4. **`inspect({clips:true, detail:true})`** — project state, clip UUIDs, effects, transitions, bookmarks, mask/fade/speed, subtitle cues, face track, stabilize*, async jobs, `selection`, `undo`.
 5. **`capture()`** — JPEG still of the composition (use to verify edits).
 
 Homepage endpoint: `POST /mcp` with `Authorization: Bearer <token>`.
@@ -40,16 +40,16 @@ Pinned endpoints (`/mcp/timeline`, `/mcp/project`, …) list that toolbox’s op
 | Topic | Rule |
 |-------|------|
 | Time | Seconds |
-| Clip reference | Prefer `clip` UUID from `inspect`; else `track` (0 = top) + `index`. One or the other is **required** — clip ops never fall back to the selection |
-| Selection ops | `separate_audio`, `unlink_audio`, `merge_clips`, `align_clip_left/right`, `copy_selection`, `cut_selection`, `paste_at_playhead`, `freeze_frame` take no clip argument — call `select_clip` first |
-| Discovery | Effect stack indices, transition ids, and bookmark indices exist **only** in `inspect({clips:true, detail:true})` |
-| Overlap | Off by default — place/move snap to gaps unless `set_overlap` enables overlap; the reply reports `requested` vs `placed` |
-| Export | `export_video` is async — poll `inspect().export` or `export_status`. The output path is normalised, so use the `path` echoed back |
-| Atomicity | `apply` is **not** atomic: on failure the ops before it stay applied. Check `stopped` / `failed` / `done` |
-| Undo | One batch = one undo step, except `import_media`, `save_project`, `set_overlap`, `set_theme`, `set_shortcut`, `reset_shortcuts` and the `audio` read ops |
+| Clip reference | Prefer `clip` UUID from `inspect`; else `track` (0 = top) + `index`. One or the other is **required** — clip ops never fall back to the selection. Read the current selection from `inspect.selection` |
+| Selection ops | `separate_audio`, `unlink_audio`, `merge_clips`, `align_clip_left/right`, `copy_selection`, `cut_selection` take no clip argument — call `select_clip` first. `freeze_frame` and `paste_at_playhead` are playhead-based (seek first); they do not use the selection |
+| Discovery | Effect stack indices, transition ids, and bookmark indices exist **only** in `inspect({clips:true, detail:true})`. Subtitle cues: `inspect({clips:true, cues:true})` or the `subtitleCues` field of a detail row. Mask/fade/speed/volume/keyframes/`hasFaceTrack`/stabilize* are on the same detail rows |
+| Overlap | Off by default — place/move snap to gaps unless `set_overlap` enables overlap; the reply reports `requested` vs `placed`. With overlap off, moving several clips toward zero must be sequenced **back-to-front**. `set_ripple` / `close_gap` close holes after a delete |
+| Export | `export_video` is async — poll `inspect().export` or `export_status`. The output path is normalised, so use the `path` echoed back. Named sizes: `list_export_presets` + `export_with_preset` |
+| Atomicity | `apply` is **not** atomic: on failure the ops before it stay applied. Check `stopped` / `failed` / `done`. An ops array cannot reference an id produced earlier in the same batch — end the batch after `set_speed_curve` |
+| Undo | One batch = one undo step. Ops outside the stack (and all read-only ops): `import_media`, `import_media_bytes`, `seek`, `play`, `pause`, `undo`, `redo`, `undo_to`, `set_overlap`, `set_ripple`, `set_snap`, `set_guides`, `set_loop_work_area`, `export_video`, `save_project`, `set_theme`, `set_shortcut`, `reset_shortcuts`, `set_beat_layers`, `detect_beats`, `list_speed_curve`, `list_fade_curve`, `install_addon`, `cancel_addon_install`, `set_acceleration`, `switch_angle`, `end_multicam`. **`set_beat_layers` changes the user's own snapping and cannot be undone.** `list_history` / `undo_to` jump further back |
 | Errors | `{ok:false, error:<code>, detail:<text>}` — `bad_args`, `not_found`, `type_mismatch`, `unknown_op`, `unknown_toolbox`, `wrong_endpoint`, `wrong_toolbox`, `apply_failed`, `import_failed`, `import_timeout`, `export_busy`, `export_failed`, `export_timeout`, `capture_failed`, `conflict` |
 | Change detection | Every `inspect` includes `revision`; pass `since:<revision>` to get `{unchanged:true}` when state is current |
-| Media import | Local absolute paths, `file://` URLs, or `import_media_bytes` (base64 — always pass an explicit `path`) |
+| Media import | Absolute paths or `file://`, or `import_media_bytes` (base64 — always pass an explicit `path`). **No directory listing.** If the user gave a fuzzy name (`GX010023.mp4` in Downloads), glob/search with **your own filesystem tools**, then pass the hits to `import_media` and confirm `missing:[]` is empty |
 
 ### Async jobs
 
@@ -63,27 +63,29 @@ All return `{started:true}` immediately. Every field below except `export` needs
 | `set_clip_reverse` (video) | `reverseRender.{active, progress, status}` |
 | `detect_scenes` | `sceneDetect.{active, progress, status, clip, scenes}` |
 | `run_segmentation`, `segment_clip`, `apply_denoise`, `detect_faces` | No progress field — re-read `inspect({clips:true, detail:true})` and compare |
+| `stabilize_clip` | Per-clip `stabilizing` / `stabilizeProgress` / `stabilizeStatus` on the detail clip row |
 
 ## Toolbox reference
 
 | Toolbox | When to use |
 |---------|-------------|
 | `media` | Import (paths/bytes), list, rename, remove, replace, export still |
-| `timeline` | Tracks, clips, selection, bookmarks, copy/paste, A/V link |
-| `canvas` | Transform, flip, blend, mask, fade, speed, reverse, animation |
+| `timeline` | Tracks, clips, selection, ripple/gap, bookmarks, copy/paste, A/V link |
+| `canvas` | Transform, flip, blend, mask, fade, speed, reverse, animation, stabilisation |
 | `playback` | Seek, play, pause, In/Out work area |
-| `text` | Title and caption clips |
+| `text` | Title and caption clips, text presets |
 | `shapes` | Builtin shapes, stickers, emoji, fonts, text presets |
 | `subtitles` | Subtitle clips, cues, import/export, Whisper generation |
-| `effects` | Video/audio effects, transitions, templates |
+| `effects` | Video/audio effects, transitions, templates, effect clipboard |
 | `project` | Open/new/save/package, canvas, background, metadata, export |
 | `keyframes` | Property animation keys and tangents |
 | `speed` | Speed ramps; reading custom fade curves (write them with `set_fade_curve` in `canvas`) |
 | `segmentation` | SAM-style cutout (session or one-shot) |
-| `ai` | Denoise and face detection |
-| `audio` | Waveforms, beat detection, beat-synced cuts, clip volume |
+| `ai` | Denoise, face detection, auto-reframe, add-on install |
+| `audio` | Waveforms, silence, loudness, ducking, beat detection, beat-synced cuts, clip volume |
 | `scene` | Shot detection, what is in each shot, scene-synced cuts |
-| `ui` | Theme, shortcuts, editor preferences |
+| `ui` | Theme, shortcuts, editor preferences, guides |
+| `multicam` | Multi-camera session: set up, switch at the playhead, save |
 
 ### Working to the music
 
@@ -140,16 +142,20 @@ against that file's timestamp, so it survives edits, undo and reload. Re-trimmin
 the scanned range, so that does scan afresh.
 
 `with_objects` needs the `object-model` add-on. Call `ai_capabilities` to see what is installed
-and what each piece unlocks; nothing in MCP installs add-ons, so report the missing one to the
-user rather than retrying.
+and what each piece unlocks; `list_addons` / `install_addon` can install a missing model.
+
+**Finding files.** Drift does not list directories. When the user names a clip loosely
+(`GX010023.mp4` in Downloads, “the wedding file”), glob or search with **your own filesystem
+tools**, pass the absolute path to `import_media`, and treat a non-empty `missing:[]` as
+“search again”, not as a bin problem.
 
 ## Traps
 
 - **`set_transform` writes at the playhead.** If the property is keyframed, or `autoKey` is on, it creates a keyframe there instead of a constant value. Seek first, or mute the animation with `set_property_keyframes_enabled(false)`.
-- **`set_mask` replaces the whole mask.** Omitted keys revert to defaults and omitting `shape` turns the mask off. Read the current mask and send it back merged.
-- **`set_subtitle_cues` replaces every cue.** Same pattern — read, merge, send.
+- **`set_mask` replaces the whole mask.** Omitted keys revert to defaults and omitting `shape` turns the mask off. Read the current mask from `inspect({clips:true, detail:true}).tracks[].items[].mask` and send it back merged.
+- **`set_subtitle_cues` replaces every cue.** Read `inspect({clips:true, cues:true})` (or a detail row's `subtitleCues`), merge, send.
 - **`set_effect_param`, `set_audio_effect_param`, `set_transition_param` do not validate.** A wrong key or index still returns `ok`. Verify with `inspect({clips:true, detail:true})`.
-- **`set_speed_curve` returns a new clip id.** The old UUID stops resolving.
+- **`set_speed_curve` returns a new clip id.** The old UUID stops resolving. End the apply batch after it — an ops array cannot reference an id produced earlier in the same batch.
 - **`remove_keyframe` deletes the *nearest* key** with no distance limit. Confirm the exact time with `list_keyframes`.
 - **`set_keyframe_interpolation` moves the playhead** to `at`, changing the default time of later ops in the same batch.
 - **`add_track` shifts every track index** — index 0 is the new track.
@@ -160,6 +166,8 @@ user rather than retrying.
 - **`snap_clips_to_beats` may not land on the beat.** With overlap off, a clip is pushed to the next free gap. Read the `to` values back rather than assuming they equal the beat time.
 - **`split_on_beats` keeps your clip id for the *first* piece.** The other pieces are new UUIDs, returned in `clips` in timeline order.
 - **There is no track volume.** `set_volume` is per clip; mute a whole lane with `set_track({muted:true})`.
+- **`generate_subtitles` after `remove_silence`.** Silence removal shifts the timeline; captions generated before it will be wrong.
+- **`apply_denoise` is noise, not reverb.** "Sounds like a bathroom" will not be fixed by denoise.
 
 ## Example
 

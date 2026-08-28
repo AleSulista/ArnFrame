@@ -56,4 +56,10 @@ public:
     // a lane, but it makes "is there anything here" unanswerable.
     static QVector<float> mixedPeaks(qint64 totalFrames, int sampleRate, int buckets,
                                      const FillChunk &fill);
+
+    // voicePeaks' speech band-pass without the display floor or loudness normalisation:
+    // true 0 for silence, which is what detect_silence needs. Same 300 Hz–3 kHz 4th-order
+    // path so breath and room tone don't read as speech.
+    static QVector<float> speechPeaks(qint64 totalFrames, int sampleRate, int buckets,
+                                      const FillChunk &fill);
 };

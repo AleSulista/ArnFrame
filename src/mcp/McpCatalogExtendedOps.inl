@@ -43,7 +43,7 @@
         { "package_project", "project", "Save bundled copy",
           "Write a copy of the project with all media embedded. Async: returns {started:true, path} "
           "immediately — poll inspect({detail:true}).package.{active,progress} until active is false.",
-          objectSchema({{QStringLiteral("path"), stringProp(QStringLiteral("Absolute output .dcut path"))}},
+          objectSchema({{QStringLiteral("path"), stringProp(QStringLiteral("Absolute output .drift path"))}},
                        {QStringLiteral("path")}) },
         { "cancel_package", "project", "Stop packaging",
           "Cancel an in-flight package job. Returns ok even when nothing was running; confirm with "
@@ -83,7 +83,8 @@
         { "select_clip", "timeline", "Focus one clip",
           "Select exactly one clip, replacing any previous selection. REQUIRED before the "
           "selection-based ops, which take no clip argument: separate_audio, unlink_audio, "
-          "merge_clips, align_clip_left, align_clip_right, copy_selection, cut_selection.",
+          "merge_clips, align_clip_left, align_clip_right, copy_selection, cut_selection. "
+          "freeze_frame and paste_at_playhead are playhead-based — seek first, do not select.",
           objectSchema(clipRefProps()) },
         { "clear_selection", "timeline", "Deselect all",
           "Clear the clip selection. Selection-based ops fail afterwards until you select again.",
@@ -101,8 +102,9 @@
           objectSchema({}), false, true },
         { "paste_at_playhead", "timeline", "Paste clips",
           "Paste the internal clipboard at the playhead. Requires an earlier copy_selection or "
-          "cut_selection; returns ok with no effect when the clipboard is empty. Does not return the "
-          "new clip ids — diff inspect({clips:true}) to find them.",
+          "cut_selection; returns ok with no effect when the clipboard is empty. Playhead-based — "
+          "seek first; selecting a clip does not change where this lands. Returns {ids:[…], n} of "
+          "the new clips.",
           objectSchema({}) },
         { "separate_audio", "timeline", "Split A/V",
           "Detach the audio of the selected video clip onto its own audio track. Acts on the current "
@@ -157,7 +159,7 @@
                        {QStringLiteral("index")}) },
         { "freeze_frame", "timeline", "Hold current frame",
           "Insert a still of the frame under the playhead as a new clip. Uses the playhead, not a clip "
-          "argument — seek first. Does not return the new clip id; diff inspect({clips:true}).",
+          "argument and not the selection — seek first. Returns {id, track, index} of the new still.",
           objectSchema({}) },
 
         { "set_flip", "canvas", "Mirror a clip",
@@ -186,7 +188,8 @@
                                   clipRefProps()),
                        {QStringLiteral("mask")}) },
         { "set_fade", "canvas", "Audio/video fade",
-          "Set fade-in and fade-out lengths in seconds. Omitted ends keep their current value. Use "
+          "Set fade-in and fade-out lengths in seconds. Omitted ends keep their current value. A fade "
+          "reveals the canvas background (the project background colour or blur), not black. Use "
           "set_fade_curve to change the fade's shape.",
           objectSchema(mergeProps({{QStringLiteral("in"), numberProp(QStringLiteral("Fade in seconds"))},
                                    {QStringLiteral("out"), numberProp(QStringLiteral("Fade out seconds"))}},
@@ -267,42 +270,40 @@
           "Returns {emoji:[{id, label}]}. add_emoji takes the emoji character itself, not the id.",
           objectSchema({}), true, false, true },
         { "list_text_presets", "shapes", "Text style packs",
-          "Returns {presets:[{id, label}]}. Use id as the preset argument to add_text.",
+          "Returns {presets:[{id, label}]}. Use id as the preset argument to add_text or "
+          "apply_text_preset.",
           objectSchema({}), true, false, true },
         { "list_fonts", "shapes", "Font list",
           "Returns {fonts:[{id, label}]} for fonts available on this machine. Use the family name as "
           "style.fontFamily in set_text.",
           objectSchema({}), true, false, true },
         { "add_shape", "shapes", "Place a shape",
-          "Add a builtin shape clip, creating a shape track when needed. Does NOT return the new clip "
-          "id — diff inspect({clips:true}) to address it afterwards, then style it with "
-          "set_shape_style.",
+          "Add a builtin shape clip, creating a shape track when needed. Returns {id, track, index}. "
+          "Style it afterwards with set_shape_style.",
           objectSchema({{QStringLiteral("shape"), stringProp(QStringLiteral("Shape id from list_shapes"))},
                         {QStringLiteral("at"), numberProp(QStringLiteral("Start seconds (default: playhead)"))},
                         {QStringLiteral("track"), integerProp(QStringLiteral("Optional destination track; omitted picks or creates one"))}},
                        {QStringLiteral("shape")}) },
         { "add_sticker", "shapes", "Place a sticker",
-          "Add a sticker clip, creating a track when needed. Does NOT return the new clip id — diff "
-          "inspect({clips:true}) to address it afterwards.",
+          "Add a sticker clip, creating a track when needed. Returns {id, track, index}.",
           objectSchema({{QStringLiteral("sticker"), stringProp(QStringLiteral("Sticker id from list_stickers"))},
                         {QStringLiteral("at"), numberProp(QStringLiteral("Start seconds (default: playhead)"))}},
                        {QStringLiteral("sticker")}) },
         { "add_emoji", "shapes", "Place emoji",
           "Add an emoji clip, creating a track when needed. Takes the emoji CHARACTER (e.g. \"🎬\"), not "
-          "a catalog id. Does NOT return the new clip id — diff inspect({clips:true}).",
+          "a catalog id. Returns {id, track, index}.",
           objectSchema({{QStringLiteral("emoji"), stringProp(QStringLiteral("The emoji character itself, e.g. 🎬"))},
                         {QStringLiteral("name"), stringProp(QStringLiteral("Optional display name for the clip"))},
                         {QStringLiteral("at"), numberProp(QStringLiteral("Start seconds (default: playhead)"))}},
                        {QStringLiteral("emoji")}) },
 
         { "add_subtitle_clip", "subtitles", "Empty subtitle lane",
-          "Add an empty subtitle clip, creating a subtitle track when needed. Does NOT return the new "
-          "clip id — diff inspect({clips:true}), then fill it with set_subtitle_cues or "
-          "import_subtitle_into_clip.",
+          "Add an empty subtitle clip, creating a subtitle track when needed. Returns {id, track, index}. "
+          "Fill it with set_subtitle_cues or import_subtitle_into_clip.",
           objectSchema({{QStringLiteral("at"), numberProp(QStringLiteral("Start seconds (default: playhead)"))}}) },
         { "import_subtitle_file", "subtitles", "Load SRT/VTT",
-          "Import an .srt or .vtt file as a NEW subtitle clip. Does not return the clip id — diff "
-          "inspect({clips:true}). Use import_subtitle_into_clip to fill an existing clip instead.",
+          "Import an .srt or .vtt file as a NEW subtitle clip. Returns {id, track, index}. Use "
+          "import_subtitle_into_clip to fill an existing clip instead.",
           objectSchema({{QStringLiteral("path"), stringProp(QStringLiteral("Absolute .srt or .vtt path"))},
                         {QStringLiteral("at"), numberProp(QStringLiteral("Start seconds (default: playhead)"))}},
                        {QStringLiteral("path")}) },
@@ -318,7 +319,8 @@
                        {QStringLiteral("path")}) },
         { "set_subtitle_cues", "subtitles", "Replace all cues",
           "REPLACE every cue on a subtitle clip. This is not a merge — cues you leave out are deleted, "
-          "so read the current list from inspect({clips:true,detail:true}) first when editing. Times "
+          "so read the current list from inspect({clips:true,cues:true}) or "
+          "inspect({clips:true,detail:true}).subtitleCues first when editing. Times "
           "are timeline seconds.",
           objectSchema(mergeProps(
               {{QStringLiteral("cues"),
@@ -337,11 +339,13 @@
         { "list_whisper_languages", "subtitles", "Whisper languages",
           "Returns {languages:[{id, label}]}. Pass an id as generate_subtitles.language.",
           objectSchema({}), true, false, true },
-        { "generate_subtitles", "subtitles", "Auto transcribe",
+        { "generate_subtitles", "subtitles", "Auto transcribe, including word-by-word captions",
           "Transcribe a clip's audio with Whisper into a new subtitle clip. Async: returns "
           "{started:true} immediately — poll "
           "inspect({detail:true}).subtitleGen.{active,progress,status} until active is false. Cancel "
-          "with cancel_subtitle_generation.",
+          "with cancel_subtitle_generation. For word-by-word captions pass max_words_per_cue:1. Run "
+          "this AFTER remove_silence — silence removal shifts the timeline and would invalidate cue "
+          "times.",
           objectSchema(mergeProps({{QStringLiteral("language"), stringProp(QStringLiteral("Language id from list_whisper_languages; omitted auto-detects"))},
                                    {QStringLiteral("max_words_per_cue"), numberProp(QStringLiteral("Cap words per caption; omit or 0 for the recommended length. Short caps drift slightly out of sync."))}},
                                   clipRefProps())) },
@@ -502,9 +506,10 @@
           "Returns {available}. Check this before apply_denoise — the model ships separately.",
           objectSchema({}), true, false, true },
         { "apply_denoise", "ai", "Denoise clip",
-          "Run AI audio denoise over the clip. Async and with no progress field — re-read "
-          "inspect({clips:true,detail:true}) and compare to detect completion. Cancel with "
-          "cancel_denoise.",
+          "Run AI audio denoise over the clip — this removes background noise (hiss, HVAC, rumble), "
+          "not reverb. \"Sounds like a bathroom\" is reverb and this will not fix it. Async and with "
+          "no progress field — re-read inspect({clips:true,detail:true}) and compare to detect "
+          "completion. Cancel with cancel_denoise.",
           objectSchema(clipRefProps()) },
         { "cancel_denoise", "ai", "Cancel denoise",
           "Cancel an in-flight denoise. Returns ok even when nothing was running.",
@@ -513,16 +518,18 @@
           "Which optional model add-ons are present and what each unlocks, plus the active ONNX "
           "Runtime. Call this before an op that needs a model, or after one fails, so you can "
           "tell the user exactly what to install instead of retrying. Returns "
-          "{models:[{kind, installed, unlocks}], runtime, hint}. Nothing here installs anything "
-          "— that is done from Extras in the app.",
+          "{models:[{kind, installed, unlocks}], runtime, hint}. Missing models install with "
+          "install_addon after list_addons; set_acceleration picks the ONNX Runtime.",
           objectSchema({}), true, false, true },
         { "face_detection_status", "ai", "Face track availability",
           "Returns {available}. Check this before detect_faces — the model ships separately.",
           objectSchema({}), true, false, true },
         { "detect_faces", "ai", "Detect faces",
-          "Run face detection over a clip and store the result as a face track for auto-framing. Async "
-          "and with no progress field — re-read inspect({clips:true,detail:true}) and compare to detect "
-          "completion. Cancel with cancel_face_detection.",
+          "Run face detection over a clip and store a face-track sidecar (per-frame anchors: eyes, "
+          "nose, mouth, chin, forehead). Read it with list_face_track; auto_reframe consumes it to "
+          "write transform keyframes that keep a face in frame. inspect({clips:true,detail:true}) "
+          "reports hasFaceTrack. Async and with no progress field — re-read inspect and compare. "
+          "Cancel with cancel_face_detection.",
           objectSchema(clipRefProps()) },
         { "cancel_face_detection", "ai", "Cancel face detect",
           "Cancel an in-flight face detection. Returns ok even when nothing was running.",
@@ -643,7 +650,7 @@
                {QStringLiteral("min_scene"), propWithDefault(numberProp(QStringLiteral("Shortest shot to emit, in seconds")), 0.5)},
                {QStringLiteral("with_objects"), propWithDefault(boolProp(QStringLiteral("Also label each shot with the objects in it. Slower; needs the object-model addon")), false)}},
               clipRefProps())) },
-        { "list_scenes", "scene", "Read the detected shots",
+        { "list_scenes", "scene", "Read shots; sort:score for a highlight reel",
           "The shots found by detect_scenes, as {scenes:[{index, start, end, duration, "
           "timeline_start, timeline_end, motion, loudness, objects, score, labels}]}. start/end "
           "are seconds into the SOURCE file; timeline_start/timeline_end are the same moments on "
@@ -705,4 +712,220 @@
           objectSchema({{QStringLiteral("autoKey"), boolProp(QStringLiteral("Auto-keyframe: transform edits create keyframes at the playhead"))},
                         {QStringLiteral("mediaGrid"), boolProp(QStringLiteral("Media bin grid mode"))},
                         {QStringLiteral("reopenLastProject"), boolProp(QStringLiteral("Reopen last project on launch"))},
-                        {QStringLiteral("followSystem"), boolProp(QStringLiteral("true clears the theme override so the OS theme wins; false is a no-op"))}}) }
+                        {QStringLiteral("followSystem"), boolProp(QStringLiteral("true clears the theme override so the OS theme wins; false is a no-op"))}}) },
+
+        { "set_ripple", "timeline", "Ripple delete and trim",
+          "Project setting. When on, deleting or shortening a clip pulls later clips on that track "
+          "left to close the hole. Off (default): every delete leaves a gap. Not undoable.",
+          objectSchema({{QStringLiteral("enabled"), boolProp(QStringLiteral("Ripple later clips into holes"))}},
+                       {QStringLiteral("enabled")}) },
+        { "close_gap", "timeline", "Close one hole on a track",
+          "Shift every clip on `track` that starts at or after `at` left by the width of the gap "
+          "whose left edge is `at` (typically the end of the preceding clip). Linked A/V partners "
+          "follow. With overlap off this is how you delete without leaving a hole, or how you put an "
+          "intro at the front: place then close_gap behind. When moving several clips toward zero with "
+          "overlap off, sequence back-to-front or each move is pushed into the clip ahead.",
+          objectSchema({{QStringLiteral("track"), integerProp(QStringLiteral("Track index"))},
+                        {QStringLiteral("at"), numberProp(QStringLiteral("Left edge of the hole, timeline seconds"))}},
+                       {QStringLiteral("track"), QStringLiteral("at")}) },
+        { "set_snap", "timeline", "Toggle snapping",
+          "Editor snap-to-clips/beats/bookmarks. Not undoable.",
+          objectSchema({{QStringLiteral("enabled"), boolProp(QStringLiteral("Snap on"))}},
+                       {QStringLiteral("enabled")}) },
+        { "set_guides", "ui", "Preview guides",
+          "Show composition guides on the preview and/or pick the guide kind. Not undoable.",
+          objectSchema({{QStringLiteral("enabled"), boolProp(QStringLiteral("Show guides"))},
+                        {QStringLiteral("type"),
+                         enumProp(QStringLiteral("Guide kind"),
+                                  {QStringLiteral("thirds"), QStringLiteral("center"),
+                                   QStringLiteral("golden"), QStringLiteral("grid")})}}) },
+        { "set_loop_work_area", "playback", "Loop the In/Out range",
+          "When on, playback loops over the work area. Not undoable.",
+          objectSchema({{QStringLiteral("enabled"), boolProp(QStringLiteral("Loop the work area"))}},
+                       {QStringLiteral("enabled")}) },
+        { "select_clips", "timeline", "Select several clips",
+          "Replace the selection with the given clips (UUIDs). Linked A/V partners are included.",
+          objectSchema({{QStringLiteral("clips"),
+                         arrayProp(stringProp(QStringLiteral("Clip UUID")),
+                                   QStringLiteral("Clip UUIDs to select"))}},
+                       {QStringLiteral("clips")}) },
+        { "copy_clip_effects", "effects", "Copy a clip's effect stack",
+          "Copy the clip's video and audio effects to the effect clipboard.",
+          objectSchema(clipRefProps()) },
+        { "paste_clip_effects", "effects", "Paste an effect stack",
+          "Paste the effect clipboard onto a clip. Fails bad_args when the clipboard is empty.",
+          objectSchema(clipRefProps()) },
+        { "set_effect_string_param", "effects", "File/string effect param",
+          "Set a file- or string-typed effect parameter (e.g. face_swap's sourceImage). Value is an "
+          "absolute path or file:// URL. Not validated — confirm with inspect({clips:true,detail:true}).",
+          objectSchema(mergeProps({{QStringLiteral("index"), effectIndexProp()},
+                                   {QStringLiteral("key"), stringProp(QStringLiteral("Parameter key from list_effects"))},
+                                   {QStringLiteral("value"), stringProp(QStringLiteral("Absolute path, file:// URL, or string value"))}},
+                                  clipRefProps()),
+                       {QStringLiteral("index"), QStringLiteral("key"), QStringLiteral("value")}) },
+        { "apply_text_preset", "text", "Restyle an existing title",
+          "Apply a builtin text style pack from list_text_presets to an existing text or subtitle clip.",
+          objectSchema(mergeProps({{QStringLiteral("preset"), stringProp(QStringLiteral("Preset id from list_text_presets"))}},
+                                  clipRefProps()),
+                       {QStringLiteral("preset")}) },
+        { "list_user_text_presets", "text", "User-saved text styles",
+          "Returns {presets:[{id, label}]}. Apply with apply_user_text_preset.",
+          objectSchema({}), true, false, true },
+        { "apply_user_text_preset", "text", "Apply a saved text style",
+          "Apply a user-saved text style from list_user_text_presets.",
+          objectSchema(mergeProps({{QStringLiteral("preset"), stringProp(QStringLiteral("Preset id from list_user_text_presets"))}},
+                                  clipRefProps()),
+                       {QStringLiteral("preset")}) },
+        { "save_text_preset", "text", "Save this clip's text style",
+          "Save the clip's current text style as a user preset. Returns {id, label}.",
+          objectSchema(mergeProps({{QStringLiteral("label"), stringProp(QStringLiteral("Preset name"))}},
+                                  clipRefProps()),
+                       {QStringLiteral("label")}) },
+        { "list_user_effect_presets", "effects", "User-saved effect stacks",
+          "Returns {presets:[{id, label, effectCount, audioEffectCount, labels}]}.",
+          objectSchema({}), true, false, true },
+        { "apply_effect_preset", "effects", "Apply a saved effect stack",
+          "Apply a user-saved effect stack from list_user_effect_presets onto a clip.",
+          objectSchema(mergeProps({{QStringLiteral("preset"), stringProp(QStringLiteral("Preset id from list_user_effect_presets"))}},
+                                  clipRefProps()),
+                       {QStringLiteral("preset")}) },
+        { "save_effect_preset", "effects", "Save this clip's effects",
+          "Save the clip's current video+audio effect stack as a user preset. Returns {id, label}.",
+          objectSchema(mergeProps({{QStringLiteral("label"), stringProp(QStringLiteral("Preset name"))}},
+                                  clipRefProps()),
+                       {QStringLiteral("label")}) },
+        { "list_export_presets", "project", "Named export sizes",
+          "Returns {presets:[{id, label}]} — 1080p, YouTube, vertical, and the rest. Use id with "
+          "export_with_preset.",
+          objectSchema({}), true, false, true },
+        { "export_with_preset", "project", "Export using a named size",
+          "Start an async encode with a scale preset from list_export_presets. Same polling as "
+          "export_video.",
+          objectSchema({{QStringLiteral("path"), stringProp(QStringLiteral("Absolute output path"))},
+                        {QStringLiteral("preset"), stringProp(QStringLiteral("Scale preset id from list_export_presets"))}},
+                       {QStringLiteral("path"), QStringLiteral("preset")}) },
+        { "stabilize_clip", "canvas", "Stabilise shaky footage",
+          "Start a two-pass stabilise on a video clip. Async: poll inspect({clips:true,detail:true}) "
+          "for that clip's stabilizing/stabilizeProgress/stabilizeStatus.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("smoothing"), integerProp(QStringLiteral("Smoothing window, typical 10–30"))},
+               {QStringLiteral("tripod"), boolProp(QStringLiteral("Lock camera translation"))},
+               {QStringLiteral("mode"), enumProp(QStringLiteral("bake writes a proxy; keyframes write transform keys"),
+                                                 {QStringLiteral("bake"), QStringLiteral("keyframes")})}},
+              clipRefProps())) },
+        { "cancel_stabilize", "canvas", "Stop stabilise job",
+          "Cancel an in-flight stabilize_clip. Returns ok even when nothing was running.",
+          objectSchema(clipRefProps()) },
+        { "remove_stabilize", "canvas", "Remove stabilisation",
+          "Clear the baked proxy / keyframe rest pose from a clip.",
+          objectSchema(clipRefProps()), false, true },
+        { "list_addons", "ai", "What add-ons exist",
+          "Returns {addons:[{id, name, kind, version, state, installed}]}. Use id with install_addon.",
+          objectSchema({}), true, false, true },
+        { "install_addon", "ai", "Install a model or pack",
+          "Start downloading and installing an add-on from list_addons. Async: poll list_addons for "
+          "state. Not undoable.",
+          objectSchema({{QStringLiteral("id"), stringProp(QStringLiteral("Add-on id from list_addons"))}},
+                       {QStringLiteral("id")}) },
+        { "cancel_addon_install", "ai", "Stop an add-on install",
+          "Cancel an in-flight install_addon. Not undoable.",
+          objectSchema({{QStringLiteral("id"), stringProp(QStringLiteral("Add-on id"))}},
+                       {QStringLiteral("id")}) },
+        { "set_acceleration", "ai", "Pick ONNX Runtime",
+          "Set the ONNX Runtime used by AI features. A change may require an app restart. Not undoable.",
+          objectSchema({{QStringLiteral("variant"), stringProp(QStringLiteral("Acceleration id (auto, cpu, cuda, …)"))}},
+                       {QStringLiteral("variant")}) },
+        { "list_face_track", "ai", "Read face anchors",
+          "The per-frame face-track sidecar written by detect_faces. Returns {fps, n, frames:[{t, "
+          "faces:[{cx, cy, rx, ry, valid}]}]}. t is source seconds. Long tracks are subsampled.",
+          objectSchema(clipRefProps()), true, false, true },
+        { "auto_reframe", "canvas", "Keep a face in frame",
+          "Write x/y/w/h transform keyframes so the subject stays in frame at the requested aspect. "
+          "Does not crop the project canvas, so a 16:9 timeline can still export a 9:16 deliverable. "
+          "mode face follows list_face_track (run detect_faces first); center is a static centre crop; "
+          "motion is face with heavier smoothing.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("aspect"), numberProp(QStringLiteral("Target width/height, e.g. 0.5625 for 9:16"))},
+               {QStringLiteral("width"), integerProp(QStringLiteral("Target width pixels"))},
+               {QStringLiteral("height"), integerProp(QStringLiteral("Target height pixels"))},
+               {QStringLiteral("mode"),
+                propWithDefault(enumProp(QStringLiteral("How to pick the crop"),
+                                         {QStringLiteral("face"), QStringLiteral("center"),
+                                          QStringLiteral("motion")}),
+                                QStringLiteral("face"))}},
+              clipRefProps())) },
+        { "set_scene_threshold", "scene", "Tune shot detection",
+          "Persist the default scene-detect sensitivity (4–100, lower finds more cuts).",
+          objectSchema({{QStringLiteral("threshold"), numberProp(QStringLiteral("Sensitivity 4..100"))}},
+                       {QStringLiteral("threshold")}) },
+        { "clear_scenes", "scene", "Drop the shot index",
+          "Clear the in-memory scene analysis.",
+          objectSchema({}), false, true },
+        { "cancel_scene_detection", "scene", "Stop a scene scan",
+          "Cancel an in-flight detect_scenes. Returns ok even when nothing was running.",
+          objectSchema({}) },
+        { "clear_beat_analysis", "audio", "Drop the beat grid",
+          "Clear the transient beat analysis so the next detect_beats is not cached.",
+          objectSchema({}), false, true },
+        { "detect_silence", "audio", "Find dead air",
+          "Find ranges where speech-band energy stays below threshold. BLOCKS. Pass clip for that "
+          "clip, or start+duration for the mixed timeline. Returns {ranges:[{start,end}], threshold, "
+          "source} in timeline seconds.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("start"), numberProp(QStringLiteral("Timeline start seconds (timeline mode)"))},
+               {QStringLiteral("duration"), numberProp(QStringLiteral("Range length seconds (timeline mode)"))},
+               {QStringLiteral("threshold"), propWithDefault(numberProp(QStringLiteral("Speech-band amplitude 0..1 below which a bucket is silence")), 0.02)},
+               {QStringLiteral("min_duration"), propWithDefault(numberProp(QStringLiteral("Ignore silences shorter than this many seconds")), 0.35)},
+               {QStringLiteral("padding"), propWithDefault(numberProp(QStringLiteral("Seconds of room tone to keep on each side of speech")), 0.08)}},
+              clipRefProps())),
+          true, false, true },
+        { "remove_silence", "audio", "Cut dead air in one step",
+          "Split, delete, and close-gap internally so silences disappear. One undo step. Pass clip "
+          "or track. Returns {removed:[{start,end}], clips:[surviving ids]}. Run generate_subtitles "
+          "AFTER this.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("threshold"), propWithDefault(numberProp(QStringLiteral("Same as detect_silence")), 0.02)},
+               {QStringLiteral("min_duration"), propWithDefault(numberProp(QStringLiteral("Same as detect_silence")), 0.35)},
+               {QStringLiteral("padding"), propWithDefault(numberProp(QStringLiteral("Same as detect_silence")), 0.08)}},
+              clipRefProps())) },
+        { "analyze_loudness", "audio", "Measure LUFS and true peak",
+          "Integrated loudness (EBU R128 / BS.1770) plus a 4×-interpolated true-peak estimate. Pass "
+          "clip or start+duration. BLOCKS. Returns {lufs, true_peak_db, duration}.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("start"), numberProp(QStringLiteral("Timeline start seconds (timeline mode)"))},
+               {QStringLiteral("duration"), numberProp(QStringLiteral("Range length seconds (timeline mode)"))}},
+              clipRefProps())),
+          true, false, true },
+        { "normalize_volume", "audio", "Match a LUFS target",
+          "Measure the clip, then set its scalar volume so integrated loudness matches target_lufs. "
+          "Clamped to 0..2.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("target_lufs"), propWithDefault(numberProp(QStringLiteral("Target integrated LUFS")), -16.0)}},
+              clipRefProps())) },
+        { "duck_under", "audio", "Lower music under speech",
+          "Write volume keyframes on this (music) clip that dip whenever speech is present on "
+          "over_track or over_clips. amount is the volume multiplier during speech. One undo step.",
+          objectSchema(mergeProps(
+              {{QStringLiteral("over_track"), integerProp(QStringLiteral("Track whose non-silent ranges drive the duck"))},
+               {QStringLiteral("over_clips"), arrayProp(stringProp(QStringLiteral("Clip UUID")), QStringLiteral("Speech clips; wins over over_track"))},
+               {QStringLiteral("amount"), propWithDefault(numberProp(QStringLiteral("Multiplier during speech, 0..1")), 0.3)},
+               {QStringLiteral("attack"), propWithDefault(numberProp(QStringLiteral("Seconds to ramp down before speech")), 0.12)},
+               {QStringLiteral("release"), propWithDefault(numberProp(QStringLiteral("Seconds to ramp back after speech")), 0.25)}},
+              clipRefProps())) },
+        { "setup_multicam", "multicam", "Open a multi-camera session",
+          "With two or more video clips selected, start punching those as angles. Otherwise place "
+          "every video asset onto its own track and start a session. Returns {active, angles}.",
+          objectSchema({}) },
+        { "switch_angle", "multicam", "Cut to another camera",
+          "Punch `angle` (0-based) at the playhead. Session-only until save_multicam_*; not undoable.",
+          objectSchema({{QStringLiteral("angle"), integerProp(QStringLiteral("0-based angle index"))}},
+                       {QStringLiteral("angle")}) },
+        { "end_multicam", "multicam", "Abandon the session",
+          "Close the multicam session without writing cuts into the project. Not undoable.",
+          objectSchema({}) },
+        { "save_multicam_separate", "multicam", "Keep each camera on its track",
+          "Write the session as separate tracks and end it.",
+          objectSchema({}) },
+        { "save_multicam_combined", "multicam", "Bake a single program track",
+          "Write the session as one combined program track and end it.",
+          objectSchema({}) }

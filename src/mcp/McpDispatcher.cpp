@@ -500,26 +500,15 @@ QJsonObject McpDispatcher::inspect(const QJsonObject &args) const
                           ? jsonInt(args.value(QStringLiteral("since")), -1)
                           : -1;
     const bool detail = jsonBool(args.value(QStringLiteral("detail")));
-    return m_controller->mcpInspect(jsonBool(args.value(QStringLiteral("clips"))), since, detail);
+    const bool cues = jsonBool(args.value(QStringLiteral("cues")));
+    return m_controller->mcpInspect(jsonBool(args.value(QStringLiteral("clips"))), since, detail, cues);
 }
 
 bool McpDispatcher::isUndoable(const QString &tool) const
 {
     if (isReadOnlyOp(tool))
         return false;
-    static const QStringList skip = {
-        QStringLiteral("import_media"), QStringLiteral("import_media_bytes"),
-        QStringLiteral("seek"),
-        QStringLiteral("play"),         QStringLiteral("pause"),
-        QStringLiteral("undo"),         QStringLiteral("redo"),
-        QStringLiteral("set_overlap"),  QStringLiteral("export_video"),
-        QStringLiteral("save_project"), QStringLiteral("set_theme"),
-        QStringLiteral("set_shortcut"), QStringLiteral("reset_shortcuts"),
-        // Transient view / session state — an undo step would revert nothing in the project.
-        QStringLiteral("set_beat_layers"), QStringLiteral("detect_beats"),
-        QStringLiteral("list_speed_curve"), QStringLiteral("list_fade_curve"),
-    };
-    return !skip.contains(tool);
+    return !undoExemptOps().contains(tool);
 }
 
 QJsonObject McpDispatcher::apply(const QJsonObject &args)
@@ -527,6 +516,16 @@ QJsonObject McpDispatcher::apply(const QJsonObject &args)
     const QJsonArray ops = args.value(QStringLiteral("ops")).toArray();
     if (ops.isEmpty())
         return err("bad_args", QStringLiteral("ops must be a non-empty array"));
+
+    auto batchLabel = [&](int count) {
+        QStringList names;
+        for (int i = 0; i < ops.size() && names.size() < 3; ++i)
+            names.append(ops.at(i).toObject().value(QStringLiteral("tool")).toString());
+        QString label = QStringLiteral("MCP: ") + names.join(QStringLiteral(", "));
+        if (count > 3)
+            label += QStringLiteral(" + %1 more").arg(count - 3);
+        return label;
+    };
 
     m_controller->mcpBeginBatch();
     bool hadUndoable = false;
@@ -539,7 +538,7 @@ QJsonObject McpDispatcher::apply(const QJsonObject &args)
         const QJsonObject one = applyOne(tool, opArgs);
         results.append(QJsonObject{{QStringLiteral("tool"), tool}, {QStringLiteral("result"), one}});
         if (!one.value(QStringLiteral("ok")).toBool()) {
-            m_controller->mcpEndBatch(QStringLiteral("MCP apply, %1 ops").arg(i),
+            m_controller->mcpEndBatch(batchLabel(i),
                                       hadUndoable && i > 0);
             return {{QStringLiteral("ok"), false},
                     {QStringLiteral("error"), QStringLiteral("apply_failed")},
@@ -550,7 +549,7 @@ QJsonObject McpDispatcher::apply(const QJsonObject &args)
         if (isUndoable(tool))
             hadUndoable = true;
     }
-    m_controller->mcpEndBatch(QStringLiteral("MCP apply, %1 ops").arg(ops.size()), hadUndoable);
+    m_controller->mcpEndBatch(batchLabel(ops.size()), hadUndoable);
     return ok({{QStringLiteral("n"), ops.size()}, {QStringLiteral("done"), results}});
 }
 
@@ -1316,9 +1315,11 @@ QJsonObject McpDispatcher::opSetMetadata(const QJsonObject &args)
 
 QJsonObject McpDispatcher::opSaveProject(const QJsonObject &args)
 {
-    const QString path = args.value(QStringLiteral("path")).toString();
+    QString path = args.value(QStringLiteral("path")).toString();
     if (path.isEmpty())
-        return err("bad_args", QStringLiteral("path required"));
+        path = m_controller->currentProjectPath();
+    if (path.isEmpty())
+        return err("bad_args", QStringLiteral("path required — project has never been saved"));
     const QFileInfo info(path);
     if (!info.absoluteDir().exists() && !QDir().mkpath(info.absolutePath()))
         return err("bad_args", QStringLiteral("Could not create parent folder"));
