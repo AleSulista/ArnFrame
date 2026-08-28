@@ -282,6 +282,11 @@ QString currentPlatform()
     const QString os = QStringLiteral("win");
 #elif defined(__APPLE__)
     const QString os = QStringLiteral("osx");
+#elif defined(__ANDROID__)
+    // Android is Linux-flavoured but its native libraries are linked against the NDK's libc and
+    // will not load on a desktop Linux build of the same architecture, so it needs a tag of its
+    // own rather than falling through to "linux-arm64".
+    const QString os = QStringLiteral("android");
 #else
     const QString os = QStringLiteral("linux");
 #endif

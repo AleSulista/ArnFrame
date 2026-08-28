@@ -65,9 +65,9 @@ struct PackageInfo
     QJsonObject raw;
 };
 
-// This build's platform tag: "<os>-<arch>", e.g. "linux-x64", "win-x64", "osx-arm64". Matches the
-// runtime identifiers Microsoft and NuGet use, so an addon recipe can name upstream's own archive
-// and this string in the same breath.
+// This build's platform tag: "<os>-<arch>", e.g. "linux-x64", "win-x64", "osx-arm64",
+// "android-arm64". Matches the runtime identifiers Microsoft and NuGet use, so an addon recipe
+// can name upstream's own archive and this string in the same breath.
 QString currentPlatform();
 
 // Header + manifest only; cheap, and does NOT check the signature — nothing here is trustworthy
