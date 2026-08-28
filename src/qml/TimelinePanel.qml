@@ -860,7 +860,10 @@ PanelFrame {
 
                             // Seeking is not a selection change: scrubbing to look at a
                             // different point used to drop the clip you were editing.
-                            onPressed: (mouse) => scrubTo(mouse.x)
+                            onPressed: (mouse) => {
+                                root.forceActiveFocus()
+                                scrubTo(mouse.x)
+                            }
                             onPositionChanged: (mouse) => {
                                 if (pressed)
                                     scrubTo(mouse.x)
@@ -1166,6 +1169,7 @@ PanelFrame {
                         cursorShape: pressed ? Qt.CrossCursor : Qt.ArrowCursor
 
                         onPressed: (mouse) => {
+                            root.forceActiveFocus()
                             root.marqueeAdditive = (mouse.modifiers & Qt.ShiftModifier) !== 0
                             root.marqueeOriginX = mouse.x
                             root.marqueeOriginY = mouse.y

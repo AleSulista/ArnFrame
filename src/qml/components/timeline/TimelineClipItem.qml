@@ -685,6 +685,7 @@ Item {
         property real grabY: 0
 
         onPressed: (mouse) => {
+            Qt.callLater(function() { clipItem.forceActiveFocus() })
             // Read before anything selects: `selected` comes back through the model, so testing it
             // after the call would report the state this press is about to create.
             const wasSelected = clipItem.selected
@@ -1002,12 +1003,16 @@ Item {
         MouseArea {
             id: fadeInMouse
             anchors.fill: parent
-            anchors.margins: -6
+            anchors.leftMargin: -6
+            anchors.rightMargin: -6
+            anchors.topMargin: -6
+            anchors.bottomMargin: clipItem.height < 35 ? 4 : -6
             z: 1
             preventStealing: true
             hoverEnabled: true
             cursorShape: Qt.SizeHorCursor
             onPressed: (mouse) => {
+                Qt.callLater(function() { clipItem.forceActiveFocus() })
                 mouse.accepted = true
                 EditorState.beginPreviewDrag(qsTr("Adjust fade"))
             }
@@ -1063,12 +1068,16 @@ Item {
         MouseArea {
             id: fadeOutMouse
             anchors.fill: parent
-            anchors.margins: -6
+            anchors.leftMargin: -6
+            anchors.rightMargin: -6
+            anchors.topMargin: -6
+            anchors.bottomMargin: clipItem.height < 35 ? 4 : -6
             z: 1
             preventStealing: true
             hoverEnabled: true
             cursorShape: Qt.SizeHorCursor
             onPressed: (mouse) => {
+                Qt.callLater(function() { clipItem.forceActiveFocus() })
                 mouse.accepted = true
                 EditorState.beginPreviewDrag(qsTr("Adjust fade"))
             }
@@ -1128,12 +1137,6 @@ Item {
         }
         z: 30
 
-        HoverHandler {
-            id: leftTrimHover
-            margin: clipItem.trimHotspotExtra
-            cursorShape: Qt.BlankCursor
-        }
-
         MouseArea {
             id: leftTrimMouse
             anchors.fill: parent
@@ -1141,7 +1144,7 @@ Item {
             anchors.rightMargin: -4
             // Leave the top corner for the fade-in dot.
             anchors.topMargin: clipItem.timelineFadeHandles && clipItem.showTrimHandles
-                               && !clipItem.touchMode ? 16 : -6
+                               && !clipItem.touchMode ? (clipItem.height < 35 ? 10 : 16) : -6
             anchors.bottomMargin: -6
             // Same reason as the move drag: these are ~38px strips at both edges of
             // every clip and they hold the grab, so on touch they turned each clip
@@ -1151,7 +1154,14 @@ Item {
             preventStealing: true
             hoverEnabled: true
             cursorShape: Qt.BlankCursor
+
+            HoverHandler {
+                id: leftTrimHover
+                cursorShape: Qt.BlankCursor
+            }
+
             onPressed: (mouse) => {
+                Qt.callLater(function() { clipItem.forceActiveFocus() })
                 const wasSelected = clipItem.selected
                 Haptics.reset()
                 clipItem.beginEdgeGesture(leftTrimMouse, mouse)
@@ -1215,12 +1225,6 @@ Item {
         }
         z: 30
 
-        HoverHandler {
-            id: rightTrimHover
-            margin: clipItem.trimHotspotExtra
-            cursorShape: Qt.BlankCursor
-        }
-
         MouseArea {
             id: rightTrimMouse
             anchors.fill: parent
@@ -1228,7 +1232,7 @@ Item {
             anchors.rightMargin: -clipItem.trimHotspotExtra
             // Leave the top corner for the fade-out dot.
             anchors.topMargin: clipItem.timelineFadeHandles && clipItem.showTrimHandles
-                               && !clipItem.touchMode ? 16 : -6
+                               && !clipItem.touchMode ? (clipItem.height < 35 ? 10 : 16) : -6
             anchors.bottomMargin: -6
             // Same reason as the move drag: these are ~38px strips at both edges of
             // every clip and they hold the grab, so on touch they turned each clip
@@ -1238,7 +1242,14 @@ Item {
             preventStealing: true
             hoverEnabled: true
             cursorShape: Qt.BlankCursor
+
+            HoverHandler {
+                id: rightTrimHover
+                cursorShape: Qt.BlankCursor
+            }
+
             onPressed: (mouse) => {
+                Qt.callLater(function() { clipItem.forceActiveFocus() })
                 const wasSelected = clipItem.selected
                 Haptics.reset()
                 clipItem.beginEdgeGesture(rightTrimMouse, mouse)
