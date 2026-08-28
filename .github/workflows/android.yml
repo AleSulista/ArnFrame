@@ -60,7 +60,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build nasm pkg-config ccache \
+            ninja-build nasm meson pkg-config ccache \
             libgl1 libegl1 libxkbcommon0 libfontconfig1
 
       - name: Install Android NDK ${{ env.NDK_VERSION }} and SDK platform 36
