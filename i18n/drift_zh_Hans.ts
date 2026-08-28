@@ -76,7 +76,7 @@
     </message>
     <message>
         <source>Checking for extras…</source>
-        <translation type="unfinished"></translation>
+        <translation>正在检查附加项中…</translation>
     </message>
     <message>
         <source>How AI runs</source>
@@ -84,11 +84,11 @@
     </message>
     <message>
         <source>Automatic picks the fastest option you have installed, and uses this computer if the graphics card can&apos;t help.</source>
-        <translation type="unfinished"></translation>
+        <translation>如果你的显卡不起作用，就会在这台电脑自动以最快选项安装。</translation>
     </message>
     <message>
         <source>Install an AI Engine below to unlock auto captions, subject cutout, funny face effects, and noise removal.</source>
-        <translation type="unfinished"></translation>
+        <translation>在下面安装 AI 引擎以解锁自动字幕、智能抠图、有趣的面部效果和降噪功能。</translation>
     </message>
     <message>
         <source>Restart Drift for this to take effect.</source>
@@ -100,7 +100,7 @@
     </message>
     <message>
         <source>Nothing in this category</source>
-        <translation type="unfinished"></translation>
+        <translation>此类别中没有内容</translation>
     </message>
     <message>
         <source>Check your connection and try again.</source>
@@ -108,7 +108,7 @@
     </message>
     <message>
         <source>Pick another category above.</source>
-        <translation type="unfinished"></translation>
+        <translation>在此选择另一类别。</translation>
     </message>
     <message>
         <source>Retry</source>
@@ -116,7 +116,7 @@
     </message>
     <message>
         <source>Technical details</source>
-        <translation>技术原因</translation>
+        <translation>技术细节</translation>
     </message>
     <message>
         <source>%1 → %2</source>
@@ -128,198 +128,198 @@
     </message>
     <message>
         <source>%1 download</source>
-        <translation type="unfinished"></translation>
+        <translation>%1 已下载</translation>
     </message>
     <message>
         <source>%1 items</source>
-        <translation type="unfinished"></translation>
+        <translation>%1 件对象</translation>
     </message>
     <message>
         <source>Starting…</source>
-        <translation type="unfinished"></translation>
+        <translation>启动中…</translation>
     </message>
     <message>
         <source>Cancel</source>
-        <translation type="unfinished"></translation>
+        <translation>取消</translation>
     </message>
     <message>
         <source>Update</source>
-        <translation type="unfinished"></translation>
+        <translation>更新</translation>
     </message>
     <message>
         <source>Install</source>
-        <translation type="unfinished"></translation>
+        <translation>安装</translation>
     </message>
     <message>
         <source>Delete this pack&apos;s downloaded data</source>
-        <translation type="unfinished"></translation>
+        <translation>删除这个包的下载数据</translation>
     </message>
 </context>
 <context>
     <name>AddonStartupDialog</name>
     <message>
         <source>Extra packs</source>
-        <translation type="unfinished"></translation>
+        <translation>附加包</translation>
     </message>
     <message>
         <source>Pack updates available</source>
-        <translation type="unfinished"></translation>
+        <translation>有可用的软件包更新</translation>
     </message>
     <message>
         <source>Recommended packs</source>
-        <translation type="unfinished"></translation>
+        <translation>推荐包</translation>
     </message>
     <message>
         <source>Install the essential packs for effects, transitions, and audio. You can keep using Drift without them — installing unlocks updates when they improve.</source>
-        <translation type="unfinished"></translation>
+        <translation>安装效果、过渡和音频的必备包。即使没有它们，你也可以继续使用 Drift —— 安装后可以在有改进时解锁更新。</translation>
     </message>
     <message>
         <source>%1… %2%</source>
-        <translation type="unfinished"></translation>
+        <translation>%1… %2%</translation>
     </message>
     <message>
         <source>Don&apos;t remind me of essential addons</source>
-        <translation type="unfinished"></translation>
+        <translation>别提醒我重要的插件</translation>
     </message>
     <message>
         <source>Updates are available for packs you already have installed.</source>
-        <translation type="unfinished"></translation>
+        <translation>你已经安装的包有可用更新。</translation>
     </message>
     <message>
         <source>%1 → %2</source>
-        <translation type="unfinished"></translation>
+        <translation>%1 → %2</translation>
     </message>
     <message>
         <source>Don&apos;t remind me of future addon updates</source>
-        <translation type="unfinished"></translation>
+        <translation>别提醒我以后的插件更新</translation>
     </message>
     <message>
         <source>Hide</source>
-        <translation type="unfinished"></translation>
+        <translation>隐藏</translation>
     </message>
     <message>
         <source>Later</source>
-        <translation type="unfinished"></translation>
+        <translation>请稍后</translation>
     </message>
     <message>
         <source>Installing…</source>
-        <translation type="unfinished"></translation>
+        <translation>正在安装中…</translation>
     </message>
     <message>
         <source>Install &amp; update</source>
-        <translation type="unfinished"></translation>
+        <translation>安装并更新</translation>
     </message>
     <message>
         <source>Update</source>
-        <translation type="unfinished"></translation>
+        <translation>更新</translation>
     </message>
     <message>
         <source>Update all</source>
-        <translation type="unfinished"></translation>
+        <translation>更新全部</translation>
     </message>
     <message>
         <source>Install</source>
-        <translation type="unfinished"></translation>
+        <translation>安装</translation>
     </message>
     <message>
         <source>Install all</source>
-        <translation type="unfinished"></translation>
+        <translation>安装全部</translation>
     </message>
 </context>
 <context>
     <name>AndroidAddMenu</name>
     <message>
         <source>Add to timeline</source>
-        <translation type="unfinished"></translation>
+        <translation>加入进轨道内</translation>
     </message>
     <message>
         <source>Media</source>
-        <translation type="unfinished"></translation>
+        <translation>媒体</translation>
     </message>
     <message>
         <source>Video, photos and audio from this device</source>
-        <translation type="unfinished"></translation>
+        <translation>在这个设备上的视频、照片及音频</translation>
     </message>
     <message>
         <source>Text</source>
-        <translation type="unfinished"></translation>
+        <translation>文本</translation>
     </message>
     <message>
         <source>A title or caption you type</source>
-        <translation type="unfinished"></translation>
+        <translation>输入标题或字幕</translation>
     </message>
     <message>
         <source>Subtitles</source>
-        <translation type="unfinished"></translation>
+        <translation>子标题</translation>
     </message>
     <message>
         <source>Captions, generated or imported</source>
-        <translation type="unfinished"></translation>
+        <translation>生成或导入字幕</translation>
     </message>
     <message>
         <source>Stickers</source>
-        <translation type="unfinished"></translation>
+        <translation>贴子</translation>
     </message>
     <message>
         <source>Emoji and sticker graphics</source>
-        <translation type="unfinished"></translation>
+        <translation>Emoji以及贴纸图案</translation>
     </message>
     <message>
         <source>Shapes</source>
-        <translation type="unfinished"></translation>
+        <translation>图形</translation>
     </message>
     <message>
         <source>Boxes, circles and lines</source>
-        <translation type="unfinished"></translation>
+        <translation>方形、圆形和线</translation>
     </message>
 </context>
 <context>
     <name>AndroidBottomRail</name>
     <message>
         <source>Edit</source>
-        <translation type="unfinished"></translation>
+        <translation>编辑</translation>
     </message>
     <message>
         <source>Effects</source>
-        <translation type="unfinished"></translation>
+        <translation>效果</translation>
     </message>
     <message>
         <source>Audio FX</source>
-        <translation type="unfinished"></translation>
+        <translation>音效</translation>
     </message>
     <message>
         <source>Transitions</source>
-        <translation type="unfinished"></translation>
+        <translation>转场</translation>
     </message>
     <message>
         <source>Add to timeline</source>
-        <translation type="unfinished"></translation>
+        <translation>加入进轨道内</translation>
     </message>
 </context>
 <context>
     <name>AndroidBottomSheet</name>
     <message>
         <source>Sheet</source>
-        <translation type="unfinished"></translation>
+        <translation>表格</translation>
     </message>
     <message>
         <source>Close</source>
-        <translation type="unfinished"></translation>
+        <translation>关闭</translation>
     </message>
 </context>
 <context>
     <name>AndroidCropOverlay</name>
     <message>
         <source>Drag the edges to reframe · pinch to zoom</source>
-        <translation type="unfinished"></translation>
+        <translation>拖动边缘来重新构图 · 捏合来缩放</translation>
     </message>
     <message>
         <source>Reset</source>
-        <translation type="unfinished"></translation>
+        <translation>重置</translation>
     </message>
     <message>
         <source>Cancel</source>
-        <translation type="unfinished"></translation>
+        <translation>取消</translation>
     </message>
     <message>
         <source>Apply</source>
