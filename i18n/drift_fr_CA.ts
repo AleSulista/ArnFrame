@@ -592,39 +592,39 @@
     </message>
     <message>
         <source>FB Story</source>
-        <translation type="unfinished">Story FB</translation>
+        <translation>Story FB</translation>
     </message>
     <message>
         <source>Snapchat</source>
-        <translation type="unfinished">Snapchat</translation>
+        <translation>Snapchat</translation>
     </message>
     <message>
         <source>X / Twitter</source>
-        <translation type="unfinished">X / Twitter</translation>
+        <translation>X / Twitter</translation>
     </message>
     <message>
         <source>LinkedIn</source>
-        <translation type="unfinished">LinkedIn</translation>
+        <translation>LinkedIn</translation>
     </message>
     <message>
         <source>Square</source>
-        <translation type="unfinished">Carré</translation>
+        <translation>Carré</translation>
     </message>
     <message>
         <source>Landscape</source>
-        <translation type="unfinished">Paysage</translation>
+        <translation>Paysage</translation>
     </message>
     <message>
         <source>Portrait</source>
-        <translation type="unfinished">Portrait</translation>
+        <translation>Portrait</translation>
     </message>
     <message>
         <source>Classic</source>
-        <translation type="unfinished"></translation>
+        <translation>Classique</translation>
     </message>
     <message>
         <source>Custom</source>
-        <translation type="unfinished">Personnalisé</translation>
+        <translation>Personnalisé</translation>
     </message>
     <message>
         <source>Any size</source>
@@ -632,15 +632,15 @@
     </message>
     <message>
         <source>4K</source>
-        <translation type="unfinished">4K</translation>
+        <translation>4K</translation>
     </message>
     <message>
         <source>1080p</source>
-        <translation type="unfinished">1080p</translation>
+        <translation>1080p</translation>
     </message>
     <message>
         <source>720p</source>
-        <translation type="unfinished">720p</translation>
+        <translation>720p</translation>
     </message>
     <message>
         <source>Choose a layout for your video</source>
@@ -648,23 +648,23 @@
     </message>
     <message>
         <source>Template</source>
-        <translation type="unfinished">Modèle</translation>
+        <translation>Modèle</translation>
     </message>
     <message>
         <source>Width</source>
-        <translation type="unfinished">Largeur</translation>
+        <translation>Largeur</translation>
     </message>
     <message>
         <source>Height</source>
-        <translation type="unfinished">Hauteur</translation>
+        <translation>Hauteur</translation>
     </message>
     <message>
         <source>Quality</source>
-        <translation type="unfinished">Qualité</translation>
+        <translation>Qualité</translation>
     </message>
     <message>
         <source>Frames per second</source>
-        <translation type="unfinished">Images par seconde</translation>
+        <translation>Images par seconde</translation>
     </message>
     <message>
         <source>%1×%2 · %3 · %4 fps</source>
