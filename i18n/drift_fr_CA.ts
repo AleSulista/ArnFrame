@@ -231,7 +231,7 @@
     <name>AndroidAddMenu</name>
     <message>
         <source>Add to timeline</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Ajouter à la ligne du temps</translation>
     </message>
     <message>
         <source>Media</source>
@@ -1046,11 +1046,11 @@
     </message>
     <message>
         <source>Light mode</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Mode clair</translation>
     </message>
     <message>
         <source>Dark mode</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Mode sombre</translation>
     </message>
     <message>
         <source>Extras</source>
