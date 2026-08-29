@@ -6136,15 +6136,15 @@ Se a reprodução travar, tente outra opção.</translation>
     </message>
     <message>
         <source>Timeline</source>
-        <translation type="unfinished"></translation>
+        <translation>Linha do tempo</translation>
     </message>
     <message>
         <source>Horizontal mouse-wheel pan</source>
-        <translation type="unfinished"></translation>
+        <translation>Deslocamento horizontal com a roda do mouse</translation>
     </message>
     <message>
         <source>Scroll pans left and right along the timeline. Shift+scroll moves between tracks. Middle-click drag also pans.</source>
-        <translation type="unfinished"></translation>
+        <translation>A rolagem desloca para a esquerda e para a direita ao longo da linha do tempo. Shift+rolagem move entre as faixas. Arrastar com o botão do meio também desloca.</translation>
     </message>
     <message>
         <source>Language</source>
