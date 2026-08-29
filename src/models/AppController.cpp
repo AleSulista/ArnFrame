@@ -3482,11 +3482,13 @@ void AppController::addClipFromAssetAt(int assetIndex, int trackIndex, double at
     const QString kind = asset.value(QStringLiteral("kind")).toString();
     const drift::ClipType clipType = drift::clipTypeFromString(kind);
 
-    drift::Track &track = m_project.tracks()[trackIndex];
-    if (!track.allowsClipType(clipType))
+    if (!m_project.tracks().at(trackIndex).allowsClipType(clipType))
         return;
 
+    // Snapshot before a non-const Track&. QList implicit sharing would otherwise let
+    // the append below mutate `before` as well, and Ctrl+Z would be a no-op.
     const drift::Project before = m_project;
+    drift::Track &track = m_project.tracks()[trackIndex];
     const drift::TimeUs duration = clipDurationForAssetIndex(assetIndex);
     const drift::TimeUs start = drift::resolveClipStart(m_project, track, -1, drift::secondsToUs(atSeconds),
                                                         duration, m_snapEnabled, m_playheadUs);

@@ -48,6 +48,7 @@ private slots:
     void addTextClipWithTextDoesNotRequestEdit();
     void addTextClipWithPresetAppliesStyle();
     void undoRedoClipAdd();
+    void undoLibraryClipDropOntoExistingTrack();
     void undoTrackMute();
     void packagedProjectCarriesDerivedArtifacts();
     void undoBookmarkAdd();
@@ -192,6 +193,38 @@ void EditorStateTest::undoRedoClipAdd()
     QVERIFY(state.redoAvailable());
     state.redo();
     QVERIFY(state.durationSeconds() > 0.0);
+}
+
+// Library drop onto an existing track uses addClipFromAssetAt. Taking a Track&
+// before the undo snapshot used to share the track list with `before`, so the
+// append mutated both sides and Ctrl+Z left the clip in place.
+void EditorStateTest::undoLibraryClipDropOntoExistingTrack()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    drift::MediaAsset asset;
+    asset.name = QStringLiteral("clip.mp4");
+    asset.kind = drift::MediaKind::Video;
+    asset.path = QStringLiteral("/nonexistent/clip.mp4");
+    asset.durationUs = drift::secondsToUs(5.0);
+    state.project()->addAsset(asset);
+    library.syncToProject();
+    QCOMPARE(library.count(), 1);
+
+    QCOMPARE(state.tracks().size(), 1);
+    QVERIFY(state.project()->tracks().at(0).clips.isEmpty());
+
+    state.addClipFromAssetAt(0, 0, 1.0);
+    QCOMPARE(state.project()->tracks().at(0).clips.size(), 1);
+    QVERIFY(state.undoAvailable());
+
+    state.undo();
+    QCOMPARE(state.project()->tracks().at(0).clips.size(), 0);
+    QVERIFY(state.redoAvailable());
+
+    state.redo();
+    QCOMPARE(state.project()->tracks().at(0).clips.size(), 1);
 }
 
 void EditorStateTest::undoTrackMute()
