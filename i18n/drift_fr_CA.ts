@@ -493,39 +493,39 @@
     </message>
     <message>
         <source>Light mode</source>
-        <translation>Mode</translation>
+        <translation>Mode clair</translation>
     </message>
     <message>
         <source>Dark mode</source>
-        <translation type="unfinished"></translation>
+        <translation>Mode sombre</translation>
     </message>
     <message>
         <source>Extras</source>
-        <translation type="unfinished">Extras</translation>
+        <translation>Extras</translation>
     </message>
     <message>
         <source>Update available</source>
-        <translation type="unfinished">Mise à jour disponible</translation>
+        <translation>Mise à jour disponible</translation>
     </message>
     <message>
         <source>Recent projects</source>
-        <translation type="unfinished"></translation>
+        <translation>Projects récents</translation>
     </message>
     <message>
         <source>Untitled</source>
-        <translation type="unfinished">Sans titre</translation>
+        <translation>Sans titre</translation>
     </message>
     <message>
         <source>That project file is missing.</source>
-        <translation type="unfinished"></translation>
+        <translation>Ce fichier de projet est introuvable.</translation>
     </message>
     <message>
         <source>Remove from recents</source>
-        <translation type="unfinished">Supprimer des récents</translation>
+        <translation>Supprimer des récents</translation>
     </message>
     <message>
         <source>New project</source>
-        <translation type="unfinished">Nouveau projet</translation>
+        <translation>Nouveau projet</translation>
     </message>
     <message>
         <source>Start with this layout</source>
@@ -540,55 +540,55 @@
     <name>AndroidLayoutPicker</name>
     <message>
         <source>YouTube</source>
-        <translation type="unfinished">YouTube</translation>
+        <translation>YouTube</translation>
     </message>
     <message>
         <source>Instagram</source>
-        <translation type="unfinished">Instagram</translation>
+        <translation>Instagram</translation>
     </message>
     <message>
         <source>Facebook</source>
-        <translation type="unfinished">Facebook</translation>
+        <translation>Facebook</translation>
     </message>
     <message>
         <source>TikTok</source>
-        <translation type="unfinished">TikTok</translation>
+        <translation>TikTok</translation>
     </message>
     <message>
         <source>More</source>
-        <translation type="unfinished">Plus</translation>
+        <translation>Plus</translation>
     </message>
     <message>
         <source>YT Video</source>
-        <translation type="unfinished">Vidéo YT</translation>
+        <translation>Vidéo YT</translation>
     </message>
     <message>
         <source>YT Short</source>
-        <translation type="unfinished">Short YT</translation>
+        <translation>Short YT</translation>
     </message>
     <message>
         <source>IG Reel</source>
-        <translation type="unfinished">Reel IG</translation>
+        <translation>Reel IG</translation>
     </message>
     <message>
         <source>IG Story</source>
-        <translation type="unfinished">Story IG</translation>
+        <translation>Story IG</translation>
     </message>
     <message>
         <source>IG Post</source>
-        <translation type="unfinished">Post IG</translation>
+        <translation>Post IG</translation>
     </message>
     <message>
         <source>IG Feed</source>
-        <translation type="unfinished">Fil IG</translation>
+        <translation>Fil IG</translation>
     </message>
     <message>
         <source>FB Reel</source>
-        <translation type="unfinished">Reel FB</translation>
+        <translation>Reel FB</translation>
     </message>
     <message>
         <source>FB Video</source>
-        <translation type="unfinished">Vidéo FB</translation>
+        <translation>Vidéo FB</translation>
     </message>
     <message>
         <source>FB Story</source>
