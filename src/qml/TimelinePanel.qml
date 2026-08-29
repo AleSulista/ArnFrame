@@ -122,6 +122,9 @@ PanelFrame {
     }
     readonly property var tracks: EditorState.tracks
     readonly property real playheadSeconds: EditorState.playheadSeconds
+    // True between beginPlayheadSeek and endPlayheadSeek when playback was
+    // interrupted so a click or drag could land, and should resume on release.
+    property bool resumePlaybackAfterSeek: false
     readonly property int selectedTrack: EditorState.selectedTrack
     readonly property int selectedClip: EditorState.selectedClip
 
@@ -654,6 +657,23 @@ PanelFrame {
         clipRenameDialog.open()
     }
 
+    // Seeking while the engine clock is running lands ahead of the click: the
+    // sink's processedUSecs is cumulative from play(), so the visible playhead
+    // becomes clickTime + elapsed. Pause for the gesture and resume on release.
+    function beginPlayheadSeek() {
+        if (!EditorState.playing)
+            return
+        resumePlaybackAfterSeek = true
+        EditorState.playing = false
+    }
+
+    function endPlayheadSeek() {
+        if (!resumePlaybackAfterSeek)
+            return
+        resumePlaybackAfterSeek = false
+        EditorState.playing = true
+    }
+
     function ensurePlayheadVisible() {
         const playheadX = EditorState.playheadSeconds * pxPerSecond;
         const margin = 64;
@@ -920,12 +940,15 @@ PanelFrame {
                             // different point used to drop the clip you were editing.
                             onPressed: (mouse) => {
                                 root.forceActiveFocus()
+                                root.beginPlayheadSeek()
                                 scrubTo(mouse.x)
                             }
                             onPositionChanged: (mouse) => {
                                 if (pressed)
                                     scrubTo(mouse.x)
                             }
+                            onReleased: root.endPlayheadSeek()
+                            onCanceled: root.endPlayheadSeek()
                             // MouseArea would otherwise swallow wheel and block Ctrl-zoom.
                             onWheel: (wheel) => root.handleTimelineWheel(wheel)
 
@@ -1885,7 +1908,15 @@ PanelFrame {
                             drag.threshold: 0
                             drag.minimumX: 0
                             drag.maximumX: flick.contentWidth - Theme.playheadLineWidth
-                            onReleased: playhead.finishSeek()
+                            onPressed: root.beginPlayheadSeek()
+                            onReleased: {
+                                playhead.finishSeek()
+                                root.endPlayheadSeek()
+                            }
+                            onCanceled: {
+                                playhead.finishSeek()
+                                root.endPlayheadSeek()
+                            }
                         }
 
                         // Narrow grab down the timeline line — stays thin so clip
@@ -1903,7 +1934,15 @@ PanelFrame {
                             drag.threshold: 0
                             drag.minimumX: 0
                             drag.maximumX: flick.contentWidth - Theme.playheadLineWidth
-                            onReleased: playhead.finishSeek()
+                            onPressed: root.beginPlayheadSeek()
+                            onReleased: {
+                                playhead.finishSeek()
+                                root.endPlayheadSeek()
+                            }
+                            onCanceled: {
+                                playhead.finishSeek()
+                                root.endPlayheadSeek()
+                            }
                         }
                     }
 

@@ -224,8 +224,10 @@ void PlaybackEngine::onAudioSampleRateChanged()
         return;
 
     m_clock.reset(m_playheadUs, m_sampleRate);
-    if (m_playing)
+    if (m_playing) {
+        m_sinkPlayedUsOffset = m_audio.processedUSecs();
         m_clock.start();
+    }
 }
 
 void PlaybackEngine::setProject(drift::Project *project)
@@ -251,8 +253,10 @@ void PlaybackEngine::setPlayheadUs(drift::TimeUs us)
     // completed frame.
     if (!m_playing)
         refreshFrame();
-    else if (!isQualityMode())
+    else if (!isQualityMode()) {
+        m_sinkPlayedUsOffset = m_audio.processedUSecs();
         m_clock.start();
+    }
 }
 
 int PlaybackEngine::previewTextureId() const
@@ -472,6 +476,7 @@ void PlaybackEngine::play()
     // focus for a silent render would interrupt whatever the user is listening to for nothing.
     requestAudioFocus();
     ensureAudioSink();
+    m_sinkPlayedUsOffset = m_audio.processedUSecs();
     m_clock.start();
 
     // Opening the device may settle on a rate the project did not ask for, which comes back as
@@ -717,6 +722,7 @@ int PlaybackEngine::fillAudio(float *buffer, int sampleCount)
             sampleCount, buffer);
     }
     m_clock.onAudioSamplesRendered(sampleCount);
-    m_clock.syncPlaybackUs(static_cast<drift::TimeUs>(m_audio.processedUSecs()));
+    const qint64 playedUs = qMax(qint64(0), m_audio.processedUSecs() - m_sinkPlayedUsOffset);
+    m_clock.syncPlaybackUs(static_cast<drift::TimeUs>(playedUs));
     return sampleCount;
 }

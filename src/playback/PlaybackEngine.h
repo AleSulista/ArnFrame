@@ -148,4 +148,8 @@ private:
     // samples in — not necessarily the project's rate, since the device has the final say.
     int m_sampleRate = 48000;
     bool m_loopWorkArea = false;
+    // processedUSecs() is cumulative from QAudioSink::start(), not from the last clock reset.
+    // Subtracting this (captured whenever the clock is re-anchored) keeps a seek from landing
+    // at seekTarget + time-since-play instead of seekTarget.
+    qint64 m_sinkPlayedUsOffset = 0;
 };

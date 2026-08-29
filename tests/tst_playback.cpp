@@ -17,6 +17,7 @@ private slots:
     void produceAdvancesWithRenderedSamples();
     void playbackTracksSinkPosition();
     void seekWhileRunningKeepsClockAlive();
+    void seekDoesNotInheritPriorSinkTime();
     void avSyncWithinTolerance();
     void rateScalesProduceAndPlayback();
     void renderedFramesIgnoreRate();
@@ -118,6 +119,25 @@ void PlaybackTest::seekWhileRunningKeepsClockAlive()
     QVERIFY(clock.isRunning());
     clock.onAudioSamplesRendered(4800);
     QCOMPARE(clock.produceTimeUs(), drift::secondsToUs(2.1));
+}
+
+void PlaybackTest::seekDoesNotInheritPriorSinkTime()
+{
+    PlaybackClock clock;
+    clock.reset(0, 48000);
+    clock.start();
+    clock.syncPlaybackUs(drift::secondsToUs(10.0));
+
+    // A seek re-anchors. The engine must pass sink time relative to that reset
+    // (processedUSecs - offset). Passing the cumulative value would land at 12s
+    // instead of 2s — the timeline click-while-playing jump.
+    clock.reset(drift::secondsToUs(2.0), 48000);
+    clock.start();
+    clock.syncPlaybackUs(drift::secondsToUs(0.05));
+
+    const drift::TimeUs now = clock.currentTimeUs();
+    QVERIFY(now >= drift::secondsToUs(2.0));
+    QVERIFY(now < drift::secondsToUs(2.2));
 }
 
 void PlaybackTest::avSyncWithinTolerance()

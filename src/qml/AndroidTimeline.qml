@@ -35,6 +35,9 @@ Item {
     // Touch replacement for marquee + shift-click: armed from a clip's long-press
     // menu, after which a tap adds or removes instead of replacing the selection.
     property bool multiSelectActive: false
+    // True between beginPlayheadSeek and endPlayheadSeek when playback was
+    // interrupted so a tap or drag could land, and should resume on release.
+    property bool resumePlaybackAfterSeek: false
 
     function toggleInSelection(trackIndex, clipIndex) {
         const existing = EditorState.selection
@@ -865,6 +868,23 @@ Item {
         return -1
     }
 
+    // Seeking while the engine clock is running lands ahead of the tap: the
+    // sink's processedUSecs is cumulative from play(), so the visible playhead
+    // becomes tapTime + elapsed. Pause for the gesture and resume on release.
+    function beginPlayheadSeek() {
+        if (!EditorState.playing)
+            return
+        resumePlaybackAfterSeek = true
+        EditorState.playing = false
+    }
+
+    function endPlayheadSeek() {
+        if (!resumePlaybackAfterSeek)
+            return
+        resumePlaybackAfterSeek = false
+        EditorState.playing = true
+    }
+
     function ensurePlayheadVisible() {
         const playheadX = EditorState.playheadSeconds * pxPerSecond
         const margin = 64
@@ -1187,14 +1207,21 @@ Item {
                                 // A previous gesture that ended on a snap would otherwise leave the
                                 // latch engaged and swallow this one's first tick.
                                 Haptics.reset()
+                                root.beginPlayheadSeek()
                                 scrubTo(mouse.x)
                             }
                             onPositionChanged: (mouse) => {
                                 if (pressed)
                                     scrubTo(mouse.x)
                             }
-                            onReleased: Haptics.reset()
-                            onCanceled: Haptics.reset()
+                            onReleased: {
+                                Haptics.reset()
+                                root.endPlayheadSeek()
+                            }
+                            onCanceled: {
+                                Haptics.reset()
+                                root.endPlayheadSeek()
+                            }
                         }
 
                         Item {
@@ -1891,7 +1918,15 @@ Item {
                             drag.threshold: 0
                             drag.minimumX: 0
                             drag.maximumX: flick.contentWidth - Theme.playheadLineWidth
-                            onReleased: playhead.finishSeek()
+                            onPressed: root.beginPlayheadSeek()
+                            onReleased: {
+                                playhead.finishSeek()
+                                root.endPlayheadSeek()
+                            }
+                            onCanceled: {
+                                playhead.finishSeek()
+                                root.endPlayheadSeek()
+                            }
                         }
 
                         // A short stem under the ruler, not the full column height: at
@@ -1909,7 +1944,15 @@ Item {
                             drag.threshold: 0
                             drag.minimumX: 0
                             drag.maximumX: flick.contentWidth - Theme.playheadLineWidth
-                            onReleased: playhead.finishSeek()
+                            onPressed: root.beginPlayheadSeek()
+                            onReleased: {
+                                playhead.finishSeek()
+                                root.endPlayheadSeek()
+                            }
+                            onCanceled: {
+                                playhead.finishSeek()
+                                root.endPlayheadSeek()
+                            }
                         }
                     }
 
