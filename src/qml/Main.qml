@@ -290,7 +290,18 @@ ApplicationWindow {
     // Header Extras icon pulses while true; never auto-opens a dialog.
     readonly property alias addonAttentionNeeded: addonStartupDialog.needsAttention
 
+    function promptLanguageChooserIfNeeded() {
+        if (!EditorState.needsUiLanguagePrompt)
+            return false
+        if (languageChooserDialog.visible)
+            return true
+        languageChooserDialog.openChooser()
+        return true
+    }
+
     function promptLayoutChooserIfNeeded() {
+        if (EditorState.needsUiLanguagePrompt || languageChooserDialog.visible)
+            return
         if (EditorState.recoveryAvailable || EditorState.projectLayoutChosen)
             return
         if (window.layoutPromptDismissed)
@@ -312,6 +323,13 @@ ApplicationWindow {
 
     ProjectSetupDialog {
         id: projectSetupDialog
+    }
+
+    LanguageChooserDialog {
+        id: languageChooserDialog
+        // First-launch only. After Continue the language is stored, then the usual
+        // recovery / layout prompts can run.
+        onClosed: window.continueStartupAfterLanguage()
     }
 
     LayoutChooserDialog {
@@ -439,6 +457,8 @@ ApplicationWindow {
     }
 
     function promptRecoveryIfNeeded() {
+        if (EditorState.needsUiLanguagePrompt || languageChooserDialog.visible)
+            return
         if (!EditorState.recoveryAvailable || recoveryDialog.visible)
             return
         // Opt-in reopen handles recovery (and last .drift) without asking.
@@ -484,6 +504,12 @@ ApplicationWindow {
     }
 
     function beginStartupProject() {
+        if (window.promptLanguageChooserIfNeeded())
+            return
+        window.continueStartupAfterLanguage()
+    }
+
+    function continueStartupAfterLanguage() {
         // A document the shell asked us to open (argv / QFileOpenEvent) wins over last-session
         // reopen and the recovery prompt.
         if (EditorState.consumeStartupProject())
@@ -513,6 +539,8 @@ ApplicationWindow {
             })
         }
         function onRecoveryChanged() {
+            if (EditorState.needsUiLanguagePrompt || languageChooserDialog.visible)
+                return
             if (EditorState.reopenLastProject)
                 return
             if (EditorState.recoveryAvailable) {

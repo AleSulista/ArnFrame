@@ -111,8 +111,11 @@ class AppController : public QObject
     Q_PROPERTY(QString mcpStdioSnippet READ mcpStdioSnippet NOTIFY mcpRunningChanged)
     // App-wide interface language, QSettings("ui/language"). Empty means follow the OS locale.
     // "en" is the source catalog (no .qm). Other codes match i18n/drift_<code>.qm.
+    // needsUiLanguagePrompt is true only on a brand-new install, before the first-launch chooser
+    // (or Settings) has written ui/languageChosen.
     Q_PROPERTY(QString uiLanguage READ uiLanguage WRITE setUiLanguage NOTIFY uiLanguageChanged)
     Q_PROPERTY(QVariantList uiLanguages READ uiLanguages NOTIFY uiLanguageChanged)
+    Q_PROPERTY(bool needsUiLanguagePrompt READ needsUiLanguagePrompt NOTIFY uiLanguageChanged)
     // Extra UI scale on top of the OS display scale. QSettings("ui/scale"), 1.0..2.0 in
     // 0.25 steps. Applied as QT_SCALE_FACTOR before QApplication; a change needs a restart.
     Q_PROPERTY(double uiScale READ uiScale WRITE setUiScale NOTIFY uiScaleChanged)
@@ -308,6 +311,7 @@ public:
     bool invertTimelineScroll() const { return m_invertTimelineScroll; }
     QString uiLanguage() const { return m_uiLanguage; }
     QVariantList uiLanguages() const;
+    bool needsUiLanguagePrompt() const { return m_needsUiLanguagePrompt; }
     double uiScale() const { return m_uiScale; }
     double appliedUiScale() const;
     bool uiScaleNeedsRestart() const;
@@ -492,6 +496,8 @@ public:
     void setAddonManager(AddonManager *manager) { m_addonManager = manager; }
     AddonManager *addonManager() const { return m_addonManager; }
     void setUiLanguage(const QString &code);
+    // First-launch chooser: persist the pick and never ask again. Settings uses setUiLanguage.
+    Q_INVOKABLE void chooseUiLanguage(const QString &code);
     void setUiScale(double scale);
     // Strip chip click — folds `prop`'s curve away, or brings it back. Purely a view filter: the
     // chip stays put either way, and the animation keeps playing while it is hidden.
@@ -1419,6 +1425,7 @@ protected:
     bool m_reopenLastProject = false;
     bool m_invertTimelineScroll = false;
     QString m_uiLanguage;
+    bool m_needsUiLanguagePrompt = false;
     double m_uiScale = 1.0;
     QStringList m_keyframeGraphHiddenProperties;
     bool m_subtitleEditing = false;

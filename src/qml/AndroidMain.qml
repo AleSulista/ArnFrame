@@ -219,6 +219,10 @@ ApplicationWindow {
     }
 
     ProjectSetupDialog { id: projectSetupDialog }
+    LanguageChooserDialog {
+        id: languageChooserDialog
+        onClosed: window.continueStartupAfterLanguage()
+    }
     LayoutChooserDialog { id: layoutChooserDialog }
 
     // Desktop reaches this from EditorHeader, which Android replaces with AndroidTopBar;
@@ -398,6 +402,8 @@ ApplicationWindow {
         onTriggered: {
             // Opting in to reopening the last project already restores the autosave, so
             // asking about it as well is a question the user has answered once already.
+            if (EditorState.needsUiLanguagePrompt || languageChooserDialog.visible)
+                return
             if (!EditorState.recoveryAvailable || EditorState.reopenLastProject) {
                 stop()
                 attempts = 0
@@ -411,6 +417,14 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        if (EditorState.needsUiLanguagePrompt) {
+            languageChooserDialog.openChooser()
+            return
+        }
+        window.continueStartupAfterLanguage()
+    }
+
+    function continueStartupAfterLanguage() {
         // Tapping a .drift in a file manager launches us with ACTION_VIEW. That project is
         // what the user asked for, so it outranks the reopen-last-project restore below.
         // Empty on desktop, where the intent does not exist.
@@ -448,6 +462,8 @@ ApplicationWindow {
     Connections {
         target: EditorState
         function onRecoveryChanged() {
+            if (EditorState.needsUiLanguagePrompt || languageChooserDialog.visible)
+                return
             if (EditorState.reopenLastProject)
                 return
             if (EditorState.recoveryAvailable)

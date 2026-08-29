@@ -4453,6 +4453,21 @@
     </message>
 </context>
 <context>
+    <name>LanguageChooserDialog</name>
+    <message>
+        <source>Choose your language</source>
+        <translation>Elige tu idioma</translation>
+    </message>
+    <message>
+        <source>Continue</source>
+        <translation>Continuar</translation>
+    </message>
+    <message>
+        <source>Pick the language for menus and labels. You can change this later in Settings.</source>
+        <translation>Elige el idioma de menús y etiquetas. Puedes cambiarlo más tarde en Ajustes.</translation>
+    </message>
+</context>
+<context>
     <name>LayoutChooserDialog</name>
     <message>
         <source>Choose your video layout</source>

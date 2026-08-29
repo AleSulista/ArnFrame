@@ -65,6 +65,7 @@ private slots:
     void projectSetupOnPristineProjectStaysClean();
     void darkModePreferencePersistsAcrossSessions();
     void uiScalePersistsAcrossSessions();
+    void uiLanguagePersistsAcrossSessions();
     void invertTimelineScrollPersistsAcrossSessions();
     void decodeModePickerListsOnlyWorkingBackends();
     void exportFrameRatePersistsAcrossSessions();
@@ -798,6 +799,70 @@ void EditorStateTest::uiScalePersistsAcrossSessions()
     qputenv("QT_SCALE_FACTOR", "3");
     AppController::applyStoredUiScale();
     QCOMPARE(qgetenv("QT_SCALE_FACTOR"), QByteArray("3"));
+}
+
+void EditorStateTest::uiLanguagePersistsAcrossSessions()
+{
+    QStandardPaths::setTestModeEnabled(true);
+    const QString org = QCoreApplication::organizationName();
+    const QString app = QCoreApplication::applicationName();
+    QCoreApplication::setOrganizationName(QStringLiteral("DriftTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("DriftTest"));
+    const auto restore = qScopeGuard([&] {
+        QSettings settings;
+        settings.remove(QStringLiteral("ui/language"));
+        settings.remove(QStringLiteral("ui/languageChosen"));
+        settings.remove(QStringLiteral("lastSessionPath"));
+        settings.remove(QStringLiteral("recentProjects"));
+        QCoreApplication::setOrganizationName(org);
+        QCoreApplication::setApplicationName(app);
+        QStandardPaths::setTestModeEnabled(false);
+    });
+    {
+        QSettings settings;
+        settings.remove(QStringLiteral("ui/language"));
+        settings.remove(QStringLiteral("ui/languageChosen"));
+        settings.remove(QStringLiteral("lastSessionPath"));
+        settings.remove(QStringLiteral("recentProjects"));
+    }
+
+    AssetLibrary library;
+    {
+        AppController state(&library);
+        // Brand-new install: no session history, so the first-launch chooser should ask.
+        QVERIFY(state.needsUiLanguagePrompt());
+        QCOMPARE(state.uiLanguage(), QString());
+
+        QSignalSpy spy(&state, &AppController::uiLanguageChanged);
+        state.chooseUiLanguage(QStringLiteral("en"));
+        QVERIFY(spy.count() >= 1);
+        QCOMPARE(state.uiLanguage(), QStringLiteral("en"));
+        QVERIFY(!state.needsUiLanguagePrompt());
+        QCOMPARE(QSettings().value(QStringLiteral("ui/language")).toString(), QStringLiteral("en"));
+        QVERIFY(QSettings().value(QStringLiteral("ui/languageChosen")).toBool());
+    }
+
+    {
+        AppController relaunched(&library);
+        QCOMPARE(relaunched.uiLanguage(), QStringLiteral("en"));
+        QVERIFY(!relaunched.needsUiLanguagePrompt());
+
+        relaunched.setUiLanguage(QStringLiteral("es"));
+        QCOMPARE(relaunched.uiLanguage(), QStringLiteral("es"));
+    }
+
+    AppController afterSettingsChange(&library);
+    QCOMPARE(afterSettingsChange.uiLanguage(), QStringLiteral("es"));
+    QVERIFY(!afterSettingsChange.needsUiLanguagePrompt());
+
+    {
+        QSettings settings;
+        settings.remove(QStringLiteral("ui/language"));
+        settings.remove(QStringLiteral("ui/languageChosen"));
+        settings.setValue(QStringLiteral("lastSessionPath"), QStringLiteral("/tmp/used.drift"));
+    }
+    AppController returningUser(&library);
+    QVERIFY(!returningUser.needsUiLanguagePrompt());
 }
 
 void EditorStateTest::invertTimelineScrollPersistsAcrossSessions()

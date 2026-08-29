@@ -4453,6 +4453,21 @@
     </message>
 </context>
 <context>
+    <name>LanguageChooserDialog</name>
+    <message>
+        <source>Choose your language</source>
+        <translation>ඔබේ භාෂාව තෝරන්න</translation>
+    </message>
+    <message>
+        <source>Continue</source>
+        <translation>ඉදිරියට</translation>
+    </message>
+    <message>
+        <source>Pick the language for menus and labels. You can change this later in Settings.</source>
+        <translation>මෙනු සහ ලේබල් සඳහා භාෂාව තෝරන්න. පසුව සැකසුම් තුළ වෙනස් කළ හැක.</translation>
+    </message>
+</context>
+<context>
     <name>LayoutChooserDialog</name>
     <message>
         <source>Choose your video layout</source>

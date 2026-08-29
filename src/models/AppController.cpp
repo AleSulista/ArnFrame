@@ -225,6 +225,38 @@ QString storedUiLanguage()
     return QSettings().value(QStringLiteral("ui/language")).toString().trimmed();
 }
 
+bool storedUiLanguageChosen()
+{
+    return QSettings().value(QStringLiteral("ui/languageChosen"), false).toBool();
+}
+
+// True when this install has already been used as an editor, so a newly added first-launch
+// language prompt must not appear for people who upgraded. Window geometry is written on the
+// first show, so it is not a signal — last session / recents / an explicit language are.
+bool looksLikeReturningInstall()
+{
+    QSettings settings;
+    if (settings.contains(QStringLiteral("ui/language")))
+        return true;
+    if (!settings.value(QStringLiteral("lastSessionPath")).toString().isEmpty())
+        return true;
+    if (!settings.value(QStringLiteral("recentProjects")).toStringList().isEmpty())
+        return true;
+    return false;
+}
+
+bool needsFirstLaunchLanguagePrompt()
+{
+    if (storedUiLanguageChosen())
+        return false;
+    return !looksLikeReturningInstall();
+}
+
+void markUiLanguageChosen()
+{
+    QSettings().setValue(QStringLiteral("ui/languageChosen"), true);
+}
+
 double normalizeUiScale(double scale)
 {
     static const double kSteps[] = {1.0, 1.25, 1.5, 1.75, 2.0};
@@ -858,6 +890,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     m_reopenLastProject = settings.value(QStringLiteral("editor/reopenLastProject"), false).toBool();
     m_invertTimelineScroll = settings.value(QStringLiteral("timeline/invertScroll"), false).toBool();
     m_uiLanguage = storedUiLanguage();
+    m_needsUiLanguagePrompt = needsFirstLaunchLanguagePrompt();
     m_uiScale = storedUiScale();
     // Unset means the user has never toggled the theme, so the UI keeps tracking the OS.
     const QVariant storedDarkMode = settings.value(QStringLiteral("ui/darkMode"));
@@ -2931,7 +2964,8 @@ QVariantList AppController::uiLanguages() const
 void AppController::setUiLanguage(const QString &language)
 {
     const QString normalized = language.trimmed();
-    if (m_uiLanguage == normalized)
+    const bool alreadyChosen = storedUiLanguageChosen();
+    if (m_uiLanguage == normalized && alreadyChosen && !m_needsUiLanguagePrompt)
         return;
     m_uiLanguage = normalized;
     QSettings settings;
@@ -2939,8 +2973,15 @@ void AppController::setUiLanguage(const QString &language)
         settings.remove(QStringLiteral("ui/language"));
     else
         settings.setValue(QStringLiteral("ui/language"), m_uiLanguage);
+    markUiLanguageChosen();
+    m_needsUiLanguagePrompt = false;
     installUiTranslators();
     emit uiLanguageChanged();
+}
+
+void AppController::chooseUiLanguage(const QString &code)
+{
+    setUiLanguage(code);
 }
 
 double AppController::storedUiScale()
