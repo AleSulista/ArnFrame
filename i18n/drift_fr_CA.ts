@@ -235,7 +235,7 @@
     </message>
     <message>
         <source>Media</source>
-        <translation type="unfinished">Média</translation>
+        <translation>Média</translation>
     </message>
     <message>
         <source>Video, photos and audio from this device</source>
@@ -243,7 +243,7 @@
     </message>
     <message>
         <source>Text</source>
-        <translation type="unfinished">Texte</translation>
+        <translation>Texte</translation>
     </message>
     <message>
         <source>A title or caption you type</source>
@@ -251,50 +251,50 @@
     </message>
     <message>
         <source>Subtitles</source>
-        <translation type="unfinished">Sous-titres</translation>
+        <translation>Sous-titres</translation>
     </message>
     <message>
         <source>Captions, generated or imported</source>
-        <translation type="unfinished"></translation>
+        <translation>Sous-titres, générés or importés</translation>
     </message>
     <message>
         <source>Stickers</source>
-        <translation type="unfinished">Autocollants</translation>
+        <translation>Autocollants</translation>
     </message>
     <message>
         <source>Emoji and sticker graphics</source>
-        <translation type="unfinished"></translation>
+        <translation>Émojis et autocollants graphiques</translation>
     </message>
     <message>
         <source>Shapes</source>
-        <translation type="unfinished">Formes</translation>
+        <translation>Formes</translation>
     </message>
     <message>
         <source>Boxes, circles and lines</source>
-        <translation type="unfinished"></translation>
+        <translation>Boîtes, cercles et lignes</translation>
     </message>
 </context>
 <context>
     <name>AndroidBottomRail</name>
     <message>
         <source>Edit</source>
-        <translation type="unfinished"></translation>
+        <translation>Modifier</translation>
     </message>
     <message>
         <source>Effects</source>
-        <translation type="unfinished">Effets</translation>
+        <translation>Effets</translation>
     </message>
     <message>
         <source>Audio FX</source>
-        <translation type="unfinished">Audio FX</translation>
+        <translation>Audio FX</translation>
     </message>
     <message>
         <source>Transitions</source>
-        <translation type="unfinished">Transitions</translation>
+        <translation>Transitions</translation>
     </message>
     <message>
         <source>Add to timeline</source>
-        <translation type="unfinished"></translation>
+        <translation>Ajouter à la ligne du temps</translation>
     </message>
 </context>
 <context>
@@ -305,18 +305,18 @@
     </message>
     <message>
         <source>Close</source>
-        <translation type="unfinished">Fermer</translation>
+        <translation>Fermer</translation>
     </message>
 </context>
 <context>
     <name>AndroidCropOverlay</name>
     <message>
         <source>Drag the edges to reframe · pinch to zoom</source>
-        <translation type="unfinished"></translation>
+        <translation>Faites glisser les bords pour recadrer · Pincez pour zoomer</translation>
     </message>
     <message>
         <source>Reset</source>
-        <translation type="unfinished">Réinitialiser</translation>
+        <translation>Réinitialiser</translation>
     </message>
     <message>
         <source>Cancel</source>
@@ -324,14 +324,14 @@
     </message>
     <message>
         <source>Apply</source>
-        <translation type="unfinished">Appliquer</translation>
+        <translation>Appliquer</translation>
     </message>
 </context>
 <context>
     <name>AndroidEditActions</name>
     <message>
         <source>Select</source>
-        <translation type="unfinished"></translation>
+        <translation>Sélectionner</translation>
     </message>
     <message>
         <source>Blade — tap a clip to split</source>
@@ -347,15 +347,15 @@
     </message>
     <message>
         <source>Paste at current time</source>
-        <translation type="unfinished">Coller à l&apos;heure actuelle</translation>
+        <translation>Coller à l&apos;heure actuelle</translation>
     </message>
     <message>
         <source>Duplicate clip</source>
-        <translation type="unfinished">Dupliquer le clip</translation>
+        <translation>Dupliquer le clip</translation>
     </message>
     <message>
         <source>Merge adjacent clips</source>
-        <translation type="unfinished">Fusionner les clips adjacents</translation>
+        <translation>Fusionner les clips adjacents</translation>
     </message>
     <message>
         <source>Close gap after clip</source>
@@ -363,15 +363,15 @@
     </message>
     <message>
         <source>Freeze frame at current time</source>
-        <translation type="unfinished">Geler l&apos;image à l&apos;instant actuel</translation>
+        <translation>Geler l&apos;image à l&apos;instant actuel</translation>
     </message>
     <message>
         <source>Separate audio from video</source>
-        <translation type="unfinished">Séparer l’audio de la vidéo</translation>
+        <translation>Séparer l’audio de la vidéo</translation>
     </message>
     <message>
         <source>Delete</source>
-        <translation type="unfinished">Supprimer</translation>
+        <translation>Supprimer</translation>
     </message>
     <message>
         <source>Add or remove a bookmark here</source>
@@ -395,23 +395,23 @@
     </message>
     <message>
         <source>Go to work area in</source>
-        <translation type="unfinished">Aller au début de la zone de travail</translation>
+        <translation>Aller au début de la zone de travail</translation>
     </message>
     <message>
         <source>Go to work area out</source>
-        <translation type="unfinished">Aller à la fin de la zone de travail</translation>
+        <translation>Aller à la fin de la zone de travail</translation>
     </message>
     <message>
         <source>Clear work area</source>
-        <translation type="unfinished">Effacer la zone de travail</translation>
+        <translation>Effacer la zone de travail</translation>
     </message>
     <message>
         <source>Toggle snapping</source>
-        <translation type="unfinished">Basculer l&apos;accrochage</translation>
+        <translation>Basculer l&apos;accrochage</translation>
     </message>
     <message>
         <source>Analyzing…</source>
-        <translation type="unfinished">Analyse en cours…</translation>
+        <translation>Analyse en cours…</translation>
     </message>
     <message>
         <source>Hide beat markers</source>
@@ -419,7 +419,7 @@
     </message>
     <message>
         <source>Find the beat and show markers</source>
-        <translation type="unfinished">Trouver le battement et afficher les marqueurs</translation>
+        <translation>Trouver le battement et afficher les marqueurs</translation>
     </message>
     <message>
         <source>Close gaps when trimming</source>
@@ -446,23 +446,23 @@
     <name>AndroidEditor</name>
     <message>
         <source>Drift project (*.drift)</source>
-        <translation type="unfinished">Projet Drift (*.drift)</translation>
+        <translation>Projet Drift (*.drift)</translation>
     </message>
     <message>
         <source>Save Project</source>
-        <translation type="unfinished">Enregistrer le projet</translation>
+        <translation>Enregistrer le projet</translation>
     </message>
     <message>
         <source>Save Shareable Copy</source>
-        <translation type="unfinished">Enregistrer une copie partageable</translation>
+        <translation>Enregistrer une copie partageable</translation>
     </message>
     <message>
         <source>Open Project</source>
-        <translation type="unfinished">Ouvrir le projet</translation>
+        <translation>Ouvrir le projet</translation>
     </message>
     <message>
         <source>Your timeline is empty</source>
-        <translation type="unfinished">Votre chronologie est vide</translation>
+        <translation>Votre ligne du temps est vide</translation>
     </message>
     <message>
         <source>Import media or open the Media library to start editing.</source>
@@ -470,11 +470,11 @@
     </message>
     <message>
         <source>Open Media</source>
-        <translation type="unfinished"></translation>
+        <translation>Ouvrir média</translation>
     </message>
     <message>
         <source>Edit</source>
-        <translation type="unfinished"></translation>
+        <translation>Modifier</translation>
     </message>
 </context>
 <context>
@@ -485,15 +485,15 @@
     </message>
     <message>
         <source>Open</source>
-        <translation type="unfinished"></translation>
+        <translation>Ouvrir</translation>
     </message>
     <message>
         <source>More</source>
-        <translation type="unfinished">Plus</translation>
+        <translation>Plus</translation>
     </message>
     <message>
         <source>Light mode</source>
-        <translation type="unfinished"></translation>
+        <translation>Mode</translation>
     </message>
     <message>
         <source>Dark mode</source>
