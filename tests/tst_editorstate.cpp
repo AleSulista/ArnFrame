@@ -65,6 +65,7 @@ private slots:
     void projectSetupOnPristineProjectStaysClean();
     void darkModePreferencePersistsAcrossSessions();
     void uiScalePersistsAcrossSessions();
+    void invertTimelineScrollPersistsAcrossSessions();
     void decodeModePickerListsOnlyWorkingBackends();
     void exportFrameRatePersistsAcrossSessions();
     void lastExportSettingsNormalisesStringTypedValues();
@@ -797,6 +798,38 @@ void EditorStateTest::uiScalePersistsAcrossSessions()
     qputenv("QT_SCALE_FACTOR", "3");
     AppController::applyStoredUiScale();
     QCOMPARE(qgetenv("QT_SCALE_FACTOR"), QByteArray("3"));
+}
+
+void EditorStateTest::invertTimelineScrollPersistsAcrossSessions()
+{
+    QStandardPaths::setTestModeEnabled(true);
+    const QString org = QCoreApplication::organizationName();
+    const QString app = QCoreApplication::applicationName();
+    QCoreApplication::setOrganizationName(QStringLiteral("DriftTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("DriftTest"));
+    const auto restore = qScopeGuard([&] {
+        QSettings().remove(QStringLiteral("timeline/invertScroll"));
+        QCoreApplication::setOrganizationName(org);
+        QCoreApplication::setApplicationName(app);
+        QStandardPaths::setTestModeEnabled(false);
+    });
+    QSettings().remove(QStringLiteral("timeline/invertScroll"));
+
+    AssetLibrary library;
+    {
+        AppController state(&library);
+        QVERIFY(!state.invertTimelineScroll());
+
+        QSignalSpy spy(&state, &AppController::invertTimelineScrollChanged);
+        state.setInvertTimelineScroll(true);
+        QCOMPARE(spy.count(), 1);
+        QVERIFY(state.invertTimelineScroll());
+        state.setInvertTimelineScroll(true);
+        QCOMPARE(spy.count(), 1);
+    }
+
+    AppController relaunched(&library);
+    QVERIFY(relaunched.invertTimelineScroll());
 }
 
 void EditorStateTest::exportFrameRatePersistsAcrossSessions()

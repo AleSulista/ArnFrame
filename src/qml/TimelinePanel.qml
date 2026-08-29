@@ -30,6 +30,9 @@ PanelFrame {
         cutHoverClip = -1
     }
 
+    property real panLastSceneX: 0
+    property real panLastSceneY: 0
+
     // CapCut: V = Select, B = Blade. These are registered actions ("selectTool" /
     // "bladeTool") so they appear in the shortcut list and can be rebound; the tool
     // state lives here rather than in the backend, so Main.qml dispatches them
@@ -562,8 +565,6 @@ PanelFrame {
     }
 
     function handleTimelineWheel(wheel) {
-        const maxX = Math.max(0, flick.contentWidth - flick.width)
-        const maxY = Math.max(0, flick.contentHeight - flick.height)
         if (wheel.modifiers & Qt.ControlModifier) {
             // Wheel MouseAreas live in content space, so wheel.x is already a
             // content X — keep that time fixed under the cursor.
@@ -576,26 +577,43 @@ PanelFrame {
 
         const dy = wheel.angleDelta.y
         const dx = wheel.angleDelta.x
+        const invert = EditorState.invertTimelineScroll
+
+        // Invert (Kdenlive-style): wheel pans along time, Shift+wheel moves
+        // between tracks. Trackpad horizontal motion always pans time.
+        if (invert) {
+            if (wheel.modifiers & Qt.ShiftModifier) {
+                const delta = dy !== 0 ? dy : dx
+                panTimelineBy(0, delta)
+                return
+            }
+            if (dx !== 0)
+                panTimelineBy(dx, 0)
+            if (dy !== 0)
+                panTimelineBy(dy, 0)
+            return
+        }
 
         // Shift forces horizontal scrolling regardless of overflow.
         if (wheel.modifiers & Qt.ShiftModifier) {
             const delta = dy !== 0 ? dy : dx
-            flick.contentX = Math.max(0, Math.min(maxX, flick.contentX - delta))
+            panTimelineBy(delta, 0)
             return
         }
 
         // Trackpad horizontal component always scrolls horizontally.
         if (dx !== 0)
-            flick.contentX = Math.max(0, Math.min(maxX, flick.contentX - dx))
+            panTimelineBy(dx, 0)
 
         // Vertical wheel scrolls the tracks when they overflow the viewport;
         // otherwise it falls back to horizontal so short timelines keep the
         // previous wheel-to-pan behaviour.
         if (dy !== 0) {
+            const maxY = Math.max(0, flick.contentHeight - flick.height)
             if (maxY > 0)
-                flick.contentY = Math.max(0, Math.min(maxY, flick.contentY - dy))
+                panTimelineBy(0, dy)
             else
-                flick.contentX = Math.max(0, Math.min(maxX, flick.contentX - dy))
+                panTimelineBy(dy, 0)
         }
     }
 
@@ -675,6 +693,30 @@ PanelFrame {
         property: "contentX"
         duration: Theme.durationBase
         easing.type: Theme.easingInOut
+    }
+
+    function panTimelineBy(dx, dy) {
+        contentXAnimation.stop()
+        const maxX = Math.max(0, flick.contentWidth - flick.width)
+        const maxY = Math.max(0, flick.contentHeight - flick.height)
+        if (dx)
+            flick.contentX = Math.max(0, Math.min(maxX, flick.contentX - dx))
+        if (dy)
+            flick.contentY = Math.max(0, Math.min(maxY, flick.contentY - dy))
+    }
+
+    function beginTimelinePan(item, mouse) {
+        const p = item.mapToItem(null, mouse.x, mouse.y)
+        panLastSceneX = p.x
+        panLastSceneY = p.y
+        contentXAnimation.stop()
+    }
+
+    function updateTimelinePan(item, mouse) {
+        const p = item.mapToItem(null, mouse.x, mouse.y)
+        panTimelineBy(p.x - panLastSceneX, p.y - panLastSceneY)
+        panLastSceneX = p.x
+        panLastSceneY = p.y
     }
 
     Column {
@@ -798,26 +840,42 @@ PanelFrame {
                     width: flick.contentWidth
                     height: flick.contentHeight
 
-                    // Wheel handling: scoped to the ruler so it does not block timeline drops.
+                    // Wheel + middle-click pan: scoped to the ruler so it does not
+                    // block timeline drops. Left/right clicks fall through.
                     MouseArea {
                         id: rulerWheelArea
                         width: parent.width
                         y: flick.contentY
                         height: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
                         z: 1
-                        acceptedButtons: Qt.NoButton
+                        acceptedButtons: Qt.MiddleButton
+                        preventStealing: true
+                        cursorShape: pressed ? Qt.ClosedHandCursor : Qt.ArrowCursor
                         onWheel: (wheel) => root.handleTimelineWheel(wheel)
+                        onPressed: (mouse) => root.beginTimelinePan(rulerWheelArea, mouse)
+                        onPositionChanged: (mouse) => {
+                            if (pressed)
+                                root.updateTimelinePan(rulerWheelArea, mouse)
+                        }
                     }
 
                     // Horizontal scroll / zoom wheel over track rows (below the drop overlay).
                     MouseArea {
+                        id: tracksWheelArea
                         x: 0
                         y: Theme.timelineRulerHeight + Theme.timelineBookmarkRowHeight
                         width: parent.width
                         height: Math.max(root.totalTracksHeight(), Theme.trackHeightVideo)
                         z: 150
-                        acceptedButtons: Qt.NoButton
+                        acceptedButtons: Qt.MiddleButton
+                        preventStealing: true
+                        cursorShape: pressed ? Qt.ClosedHandCursor : Qt.ArrowCursor
                         onWheel: (wheel) => root.handleTimelineWheel(wheel)
+                        onPressed: (mouse) => root.beginTimelinePan(tracksWheelArea, mouse)
+                        onPositionChanged: (mouse) => {
+                            if (pressed)
+                                root.updateTimelinePan(tracksWheelArea, mouse)
+                        }
                     }
 
                     // seek strip (ruler + bookmark lane) ------------------------------------

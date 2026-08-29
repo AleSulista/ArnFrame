@@ -97,6 +97,8 @@ class AppController : public QObject
     Q_PROPERTY(bool autoKeyEnabled READ autoKeyEnabled WRITE setAutoKeyEnabled NOTIFY autoKeyEnabledChanged)
     // Opt-in: on launch, restore the last open project (saved .drift or unsaved recovery snapshot).
     Q_PROPERTY(bool reopenLastProject READ reopenLastProject WRITE setReopenLastProject NOTIFY reopenLastProjectChanged)
+    Q_PROPERTY(bool invertTimelineScroll READ invertTimelineScroll WRITE setInvertTimelineScroll
+                   NOTIFY invertTimelineScrollChanged)
     // Session-only localhost MCP for agents. Never persisted. Off at every launch.
     Q_PROPERTY(bool mcpEnabled READ mcpEnabled WRITE setMcpEnabled NOTIFY mcpRunningChanged)
     Q_PROPERTY(bool mcpRunning READ mcpRunning NOTIFY mcpRunningChanged)
@@ -303,6 +305,7 @@ public:
     bool mediaGridMode() const { return m_mediaGridMode; }
     bool autoKeyEnabled() const { return m_autoKeyEnabled; }
     bool reopenLastProject() const { return m_reopenLastProject; }
+    bool invertTimelineScroll() const { return m_invertTimelineScroll; }
     QString uiLanguage() const { return m_uiLanguage; }
     QVariantList uiLanguages() const;
     double uiScale() const { return m_uiScale; }
@@ -395,6 +398,7 @@ public:
     void setMediaGridMode(bool enabled);
     void setAutoKeyEnabled(bool enabled);
     void setReopenLastProject(bool enabled);
+    void setInvertTimelineScroll(bool enabled);
     Q_INVOKABLE void setMcpEnabled(bool enabled);
     bool mcpEnabled() const { return mcpRunning(); }
     bool mcpRunning() const;
@@ -1109,6 +1113,7 @@ signals:
     void mediaGridModeChanged();
     void autoKeyEnabledChanged();
     void reopenLastProjectChanged();
+    void invertTimelineScrollChanged();
     void mcpRunningChanged();
     void mcpErrorChanged();
     void uiLanguageChanged();
@@ -1412,6 +1417,7 @@ protected:
     bool m_mediaGridMode = true;
     bool m_autoKeyEnabled = false;
     bool m_reopenLastProject = false;
+    bool m_invertTimelineScroll = false;
     QString m_uiLanguage;
     double m_uiScale = 1.0;
     QStringList m_keyframeGraphHiddenProperties;

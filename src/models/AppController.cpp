@@ -856,6 +856,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     // keyframe, and an animation appears where the user only meant to reposition something.
     m_autoKeyEnabled = settings.value(QStringLiteral("editor/autoKeyEnabled"), false).toBool();
     m_reopenLastProject = settings.value(QStringLiteral("editor/reopenLastProject"), false).toBool();
+    m_invertTimelineScroll = settings.value(QStringLiteral("timeline/invertScroll"), false).toBool();
     m_uiLanguage = storedUiLanguage();
     m_uiScale = storedUiScale();
     // Unset means the user has never toggled the theme, so the UI keeps tracking the OS.
@@ -2855,6 +2856,16 @@ void AppController::setReopenLastProject(bool enabled)
     QSettings settings;
     settings.setValue(QStringLiteral("editor/reopenLastProject"), m_reopenLastProject);
     emit reopenLastProjectChanged();
+}
+
+void AppController::setInvertTimelineScroll(bool enabled)
+{
+    if (m_invertTimelineScroll == enabled)
+        return;
+    m_invertTimelineScroll = enabled;
+    QSettings settings;
+    settings.setValue(QStringLiteral("timeline/invertScroll"), m_invertTimelineScroll);
+    emit invertTimelineScrollChanged();
 }
 
 void AppController::installUiTranslators()
