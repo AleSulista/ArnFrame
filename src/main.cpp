@@ -213,6 +213,14 @@ int main(int argc, char *argv[])
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 
+#ifdef Q_OS_WIN
+    // DirectWrite mis-maps glyphs in the qrc-embedded Inter used by Theme.fontFamily
+    // (neighbouring letters, stray diacritics). FreeType renders the same file correctly.
+    // An explicit QT_QPA_PLATFORM from the environment still wins.
+    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
+        qputenv("QT_QPA_PLATFORM", "windows:fontengine=freetype");
+#endif
+
     // Names must be set before reading QSettings for ui/scale, and QT_SCALE_FACTOR
     // must be in the environment before QApplication is constructed.
     QCoreApplication::setApplicationName("CutWire Drift");
