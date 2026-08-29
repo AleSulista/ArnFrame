@@ -230,95 +230,95 @@
     <name>AgentAccessDialog</name>
     <message>
         <source>Agent access</source>
-        <translation type="unfinished">නියෝජිත (Agent) ප්‍රවේශය</translation>
+        <translation>නියෝජිත (Agent) ප්‍රවේශය</translation>
     </message>
     <message>
         <source>Close</source>
-        <translation type="unfinished">වසන්න</translation>
+        <translation>වසන්න</translation>
     </message>
     <message>
         <source>Let Cursor or Claude edit this project for you — add clips, change the timeline, and check how it looks. Only programs on this computer. Starts off each time you open Drift; turn it off when you finish.</source>
-        <translation type="unfinished"></translation>
+        <translation>Cursor හෝ Claude හට ඔබ වෙනුවෙන් මෙම ව්‍යාපෘතිය සංස්කරණය කිරීමට ඉඩ දෙන්න — ක්ලිප් එක් කරන්න, කාලරේඛාව වෙනස් කරන්න, සහ එය දිස්වන ආකාරය පරීක්ෂා කරන්න. මෙම පරිගණකයේ ඇති වැඩසටහන් සඳහා පමණි. ඔබ Drift විවෘත කරන සෑම විටම අක්‍රියව ආරම්භ වේ; ඔබ අවසන් වූ පසු එය අක්‍රිය කරන්න.</translation>
     </message>
     <message>
         <source>Allow for this session</source>
-        <translation type="unfinished"></translation>
+        <translation>මෙම සැසිය සඳහා ඉඩ දෙන්න</translation>
     </message>
     <message>
         <source>Allows an assistant on this computer to edit this project until you turn it off or quit.</source>
-        <translation type="unfinished"></translation>
+        <translation>ඔබ එය අක්‍රිය කරන තෙක් හෝ ඉවත් වන තෙක් මෙම පරිගණකයේ ඇති සහායකයෙකුට මෙම ව්‍යාපෘතිය සංස්කරණය කිරීමට ඉඩ සලසයි.</translation>
     </message>
     <message>
         <source>Turn this on, then copy the setup for Cursor or Claude and paste it into that app.</source>
-        <translation type="unfinished"></translation>
+        <translation>මෙය ක්‍රියාත්මක කර Cursor හෝ Claude සඳහා සැකසුම පිටපත් කර එම යෙදුමට අලවන්න.</translation>
     </message>
     <message>
         <source>Access is on</source>
-        <translation type="unfinished"></translation>
+        <translation>ප්‍රවේශය ක්‍රියාත්මකයි</translation>
     </message>
     <message>
         <source>Copy the setup for the assistant you use. You only need one.</source>
-        <translation type="unfinished"></translation>
+        <translation>ඔබ භාවිත කරන සහායකයා සඳහා සැකසුම පිටපත් කරන්න. ඔබට අවශ්‍ය වන්නේ එකක් පමණි.</translation>
     </message>
     <message>
         <source>Copy for Cursor</source>
-        <translation type="unfinished"></translation>
+        <translation>Cursor සඳහා පිටපත් කරන්න</translation>
     </message>
     <message>
         <source>Copy a setup snippet to paste into Cursor</source>
-        <translation type="unfinished"></translation>
+        <translation>Cursor වෙත ඇලවීම සඳහා සැකසුම් snippet පිටපත් කරන්න</translation>
     </message>
     <message>
         <source>Copied for Cursor</source>
-        <translation type="unfinished"></translation>
+        <translation>Cursor සඳහා පිටපත් කරන ලදී</translation>
     </message>
     <message>
         <source>Copy for Claude</source>
-        <translation type="unfinished"></translation>
+        <translation>Claude සඳහා පිටපත් කරන්න</translation>
     </message>
     <message>
         <source>Copy a command to paste into Claude Code</source>
-        <translation type="unfinished"></translation>
+        <translation>Claude Code වෙත ඇලවීම සඳහා විධානය පිටපත් කරන්න</translation>
     </message>
     <message>
         <source>Copied for Claude</source>
-        <translation type="unfinished"></translation>
+        <translation>Claude සඳහා පිටපත් කරන ලදී</translation>
     </message>
     <message>
         <source>Paste that into the assistant. To help it use this editor, copy the how-to next and paste it into the chat.</source>
-        <translation type="unfinished"></translation>
+        <translation>එය සහායකයා වෙත අලවන්න. මෙම සංස්කාරකය භාවිත කිරීමට ඊට සහාය වීමට, ඊළඟට උපදෙස් පිටපත් කර කතාබහට (chat) අලවන්න.</translation>
     </message>
     <message>
         <source>Copy a how-to for the agent</source>
-        <translation type="unfinished"></translation>
+        <translation>නියෝජිතයා සඳහා උපදෙස් පිටපත් කරන්න</translation>
     </message>
     <message>
         <source>A short list of what the agent can do here — paste it into the chat</source>
-        <translation type="unfinished"></translation>
+        <translation>නියෝජිතයාට මෙහි කළ හැකි දේ පිළිබඳ කෙටි ලැයිස්තුවක් — එය කතාබහට (chat) අලවන්න</translation>
     </message>
     <message>
         <source>Copied how-to</source>
-        <translation type="unfinished"></translation>
+        <translation>උපදෙස් පිටපත් කරන ලදී</translation>
     </message>
     <message>
         <source>More options</source>
-        <translation type="unfinished"></translation>
+        <translation>තවත් විකල්ප</translation>
     </message>
     <message>
         <source>For a different assistant, copy a one-time setup. The address and key are already in the Cursor and Claude copies above.</source>
-        <translation type="unfinished"></translation>
+        <translation>වෙනත් සහායකයෙකු සඳහා, එක් වරක් කරන සැකසුම පිටපත් කරන්න. ලිපිනය සහ යතුර දැනටමත් ඉහත Cursor සහ Claude පිටපත්වල අඩංගු වේ.</translation>
     </message>
     <message>
         <source>Copy one-time setup</source>
-        <translation type="unfinished"></translation>
+        <translation>එක් වරක් කරන සැකසුම පිටපත් කරන්න</translation>
     </message>
     <message>
         <source>Add this once to the assistant’s config. Access still has to be turned on here.</source>
-        <translation type="unfinished"></translation>
+        <translation>මෙය සහායකයාගේ වින්‍යාසයට (config) එක් වරක් එක් කරන්න. ප්‍රවේශය තවමත් මෙහිදී ක්‍රියාත්මක කළ යුතුය.</translation>
     </message>
     <message>
         <source>Copied one-time setup</source>
-        <translation type="unfinished"></translation>
+        <translation>එක් වරක් කරන සැකසුම පිටපත් කරන ලදී</translation>
     </message>
 </context>
 <context>
@@ -3616,7 +3616,7 @@
     </message>
     <message>
         <source>Save</source>
-        <translation type="unfinished">සුරකින්න</translation>
+        <translation>සුරකින්න</translation>
     </message>
     <message>
         <source>Save project (%1)</source>
@@ -3628,11 +3628,11 @@
     </message>
     <message>
         <source>Video</source>
-        <translation type="unfinished">වීඩියෝ</translation>
+        <translation>වීඩියෝ</translation>
     </message>
     <message>
         <source>Video size and layout</source>
-        <translation type="unfinished"></translation>
+        <translation>වීඩියෝ ප්‍රමාණය සහ පිරිසැලසුම</translation>
     </message>
     <message>
         <source>Agent</source>
@@ -3640,7 +3640,7 @@
     </message>
     <message>
         <source>Agent access is on</source>
-        <translation type="unfinished"></translation>
+        <translation>නියෝජිත (Agent) ප්‍රවේශය ක්‍රියාත්මකයි</translation>
     </message>
     <message>
         <source>Recommended packs and updates</source>
@@ -3652,11 +3652,11 @@
     </message>
     <message>
         <source>Language</source>
-        <translation type="unfinished">භාෂාව</translation>
+        <translation>භාෂාව</translation>
     </message>
     <message>
         <source>Language for menus and labels</source>
-        <translation type="unfinished"></translation>
+        <translation>මෙනු සහ ලේබල් සඳහා භාෂාව</translation>
     </message>
     <message>
         <source>Debug info</source>
@@ -3664,7 +3664,7 @@
     </message>
     <message>
         <source>Update</source>
-        <translation type="unfinished">යාවත්කාලීන කරන්න</translation>
+        <translation>යාවත්කාලීන කරන්න</translation>
     </message>
     <message>
         <source>Drift %1 is available</source>
@@ -3672,7 +3672,7 @@
     </message>
     <message>
         <source>Agent access</source>
-        <translation type="unfinished">නියෝජිත (Agent) ප්‍රවේශය</translation>
+        <translation>නියෝජිත (Agent) ප්‍රවේශය</translation>
     </message>
     <message>
         <source>Export in progress (%1%) — click to view</source>
@@ -3696,7 +3696,7 @@
     </message>
     <message>
         <source>Workspace</source>
-        <translation type="unfinished"></translation>
+        <translation>වැඩබිම</translation>
     </message>
     <message>
         <source>Workspace: portrait</source>
@@ -3720,7 +3720,7 @@
     </message>
     <message>
         <source>Theme</source>
-        <translation type="unfinished"></translation>
+        <translation>තේමාව</translation>
     </message>
     <message>
         <source>Switch to light mode</source>
@@ -4587,7 +4587,7 @@
     </message>
     <message>
         <source>Language</source>
-        <translation type="unfinished">භාෂාව</translation>
+        <translation>භාෂාව</translation>
     </message>
     <message>
         <source>Continue</source>
@@ -4595,15 +4595,15 @@
     </message>
     <message>
         <source>Close</source>
-        <translation type="unfinished">වසන්න</translation>
+        <translation>වසන්න</translation>
     </message>
     <message>
         <source>Language for menus and labels. Takes effect immediately.</source>
-        <translation type="unfinished">මෙනු සහ ලේබල් සඳහා භාෂාව. වහාම බලපැවැත්වේ.</translation>
+        <translation>මෙනු සහ ලේබල් සඳහා භාෂාව. වහාම බලපැවැත්වේ.</translation>
     </message>
     <message>
         <source>Pick the language for menus and labels. You can change this later.</source>
-        <translation type="unfinished"></translation>
+        <translation>මෙනු සහ ලේබල් සඳහා භාෂාව තෝරන්න. ඔබට මෙය පසුව වෙනස් කළ හැක.</translation>
     </message>
 </context>
 <context>
@@ -6162,15 +6162,15 @@ If playback stutters, try another.</source>
     </message>
     <message>
         <source>Video</source>
-        <translation type="unfinished">වීඩියෝ</translation>
+        <translation>වීඩියෝ</translation>
     </message>
     <message>
         <source>Preview</source>
-        <translation type="unfinished">පෙරදසුන</translation>
+        <translation>පෙරදසුන</translation>
     </message>
     <message>
         <source>Show guides</source>
-        <translation type="unfinished"></translation>
+        <translation>මඟපෙන්වුම් රේඛා පෙන්වන්න</translation>
     </message>
     <message>
         <source>Blur strength</source>
@@ -6178,7 +6178,7 @@ If playback stutters, try another.</source>
     </message>
     <message>
         <source>Playback</source>
-        <translation type="unfinished"></translation>
+        <translation>ධාවනය</translation>
     </message>
     <message>
         <source>Audio output</source>
@@ -6190,15 +6190,15 @@ If playback stutters, try another.</source>
     </message>
     <message>
         <source>Interface</source>
-        <translation type="unfinished"></translation>
+        <translation>අතුරුමුහුණත</translation>
     </message>
     <message>
         <source>Size</source>
-        <translation type="unfinished">ප්‍රමාණය</translation>
+        <translation>ප්‍රමාණය</translation>
     </message>
     <message>
         <source>App</source>
-        <translation type="unfinished"></translation>
+        <translation>යෙදුම</translation>
     </message>
     <message>
         <source>Updates</source>
@@ -6258,11 +6258,11 @@ If playback stutters, try another.</source>
     </message>
     <message>
         <source>Horizontal mouse-wheel pan</source>
-        <translation type="unfinished"></translation>
+        <translation>මවුස් රෝදය මඟින් තිරස්ව පෑන් කිරීම (Pan)</translation>
     </message>
     <message>
         <source>Scroll pans left and right along the timeline. Shift+scroll moves between tracks. Middle-click drag also pans.</source>
-        <translation type="unfinished"></translation>
+        <translation>Scroll කිරීමෙන් කාලරේඛාව ඔස්සේ වමට සහ දකුණට පෑන් වේ. Shift+scroll මඟින් ට්‍රැක් අතර මාරු වේ. මැද බොත්තම ක්ලික් කර ඇදීමෙන්ද පෑන් කළ හැක.</translation>
     </message>
     <message>
         <source>Language</source>
@@ -8386,54 +8386,54 @@ If playback stutters, try another.</source>
     <name>VideoSizeControls</name>
     <message>
         <source>Custom</source>
-        <translation type="unfinished">අභිරුචි</translation>
+        <translation>අභිරුචි</translation>
     </message>
     <message>
         <source>Choose layout…</source>
-        <translation type="unfinished">පිරිසැලසුම තෝරන්න…</translation>
+        <translation>පිරිසැලසුම තෝරන්න…</translation>
     </message>
     <message>
         <source>Pick a platform template (YouTube, Instagram, TikTok, …) and quality</source>
-        <translation type="unfinished">වේදිකා ආකෘතියක් (YouTube, Instagram, TikTok, …) සහ ගුණාත්මකභාවය තෝරන්න</translation>
+        <translation>වේදිකා ආකෘතියක් (YouTube, Instagram, TikTok, …) සහ ගුණාත්මකභාවය තෝරන්න</translation>
     </message>
     <message>
         <source>Change the video size. Clips keep their current size and position.</source>
-        <translation type="unfinished">වීඩියෝ ප්‍රමාණය වෙනස් කරන්න. ක්ලිප් ඒවායේ වත්මන් ප්‍රමාණය සහ පිහිටීම රඳවා ගනී.</translation>
+        <translation>වීඩියෝ ප්‍රමාණය වෙනස් කරන්න. ක්ලිප් ඒවායේ වත්මන් ප්‍රමාණය සහ පිහිටීම රඳවා ගනී.</translation>
     </message>
     <message>
         <source>Width</source>
-        <translation type="unfinished">පළල</translation>
+        <translation>පළල</translation>
     </message>
     <message>
         <source>Height</source>
-        <translation type="unfinished">උස</translation>
+        <translation>උස</translation>
     </message>
     <message>
         <source>Cancel crop</source>
-        <translation type="unfinished">කප්පාදුව අවලංගු කරන්න</translation>
+        <translation>කප්පාදුව අවලංගු කරන්න</translation>
     </message>
     <message>
         <source>Crop video size</source>
-        <translation type="unfinished">වීඩියෝ ප්‍රමාණය කප්පාදු කරන්න</translation>
+        <translation>වීඩියෝ ප්‍රමාණය කප්පාදු කරන්න</translation>
     </message>
     <message>
         <source>Drag the preview edges to change what’s included</source>
-        <translation type="unfinished">ඇතුළත් වන දේ වෙනස් කිරීමට පෙරදසුනේ දාර අදින්න</translation>
+        <translation>ඇතුළත් වන දේ වෙනස් කිරීමට පෙරදසුනේ දාර අදින්න</translation>
     </message>
     <message>
         <source>Changing size doesn’t shrink your clips — anything outside the new edges is cut off.</source>
-        <translation type="unfinished">ප්‍රමාණය වෙනස් කිරීමෙන් ඔබේ ක්ලිප් හැකිලෙන්නේ නැත — නව දාරවලින් පිටත ඇති සියල්ල කපා හැරේ.</translation>
+        <translation>ප්‍රමාණය වෙනස් කිරීමෙන් ඔබේ ක්ලිප් හැකිලෙන්නේ නැත — නව දාරවලින් පිටත ඇති සියල්ල කපා හැරේ.</translation>
     </message>
 </context>
 <context>
     <name>VideoSizeDialog</name>
     <message>
         <source>Video</source>
-        <translation type="unfinished">වීඩියෝ</translation>
+        <translation>වීඩියෝ</translation>
     </message>
     <message>
         <source>Close</source>
-        <translation type="unfinished">වසන්න</translation>
+        <translation>වසන්න</translation>
     </message>
 </context>
 </TS>

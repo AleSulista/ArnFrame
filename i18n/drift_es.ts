@@ -230,95 +230,95 @@
     <name>AgentAccessDialog</name>
     <message>
         <source>Agent access</source>
-        <translation type="unfinished">Acceso de agente</translation>
+        <translation>Acceso de agente</translation>
     </message>
     <message>
         <source>Close</source>
-        <translation type="unfinished">Cerrar</translation>
+        <translation>Cerrar</translation>
     </message>
     <message>
         <source>Let Cursor or Claude edit this project for you — add clips, change the timeline, and check how it looks. Only programs on this computer. Starts off each time you open Drift; turn it off when you finish.</source>
-        <translation type="unfinished"></translation>
+        <translation>Deja que Cursor o Claude editen este proyecto por ti — añade clips, cambia la línea de tiempo y comprueba cómo se ve. Solo programas en este equipo. Se inicia desactivado cada vez que abres Drift; desactívalo cuando termines.</translation>
     </message>
     <message>
         <source>Allow for this session</source>
-        <translation type="unfinished"></translation>
+        <translation>Permitir durante esta sesión</translation>
     </message>
     <message>
         <source>Allows an assistant on this computer to edit this project until you turn it off or quit.</source>
-        <translation type="unfinished"></translation>
+        <translation>Permite que un asistente en este equipo edite este proyecto hasta que lo desactives o salgas.</translation>
     </message>
     <message>
         <source>Turn this on, then copy the setup for Cursor or Claude and paste it into that app.</source>
-        <translation type="unfinished"></translation>
+        <translation>Activa esto, luego copia la configuración para Cursor o Claude y pégala en esa aplicación.</translation>
     </message>
     <message>
         <source>Access is on</source>
-        <translation type="unfinished"></translation>
+        <translation>El acceso está activado</translation>
     </message>
     <message>
         <source>Copy the setup for the assistant you use. You only need one.</source>
-        <translation type="unfinished"></translation>
+        <translation>Copia la configuración para el asistente que uses. Solo necesitas una.</translation>
     </message>
     <message>
         <source>Copy for Cursor</source>
-        <translation type="unfinished"></translation>
+        <translation>Copiar para Cursor</translation>
     </message>
     <message>
         <source>Copy a setup snippet to paste into Cursor</source>
-        <translation type="unfinished"></translation>
+        <translation>Copiar un fragmento de configuración para pegar en Cursor</translation>
     </message>
     <message>
         <source>Copied for Cursor</source>
-        <translation type="unfinished"></translation>
+        <translation>Copiado para Cursor</translation>
     </message>
     <message>
         <source>Copy for Claude</source>
-        <translation type="unfinished"></translation>
+        <translation>Copiar para Claude</translation>
     </message>
     <message>
         <source>Copy a command to paste into Claude Code</source>
-        <translation type="unfinished"></translation>
+        <translation>Copiar un comando para pegar en Claude Code</translation>
     </message>
     <message>
         <source>Copied for Claude</source>
-        <translation type="unfinished"></translation>
+        <translation>Copiado para Claude</translation>
     </message>
     <message>
         <source>Paste that into the assistant. To help it use this editor, copy the how-to next and paste it into the chat.</source>
-        <translation type="unfinished"></translation>
+        <translation>Pega eso en el asistente. Para ayudarle a usar este editor, copia a continuación la guía y pégala en el chat.</translation>
     </message>
     <message>
         <source>Copy a how-to for the agent</source>
-        <translation type="unfinished"></translation>
+        <translation>Copiar guía para el agente</translation>
     </message>
     <message>
         <source>A short list of what the agent can do here — paste it into the chat</source>
-        <translation type="unfinished"></translation>
+        <translation>Una lista breve de lo que el agente puede hacer aquí — pégala en el chat</translation>
     </message>
     <message>
         <source>Copied how-to</source>
-        <translation type="unfinished"></translation>
+        <translation>Guía copiada</translation>
     </message>
     <message>
         <source>More options</source>
-        <translation type="unfinished"></translation>
+        <translation>Más opciones</translation>
     </message>
     <message>
         <source>For a different assistant, copy a one-time setup. The address and key are already in the Cursor and Claude copies above.</source>
-        <translation type="unfinished"></translation>
+        <translation>Para un asistente diferente, copia una configuración única. La dirección y la clave ya están en las copias de Cursor y Claude anteriores.</translation>
     </message>
     <message>
         <source>Copy one-time setup</source>
-        <translation type="unfinished"></translation>
+        <translation>Copiar configuración única</translation>
     </message>
     <message>
         <source>Add this once to the assistant’s config. Access still has to be turned on here.</source>
-        <translation type="unfinished"></translation>
+        <translation>Añade esto una sola vez a la configuración del asistente. El acceso todavía tiene que estar activado aquí.</translation>
     </message>
     <message>
         <source>Copied one-time setup</source>
-        <translation type="unfinished"></translation>
+        <translation>Configuración única copiada</translation>
     </message>
 </context>
 <context>
@@ -3616,7 +3616,7 @@
     </message>
     <message>
         <source>Save</source>
-        <translation type="unfinished">Guardar</translation>
+        <translation>Guardar</translation>
     </message>
     <message>
         <source>Save project (%1)</source>
@@ -3628,11 +3628,11 @@
     </message>
     <message>
         <source>Video</source>
-        <translation type="unfinished">Vídeo</translation>
+        <translation>Vídeo</translation>
     </message>
     <message>
         <source>Video size and layout</source>
-        <translation type="unfinished"></translation>
+        <translation>Tamaño y diseño del vídeo</translation>
     </message>
     <message>
         <source>Agent</source>
@@ -3640,7 +3640,7 @@
     </message>
     <message>
         <source>Agent access is on</source>
-        <translation type="unfinished"></translation>
+        <translation>El acceso de agente está activado</translation>
     </message>
     <message>
         <source>Recommended packs and updates</source>
@@ -3652,11 +3652,11 @@
     </message>
     <message>
         <source>Language</source>
-        <translation type="unfinished">Idioma</translation>
+        <translation>Idioma</translation>
     </message>
     <message>
         <source>Language for menus and labels</source>
-        <translation type="unfinished"></translation>
+        <translation>Idioma para menús y etiquetas</translation>
     </message>
     <message>
         <source>Debug info</source>
@@ -3664,7 +3664,7 @@
     </message>
     <message>
         <source>Update</source>
-        <translation type="unfinished">Actualizar</translation>
+        <translation>Actualizar</translation>
     </message>
     <message>
         <source>Drift %1 is available</source>
@@ -3672,7 +3672,7 @@
     </message>
     <message>
         <source>Agent access</source>
-        <translation type="unfinished">Acceso de agente</translation>
+        <translation>Acceso de agente</translation>
     </message>
     <message>
         <source>Export in progress (%1%) — click to view</source>
@@ -3696,7 +3696,7 @@
     </message>
     <message>
         <source>Workspace</source>
-        <translation type="unfinished"></translation>
+        <translation>Espacio de trabajo</translation>
     </message>
     <message>
         <source>Workspace: portrait</source>
@@ -3720,7 +3720,7 @@
     </message>
     <message>
         <source>Theme</source>
-        <translation type="unfinished"></translation>
+        <translation>Tema</translation>
     </message>
     <message>
         <source>Switch to light mode</source>
@@ -4587,7 +4587,7 @@
     </message>
     <message>
         <source>Language</source>
-        <translation type="unfinished">Idioma</translation>
+        <translation>Idioma</translation>
     </message>
     <message>
         <source>Continue</source>
@@ -4595,15 +4595,15 @@
     </message>
     <message>
         <source>Close</source>
-        <translation type="unfinished">Cerrar</translation>
+        <translation>Cerrar</translation>
     </message>
     <message>
         <source>Language for menus and labels. Takes effect immediately.</source>
-        <translation type="unfinished">Idioma para menús y etiquetas. Surte efecto inmediatamente.</translation>
+        <translation>Idioma para menús y etiquetas. Surte efecto inmediatamente.</translation>
     </message>
     <message>
         <source>Pick the language for menus and labels. You can change this later.</source>
-        <translation type="unfinished"></translation>
+        <translation>Elige el idioma para menús y etiquetas. Puedes cambiar esto más tarde.</translation>
     </message>
 </context>
 <context>
@@ -6162,15 +6162,15 @@ Si la reproducción se corta, prueba con otra opción.</translation>
     </message>
     <message>
         <source>Video</source>
-        <translation type="unfinished">Vídeo</translation>
+        <translation>Vídeo</translation>
     </message>
     <message>
         <source>Preview</source>
-        <translation type="unfinished">Vista previa</translation>
+        <translation>Vista previa</translation>
     </message>
     <message>
         <source>Show guides</source>
-        <translation type="unfinished"></translation>
+        <translation>Mostrar guías</translation>
     </message>
     <message>
         <source>Blur strength</source>
@@ -6178,7 +6178,7 @@ Si la reproducción se corta, prueba con otra opción.</translation>
     </message>
     <message>
         <source>Playback</source>
-        <translation type="unfinished"></translation>
+        <translation>Reproducción</translation>
     </message>
     <message>
         <source>Audio output</source>
@@ -6190,15 +6190,15 @@ Si la reproducción se corta, prueba con otra opción.</translation>
     </message>
     <message>
         <source>Interface</source>
-        <translation type="unfinished"></translation>
+        <translation>Interfaz</translation>
     </message>
     <message>
         <source>Size</source>
-        <translation type="unfinished">Tamaño</translation>
+        <translation>Tamaño</translation>
     </message>
     <message>
         <source>App</source>
-        <translation type="unfinished"></translation>
+        <translation>Aplicación</translation>
     </message>
     <message>
         <source>Updates</source>
@@ -6258,11 +6258,11 @@ Si la reproducción se corta, prueba con otra opción.</translation>
     </message>
     <message>
         <source>Horizontal mouse-wheel pan</source>
-        <translation type="unfinished"></translation>
+        <translation>Desplazamiento horizontal con la rueda del ratón</translation>
     </message>
     <message>
         <source>Scroll pans left and right along the timeline. Shift+scroll moves between tracks. Middle-click drag also pans.</source>
-        <translation type="unfinished"></translation>
+        <translation>El desplazamiento mueve a izquierda y derecha por la línea de tiempo. Mayús+desplazamiento mueve entre pistas. Arrastrar con el botón central también desplaza la vista.</translation>
     </message>
     <message>
         <source>Language</source>
@@ -8386,54 +8386,54 @@ Si la reproducción se corta, prueba con otra opción.</translation>
     <name>VideoSizeControls</name>
     <message>
         <source>Custom</source>
-        <translation type="unfinished">Personalizado</translation>
+        <translation>Personalizado</translation>
     </message>
     <message>
         <source>Choose layout…</source>
-        <translation type="unfinished">Elegir diseño…</translation>
+        <translation>Elegir diseño…</translation>
     </message>
     <message>
         <source>Pick a platform template (YouTube, Instagram, TikTok, …) and quality</source>
-        <translation type="unfinished">Elige una plantilla de plataforma (YouTube, Instagram, TikTok…) y calidad</translation>
+        <translation>Elige una plantilla de plataforma (YouTube, Instagram, TikTok…) y calidad</translation>
     </message>
     <message>
         <source>Change the video size. Clips keep their current size and position.</source>
-        <translation type="unfinished">Cambia el tamaño del vídeo. Los clips conservan su tamaño y posición actuales.</translation>
+        <translation>Cambia el tamaño del vídeo. Los clips conservan su tamaño y posición actuales.</translation>
     </message>
     <message>
         <source>Width</source>
-        <translation type="unfinished">Anchura</translation>
+        <translation>Anchura</translation>
     </message>
     <message>
         <source>Height</source>
-        <translation type="unfinished">Altura</translation>
+        <translation>Altura</translation>
     </message>
     <message>
         <source>Cancel crop</source>
-        <translation type="unfinished">Cancelar recorte</translation>
+        <translation>Cancelar recorte</translation>
     </message>
     <message>
         <source>Crop video size</source>
-        <translation type="unfinished">Recortar tamaño de vídeo</translation>
+        <translation>Recortar tamaño de vídeo</translation>
     </message>
     <message>
         <source>Drag the preview edges to change what’s included</source>
-        <translation type="unfinished">Arrastra los bordes de la vista previa para cambiar lo que se incluye</translation>
+        <translation>Arrastra los bordes de la vista previa para cambiar lo que se incluye</translation>
     </message>
     <message>
         <source>Changing size doesn’t shrink your clips — anything outside the new edges is cut off.</source>
-        <translation type="unfinished">Cambiar de tamaño no reduce los clips: todo lo que quede fuera de los nuevos bordes se recortará.</translation>
+        <translation>Cambiar de tamaño no reduce los clips: todo lo que quede fuera de los nuevos bordes se recortará.</translation>
     </message>
 </context>
 <context>
     <name>VideoSizeDialog</name>
     <message>
         <source>Video</source>
-        <translation type="unfinished">Vídeo</translation>
+        <translation>Vídeo</translation>
     </message>
     <message>
         <source>Close</source>
-        <translation type="unfinished">Cerrar</translation>
+        <translation>Cerrar</translation>
     </message>
 </context>
 </TS>
