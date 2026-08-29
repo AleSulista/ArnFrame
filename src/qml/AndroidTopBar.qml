@@ -309,7 +309,7 @@ Item {
                 }
                 MenuRow {
                     text: qsTr("Multicam")
-                    glyph: Theme.icons.grid
+                    glyph: Theme.icons.shuffle
                     onTriggered: root.Window.window.openMulticam()
                 }
                 MenuRow {

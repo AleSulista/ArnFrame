@@ -2,7 +2,8 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Drift
 
-// Icon-only button, variants "text" / "ghost" / "secondary".
+// Toolbar button, variants "text" / "ghost". Icon-only by default; set `text`
+// to show a label beside the glyph (header actions).
 //
 // Built on AbstractButton (not a bare Rectangle) so it joins the tab chain, is
 // activatable with Space/Enter, and reports a Button role to accessibility.
@@ -19,9 +20,14 @@ AbstractButton {
     // "ghost": transparent, hover = accent background (tab rail, view toggles)
     property string variant: "text"
 
-    implicitWidth: buttonSize
+    readonly property bool hasLabel: text.length > 0
+    readonly property color _fg: active ? Theme.panelSecondaryForeground : Theme.mutedForeground
+    readonly property color _labelFg: active ? Theme.panelSecondaryForeground : Theme.foreground
+
+    implicitWidth: hasLabel ? Math.ceil(labeledRow.implicitWidth + Theme.spacingMd * 2)
+                            : buttonSize
     implicitHeight: buttonSize
-    width: buttonSize
+    width: implicitWidth
     height: buttonSize
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
@@ -35,7 +41,7 @@ AbstractButton {
     }
 
     Accessible.role: Accessible.Button
-    Accessible.name: tooltip.length > 0 ? tooltip : glyph
+    Accessible.name: text.length > 0 ? text : (tooltip.length > 0 ? tooltip : glyph)
     Accessible.onPressAction: root.clicked()
 
     background: Rectangle {
@@ -76,21 +82,56 @@ AbstractButton {
         }
     }
 
-    contentItem: IconGlyph {
-        glyph: root.glyph
-        iconSize: root.iconSize
-        iconColor: root.active ? Theme.panelSecondaryForeground : Theme.mutedForeground
-        opacity: root.enabled ? 1 : 0.5
+    contentItem: Item {
+        implicitWidth: root.hasLabel ? labeledRow.implicitWidth : glyphOnly.implicitWidth
+        implicitHeight: root.buttonSize
 
-        Behavior on opacity {
-            NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+        IconGlyph {
+            id: glyphOnly
+            visible: !root.hasLabel
+            anchors.centerIn: parent
+            glyph: root.glyph
+            iconSize: root.iconSize
+            iconColor: root._fg
+            opacity: root.enabled ? 1 : 0.5
+
+            Behavior on opacity {
+                NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+            }
+        }
+
+        Row {
+            id: labeledRow
+            visible: root.hasLabel
+            anchors.centerIn: parent
+            spacing: Theme.spacingSm
+
+            IconGlyph {
+                glyph: root.glyph
+                iconSize: root.iconSize
+                iconColor: root._fg
+                anchors.verticalCenter: parent.verticalCenter
+                opacity: root.enabled ? 1 : 0.5
+            }
+
+            Text {
+                text: root.text
+                color: root._labelFg
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeXs
+                font.weight: Font.Medium
+                anchors.verticalCenter: parent.verticalCenter
+                opacity: root.enabled ? 1 : 0.5
+            }
         }
     }
 
     ThemedToolTip {
         text: root.tooltip
         // Shown on hover, and on keyboard focus so Tab users get the same labels.
-        visible: root.tooltip.length > 0 && (root.hovered || root.visualFocus)
+        // Skip when the tooltip is just the visible label again.
+        visible: root.tooltip.length > 0 && root.tooltip !== root.text
+                 && (root.hovered || root.visualFocus)
     }
 
     MouseArea {

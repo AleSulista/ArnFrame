@@ -227,6 +227,101 @@
     </message>
 </context>
 <context>
+    <name>AgentAccessDialog</name>
+    <message>
+        <source>Agent access</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">关闭</translation>
+    </message>
+    <message>
+        <source>Let Cursor or Claude edit this project for you — add clips, change the timeline, and check how it looks. Only programs on this computer. Starts off each time you open Drift; turn it off when you finish.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow for this session</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allows an assistant on this computer to edit this project until you turn it off or quit.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Turn this on, then copy the setup for Cursor or Claude and paste it into that app.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Access is on</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy the setup for the assistant you use. You only need one.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy for Cursor</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy a setup snippet to paste into Cursor</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copied for Cursor</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy for Claude</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy a command to paste into Claude Code</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copied for Claude</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste that into the assistant. To help it use this editor, copy the how-to next and paste it into the chat.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy a how-to for the agent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A short list of what the agent can do here — paste it into the chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copied how-to</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>More options</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>For a different assistant, copy a one-time setup. The address and key are already in the Cursor and Claude copies above.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy one-time setup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add this once to the assistant’s config. Access still has to be turned on here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copied one-time setup</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>AndroidAddMenu</name>
     <message>
         <source>Add to timeline</source>
@@ -3511,6 +3606,10 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Save</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Save project (%1)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3519,7 +3618,11 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Agent access is on</source>
+        <source>Video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Video size and layout</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3527,7 +3630,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Agent access is on — localhost MCP is listening. Turn it off in Settings when you are done.</source>
+        <source>Agent access is on</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3539,11 +3642,27 @@
         <translation type="unfinished">附加项</translation>
     </message>
     <message>
+        <source>Language</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Language for menus and labels</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Debug info</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Update</source>
+        <translation type="unfinished">更新</translation>
+    </message>
+    <message>
         <source>Drift %1 is available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Agent access</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3567,6 +3686,10 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Workspace</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Workspace: portrait</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3584,6 +3707,10 @@
     </message>
     <message>
         <source>Portrait</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Theme</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -4449,12 +4576,24 @@
         <translation>选择语言</translation>
     </message>
     <message>
+        <source>Language</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Continue</source>
         <translation>继续</translation>
     </message>
     <message>
-        <source>Pick the language for menus and labels. You can change this later in Settings.</source>
-        <translation>选择菜单和标签所用的语言。之后可在设置中更改。</translation>
+        <source>Close</source>
+        <translation type="unfinished">关闭</translation>
+    </message>
+    <message>
+        <source>Language for menus and labels. Takes effect immediately.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pick the language for menus and labels. You can change this later.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -5965,58 +6104,6 @@ If playback stutters, try another.</source>
 <context>
     <name>SettingsTab</name>
     <message>
-        <source>Custom</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Video size</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Choose layout…</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Pick a platform template (YouTube, Instagram, TikTok, …) and quality</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Change the video size. Clips keep their current size and position.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Width</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Height</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Cancel crop</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Crop video size</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Drag the preview edges to change what’s included</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Changing size doesn’t shrink your clips — anything outside the new edges is cut off.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Preview guides</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enabled</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Show alignment guides over the preview</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6057,11 +6144,23 @@ If playback stutters, try another.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Enter a color like #FF0000</source>
+        <source>Video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show guides</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Blur strength</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Playback</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6070,6 +6169,18 @@ If playback stutters, try another.</source>
     </message>
     <message>
         <source>Where playback is heard. “System default” follows whatever your computer is set to, including when that changes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Interface</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>App</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6117,10 +6228,6 @@ If playback stutters, try another.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Interface scale</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>100% (system)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6130,10 +6237,6 @@ If playback stutters, try another.</source>
     </message>
     <message>
         <source>Restart Drift to apply this size.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Timeline</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6153,95 +6256,11 @@ If playback stutters, try another.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Startup</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Reopen last project on startup</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Automatically restore the last open project on startup. Closing still asks you to save; a crash snapshot never overwrites your save file.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Agent access</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Lets local agents (Cursor, Claude Code) control this editor: import media, edit the timeline, and capture frames. Any process on this computer with the token can do the same. Off at every launch. Turn it off when you are done.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable for this session</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Start a localhost MCP server. Not saved. Stops when Drift quits or you turn this off.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Listening on %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Token (shown once this session)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Copy Cursor config</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Copy an mcp.json snippet with this session’s URL and token</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Copy Claude command</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Copy a claude mcp add command for this session</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Copy stdio attach (one-time setup)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add this once to mcp.json. drift --mcp-stdio talks to whichever session is running. Agent access still has to be turned on in Drift.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Copy agent guide</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Copy workflow, conventions, and toolbox list for agents</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Pinned endpoints: /mcp/media, /mcp/timeline, /mcp/canvas, /mcp/playback, /mcp/text, /mcp/effects, /mcp/project</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Agent workflow</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>1. Enable agent access for this session.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>2. Connect Cursor or Claude with the copied config.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>3. Call catalog, then toolbox, then apply with batched ops.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>4. Use inspect({clips:true}) for clip ids; capture() to verify frames.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -8342,6 +8361,60 @@ If playback stutters, try another.</source>
     <message>
         <source>Opens the release page in your browser</source>
         <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>VideoSizeControls</name>
+    <message>
+        <source>Custom</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose layout…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pick a platform template (YouTube, Instagram, TikTok, …) and quality</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change the video size. Clips keep their current size and position.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Width</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Height</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel crop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Crop video size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Drag the preview edges to change what’s included</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Changing size doesn’t shrink your clips — anything outside the new edges is cut off.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>VideoSizeDialog</name>
+    <message>
+        <source>Video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">关闭</translation>
     </message>
 </context>
 </TS>

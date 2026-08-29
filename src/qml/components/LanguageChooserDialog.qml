@@ -2,34 +2,53 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Drift
 
-// First launch after install: pick an interface language before the rest of startup.
-// English is selected by default. Settings keeps the same list for later changes.
+// First launch after install, and the header Language button afterwards.
+// English is selected by default on first launch. The header reopens the same
+// list (including System default) so Settings does not have to host a dropdown.
 ThemedDialog {
     id: root
 
-    title: qsTr("Choose your language")
+    title: fromHeader ? qsTr("Language") : qsTr("Choose your language")
     acceptText: qsTr("Continue")
-    showReject: false
+    rejectText: qsTr("Close")
+    showAccept: !fromHeader
+    showReject: fromHeader
     preferredWidth: Theme.dialogWidthSm
-    closePolicy: Popup.NoAutoClose
+    closePolicy: fromHeader ? Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                            : Popup.NoAutoClose
 
     property string selectedId: "en"
+    // Header reopen vs the blocking first-launch prompt. Separate instances
+    // (Main vs EditorHeader) so closing the header picker cannot resume startup.
+    property bool fromHeader: false
 
-    function openChooser() {
-        selectedId = "en"
-        const langs = chooserLanguages
+    function selectId(id) {
+        selectedId = id
+        const langs = pickerLanguages
         for (let i = 0; i < langs.length; ++i) {
-            if (langs[i].id === "en") {
+            if (langs[i].id === id) {
                 languageList.currentIndex = i
                 languageList.positionViewAtIndex(i, ListView.Contain)
-                break
+                return
             }
         }
+        languageList.currentIndex = 0
+    }
+
+    function openChooser() {
+        fromHeader = false
+        selectId("en")
         open()
     }
 
-    // Concrete languages only — "System default" stays a Settings option. First launch
-    // always writes an explicit code (English unless the user picks another).
+    function openFromHeader() {
+        fromHeader = true
+        selectId(EditorState.uiLanguage)
+        open()
+    }
+
+    // Concrete languages only — "System default" is a later choice from the header
+    // (desktop) or Settings (Android). First launch always writes an explicit code.
     readonly property var chooserLanguages: {
         const all = EditorState.uiLanguages
         const out = []
@@ -40,7 +59,13 @@ ThemedDialog {
         return out
     }
 
-    onAccepted: EditorState.chooseUiLanguage(selectedId)
+    readonly property var pickerLanguages: fromHeader ? EditorState.uiLanguages
+                                                       : chooserLanguages
+
+    onAccepted: {
+        if (!fromHeader)
+            EditorState.chooseUiLanguage(selectedId)
+    }
 
     contentItem: Column {
         spacing: Theme.spacingXl
@@ -50,7 +75,9 @@ ThemedDialog {
             width: parent.width
             size: "sm"
             wrapMode: Text.WordWrap
-            text: qsTr("Pick the language for menus and labels. You can change this later in Settings.")
+            text: root.fromHeader
+                  ? qsTr("Language for menus and labels. Takes effect immediately.")
+                  : qsTr("Pick the language for menus and labels. You can change this later.")
         }
 
         Rectangle {
@@ -68,7 +95,7 @@ ThemedDialog {
                 anchors.fill: parent
                 anchors.margins: 1
                 clip: true
-                model: root.chooserLanguages
+                model: root.pickerLanguages
                 interactive: contentHeight > height
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: AppScrollBar { }
@@ -126,8 +153,10 @@ ThemedDialog {
                     onClicked: {
                         root.selectedId = modelData.id
                         // Apply now so the dialog (and the rest of the UI) switches
-                        // before Continue — same live retranslate as Settings.
+                        // before Continue — same live retranslate as the header.
                         EditorState.uiLanguage = modelData.id
+                        if (root.fromHeader)
+                            root.close()
                     }
                 }
             }

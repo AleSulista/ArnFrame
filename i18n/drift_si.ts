@@ -227,6 +227,101 @@
     </message>
 </context>
 <context>
+    <name>AgentAccessDialog</name>
+    <message>
+        <source>Agent access</source>
+        <translation type="unfinished">නියෝජිත (Agent) ප්‍රවේශය</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">වසන්න</translation>
+    </message>
+    <message>
+        <source>Let Cursor or Claude edit this project for you — add clips, change the timeline, and check how it looks. Only programs on this computer. Starts off each time you open Drift; turn it off when you finish.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow for this session</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allows an assistant on this computer to edit this project until you turn it off or quit.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Turn this on, then copy the setup for Cursor or Claude and paste it into that app.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Access is on</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy the setup for the assistant you use. You only need one.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy for Cursor</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy a setup snippet to paste into Cursor</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copied for Cursor</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy for Claude</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy a command to paste into Claude Code</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copied for Claude</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste that into the assistant. To help it use this editor, copy the how-to next and paste it into the chat.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy a how-to for the agent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A short list of what the agent can do here — paste it into the chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copied how-to</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>More options</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>For a different assistant, copy a one-time setup. The address and key are already in the Cursor and Claude copies above.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy one-time setup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add this once to the assistant’s config. Access still has to be turned on here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copied one-time setup</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>AndroidAddMenu</name>
     <message>
         <source>Add to timeline</source>
@@ -3520,6 +3615,10 @@
         <translation>නොසුරකින ලද වෙනස්කම් — මාරු වීමට හෝ අලුතින් ආරම්භ කිරීමට ක්ලික් කරන්න</translation>
     </message>
     <message>
+        <source>Save</source>
+        <translation type="unfinished">සුරකින්න</translation>
+    </message>
+    <message>
         <source>Save project (%1)</source>
         <translation>ව්‍යාපෘතිය සුරකින්න (%1)</translation>
     </message>
@@ -3528,16 +3627,20 @@
         <translation>ව්‍යාපෘතිය සුරකින්න</translation>
     </message>
     <message>
-        <source>Agent access is on</source>
-        <translation>නියෝජිත ප්‍රවේශය ක්‍රියාත්මකයි</translation>
+        <source>Video</source>
+        <translation type="unfinished">වීඩියෝ</translation>
+    </message>
+    <message>
+        <source>Video size and layout</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Agent</source>
         <translation>නියෝජිතයා</translation>
     </message>
     <message>
-        <source>Agent access is on — localhost MCP is listening. Turn it off in Settings when you are done.</source>
-        <translation>නියෝජිත ප්‍රවේශය ක්‍රියාත්මකයි — localhost MCP සවන් දෙමින් පවතී. ඔබ අවසන් වූ පසු සැකසීම් වෙතින් එය අක්‍රිය කරන්න.</translation>
+        <source>Agent access is on</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Recommended packs and updates</source>
@@ -3548,12 +3651,28 @@
         <translation>අමතර අංග</translation>
     </message>
     <message>
+        <source>Language</source>
+        <translation type="unfinished">භාෂාව</translation>
+    </message>
+    <message>
+        <source>Language for menus and labels</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Debug info</source>
         <translation>දෝෂහරණ තොරතුරු</translation>
     </message>
     <message>
+        <source>Update</source>
+        <translation type="unfinished">යාවත්කාලීන කරන්න</translation>
+    </message>
+    <message>
         <source>Drift %1 is available</source>
         <translation>Drift %1 ලබාගත හැක</translation>
+    </message>
+    <message>
+        <source>Agent access</source>
+        <translation type="unfinished">නියෝජිත (Agent) ප්‍රවේශය</translation>
     </message>
     <message>
         <source>Export in progress (%1%) — click to view</source>
@@ -3576,6 +3695,10 @@
         <translation>බහු කැමරා</translation>
     </message>
     <message>
+        <source>Workspace</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Workspace: portrait</source>
         <translation>වැඩබිම: සිරස් (portrait)</translation>
     </message>
@@ -3594,6 +3717,10 @@
     <message>
         <source>Portrait</source>
         <translation>සිරස් (Portrait)</translation>
+    </message>
+    <message>
+        <source>Theme</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Switch to light mode</source>
@@ -4459,12 +4586,24 @@
         <translation>ඔබේ භාෂාව තෝරන්න</translation>
     </message>
     <message>
+        <source>Language</source>
+        <translation type="unfinished">භාෂාව</translation>
+    </message>
+    <message>
         <source>Continue</source>
         <translation>ඉදිරියට</translation>
     </message>
     <message>
-        <source>Pick the language for menus and labels. You can change this later in Settings.</source>
-        <translation>මෙනු සහ ලේබල් සඳහා භාෂාව තෝරන්න. පසුව සැකසුම් තුළ වෙනස් කළ හැක.</translation>
+        <source>Close</source>
+        <translation type="unfinished">වසන්න</translation>
+    </message>
+    <message>
+        <source>Language for menus and labels. Takes effect immediately.</source>
+        <translation type="unfinished">මෙනු සහ ලේබල් සඳහා භාෂාව. වහාම බලපැවැත්වේ.</translation>
+    </message>
+    <message>
+        <source>Pick the language for menus and labels. You can change this later.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -5982,58 +6121,6 @@ If playback stutters, try another.</source>
 <context>
     <name>SettingsTab</name>
     <message>
-        <source>Custom</source>
-        <translation>අභිරුචි</translation>
-    </message>
-    <message>
-        <source>Video size</source>
-        <translation>වීඩියෝ ප්‍රමාණය</translation>
-    </message>
-    <message>
-        <source>Choose layout…</source>
-        <translation>පිරිසැලසුම තෝරන්න…</translation>
-    </message>
-    <message>
-        <source>Pick a platform template (YouTube, Instagram, TikTok, …) and quality</source>
-        <translation>වේදිකා ආකෘතියක් (YouTube, Instagram, TikTok, …) සහ ගුණාත්මකභාවය තෝරන්න</translation>
-    </message>
-    <message>
-        <source>Change the video size. Clips keep their current size and position.</source>
-        <translation>වීඩියෝ ප්‍රමාණය වෙනස් කරන්න. ක්ලිප් ඒවායේ වත්මන් ප්‍රමාණය සහ පිහිටීම රඳවා ගනී.</translation>
-    </message>
-    <message>
-        <source>Width</source>
-        <translation>පළල</translation>
-    </message>
-    <message>
-        <source>Height</source>
-        <translation>උස</translation>
-    </message>
-    <message>
-        <source>Cancel crop</source>
-        <translation>කප්පාදුව අවලංගු කරන්න</translation>
-    </message>
-    <message>
-        <source>Crop video size</source>
-        <translation>වීඩියෝ ප්‍රමාණය කප්පාදු කරන්න</translation>
-    </message>
-    <message>
-        <source>Drag the preview edges to change what’s included</source>
-        <translation>ඇතුළත් වන දේ වෙනස් කිරීමට පෙරදසුනේ දාර අදින්න</translation>
-    </message>
-    <message>
-        <source>Changing size doesn’t shrink your clips — anything outside the new edges is cut off.</source>
-        <translation>ප්‍රමාණය වෙනස් කිරීමෙන් ඔබේ ක්ලිප් හැකිලෙන්නේ නැත — නව දාරවලින් පිටත ඇති සියල්ල කපා හැරේ.</translation>
-    </message>
-    <message>
-        <source>Preview guides</source>
-        <translation>පෙරදසුන් මඟපෙන්වීම්</translation>
-    </message>
-    <message>
-        <source>Enabled</source>
-        <translation>ක්‍රියාත්මකයි</translation>
-    </message>
-    <message>
         <source>Show alignment guides over the preview</source>
         <translation>පෙරදසුන මත පෙළගැස්වීමේ මඟපෙන්වුම් රේඛා පෙන්වන්න</translation>
     </message>
@@ -6074,12 +6161,24 @@ If playback stutters, try another.</source>
         <translation>පසුබිම් වර්ණය තෝරන්න</translation>
     </message>
     <message>
-        <source>Enter a color like #FF0000</source>
-        <translation>#FF0000 වැනි වර්ණ කේතයක් ඇතුළත් කරන්න</translation>
+        <source>Video</source>
+        <translation type="unfinished">වීඩියෝ</translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation type="unfinished">පෙරදසුන</translation>
+    </message>
+    <message>
+        <source>Show guides</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Blur strength</source>
         <translation>බොඳ කිරීමේ ප්‍රබලතාව</translation>
+    </message>
+    <message>
+        <source>Playback</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Audio output</source>
@@ -6088,6 +6187,18 @@ If playback stutters, try another.</source>
     <message>
         <source>Where playback is heard. “System default” follows whatever your computer is set to, including when that changes.</source>
         <translation>ධාවනය ඇසෙන ස්ථානය. “පද්ධති පෙරනිමිය” ඔබේ පරිගණකය සකසා ඇති ඕනෑම දෙයක් අනුගමනය කරයි (එය වෙනස් වන විටද ඇතුළුව).</translation>
+    </message>
+    <message>
+        <source>Interface</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Size</source>
+        <translation type="unfinished">ප්‍රමාණය</translation>
+    </message>
+    <message>
+        <source>App</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Updates</source>
@@ -6134,10 +6245,6 @@ If playback stutters, try another.</source>
         <translation>ඔබ දැනටමත් ස්ථාපනය කර ඇති පැකේජ සඳහා යාවත්කාලීන ඇති විට අමතර අංග අයිකනය ස්පන්දනය කරන්න</translation>
     </message>
     <message>
-        <source>Interface scale</source>
-        <translation>අතුරුමුහුණත් පරිමාණය</translation>
-    </message>
-    <message>
         <source>100% (system)</source>
         <translation>100% (පද්ධතිය)</translation>
     </message>
@@ -6148,10 +6255,6 @@ If playback stutters, try another.</source>
     <message>
         <source>Restart Drift to apply this size.</source>
         <translation>මෙම ප්‍රමාණය යෙදීමට Drift නැවත ආරම්භ කරන්න.</translation>
-    </message>
-    <message>
-        <source>Timeline</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Horizontal mouse-wheel pan</source>
@@ -6170,96 +6273,12 @@ If playback stutters, try another.</source>
         <translation>මෙනු සහ ලේබල් සඳහා භාෂාව. වහාම බලපැවැත්වේ.</translation>
     </message>
     <message>
-        <source>Startup</source>
-        <translation>ආරම්භය</translation>
-    </message>
-    <message>
         <source>Reopen last project on startup</source>
         <translation>ආරම්භයේදී අවසන් ව්‍යාපෘතිය නැවත විවෘත කරන්න</translation>
     </message>
     <message>
         <source>Automatically restore the last open project on startup. Closing still asks you to save; a crash snapshot never overwrites your save file.</source>
         <translation>අවසන් වරට විවෘත කළ ව්‍යාපෘතිය ආරම්භයේදී ස්වයංක්‍රීයව ප්‍රතිසාධනය කරන්න. වසා දැමීමේදී තවමත් සුරැකීමට ඇසෙනු ඇත; බිඳවැටුම් පිටපතක් කිසි විටෙකත් ඔබේ සුරැකි ගොනුව මත ලියවෙන්නේ නැත.</translation>
-    </message>
-    <message>
-        <source>Agent access</source>
-        <translation>නියෝජිත (Agent) ප්‍රවේශය</translation>
-    </message>
-    <message>
-        <source>Lets local agents (Cursor, Claude Code) control this editor: import media, edit the timeline, and capture frames. Any process on this computer with the token can do the same. Off at every launch. Turn it off when you are done.</source>
-        <translation>දේශීය නියෝජිතයින්ට (Cursor, Claude Code) මෙම සංස්කාරකය පාලනය කිරීමට ඉඩ දෙයි: මාධ්‍ය ආයාත කිරීම, කාලරේඛාව සංස්කරණය කිරීම සහ රාමු ග්‍රහණය කිරීම. ටෝකනය සහිත මෙම පරිගණකයේ ඕනෑම ක්‍රියාවලියකට ද මෙය කළ හැක. සෑම ආරම්භයකදීම අක්‍රිය වේ. ඔබ අවසන් වූ පසු එය අක්‍රිය කරන්න.</translation>
-    </message>
-    <message>
-        <source>Enable for this session</source>
-        <translation>මෙම සැසිය සඳහා සක්‍රීය කරන්න</translation>
-    </message>
-    <message>
-        <source>Start a localhost MCP server. Not saved. Stops when Drift quits or you turn this off.</source>
-        <translation>Localhost MCP සේවාදායකයක් ආරම්භ කරන්න. සුරැකෙන්නේ නැත. Drift වැසූ විට හෝ ඔබ මෙය අක්‍රිය කළ විට නතර වේ.</translation>
-    </message>
-    <message>
-        <source>Listening on %1</source>
-        <translation>%1 හි සවන් දෙමින් පවතී</translation>
-    </message>
-    <message>
-        <source>Token (shown once this session)</source>
-        <translation>ටෝකනය (මෙම සැසියේ එක් වරක් පමණක් පෙන්වයි)</translation>
-    </message>
-    <message>
-        <source>Copy Cursor config</source>
-        <translation>Cursor වින්‍යාසය පිටපත් කරන්න</translation>
-    </message>
-    <message>
-        <source>Copy an mcp.json snippet with this session’s URL and token</source>
-        <translation>මෙම සැසියේ URL සහ ටෝකනය සමඟ mcp.json කොටස පිටපත් කරන්න</translation>
-    </message>
-    <message>
-        <source>Copy Claude command</source>
-        <translation>Claude විධානය පිටපත් කරන්න</translation>
-    </message>
-    <message>
-        <source>Copy a claude mcp add command for this session</source>
-        <translation>මෙම සැසිය සඳහා claude mcp add විධානය පිටපත් කරන්න</translation>
-    </message>
-    <message>
-        <source>Copy stdio attach (one-time setup)</source>
-        <translation>stdio attach පිටපත් කරන්න (එක් වරක් සැකසීම)</translation>
-    </message>
-    <message>
-        <source>Add this once to mcp.json. drift --mcp-stdio talks to whichever session is running. Agent access still has to be turned on in Drift.</source>
-        <translation>මෙය mcp.json වෙත එක් වරක් එක් කරන්න. drift --mcp-stdio ධාවනය වන ඕනෑම සැසියක් සමඟ සන්නිවේදනය කරයි. Drift හි නියෝජිත ප්‍රවේශය තවමත් සක්‍රීය කර තිබිය යුතුය.</translation>
-    </message>
-    <message>
-        <source>Copy agent guide</source>
-        <translation>නියෝජිත මඟපෙන්වීම පිටපත් කරන්න</translation>
-    </message>
-    <message>
-        <source>Copy workflow, conventions, and toolbox list for agents</source>
-        <translation>නියෝජිතයින් සඳහා කාර්ය ප්‍රවාහය, සම්මුතීන් සහ මෙවලම් ලැයිස්තුව පිටපත් කරන්න</translation>
-    </message>
-    <message>
-        <source>Pinned endpoints: /mcp/media, /mcp/timeline, /mcp/canvas, /mcp/playback, /mcp/text, /mcp/effects, /mcp/project</source>
-        <translation>ඇමිණූ අන්ත ලක්ෂ්‍ය: /mcp/media, /mcp/timeline, /mcp/canvas, /mcp/playback, /mcp/text, /mcp/effects, /mcp/project</translation>
-    </message>
-    <message>
-        <source>Agent workflow</source>
-        <translation>නියෝජිත කාර්ය ප්‍රවාහය</translation>
-    </message>
-    <message>
-        <source>1. Enable agent access for this session.</source>
-        <translation>1. මෙම සැසිය සඳහා නියෝජිත ප්‍රවේශය සක්‍රීය කරන්න.</translation>
-    </message>
-    <message>
-        <source>2. Connect Cursor or Claude with the copied config.</source>
-        <translation>2. පිටපත් කළ වින්‍යාසය සමඟ Cursor හෝ Claude සම්බන්ධ කරන්න.</translation>
-    </message>
-    <message>
-        <source>3. Call catalog, then toolbox, then apply with batched ops.</source>
-        <translation>3. catalog, පසුව toolbox අමතන්න, අනතුරුව batched ops සමඟ යොදන්න.</translation>
-    </message>
-    <message>
-        <source>4. Use inspect({clips:true}) for clip ids; capture() to verify frames.</source>
-        <translation>4. ක්ලිප් හැඳුනුම්පත් සඳහා inspect({clips:true}) භාවිත කරන්න; රාමු තහවුරු කිරීමට capture() භාවිත කරන්න.</translation>
     </message>
 </context>
 <context>
@@ -8361,6 +8380,60 @@ If playback stutters, try another.</source>
     <message>
         <source>Opens the release page in your browser</source>
         <translation>ඔබේ බ්‍රවුසරයේ නිකුතු පිටුව විවෘත කරයි</translation>
+    </message>
+</context>
+<context>
+    <name>VideoSizeControls</name>
+    <message>
+        <source>Custom</source>
+        <translation type="unfinished">අභිරුචි</translation>
+    </message>
+    <message>
+        <source>Choose layout…</source>
+        <translation type="unfinished">පිරිසැලසුම තෝරන්න…</translation>
+    </message>
+    <message>
+        <source>Pick a platform template (YouTube, Instagram, TikTok, …) and quality</source>
+        <translation type="unfinished">වේදිකා ආකෘතියක් (YouTube, Instagram, TikTok, …) සහ ගුණාත්මකභාවය තෝරන්න</translation>
+    </message>
+    <message>
+        <source>Change the video size. Clips keep their current size and position.</source>
+        <translation type="unfinished">වීඩියෝ ප්‍රමාණය වෙනස් කරන්න. ක්ලිප් ඒවායේ වත්මන් ප්‍රමාණය සහ පිහිටීම රඳවා ගනී.</translation>
+    </message>
+    <message>
+        <source>Width</source>
+        <translation type="unfinished">පළල</translation>
+    </message>
+    <message>
+        <source>Height</source>
+        <translation type="unfinished">උස</translation>
+    </message>
+    <message>
+        <source>Cancel crop</source>
+        <translation type="unfinished">කප්පාදුව අවලංගු කරන්න</translation>
+    </message>
+    <message>
+        <source>Crop video size</source>
+        <translation type="unfinished">වීඩියෝ ප්‍රමාණය කප්පාදු කරන්න</translation>
+    </message>
+    <message>
+        <source>Drag the preview edges to change what’s included</source>
+        <translation type="unfinished">ඇතුළත් වන දේ වෙනස් කිරීමට පෙරදසුනේ දාර අදින්න</translation>
+    </message>
+    <message>
+        <source>Changing size doesn’t shrink your clips — anything outside the new edges is cut off.</source>
+        <translation type="unfinished">ප්‍රමාණය වෙනස් කිරීමෙන් ඔබේ ක්ලිප් හැකිලෙන්නේ නැත — නව දාරවලින් පිටත ඇති සියල්ල කපා හැරේ.</translation>
+    </message>
+</context>
+<context>
+    <name>VideoSizeDialog</name>
+    <message>
+        <source>Video</source>
+        <translation type="unfinished">වීඩියෝ</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">වසන්න</translation>
     </message>
 </context>
 </TS>

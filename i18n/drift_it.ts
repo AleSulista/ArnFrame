@@ -227,6 +227,101 @@
     </message>
 </context>
 <context>
+    <name>AgentAccessDialog</name>
+    <message>
+        <source>Agent access</source>
+        <translation type="unfinished">Accesso agente</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">Chiudi</translation>
+    </message>
+    <message>
+        <source>Let Cursor or Claude edit this project for you — add clips, change the timeline, and check how it looks. Only programs on this computer. Starts off each time you open Drift; turn it off when you finish.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow for this session</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allows an assistant on this computer to edit this project until you turn it off or quit.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Turn this on, then copy the setup for Cursor or Claude and paste it into that app.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Access is on</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy the setup for the assistant you use. You only need one.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy for Cursor</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy a setup snippet to paste into Cursor</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copied for Cursor</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy for Claude</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy a command to paste into Claude Code</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copied for Claude</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste that into the assistant. To help it use this editor, copy the how-to next and paste it into the chat.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy a how-to for the agent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A short list of what the agent can do here — paste it into the chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copied how-to</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>More options</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>For a different assistant, copy a one-time setup. The address and key are already in the Cursor and Claude copies above.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy one-time setup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add this once to the assistant’s config. Access still has to be turned on here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copied one-time setup</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>AndroidAddMenu</name>
     <message>
         <source>Add to timeline</source>
@@ -3520,6 +3615,10 @@
         <translation>Modifiche non salvate — fai clic per passare a un altro o avviarne uno nuovo</translation>
     </message>
     <message>
+        <source>Save</source>
+        <translation type="unfinished">Salva</translation>
+    </message>
+    <message>
         <source>Save project (%1)</source>
         <translation>Salva progetto (%1)</translation>
     </message>
@@ -3528,16 +3627,20 @@
         <translation>Salva progetto</translation>
     </message>
     <message>
-        <source>Agent access is on</source>
-        <translation>L&apos;accesso agente è attivo</translation>
+        <source>Video</source>
+        <translation type="unfinished">Video</translation>
+    </message>
+    <message>
+        <source>Video size and layout</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Agent</source>
         <translation>Agente</translation>
     </message>
     <message>
-        <source>Agent access is on — localhost MCP is listening. Turn it off in Settings when you are done.</source>
-        <translation>L&apos;accesso agente è attivo — MCP localhost è in ascolto. Disattivalo nelle Impostazioni quando hai finito.</translation>
+        <source>Agent access is on</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Recommended packs and updates</source>
@@ -3548,12 +3651,28 @@
         <translation>Extra</translation>
     </message>
     <message>
+        <source>Language</source>
+        <translation type="unfinished">Lingua</translation>
+    </message>
+    <message>
+        <source>Language for menus and labels</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Debug info</source>
         <translation>Informazioni di debug</translation>
     </message>
     <message>
+        <source>Update</source>
+        <translation type="unfinished">Aggiorna</translation>
+    </message>
+    <message>
         <source>Drift %1 is available</source>
         <translation>Drift %1 è disponibile</translation>
+    </message>
+    <message>
+        <source>Agent access</source>
+        <translation type="unfinished">Accesso agente</translation>
     </message>
     <message>
         <source>Export in progress (%1%) — click to view</source>
@@ -3576,6 +3695,10 @@
         <translation>Multicam</translation>
     </message>
     <message>
+        <source>Workspace</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Workspace: portrait</source>
         <translation>Spazio di lavoro: verticale</translation>
     </message>
@@ -3594,6 +3717,10 @@
     <message>
         <source>Portrait</source>
         <translation>Verticale</translation>
+    </message>
+    <message>
+        <source>Theme</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Switch to light mode</source>
@@ -4459,12 +4586,24 @@
         <translation>Scegli la lingua</translation>
     </message>
     <message>
+        <source>Language</source>
+        <translation type="unfinished">Lingua</translation>
+    </message>
+    <message>
         <source>Continue</source>
         <translation>Continua</translation>
     </message>
     <message>
-        <source>Pick the language for menus and labels. You can change this later in Settings.</source>
-        <translation>Scegli la lingua di menu ed etichette. Puoi cambiarla più tardi in Impostazioni.</translation>
+        <source>Close</source>
+        <translation type="unfinished">Chiudi</translation>
+    </message>
+    <message>
+        <source>Language for menus and labels. Takes effect immediately.</source>
+        <translation type="unfinished">Lingua per menu ed etichette. Ha effetto immediato.</translation>
+    </message>
+    <message>
+        <source>Pick the language for menus and labels. You can change this later.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -5982,58 +6121,6 @@ Se la riproduzione va a scatti, prova un&apos;altra opzione.</translation>
 <context>
     <name>SettingsTab</name>
     <message>
-        <source>Custom</source>
-        <translation>Personalizzato</translation>
-    </message>
-    <message>
-        <source>Video size</source>
-        <translation>Dimensioni video</translation>
-    </message>
-    <message>
-        <source>Choose layout…</source>
-        <translation>Scegli layout…</translation>
-    </message>
-    <message>
-        <source>Pick a platform template (YouTube, Instagram, TikTok, …) and quality</source>
-        <translation>Scegli un modello di piattaforma (YouTube, Instagram, TikTok, …) e la qualità</translation>
-    </message>
-    <message>
-        <source>Change the video size. Clips keep their current size and position.</source>
-        <translation>Modifica le dimensioni video. Le clip mantengono le loro dimensioni e posizioni attuali.</translation>
-    </message>
-    <message>
-        <source>Width</source>
-        <translation>Larghezza</translation>
-    </message>
-    <message>
-        <source>Height</source>
-        <translation>Altezza</translation>
-    </message>
-    <message>
-        <source>Cancel crop</source>
-        <translation>Annulla ritaglio quadro</translation>
-    </message>
-    <message>
-        <source>Crop video size</source>
-        <translation>Ritaglia dimensioni video</translation>
-    </message>
-    <message>
-        <source>Drag the preview edges to change what’s included</source>
-        <translation>Trascina i bordi dell&apos;anteprima per modificare cosa includere</translation>
-    </message>
-    <message>
-        <source>Changing size doesn’t shrink your clips — anything outside the new edges is cut off.</source>
-        <translation>La modifica delle dimensioni non riduce le clip: tutto ciò che si trova all&apos;esterno dei nuovi bordi viene tagliato.</translation>
-    </message>
-    <message>
-        <source>Preview guides</source>
-        <translation>Guide di anteprima</translation>
-    </message>
-    <message>
-        <source>Enabled</source>
-        <translation>Abilitato</translation>
-    </message>
-    <message>
         <source>Show alignment guides over the preview</source>
         <translation>Mostra le guide di allineamento sull&apos;anteprima</translation>
     </message>
@@ -6074,12 +6161,24 @@ Se la riproduzione va a scatti, prova un&apos;altra opzione.</translation>
         <translation>Scegli colore di sfondo</translation>
     </message>
     <message>
-        <source>Enter a color like #FF0000</source>
-        <translation>Inserisci un colore come #FF0000</translation>
+        <source>Video</source>
+        <translation type="unfinished">Video</translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation type="unfinished">Anteprima</translation>
+    </message>
+    <message>
+        <source>Show guides</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Blur strength</source>
         <translation>Intensità sfocatura</translation>
+    </message>
+    <message>
+        <source>Playback</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Audio output</source>
@@ -6088,6 +6187,18 @@ Se la riproduzione va a scatti, prova un&apos;altra opzione.</translation>
     <message>
         <source>Where playback is heard. “System default” follows whatever your computer is set to, including when that changes.</source>
         <translation>Dispositivo di ascolto della riproduzione. “Predefinito di sistema” segue le impostazioni del computer, anche in caso di modifica.</translation>
+    </message>
+    <message>
+        <source>Interface</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Size</source>
+        <translation type="unfinished">Dimensione</translation>
+    </message>
+    <message>
+        <source>App</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Updates</source>
@@ -6134,10 +6245,6 @@ Se la riproduzione va a scatti, prova un&apos;altra opzione.</translation>
         <translation>Fai pulsare l&apos;icona Extra quando sono disponibili aggiornamenti per i pacchetti già installati</translation>
     </message>
     <message>
-        <source>Interface scale</source>
-        <translation>Scala dell&apos;interfaccia</translation>
-    </message>
-    <message>
         <source>100% (system)</source>
         <translation>100% (sistema)</translation>
     </message>
@@ -6148,10 +6255,6 @@ Se la riproduzione va a scatti, prova un&apos;altra opzione.</translation>
     <message>
         <source>Restart Drift to apply this size.</source>
         <translation>Riavvia Drift per applicare questa dimensione.</translation>
-    </message>
-    <message>
-        <source>Timeline</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Horizontal mouse-wheel pan</source>
@@ -6170,96 +6273,12 @@ Se la riproduzione va a scatti, prova un&apos;altra opzione.</translation>
         <translation>Lingua per menu ed etichette. Ha effetto immediato.</translation>
     </message>
     <message>
-        <source>Startup</source>
-        <translation>Avvio</translation>
-    </message>
-    <message>
         <source>Reopen last project on startup</source>
         <translation>Riapri l&apos;ultimo progetto all&apos;avvio</translation>
     </message>
     <message>
         <source>Automatically restore the last open project on startup. Closing still asks you to save; a crash snapshot never overwrites your save file.</source>
         <translation>Ripristina automaticamente l&apos;ultimo progetto aperto all&apos;avvio. La chiusura chiederà comunque di salvare; un&apos;istantanea di crash non sovrascrive mai il file salvato.</translation>
-    </message>
-    <message>
-        <source>Agent access</source>
-        <translation>Accesso agente</translation>
-    </message>
-    <message>
-        <source>Lets local agents (Cursor, Claude Code) control this editor: import media, edit the timeline, and capture frames. Any process on this computer with the token can do the same. Off at every launch. Turn it off when you are done.</source>
-        <translation>Consente agli agenti locali (Cursor, Claude Code) di controllare questo editor: importare elementi multimediali, modificare la timeline e catturare fotogrammi. Qualsiasi processo su questo computer dotato del token può fare altrettanto. Disattivato a ogni avvio. Disattivalo al termine.</translation>
-    </message>
-    <message>
-        <source>Enable for this session</source>
-        <translation>Abilita per questa sessione</translation>
-    </message>
-    <message>
-        <source>Start a localhost MCP server. Not saved. Stops when Drift quits or you turn this off.</source>
-        <translation>Avvia un server MCP su localhost. Non viene salvato. Si arresta alla chiusura di Drift o alla disattivazione manuale.</translation>
-    </message>
-    <message>
-        <source>Listening on %1</source>
-        <translation>In ascolto su %1</translation>
-    </message>
-    <message>
-        <source>Token (shown once this session)</source>
-        <translation>Token (mostrato una sola volta per questa sessione)</translation>
-    </message>
-    <message>
-        <source>Copy Cursor config</source>
-        <translation>Copia configurazione Cursor</translation>
-    </message>
-    <message>
-        <source>Copy an mcp.json snippet with this session’s URL and token</source>
-        <translation>Copia uno snippet mcp.json con l&apos;URL e il token di questa sessione</translation>
-    </message>
-    <message>
-        <source>Copy Claude command</source>
-        <translation>Copia comando Claude</translation>
-    </message>
-    <message>
-        <source>Copy a claude mcp add command for this session</source>
-        <translation>Copia un comando claude mcp add per questa sessione</translation>
-    </message>
-    <message>
-        <source>Copy stdio attach (one-time setup)</source>
-        <translation>Copia collegamento stdio (configurazione una tantum)</translation>
-    </message>
-    <message>
-        <source>Add this once to mcp.json. drift --mcp-stdio talks to whichever session is running. Agent access still has to be turned on in Drift.</source>
-        <translation>Aggiungi questo una sola volta a mcp.json. drift --mcp-stdio comunica con qualsiasi sessione in esecuzione. L&apos;accesso agente deve comunque essere abilitato in Drift.</translation>
-    </message>
-    <message>
-        <source>Copy agent guide</source>
-        <translation>Copia guida per agenti</translation>
-    </message>
-    <message>
-        <source>Copy workflow, conventions, and toolbox list for agents</source>
-        <translation>Copia flusso di lavoro, convenzioni ed elenco degli strumenti per gli agenti</translation>
-    </message>
-    <message>
-        <source>Pinned endpoints: /mcp/media, /mcp/timeline, /mcp/canvas, /mcp/playback, /mcp/text, /mcp/effects, /mcp/project</source>
-        <translation>Endpoint fissati: /mcp/media, /mcp/timeline, /mcp/canvas, /mcp/playback, /mcp/text, /mcp/effects, /mcp/project</translation>
-    </message>
-    <message>
-        <source>Agent workflow</source>
-        <translation>Flusso di lavoro agente</translation>
-    </message>
-    <message>
-        <source>1. Enable agent access for this session.</source>
-        <translation>1. Abilita l&apos;accesso agente per questa sessione.</translation>
-    </message>
-    <message>
-        <source>2. Connect Cursor or Claude with the copied config.</source>
-        <translation>2. Connetti Cursor o Claude con la configurazione copiata.</translation>
-    </message>
-    <message>
-        <source>3. Call catalog, then toolbox, then apply with batched ops.</source>
-        <translation>3. Richiama catalog, quindi toolbox, poi apply con operazioni raggruppate.</translation>
-    </message>
-    <message>
-        <source>4. Use inspect({clips:true}) for clip ids; capture() to verify frames.</source>
-        <translation>4. Usa inspect({clips:true}) per gli ID delle clip; capture() per verificare i fotogrammi.</translation>
     </message>
 </context>
 <context>
@@ -8361,6 +8380,60 @@ Se la riproduzione va a scatti, prova un&apos;altra opzione.</translation>
     <message>
         <source>Opens the release page in your browser</source>
         <translation>Apre la pagina di rilascio nel browser</translation>
+    </message>
+</context>
+<context>
+    <name>VideoSizeControls</name>
+    <message>
+        <source>Custom</source>
+        <translation type="unfinished">Personalizzato</translation>
+    </message>
+    <message>
+        <source>Choose layout…</source>
+        <translation type="unfinished">Scegli layout…</translation>
+    </message>
+    <message>
+        <source>Pick a platform template (YouTube, Instagram, TikTok, …) and quality</source>
+        <translation type="unfinished">Scegli un modello di piattaforma (YouTube, Instagram, TikTok, …) e la qualità</translation>
+    </message>
+    <message>
+        <source>Change the video size. Clips keep their current size and position.</source>
+        <translation type="unfinished">Modifica le dimensioni video. Le clip mantengono le loro dimensioni e posizioni attuali.</translation>
+    </message>
+    <message>
+        <source>Width</source>
+        <translation type="unfinished">Larghezza</translation>
+    </message>
+    <message>
+        <source>Height</source>
+        <translation type="unfinished">Altezza</translation>
+    </message>
+    <message>
+        <source>Cancel crop</source>
+        <translation type="unfinished">Annulla ritaglio quadro</translation>
+    </message>
+    <message>
+        <source>Crop video size</source>
+        <translation type="unfinished">Ritaglia dimensioni video</translation>
+    </message>
+    <message>
+        <source>Drag the preview edges to change what’s included</source>
+        <translation type="unfinished">Trascina i bordi dell&apos;anteprima per modificare cosa includere</translation>
+    </message>
+    <message>
+        <source>Changing size doesn’t shrink your clips — anything outside the new edges is cut off.</source>
+        <translation type="unfinished">La modifica delle dimensioni non riduce le clip: tutto ciò che si trova all&apos;esterno dei nuovi bordi viene tagliato.</translation>
+    </message>
+</context>
+<context>
+    <name>VideoSizeDialog</name>
+    <message>
+        <source>Video</source>
+        <translation type="unfinished">Video</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">Chiudi</translation>
     </message>
 </context>
 </TS>

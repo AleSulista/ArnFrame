@@ -30,6 +30,8 @@ icons=(
   # Close a timeline gap (arrows collapsing toward each other)
   chevrons-right-left
   save arrow-right-to-line arrow-left-to-line tags blend option square-dashed puzzle bug info
+  # Header: agent access, language picker, multicam
+  bot languages shuffle
   # Project bundle: package/properties entries in the project menu
   package file-text
   # Status / feedback (toasts, inline errors, empty states)

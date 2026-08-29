@@ -139,6 +139,18 @@ Rectangle {
         id: packageProgressDialog
     }
 
+    LanguageChooserDialog {
+        id: languageChooserDialog
+    }
+
+    AgentAccessDialog {
+        id: agentAccessDialog
+    }
+
+    VideoSizeDialog {
+        id: videoSizeDialog
+    }
+
     UnsavedChangesDialog {
         id: unsavedDialog
 
@@ -278,6 +290,7 @@ Rectangle {
             IconButton {
                 glyph: Theme.icons.save
                 variant: "ghost"
+                text: qsTr("Save")
                 tooltip: {
                     const keys = EditorState.shortcutFor("save")
                     return keys.length > 0 ? qsTr("Save project (%1)").arg(keys)
@@ -285,6 +298,16 @@ Rectangle {
                 }
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: root.saveProject()
+            }
+
+            IconButton {
+                glyph: Theme.icons.ratio
+                variant: "ghost"
+                text: qsTr("Video")
+                active: videoSizeDialog.visible || EditorState.canvasCropMode
+                tooltip: qsTr("Video size and layout")
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: videoSizeDialog.openDialog()
             }
         }
 
@@ -294,63 +317,115 @@ Rectangle {
             Layout.minimumWidth: 0
         }
 
-        // --- Right: global actions --------------------------------------------
+        // --- Right: appearance | extras | agent | infrequent | export ------
         Row {
             Layout.alignment: Qt.AlignVCenter
-            spacing: Theme.spacingLg
+            spacing: Theme.spacingSm
 
-            Rectangle {
-                visible: EditorState.mcpRunning
+            component HeaderSeparator: Item {
+                width: Theme.spacingLg + Theme.borderWidth
                 height: 32
-                width: mcpBadgeRow.implicitWidth + Theme.spacingXl * 2
-                radius: Theme.radiusPill
-                color: Theme.panelSecondaryBg
-                border.width: Theme.borderWidth
-                border.color: Theme.warning
                 anchors.verticalCenter: parent.verticalCenter
 
-                Accessible.role: Accessible.StaticText
-                Accessible.name: qsTr("Agent access is on")
-
-                Row {
-                    id: mcpBadgeRow
+                Rectangle {
+                    width: Theme.borderWidth
+                    height: 16
                     anchors.centerIn: parent
-                    spacing: Theme.spacingSm
-
-                    IconGlyph {
-                        glyph: Theme.icons.warning
-                        iconSize: Theme.iconSizeSm
-                        iconColor: Theme.warning
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    Text {
-                        text: qsTr("Agent")
-                        color: Theme.panelSecondaryForeground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeXs
-                        font.weight: Font.Medium
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                }
-
-                ThemedToolTip {
-                    visible: mcpBadgeHover.containsMouse
-                    text: qsTr("Agent access is on — localhost MCP is listening. Turn it off in Settings when you are done.")
-                }
-                MouseArea {
-                    id: mcpBadgeHover
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    acceptedButtons: Qt.NoButton
+                    color: Theme.panelBorder
                 }
             }
+
+            // Workspace switcher. Portrait projects default to the portrait
+            // arrangement, but the choice stays the user's: a tall canvas on an
+            // ultrawide display is still comfortable in the landscape workspace, and
+            // a portrait *display* suits the portrait one whatever the canvas is.
+            // Picking either explicitly stops the canvas from driving it; "Auto"
+            // hands it back.
+            Item {
+                id: workspaceButton
+                implicitWidth: workspaceBtn.implicitWidth
+                implicitHeight: workspaceBtn.implicitHeight
+                width: implicitWidth
+                height: implicitHeight
+                anchors.verticalCenter: parent.verticalCenter
+
+                readonly property bool portrait: {
+                    const win = root.Window.window
+                    return win ? win.portraitWorkspace : false
+                }
+
+                IconButton {
+                    id: workspaceBtn
+                    anchors.fill: parent
+                    glyph: workspaceButton.portrait ? Theme.icons.smartphone : Theme.icons.monitor
+                    variant: "ghost"
+                    text: qsTr("Workspace")
+                    active: workspaceMenu.opened
+                    tooltip: workspaceButton.portrait ? qsTr("Workspace: portrait")
+                                                      : qsTr("Workspace: landscape")
+                    onClicked: workspaceMenu.popup(0, workspaceButton.height + Theme.spacingMd)
+                }
+
+                ThemedContextMenu {
+                    id: workspaceMenu
+                    implicitWidth: 236
+
+                    // The active entry swaps its own icon for a tick rather than
+                    // adding a trailing column — every row keeps a glyph, so the
+                    // labels stay aligned.
+                    ThemedMenuItem {
+                        text: qsTr("Auto (follow canvas)")
+                        icon.name: EditorState.workspaceLayoutOverridden ? Theme.icons.grid
+                                                                         : Theme.icons.check
+                        onTriggered: EditorState.clearWorkspaceLayoutPreference()
+                    }
+
+                    ThemedMenuItem {
+                        text: qsTr("Landscape")
+                        icon.name: EditorState.workspaceLayoutOverridden
+                                   && EditorState.workspaceLayoutPreferred === "landscape"
+                                   ? Theme.icons.check : Theme.icons.monitor
+                        onTriggered: EditorState.setWorkspaceLayoutPreference("landscape")
+                    }
+
+                    ThemedMenuItem {
+                        text: qsTr("Portrait")
+                        icon.name: EditorState.workspaceLayoutOverridden
+                                   && EditorState.workspaceLayoutPreferred === "portrait"
+                                   ? Theme.icons.check : Theme.icons.smartphone
+                        onTriggered: EditorState.setWorkspaceLayoutPreference("portrait")
+                    }
+                }
+            }
+
+            IconButton {
+                glyph: Theme.darkMode ? Theme.icons.sun : Theme.icons.moon
+                variant: "ghost"
+                text: qsTr("Theme")
+                tooltip: Theme.darkMode ? qsTr("Switch to light mode") : qsTr("Switch to dark mode")
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: Theme.toggleDarkMode()
+            }
+
+            IconButton {
+                glyph: Theme.icons.languages
+                variant: "ghost"
+                text: qsTr("Language")
+                tooltip: qsTr("Language for menus and labels")
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: languageChooserDialog.openFromHeader()
+            }
+
+            HeaderSeparator {}
 
             // Extras. Pulses with a red shockwave while essential packs or updates need
             // attention — the dialog itself never opens on its own (see UpdateDialog).
             Item {
                 id: extrasButton
-                width: Theme.iconButtonSize
-                height: Theme.iconButtonSize
+                implicitWidth: extrasBtn.implicitWidth
+                implicitHeight: extrasBtn.implicitHeight
+                width: implicitWidth
+                height: implicitHeight
                 anchors.verticalCenter: parent.verticalCenter
 
                 readonly property bool attention: {
@@ -367,8 +442,8 @@ Rectangle {
                         required property int index
 
                         anchors.centerIn: parent
-                        width: extrasButton.width
-                        height: extrasButton.height
+                        width: Theme.iconButtonSize
+                        height: Theme.iconButtonSize
                         scale: 0.85
                         opacity: 0
                         visible: extrasButton.attention
@@ -411,9 +486,11 @@ Rectangle {
                 }
 
                 IconButton {
+                    id: extrasBtn
                     anchors.fill: parent
                     glyph: Theme.icons.puzzle
                     variant: "ghost"
+                    text: qsTr("Extras")
                     tooltip: extrasButton.attention
                              ? qsTr("Recommended packs and updates")
                              : qsTr("Extras")
@@ -421,31 +498,22 @@ Rectangle {
                 }
             }
 
-            // Decoder capability and host facts for bug reports.
-            IconButton {
-                glyph: Theme.icons.bug
-                variant: "ghost"
-                tooltip: qsTr("Debug info")
-                anchors.verticalCenter: parent.verticalCenter
-                onClicked: {
-                    const win = root.Window.window
-                    if (win)
-                        win.openDebugInfo()
-                }
-            }
-
             // Only exists while there is a newer release to tell the user about; the check itself
             // is silent, so this dot is the whole notification.
             Item {
-                width: Theme.iconButtonSize
-                height: Theme.iconButtonSize
+                implicitWidth: updateBtn.implicitWidth
+                implicitHeight: updateBtn.implicitHeight
+                width: implicitWidth
+                height: implicitHeight
                 anchors.verticalCenter: parent.verticalCenter
                 visible: Updates.updateAvailable
 
                 IconButton {
+                    id: updateBtn
                     anchors.fill: parent
                     glyph: Theme.icons.download
                     variant: "ghost"
+                    text: qsTr("Update")
                     tooltip: qsTr("Drift %1 is available").arg(Updates.latestVersion)
                     onClicked: root.Window.window.openUpdateDialog()
                 }
@@ -462,6 +530,49 @@ Rectangle {
                     anchors.margins: 3
                 }
             }
+
+            HeaderSeparator {}
+
+            IconButton {
+                glyph: Theme.icons.bot
+                variant: "ghost"
+                text: qsTr("Agent")
+                active: EditorState.mcpRunning
+                tooltip: EditorState.mcpRunning
+                         ? qsTr("Agent access is on")
+                         : qsTr("Agent access")
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: agentAccessDialog.openDialog()
+            }
+
+            HeaderSeparator {}
+
+            // Infrequent tools, icon-only, kept off the main labeled cluster.
+            IconButton {
+                glyph: Theme.icons.shuffle
+                variant: "ghost"
+                tooltip: qsTr("Multicam")
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: {
+                    const win = root.Window.window
+                    if (win)
+                        win.openMulticam()
+                }
+            }
+
+            IconButton {
+                glyph: Theme.icons.bug
+                variant: "ghost"
+                tooltip: qsTr("Debug info")
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: {
+                    const win = root.Window.window
+                    if (win)
+                        win.openDebugInfo()
+                }
+            }
+
+            HeaderSeparator {}
 
             Rectangle {
                 id: exportProgressBadge
@@ -594,87 +705,6 @@ Rectangle {
                     cursorShape: exportButton.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
                     onClicked: if (!exportButton.busy) root.exportVideo()
                 }
-            }
-
-            // Multicam. A separate window rather than a panel, so switching cameras never costs
-            // the editor any of the space it already has.
-            IconButton {
-                glyph: Theme.icons.grid
-                variant: "ghost"
-                tooltip: qsTr("Multicam")
-                anchors.verticalCenter: parent.verticalCenter
-                onClicked: {
-                    const win = root.Window.window
-                    if (win)
-                        win.openMulticam()
-                }
-            }
-
-            // Workspace switcher. Portrait projects default to the portrait
-            // arrangement, but the choice stays the user's: a tall canvas on an
-            // ultrawide display is still comfortable in the landscape workspace, and
-            // a portrait *display* suits the portrait one whatever the canvas is.
-            // Picking either explicitly stops the canvas from driving it; "Auto"
-            // hands it back.
-            Item {
-                id: workspaceButton
-                width: Theme.iconButtonSize
-                height: Theme.iconButtonSize
-                anchors.verticalCenter: parent.verticalCenter
-
-                readonly property bool portrait: {
-                    const win = root.Window.window
-                    return win ? win.portraitWorkspace : false
-                }
-
-                IconButton {
-                    anchors.fill: parent
-                    glyph: workspaceButton.portrait ? Theme.icons.smartphone : Theme.icons.monitor
-                    variant: "ghost"
-                    active: workspaceMenu.opened
-                    tooltip: workspaceButton.portrait ? qsTr("Workspace: portrait")
-                                                      : qsTr("Workspace: landscape")
-                    onClicked: workspaceMenu.popup(0, workspaceButton.height + Theme.spacingMd)
-                }
-
-                ThemedContextMenu {
-                    id: workspaceMenu
-                    implicitWidth: 236
-
-                    // The active entry swaps its own icon for a tick rather than
-                    // adding a trailing column — every row keeps a glyph, so the
-                    // labels stay aligned.
-                    ThemedMenuItem {
-                        text: qsTr("Auto (follow canvas)")
-                        icon.name: EditorState.workspaceLayoutOverridden ? Theme.icons.grid
-                                                                         : Theme.icons.check
-                        onTriggered: EditorState.clearWorkspaceLayoutPreference()
-                    }
-
-                    ThemedMenuItem {
-                        text: qsTr("Landscape")
-                        icon.name: EditorState.workspaceLayoutOverridden
-                                   && EditorState.workspaceLayoutPreferred === "landscape"
-                                   ? Theme.icons.check : Theme.icons.monitor
-                        onTriggered: EditorState.setWorkspaceLayoutPreference("landscape")
-                    }
-
-                    ThemedMenuItem {
-                        text: qsTr("Portrait")
-                        icon.name: EditorState.workspaceLayoutOverridden
-                                   && EditorState.workspaceLayoutPreferred === "portrait"
-                                   ? Theme.icons.check : Theme.icons.smartphone
-                        onTriggered: EditorState.setWorkspaceLayoutPreference("portrait")
-                    }
-                }
-            }
-
-            IconButton {
-                glyph: Theme.darkMode ? Theme.icons.sun : Theme.icons.moon
-                variant: "ghost"
-                tooltip: Theme.darkMode ? qsTr("Switch to light mode") : qsTr("Switch to dark mode")
-                anchors.verticalCenter: parent.verticalCenter
-                onClicked: Theme.toggleDarkMode()
             }
         }
     }

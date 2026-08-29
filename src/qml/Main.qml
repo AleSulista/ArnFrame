@@ -15,7 +15,9 @@ ApplicationWindow {
     // Shown from Component.onCompleted, once the stored geometry is in place:
     // assigning it to a window that is already up makes it jump across the screen,
     // and a session left maximized would flash at its windowed size first.
-    visible: false
+    // Use visibility only — setting both this and `visible` makes Qt warn
+    // "Conflicting properties 'visible' and 'visibility'" (Maximized + hidden).
+    visibility: Window.Hidden
     title: "CutWire Drift"
     color: Theme.appBackground
 
@@ -64,8 +66,8 @@ ApplicationWindow {
         interval: 250
         onTriggered: {
             // Tested by exclusion rather than against Window.Windowed: a window shown
-            // via `visible = true` can report AutomaticVisibility, and that is an
-            // ordinary window — it is only the three modes below that are not.
+            // via AutomaticVisibility can report that instead of Windowed, and that is
+            // an ordinary window — it is only the three modes below that are not.
             const mode = window.visibility
             if (mode !== Window.Maximized && mode !== Window.FullScreen
                     && mode !== Window.Minimized && !window.previewFullscreen)
@@ -95,10 +97,8 @@ ApplicationWindow {
     function showRestored() {
         // Assigning visibility shows the window too, so a session that was left
         // maximized never appears at its windowed size on the way there.
-        if (LayoutMemory.savedWindowMaximized())
-            window.visibility = Window.Maximized
-        else
-            window.visible = true
+        window.visibility = LayoutMemory.savedWindowMaximized()
+                            ? Window.Maximized : Window.Windowed
         // A launch nobody resizes never emits a geometry change, so the sampler that
         // hangs off those signals would never run and the session would save nothing.
         geometrySettleTimer.restart()
