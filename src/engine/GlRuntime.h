@@ -189,6 +189,16 @@ public:
     // tile without this, so two scrubs of the same timestamp would not match.
     QImage readTarget(const GlTarget &target);
 
+    // Export NV12 ring. Convert the composited (premultiplied) canvas to BT.709
+    // limited NV12 and pack into a PIXEL_PACK_BUFFER without waiting. `slot` is
+    // 0 .. kExportNv12Slots-1. The GL context must be current (call from exec()).
+    static constexpr int kExportNv12Slots = 2;
+    bool packCanvasToNv12Slot(const GlTarget &canvas, int outW, int outH, int slot);
+    // Wait for packCanvasToNv12Slot(slot), then copy Y and interleaved UV. Strides
+    // are bytes per row. The GL context must be current.
+    bool mapNv12Slot(int slot, uint8_t *y, int yStride, uint8_t *uv, int uvStride, int width,
+                     int height);
+
     // Presentation ring. The preview's composited frame is handed to the Qt Quick
     // scene graph as a live GL texture rather than read back, so the target it
     // lives in cannot go back to the general pool while the scene graph samples
@@ -230,6 +240,9 @@ private:
     void waitPresentFence(int slotIndex);
     void destroyImageUploadCache();
     void destroyVideoUploadState();
+    void destroyExportNv12State();
+    void destroyExportNv12Slot(int slot);
+    bool ensureExportNv12Slot(QOpenGLExtraFunctions *gl, int slot, int width, int height);
     bool ensureVideoUploadTextures(QOpenGLExtraFunctions *gl, int width, int height);
     bool uploadPlanePbo(QOpenGLExtraFunctions *gl, GLuint texture, int texW, int texH, GLenum internalFormat,
                         GLenum format, const uint8_t *src, int srcPitch, int packedWidth);
@@ -288,6 +301,19 @@ private:
     GLuint m_importY = 0;
     GLuint m_importUV = 0;
     bool m_vaapiImportFailed = false;
+
+    struct ExportNv12Slot
+    {
+        GLuint yTex = 0;
+        GLuint uvTex = 0;
+        GLuint yFbo = 0;
+        GLuint uvFbo = 0;
+        GLuint pbo = 0;
+        GLsync fence = 0;
+        int width = 0;
+        int height = 0;
+    };
+    ExportNv12Slot m_exportNv12[kExportNv12Slots];
 
     friend GLuint cachedUploadTexture(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QImage &image);
     friend GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,

@@ -76,6 +76,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/pixfmt.h>
+#include <libswscale/swscale.h>
 }
 
 class EngineTest : public QObject
@@ -209,6 +210,7 @@ private slots:
     void exporterProducesPlayableFileWithBackground();
     void exporterProducesAudioOnlyMp3();
     void exporterTagsSdrBt709ColorMetadata();
+    void gpuNv12MatchesSwsBt709();
     void exporterDefaultCrfIsNearLosslessForH264();
     void exporterHardwareCodecsListedForThisOs();
     void exporterHardwarePreferredContainerIsMp4();
@@ -5516,6 +5518,109 @@ void EngineTest::exporterTagsSdrBt709ColorMetadata()
     QCOMPARE(vstream->codecpar->color_space, AVCOL_SPC_BT709);
 
     avformat_close_input(&fmt);
+}
+
+void EngineTest::gpuNv12MatchesSwsBt709()
+{
+    if (!GpuCompositor::isAvailable())
+        QSKIP("OpenGL unavailable");
+
+    const auto convertSws = [](const QImage &img, std::vector<uint8_t> *y, std::vector<uint8_t> *uv) {
+        const int w = img.width();
+        const int h = img.height();
+        y->assign(size_t(w) * h, 0);
+        uv->assign(size_t(w) * (h / 2), 0);
+        SwsContext *sws = sws_getContext(w, h, AV_PIX_FMT_RGBA, w, h, AV_PIX_FMT_NV12, SWS_BICUBIC,
+                                         nullptr, nullptr, nullptr);
+        if (!sws)
+            return false;
+        const int *coeff = sws_getCoefficients(SWS_CS_ITU709);
+        if (sws_setColorspaceDetails(sws, coeff, 1, coeff, 0, 0, 1 << 16, 1 << 16) < 0) {
+            sws_freeContext(sws);
+            return false;
+        }
+        uint8_t *dstData[4] = {y->data(), uv->data(), nullptr, nullptr};
+        int dstStride[4] = {w, w, 0, 0};
+        const uint8_t *srcData[4] = {img.constBits(), nullptr, nullptr, nullptr};
+        const int srcStride[4] = {int(img.bytesPerLine()), 0, 0, 0};
+        sws_scale(sws, srcData, srcStride, 0, h, dstData, dstStride);
+        sws_freeContext(sws);
+        return true;
+    };
+
+    const auto convertGpu = [](const QImage &img, std::vector<uint8_t> *y, std::vector<uint8_t> *uv) {
+        const int w = img.width();
+        const int h = img.height();
+        GpuScene scene;
+        scene.canvasSize = QSize(w, h);
+        scene.backgroundColor = Qt::black;
+        GpuItem item;
+        item.layer.valid = true;
+        item.layer.source = img;
+        item.layer.rect = QRectF(0, 0, w, h);
+        item.layer.opacity = 1.0;
+        scene.items.append(item);
+        y->assign(size_t(w) * h, 0);
+        uv->assign(size_t(w) * (h / 2), 0);
+        if (!GpuCompositor::beginExportNv12(scene, w, h, 0))
+            return false;
+        return GpuCompositor::finishExportNv12(0, y->data(), w, uv->data(), w, w, h);
+    };
+
+    const auto maxAbs = [](const std::vector<uint8_t> &a, const std::vector<uint8_t> &b) {
+        int m = 0;
+        for (size_t i = 0; i < a.size(); ++i)
+            m = qMax(m, qAbs(int(a[i]) - int(b[i])));
+        return m;
+    };
+
+    const QRgb solids[] = {qRgba(0, 0, 0, 255),       qRgba(255, 255, 255, 255),
+                           qRgba(255, 0, 0, 255),     qRgba(0, 255, 0, 255),
+                           qRgba(0, 0, 255, 255),     qRgba(128, 128, 128, 255)};
+    for (QRgb color : solids) {
+        QImage img(32, 32, QImage::Format_RGBA8888);
+        img.fill(color);
+        std::vector<uint8_t> gy, gu, sy, su;
+        QVERIFY(convertGpu(img, &gy, &gu));
+        QVERIFY(convertSws(img, &sy, &su));
+        QVERIFY2(maxAbs(gy, sy) <= 1, "solid Y");
+        QVERIFY2(maxAbs(gu, su) <= 2, "solid UV");
+    }
+
+    constexpr int kW = 64;
+    constexpr int kH = 64;
+    QImage img(kW, kH, QImage::Format_RGBA8888);
+    const QRgb tiles[] = {
+        qRgba(0, 0, 0, 255),     qRgba(255, 255, 255, 255), qRgba(255, 0, 0, 255),
+        qRgba(0, 255, 0, 255),   qRgba(0, 0, 255, 255),     qRgba(128, 128, 128, 255),
+        qRgba(255, 255, 0, 255), qRgba(0, 255, 255, 255),
+    };
+    for (int y = 0; y < kH; ++y) {
+        for (int x = 0; x < kW; ++x) {
+            const int tile = (y / 16) * 4 + (x / 16);
+            img.setPixel(x, y, tiles[tile % 8]);
+        }
+    }
+
+    std::vector<uint8_t> gpuY, gpuUv, swsY, swsUv;
+    QVERIFY(convertGpu(img, &gpuY, &gpuUv));
+    QVERIFY(convertSws(img, &swsY, &swsUv));
+    QVERIFY2(maxAbs(gpuY, swsY) <= 1,
+             qPrintable(QStringLiteral("tiled Y delta %1").arg(maxAbs(gpuY, swsY))));
+
+    int maxUv = 0;
+    for (int cy = 2; cy < kH / 2 - 2; ++cy) {
+        for (int cx = 2; cx < kW / 2 - 2; ++cx) {
+            const int px = cx * 2;
+            const int py = cy * 2;
+            if ((px % 16) < 2 || (px % 16) > 13 || (py % 16) < 2 || (py % 16) > 13)
+                continue;
+            const int i = cy * kW + cx * 2;
+            maxUv = qMax(maxUv, qAbs(int(gpuUv[size_t(i)]) - int(swsUv[size_t(i)])));
+            maxUv = qMax(maxUv, qAbs(int(gpuUv[size_t(i) + 1]) - int(swsUv[size_t(i) + 1])));
+        }
+    }
+    QVERIFY2(maxUv <= 2, qPrintable(QStringLiteral("tiled interior UV delta %1").arg(maxUv)));
 }
 
 void EngineTest::exporterDefaultCrfIsNearLosslessForH264()

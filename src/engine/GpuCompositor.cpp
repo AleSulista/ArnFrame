@@ -735,4 +735,38 @@ GpuFrameTexture renderToTexture(const GpuScene &scene)
     return out;
 }
 
+static_assert(kExportNv12Slots == GlRuntime::kExportNv12Slots);
+
+bool beginExportNv12(const GpuScene &scene, int outW, int outH, int slot)
+{
+    if (scene.canvasSize.isEmpty() || outW < 2 || outH < 2 || (outW % 2) || (outH % 2)
+        || slot < 0 || slot >= kExportNv12Slots)
+        return false;
+
+    GlRuntime &rt = runtime();
+    bool ok = false;
+    rt.exec([&] {
+        GlTarget canvas = rt.acquireTarget(scene.canvasSize.width(), scene.canvasSize.height());
+        if (!canvas.isValid())
+            return;
+
+        composeOnGlThread(rt, scene, canvas);
+        ok = rt.packCanvasToNv12Slot(canvas, outW, outH, slot);
+        rt.releaseTarget(std::move(canvas));
+    });
+    return ok;
+}
+
+bool finishExportNv12(int slot, uint8_t *y, int yStride, uint8_t *uv, int uvStride, int width,
+                      int height)
+{
+    if (!y || !uv || slot < 0 || slot >= kExportNv12Slots)
+        return false;
+
+    GlRuntime &rt = runtime();
+    bool ok = false;
+    rt.exec([&] { ok = rt.mapNv12Slot(slot, y, yStride, uv, uvStride, width, height); });
+    return ok;
+}
+
 } // namespace GpuCompositor

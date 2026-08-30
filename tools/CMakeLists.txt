@@ -24,6 +24,12 @@ target_link_libraries(benchcomposite PRIVATE Qt6::Core Qt6::Gui driftengine drif
 drift_copy_effects(benchcomposite)
 drift_copy_transitions(benchcomposite)
 
+add_executable(benchexport benchexport.cpp)
+target_include_directories(benchexport PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(benchexport PRIVATE Qt6::Core Qt6::Gui driftengine driftcore)
+drift_copy_effects(benchexport)
+drift_copy_transitions(benchexport)
+
 add_executable(transitionthumbs transitionthumbs.cpp)
 target_include_directories(transitionthumbs PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(transitionthumbs PRIVATE Qt6::Core Qt6::Gui driftengine driftcore)

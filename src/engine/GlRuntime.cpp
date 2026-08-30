@@ -78,6 +78,45 @@ extern "C" {
 #ifndef GL_MAP_INVALIDATE_BUFFER_BIT
 #define GL_MAP_INVALIDATE_BUFFER_BIT 0x0008
 #endif
+#ifndef GL_PIXEL_PACK_BUFFER
+#define GL_PIXEL_PACK_BUFFER 0x88EB
+#endif
+#ifndef GL_STREAM_READ
+#define GL_STREAM_READ 0x88E1
+#endif
+#ifndef GL_MAP_READ_BIT
+#define GL_MAP_READ_BIT 0x0001
+#endif
+#ifndef GL_PACK_ROW_LENGTH
+#define GL_PACK_ROW_LENGTH 0x0D02
+#endif
+#ifndef GL_PACK_ALIGNMENT
+#define GL_PACK_ALIGNMENT 0x0D05
+#endif
+#ifndef GL_READ_FRAMEBUFFER
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#endif
+#ifndef GL_FRAMEBUFFER
+#define GL_FRAMEBUFFER 0x8D40
+#endif
+#ifndef GL_COLOR_ATTACHMENT0
+#define GL_COLOR_ATTACHMENT0 0x8CE0
+#endif
+#ifndef GL_FRAMEBUFFER_COMPLETE
+#define GL_FRAMEBUFFER_COMPLETE 0x8CD5
+#endif
+#ifndef GL_TIMEOUT_IGNORED
+#define GL_TIMEOUT_IGNORED 0xFFFFFFFFFFFFFFFFull
+#endif
+#ifndef GL_ALREADY_SIGNALED
+#define GL_ALREADY_SIGNALED 0x911A
+#endif
+#ifndef GL_CONDITION_SATISFIED
+#define GL_CONDITION_SATISFIED 0x911C
+#endif
+#ifndef GL_WAIT_FAILED
+#define GL_WAIT_FAILED 0x911D
+#endif
 
 namespace drift {
 
@@ -171,6 +210,37 @@ void main() {
     vec3 yuv = (vec3(y, chroma) - u_yuvOffset) * u_yuvScale;
     vec3 rgb = u_yuvToRgb * yuv;
     fragColor = vec4(clamp(rgb, 0.0, 1.0), 1.0);
+}
+)";
+
+// Premultiplied canvas RGBA → BT.709 limited luma. Matches libswscale
+// SWS_CS_ITU709 with full-range RGB source and limited-range YUV dest.
+constexpr const char *kRgbaToYFragShader = R"(#version 330 core
+in vec2 v_texCoord;
+out vec4 fragColor;
+uniform sampler2D u_src;
+void main() {
+    vec4 c = texture(u_src, v_texCoord);
+    vec3 rgb = (c.a > 0.0001) ? clamp(c.rgb / c.a, 0.0, 1.0) : vec3(0.0);
+    float yFull = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    float y = yFull * (219.0 / 255.0) + (16.0 / 255.0);
+    fragColor = vec4(y, 0.0, 0.0, 1.0);
+}
+)";
+
+// Half-res chroma: bilinear sample at the UV texel centre (centre of each 2×2).
+constexpr const char *kRgbaToUvFragShader = R"(#version 330 core
+in vec2 v_texCoord;
+out vec4 fragColor;
+uniform sampler2D u_src;
+void main() {
+    vec4 c = texture(u_src, v_texCoord);
+    vec3 rgb = (c.a > 0.0001) ? clamp(c.rgb / c.a, 0.0, 1.0) : vec3(0.0);
+    float yFull = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    float cb = (rgb.b - yFull) / (2.0 * (1.0 - 0.0722));
+    float cr = (rgb.r - yFull) / (2.0 * (1.0 - 0.2126));
+    fragColor = vec4(cb * (224.0 / 255.0) + (128.0 / 255.0),
+                     cr * (224.0 / 255.0) + (128.0 / 255.0), 0.0, 1.0);
 }
 )";
 
@@ -847,6 +917,7 @@ void GlRuntime::releaseCaches()
     exec([this] {
         destroyImageUploadCache();
         destroyVideoUploadState();
+        destroyExportNv12State();
         m_targetPool.clear();
         m_pooledTargets = 0;
         if (auto *gl = functions())
@@ -876,6 +947,7 @@ void GlRuntime::shutdown()
                 }
                 destroyImageUploadCache();
                 destroyVideoUploadState();
+                destroyExportNv12State();
             }
             for (GlTarget &target : m_presentRing)
                 target.fbo.reset();
@@ -967,6 +1039,214 @@ QImage GlRuntime::readTarget(const GlTarget &target)
     if (auto *gl = functions())
         gl->glFinish();
     return target.fbo->toImage(false).convertToFormat(QImage::Format_RGBA8888);
+}
+
+void GlRuntime::destroyExportNv12State()
+{
+    for (int i = 0; i < kExportNv12Slots; ++i)
+        destroyExportNv12Slot(i);
+}
+
+void GlRuntime::destroyExportNv12Slot(int slot)
+{
+    if (slot < 0 || slot >= kExportNv12Slots)
+        return;
+    auto *gl = functions();
+    ExportNv12Slot &s = m_exportNv12[slot];
+    if (gl) {
+        if (s.fence) {
+            gl->glDeleteSync(s.fence);
+            s.fence = nullptr;
+        }
+        if (s.pbo)
+            gl->glDeleteBuffers(1, &s.pbo);
+        if (s.yFbo)
+            gl->glDeleteFramebuffers(1, &s.yFbo);
+        if (s.uvFbo)
+            gl->glDeleteFramebuffers(1, &s.uvFbo);
+        if (s.yTex)
+            gl->glDeleteTextures(1, &s.yTex);
+        if (s.uvTex)
+            gl->glDeleteTextures(1, &s.uvTex);
+    }
+    s = ExportNv12Slot{};
+}
+
+bool GlRuntime::ensureExportNv12Slot(QOpenGLExtraFunctions *gl, int slot, int width, int height)
+{
+    if (!gl || slot < 0 || slot >= kExportNv12Slots || width < 2 || height < 2 || (width % 2)
+        || (height % 2))
+        return false;
+
+    ExportNv12Slot &s = m_exportNv12[slot];
+    const GLsizeiptr pboBytes = GLsizeiptr(width) * height + GLsizeiptr(width) * (height / 2);
+    if (s.yTex && s.uvTex && s.yFbo && s.uvFbo && s.pbo && s.width == width && s.height == height)
+        return true;
+
+    auto deleteTex = [gl](GLuint &t) {
+        if (t) {
+            gl->glDeleteTextures(1, &t);
+            t = 0;
+        }
+    };
+    auto deleteFbo = [gl](GLuint &f) {
+        if (f) {
+            gl->glDeleteFramebuffers(1, &f);
+            f = 0;
+        }
+    };
+    if (s.fence) {
+        gl->glDeleteSync(s.fence);
+        s.fence = nullptr;
+    }
+    if (s.pbo) {
+        gl->glDeleteBuffers(1, &s.pbo);
+        s.pbo = 0;
+    }
+    deleteFbo(s.yFbo);
+    deleteFbo(s.uvFbo);
+    deleteTex(s.yTex);
+    deleteTex(s.uvTex);
+    s.width = 0;
+    s.height = 0;
+
+    auto makePlane = [gl](GLuint *tex, GLuint *fbo, GLenum internal, GLenum format, int w, int h) {
+        gl->glGenTextures(1, tex);
+        gl->glBindTexture(GL_TEXTURE_2D, *tex);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        gl->glTexImage2D(GL_TEXTURE_2D, 0, internal, w, h, 0, format, GL_UNSIGNED_BYTE, nullptr);
+
+        gl->glGenFramebuffers(1, fbo);
+        gl->glBindFramebuffer(GL_FRAMEBUFFER, *fbo);
+        gl->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *tex, 0);
+        const GLenum status = gl->glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        gl->glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        gl->glBindTexture(GL_TEXTURE_2D, 0);
+        return status == GL_FRAMEBUFFER_COMPLETE && *tex && *fbo;
+    };
+
+    if (!makePlane(&s.yTex, &s.yFbo, GL_R8, GL_RED, width, height)
+        || !makePlane(&s.uvTex, &s.uvFbo, GL_RG8, GL_RG, width / 2, height / 2)) {
+        destroyExportNv12Slot(slot);
+        return false;
+    }
+
+    gl->glGenBuffers(1, &s.pbo);
+    gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, s.pbo);
+    gl->glBufferData(GL_PIXEL_PACK_BUFFER, pboBytes, nullptr, GL_STREAM_READ);
+    gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    if (!s.pbo)
+        return false;
+
+    s.width = width;
+    s.height = height;
+    return true;
+}
+
+bool GlRuntime::packCanvasToNv12Slot(const GlTarget &canvas, int outW, int outH, int slot)
+{
+    auto *gl = functions();
+    if (!gl || !canvas.isValid() || !ensureExportNv12Slot(gl, slot, outW, outH))
+        return false;
+
+    ExportNv12Slot &s = m_exportNv12[slot];
+    if (s.fence) {
+        gl->glClientWaitSync(s.fence, GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64(1'000'000'000));
+        gl->glDeleteSync(s.fence);
+        s.fence = nullptr;
+    }
+
+    auto drawPlane = [&](QOpenGLShaderProgram *program, GLuint fbo, int w, int h) {
+        if (!program)
+            return false;
+        gl->glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        gl->glViewport(0, 0, w, h);
+        gl->glDisable(GL_BLEND);
+        program->bind();
+        program->setUniformValue("u_src", 0);
+        gl->glActiveTexture(GL_TEXTURE0);
+        gl->glBindTexture(GL_TEXTURE_2D, canvas.texture());
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        gl->glBindVertexArray(vao);
+        gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        gl->glBindVertexArray(0);
+        program->release();
+        gl->glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return true;
+    };
+
+    QOpenGLShaderProgram *yProg =
+        builtinProgram(QStringLiteral("__rgba_to_y__"), kQuadVertexShader, kRgbaToYFragShader);
+    QOpenGLShaderProgram *uvProg =
+        builtinProgram(QStringLiteral("__rgba_to_uv__"), kQuadVertexShader, kRgbaToUvFragShader);
+    if (!drawPlane(yProg, s.yFbo, outW, outH) || !drawPlane(uvProg, s.uvFbo, outW / 2, outH / 2))
+        return false;
+
+    gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, s.pbo);
+    gl->glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    gl->glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+
+    gl->glBindFramebuffer(GL_READ_FRAMEBUFFER, s.yFbo);
+    gl->glReadPixels(0, 0, outW, outH, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+
+    gl->glBindFramebuffer(GL_READ_FRAMEBUFFER, s.uvFbo);
+    gl->glReadPixels(0, 0, outW / 2, outH / 2, GL_RG, GL_UNSIGNED_BYTE,
+                     reinterpret_cast<void *>(GLintptr(outW) * outH));
+
+    gl->glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    gl->glPixelStorei(GL_PACK_ALIGNMENT, 4);
+
+    gl->glFlush();
+    s.fence = gl->glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    return s.fence != nullptr;
+}
+
+bool GlRuntime::mapNv12Slot(int slot, uint8_t *y, int yStride, uint8_t *uv, int uvStride, int width,
+                            int height)
+{
+    auto *gl = functions();
+    if (!gl || !y || !uv || yStride < width || uvStride < width || slot < 0
+        || slot >= kExportNv12Slots)
+        return false;
+
+    ExportNv12Slot &s = m_exportNv12[slot];
+    if (!s.pbo || s.width != width || s.height != height)
+        return false;
+
+    if (s.fence) {
+        const GLenum wait =
+            gl->glClientWaitSync(s.fence, GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64(1'000'000'000));
+        gl->glDeleteSync(s.fence);
+        s.fence = nullptr;
+        if (wait == GL_WAIT_FAILED)
+            return false;
+    }
+
+    const GLsizeiptr yBytes = GLsizeiptr(width) * height;
+    gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, s.pbo);
+    auto *mapped = static_cast<const uint8_t *>(
+        gl->glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, yBytes + GLsizeiptr(width) * (height / 2),
+                             GL_MAP_READ_BIT));
+    if (!mapped) {
+        gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        return false;
+    }
+
+    const uint8_t *srcY = mapped;
+    const uint8_t *srcUv = mapped + yBytes;
+    for (int row = 0; row < height; ++row)
+        memcpy(y + row * yStride, srcY + row * width, size_t(width));
+    for (int row = 0; row < height / 2; ++row)
+        memcpy(uv + row * uvStride, srcUv + row * width, size_t(width));
+
+    gl->glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    return true;
 }
 
 void GlRuntime::waitPresentFence(int slotIndex)

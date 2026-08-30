@@ -15,6 +15,8 @@
 #include <QSize>
 #include <QVariant>
 
+#include <cstdint>
+
 namespace drift {
 struct GpuEffectDefinition;
 }
@@ -101,6 +103,13 @@ QImage render(const GpuScene &scene);
 // Composite and leave the result on the GPU. Used by the preview, which hands
 // the texture straight to the scene graph — no readback, no re-upload.
 GpuFrameTexture renderToTexture(const GpuScene &scene);
+
+// Export path: compose, convert to BT.709 limited NV12, pack into an async
+// PBO. `slot` is 0 .. kExportNv12Slots-1. finishExportNv12 waits and copies.
+inline constexpr int kExportNv12Slots = 2;
+bool beginExportNv12(const GpuScene &scene, int outW, int outH, int slot);
+bool finishExportNv12(int slot, uint8_t *y, int yStride, uint8_t *uv, int uvStride, int width,
+                      int height);
 
 bool isAvailable();
 

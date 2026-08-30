@@ -38,6 +38,10 @@ public:
     // OpenGL is unavailable, in which case callers should use compositeAt.
     GpuFrameTexture compositeToTextureAt(drift::TimeUs timelineUs, const RenderOptions &options) const;
 
+    // Builds the GPU scene for T without composing. Used by the export pipeline
+    // so decode/scene-build can overlap the previous frame's GL work.
+    bool buildSceneAt(drift::TimeUs timelineUs, const RenderOptions &options, GpuScene *sceneOut) const;
+
 private:
     // Shared by both entry points: resolves the canvas size, warms the decoders
     // and builds the scene. Returns false when there is nothing to render.

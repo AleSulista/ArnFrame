@@ -996,3 +996,12 @@ GpuFrameTexture FrameCompositor::compositeToTextureAt(drift::TimeUs timelineUs,
     return GpuCompositor::renderToTexture(scene);
 }
 
+bool FrameCompositor::buildSceneAt(drift::TimeUs timelineUs, const RenderOptions &options,
+                                   GpuScene *sceneOut) const
+{
+    int width = 0;
+    int height = 0;
+    double renderScale = 1.0;
+    return prepare(timelineUs, options, sceneOut, &width, &height, &renderScale);
+}
+
