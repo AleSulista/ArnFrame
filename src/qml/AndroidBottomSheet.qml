@@ -94,6 +94,7 @@ Popup {
         const host = Overlay.overlay ? Overlay.overlay.Window.window : null
         if (host && host.pushOverlayModal)
             host.pushOverlayModal()
+        Haptics.press()
     }
 
     onClosed: {
@@ -104,11 +105,13 @@ Popup {
 
     function expand() {
         expanded = true
+        Haptics.detent()
         animateTo(expandedHeight)
     }
 
     function collapse() {
         expanded = false
+        Haptics.detent()
         animateTo(collapsedHeight)
     }
 
@@ -130,6 +133,7 @@ Popup {
             close()
             return
         }
+        Haptics.drop()
         closeAnimation.stop()
         closeAnimation.from = root.panelHeight
         closeAnimation.start()
@@ -138,6 +142,7 @@ Popup {
     function beginDrag(globalY) {
         heightAnimation.stop()
         root._dragging = true
+        Haptics.pickUp()
         return { startGlobalY: globalY, startHeight: root.panelHeight }
     }
 
@@ -421,6 +426,7 @@ Popup {
                     glyph: Theme.icons.x
                     variant: "text"
                     tooltip: qsTr("Close")
+                    haptic: "none"
                     onClicked: root.dismiss()
                 }
 

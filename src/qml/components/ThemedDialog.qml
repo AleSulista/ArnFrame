@@ -68,6 +68,7 @@ Dialog {
             acceptButton.forceActiveFocus()
         else
             root.forceActiveFocus()
+        Haptics.detent()
     }
 
     onClosed: {

@@ -71,7 +71,10 @@ Row {
                     cursorShape: modelData.id === root.currentFolderId
                                  ? Qt.ArrowCursor : Qt.PointingHandCursor
                     enabled: modelData.id !== root.currentFolderId
-                    onClicked: root.navigate(modelData.id)
+                    onClicked: {
+                        Haptics.select()
+                        root.navigate(modelData.id)
+                    }
                 }
             }
         }

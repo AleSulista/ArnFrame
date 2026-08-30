@@ -123,6 +123,8 @@ AbstractButton {
         visible: root.tooltip.length > 0 && (root.hovered || root.visualFocus)
     }
 
+    onClicked: Haptics.select()
+
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton

@@ -85,6 +85,8 @@ Item {
             Accessible.checkable: true
             Accessible.checked: railBtn.selected
 
+            onClicked: Haptics.select()
+
             // Press feedback. On the root rather than the background so the label
             // dips with the icon, and via scale so packed slots do not reflow.
             scale: railBtn.down ? Theme.pressScale : 1.0
@@ -201,7 +203,10 @@ Item {
                 }
             }
 
-            onClicked: root.addRequested()
+            onClicked: {
+                Haptics.confirm()
+                root.addRequested()
+            }
         }
 
         RailButton {

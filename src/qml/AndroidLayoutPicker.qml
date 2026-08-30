@@ -293,7 +293,10 @@ Item {
                             }
                         }
 
-                        onClicked: root.selectCategory(modelData.id)
+                        onClicked: {
+                            Haptics.select()
+                            root.selectCategory(modelData.id)
+                        }
                     }
                 }
             }
@@ -418,7 +421,10 @@ Item {
                         }
                     }
 
-                    onClicked: root.templateId = modelData.id
+                    onClicked: {
+                        Haptics.select()
+                        root.templateId = modelData.id
+                    }
                 }
             }
         }

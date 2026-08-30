@@ -93,6 +93,9 @@ ComboBox {
                  && (root.hovered || root.visualFocus)
     }
 
+    onPressedChanged: if (pressed) Haptics.press()
+    onActivated: Haptics.select()
+
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton

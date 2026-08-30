@@ -194,6 +194,7 @@ Item {
                     grip.startCropY = root.cropY
                     grip.startCropW = root.cropW
                     grip.startCropH = root.cropH
+                    Haptics.pickUp()
                 }
 
                 onPositionChanged: (mouse) => {
@@ -224,6 +225,9 @@ Item {
                         root.cropH = Math.max(16, grip.startCropH + ddy)
                     }
                 }
+
+                onReleased: Haptics.drop()
+                onCanceled: Haptics.drop()
             }
         }
     }

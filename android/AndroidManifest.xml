@@ -25,7 +25,7 @@
          nothing and returns false when the system's touch-feedback setting is off, which several
          OEM skins ship as the default, and since API 33 there is no flag that overrides it. Without
          the fallback the feature is simply dead on those devices. Drift's own switch (Settings →
-         Feedback, off by one tap) is what gates the fallback — the C++ side never reaches the Java
+         Interface → Haptic feedback, off by one tap) is what gates the fallback — the C++ side never reaches the Java
          at all when it is off. Normal permission: no runtime prompt, no install-time consent. -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- A video export runs for minutes in the app process; backgrounded, that process is frozen

@@ -1382,11 +1382,15 @@ Item {
                                         onPressed: held = false
                                         onPressAndHold: {
                                             held = true
+                                            Haptics.pickUp()
                                             bookmarkContextMenu.bookmarkIndex = bookmarkFlag.index
                                             bookmarkContextMenu.bookmarkLabel = bookmarkFlag.modelData.label
                                             bookmarkContextMenu.popup()
                                         }
-                                        onClicked: if (!held) EditorState.goToBookmark(bookmarkFlag.index)
+                                        onClicked: if (!held) {
+                                            Haptics.select()
+                                            EditorState.goToBookmark(bookmarkFlag.index)
+                                        }
                                     }
                                 }
                             }
@@ -1624,13 +1628,16 @@ Item {
                                         MouseArea {
                                             anchors.fill: parent
                                             onClicked: {
-                                                if (transitionRegion.hasTransition)
+                                                if (transitionRegion.hasTransition) {
+                                                    Haptics.select()
                                                     EditorState.selectTransition(trackRow.trackIndex,
                                                                                  transitionRegion.leftClipIndex)
-                                                else
+                                                } else {
+                                                    Haptics.confirm()
                                                     EditorState.addTransition(trackRow.trackIndex,
                                                                               transitionRegion.leftClipIndex,
                                                                               "crossfade", 0.5)
+                                                }
                                             }
                                         }
                                     }

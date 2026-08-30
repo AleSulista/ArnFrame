@@ -76,6 +76,10 @@ void Haptics::setEnabled(bool enabled)
     // first drag after switching it back on would start mid-snap and stay silent.
     reset();
     emit enabledChanged();
+    // The settings switch that just turned this on would otherwise be silent: fire() bailed while
+    // m_enabled was still false. One tick now, so the opt-in is felt rather than trusted.
+    if (enabled)
+        fire(ToggleOn);
 }
 
 void Haptics::fire(Effect effect)
@@ -85,9 +89,14 @@ void Haptics::fire(Effect effect)
 
     // Applied on every platform, not just the one that can feel it, so the limiter is exercised by
     // the desktop build and a call site that would machine-gun on device shows up in a debugger
-    // here too.
+    // here too. Ticks that can stack during a drag (select, snap, detent, press) are limited;
+    // one-shots that name a discrete event always go through, so a button press 20 ms earlier
+    // cannot swallow the confirm of the action it caused.
     const qint64 now = m_clock.elapsed();
-    if (m_lastFiredMs != 0 && now - m_lastFiredMs < kMinIntervalMs)
+    const bool oneShot = effect == PickUp || effect == Drop || effect == Boundary
+                         || effect == Confirm || effect == ToggleOn || effect == ToggleOff
+                         || effect == Success || effect == Error;
+    if (!oneShot && m_lastFiredMs != 0 && now - m_lastFiredMs < kMinIntervalMs)
         return;
     m_lastFiredMs = now;
 
@@ -147,6 +156,26 @@ void Haptics::detent()
 void Haptics::confirm()
 {
     fire(Confirm);
+}
+
+void Haptics::press()
+{
+    fire(Press);
+}
+
+void Haptics::toggle(bool on)
+{
+    fire(on ? ToggleOn : ToggleOff);
+}
+
+void Haptics::success()
+{
+    fire(Success);
+}
+
+void Haptics::error()
+{
+    fire(Error);
 }
 
 void Haptics::snap(qreal targetSeconds)

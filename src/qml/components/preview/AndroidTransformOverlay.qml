@@ -82,6 +82,9 @@ Item {
     property real snapGuideX: -1
     property real snapGuideY: -1
 
+    onSnapGuideXChanged: if (snapGuideX >= 0) Haptics.detent()
+    onSnapGuideYChanged: if (snapGuideY >= 0) Haptics.detent()
+
     // Nearest target within `tol` of any candidate, returned as the delta to add
     // to the moving value. `guide` is the target that won, or -1 for no snap.
     function snapAxis(candidates, targets, tol) {
@@ -384,12 +387,16 @@ Item {
                 onTapped: {
                     EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
                     handle.forceActiveFocus()
+                    Haptics.select()
                 }
                 onDoubleTapped: if (handle.isText) handle.enterEdit()
                 // Reaching a text editor by double-tap alone is a coin flip on a
                 // phone: the first tap can land on a neighbouring box. Long-press
                 // is the unambiguous route.
-                onLongPressed: if (handle.isText) handle.enterEdit()
+                onLongPressed: if (handle.isText) {
+                    Haptics.pickUp()
+                    handle.enterEdit()
+                }
             }
 
             DragHandler {
@@ -409,10 +416,12 @@ Item {
                         EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
                         handle.forceActiveFocus()
                         EditorState.beginPreviewDrag()
+                        Haptics.pickUp()
                     } else {
                         handle.liveX = -1e12
                         handle.liveY = -1e12
                         root.endInteraction()
+                        Haptics.drop()
                     }
                 }
                 onTranslationChanged: {
@@ -644,6 +653,7 @@ Item {
                             EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
                             handle.forceActiveFocus()
                             EditorState.beginPreviewDrag()
+                            Haptics.pickUp()
                         }
 
                         onPositionChanged: (mouse) => {
@@ -666,6 +676,7 @@ Item {
                         handle.liveW = -1
                         handle.liveH = -1
                         root.endInteraction()
+                        Haptics.drop()
                     }
                 }
             }
@@ -734,9 +745,11 @@ Item {
                             EditorState.selectClip(handle.modelData.track, handle.modelData.clip)
                             handle.forceActiveFocus()
                             EditorState.beginPreviewDrag()
+                            Haptics.pickUp()
                         } else {
                             handle.liveRotation = 1e9
                             root.endInteraction()
+                            Haptics.drop()
                         }
                     }
                     onCentroidChanged: {

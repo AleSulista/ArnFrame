@@ -45,6 +45,7 @@ MouseArea {
     onPressAndHold: (mouse) => {
         lifted = true
         suppressTap = true
+        Haptics.pickUp()
         TouchDrag.begin(liftArea.dragKind, liftArea.payload, {
             "label": liftArea.label,
             "thumbnail": liftArea.thumbnail,
@@ -73,5 +74,8 @@ MouseArea {
         TouchDrag.cancel()
     }
 
-    onClicked: if (!suppressTap) liftArea.liftTapped()
+    onClicked: if (!suppressTap) {
+        Haptics.press()
+        liftArea.liftTapped()
+    }
 }

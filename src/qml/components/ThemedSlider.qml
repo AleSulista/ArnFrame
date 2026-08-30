@@ -12,6 +12,12 @@ Slider {
     property bool showValueTooltip: true
     property var valueFormatter: function (v) { return Number(v).toFixed(2) }
 
+    // Edge-triggered while the finger is down: a notch index, plus whether the
+    // handle is currently parked on an end. Latched so a held min does not buzz.
+    property int _hapticNotch: -1
+    property bool _hapticMin: false
+    property bool _hapticMax: false
+
     // What this slider controls, for assistive tech. The role was already declared
     // but no name ever was, so every instance announced as an unlabelled "slider".
     // Callers should set it; the formatter is a fallback, not a substitute.
@@ -69,6 +75,10 @@ Slider {
                     if (root._flickable)
                         root._flickable.dragLocks++
                 }
+                root._hapticNotch = -1
+                root._hapticMin = false
+                root._hapticMax = false
+                Haptics.press()
             } else {
                 root.restoreFlickable()
             }
@@ -133,6 +143,42 @@ Slider {
         // No reveal delay while dragging — the readout must track the handle.
         delay: root.pressed ? 0 : Theme.tooltipDelay
         text: root.valueFormatter(root.value)
+    }
+
+    onMoved: {
+        if (!pressed)
+            return
+        const span = to - from
+        if (span <= 0)
+            return
+        const t = (value - from) / span
+        if (t <= 0.002) {
+            if (!_hapticMin) {
+                Haptics.boundary()
+                _hapticMin = true
+            }
+        } else {
+            _hapticMin = false
+        }
+        if (t >= 0.998) {
+            if (!_hapticMax) {
+                Haptics.boundary()
+                _hapticMax = true
+            }
+        } else {
+            _hapticMax = false
+        }
+        // Discrete sliders tick every step; continuous ones tick at the quarters
+        // so a long drag still has a rhythm without grinding.
+        const notch = stepSize > 0
+                      ? Math.round((value - from) / stepSize)
+                      : Math.round(t * 4)
+        if (notch === _hapticNotch)
+            return
+        const prev = _hapticNotch
+        _hapticNotch = notch
+        if (prev >= 0 && !_hapticMin && !_hapticMax)
+            Haptics.detent()
     }
 
     // Cursor-only overlay. Must forward wheel when inside a scrollable Flickable:

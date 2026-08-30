@@ -46,6 +46,7 @@ Row {
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: {
+                Haptics.press()
                 colorDialog.selectedColor = root.hex
                 colorDialog.open()
             }

@@ -27,6 +27,8 @@ Item {
     property int draggingTrackTo: -1
     property int draggingTrackSlot: -1
 
+    onDraggingTrackToChanged: Haptics.lane(draggingTrackTo)
+
     // Pending delete confirmation — index kept until Accept/Reject so the menu
     // can close without wiping the track immediately.
     property int pendingDeleteTrack: -1
@@ -213,6 +215,7 @@ Item {
                     root.draggingTrackFrom = index
                     root.draggingTrackTo = index
                     root.draggingTrackSlot = -1
+                    Haptics.pickUp()
                 }
                 onPositionChanged: (mouse) => {
                     if (root.draggingTrackFrom < 0)
@@ -239,9 +242,13 @@ Item {
                     }
                     if (moved && root.draggingTrackFrom >= 0
                             && root.draggingTrackTo >= 0
-                            && root.draggingTrackFrom !== root.draggingTrackTo)
+                            && root.draggingTrackFrom !== root.draggingTrackTo) {
+                        Haptics.confirm()
                         EditorState.moveTrack(root.draggingTrackFrom,
                                               root.draggingTrackTo)
+                    } else {
+                        Haptics.drop()
+                    }
                     root.clearTrackDrag()
                 }
                 onCanceled: {
@@ -312,7 +319,10 @@ Item {
                         anchors.margins: -4
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: EditorState.setTrackMuted(index, !trackLabelRow.trackMuted)
+                        onClicked: {
+                            Haptics.toggle(!trackLabelRow.trackMuted)
+                            EditorState.setTrackMuted(index, !trackLabelRow.trackMuted)
+                        }
                     }
                 }
 
@@ -337,7 +347,10 @@ Item {
                         anchors.margins: -4
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: EditorState.setTrackHidden(index, !trackLabelRow.trackHidden)
+                        onClicked: {
+                            Haptics.toggle(!trackLabelRow.trackHidden)
+                            EditorState.setTrackHidden(index, !trackLabelRow.trackHidden)
+                        }
                     }
                 }
 
@@ -361,7 +374,10 @@ Item {
                         anchors.margins: -4
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: EditorState.setTrackShowWaveform(index, !trackLabelRow.trackWaveform)
+                        onClicked: {
+                            Haptics.toggle(!trackLabelRow.trackWaveform)
+                            EditorState.setTrackShowWaveform(index, !trackLabelRow.trackWaveform)
+                        }
                     }
                 }
 
@@ -414,7 +430,10 @@ Item {
                 MouseArea {
                     anchors.fill: parent
                     anchors.margins: -8
-                    onClicked: EditorState.setTrackShowWaveform(index, !trackLabelRow.trackWaveform)
+                    onClicked: {
+                        Haptics.toggle(!trackLabelRow.trackWaveform)
+                        EditorState.setTrackShowWaveform(index, !trackLabelRow.trackWaveform)
+                    }
                 }
             }
 

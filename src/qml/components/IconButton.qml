@@ -19,6 +19,8 @@ AbstractButton {
     // "text": transparent, hover = subtle tint (toolbar buttons)
     // "ghost": transparent, hover = accent background (tab rail, view toggles)
     property string variant: "text"
+    // "auto" | "press" | "confirm" | "select" | "none". auto is a light press.
+    property string haptic: "auto"
 
     readonly property bool hasLabel: text.length > 0
     readonly property color _fg: active ? Theme.panelSecondaryForeground : Theme.mutedForeground
@@ -132,6 +134,19 @@ AbstractButton {
         // Skip when the tooltip is just the visible label again.
         visible: root.tooltip.length > 0 && root.tooltip !== root.text
                  && (root.hovered || root.visualFocus)
+    }
+
+    onClicked: {
+        if (haptic === "none")
+            return
+        if (haptic === "confirm")
+            Haptics.confirm()
+        else if (haptic === "select")
+            Haptics.select()
+        else if (haptic !== "auto" && haptic !== "press")
+            return
+        else
+            Haptics.press()
     }
 
     MouseArea {

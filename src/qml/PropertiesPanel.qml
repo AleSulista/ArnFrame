@@ -358,7 +358,10 @@ PanelFrame {
                                 NumberAnimation { duration: Theme.durationPress; easing.type: Theme.easing }
                             }
 
-                            onClicked: root.activeTab = tabChip.index
+                            onClicked: {
+                                Haptics.select()
+                                root.activeTab = tabChip.index
+                            }
 
                             background: Rectangle {
                                 radius: Theme.radiusMd

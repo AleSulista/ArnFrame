@@ -27,6 +27,13 @@ Rectangle {
     readonly property bool handleHovered: T.SplitHandle.hovered
     readonly property bool handlePressed: T.SplitHandle.pressed
 
+    onHandlePressedChanged: {
+        if (handlePressed)
+            Haptics.pickUp()
+        else
+            Haptics.drop()
+    }
+
     implicitWidth: horizontal ? Theme.spacingMd : (view ? view.width : 0)
     implicitHeight: horizontal ? (view ? view.height : 0) : Theme.spacingMd
     color: handlePressed ? Theme.primary

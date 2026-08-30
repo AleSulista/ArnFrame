@@ -12,6 +12,9 @@ Button {
     property string glyph: ""
     property real glyphSize: Theme.iconSizeMd
     property string tooltip: ""
+    // "auto" | "press" | "confirm" | "select" | "none". auto is confirm for primary
+    // and destructive (those commit something) and press for everything else.
+    property string haptic: "auto"
 
     font.family: Theme.fontFamily
     font.pixelSize: Theme.fontSizeSm
@@ -148,6 +151,18 @@ Button {
     ThemedToolTip {
         text: root.tooltip
         visible: root.tooltip.length > 0 && (root.hovered || root.visualFocus)
+    }
+
+    onClicked: {
+        if (haptic === "none")
+            return
+        if (haptic === "confirm"
+                || (haptic === "auto" && (variant === "primary" || variant === "destructive")))
+            Haptics.confirm()
+        else if (haptic === "select")
+            Haptics.select()
+        else
+            Haptics.press()
     }
 
     MouseArea {

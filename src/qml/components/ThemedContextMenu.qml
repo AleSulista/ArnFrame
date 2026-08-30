@@ -24,6 +24,8 @@ Menu {
         border.color: Theme.panelBorder
     }
 
+    onAboutToShow: Haptics.press()
+
     // Opacity alone made the menu appear out of nothing; pairing it with a scale
     // gives it presence, matching ThemedDialog. Enter is deliberate, exit snaps.
     // A QML Popup has no transformOrigin, so this scales from the menu's own

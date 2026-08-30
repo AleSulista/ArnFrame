@@ -43,9 +43,11 @@ ThemedTextField {
     function applyValue(v) {
         const clamped = clamp(v)
         // Surface the correction rather than performing it silently.
-        if (Math.abs(clamped - v) > 1e-9)
+        if (Math.abs(clamped - v) > 1e-9) {
             _flash(rangeHint.length > 0 ? rangeHint
                                         : qsTr("Value clamped to %1").arg(format(clamped)))
+            Haptics.boundary()
+        }
         const changed = decimals === 0
                 ? (Math.round(clamped) !== Math.round(value))
                 : (Math.abs(clamped - value) > 1e-9)
@@ -59,6 +61,7 @@ ThemedTextField {
         const v = parseFloat(text)
         if (isNaN(v)) {
             _flash(qsTr("Enter a number"))
+            Haptics.error()
             text = format(value)
             return
         }

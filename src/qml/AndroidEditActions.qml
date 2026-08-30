@@ -163,6 +163,7 @@ Item {
             ActionButton {
                 glyph: Theme.icons.trash
                 tooltip: qsTr("Delete")
+                haptic: "confirm"
                 enabled: root.hasSelection
                 onClicked: EditorState.deleteSelectedClip()
             }

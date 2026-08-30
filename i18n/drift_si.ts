@@ -6268,6 +6268,14 @@ If playback stutters, try another.</source>
         <translation>ප්‍රමාණය</translation>
     </message>
     <message>
+        <source>Haptic feedback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Vibrate on taps, snaps, and edits. Uses this device’s own haptic effects when it has them.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>App</source>
         <translation>යෙදුම</translation>
     </message>

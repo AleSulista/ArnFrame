@@ -63,6 +63,15 @@ Item {
                 Accessible.name: toast.message
                 Accessible.description: toast.severity
 
+                Component.onCompleted: {
+                    switch (toast.severity) {
+                    case "error": Haptics.error(); break
+                    case "warning": Haptics.confirm(); break
+                    case "success": Haptics.success(); break
+                    default: Haptics.press(); break
+                    }
+                }
+
                 // Severity is carried by a leading accent bar rather than a full
                 // color wash, so the message stays readable in both themes.
                 Rectangle {

@@ -143,6 +143,7 @@ Item {
 
                     property real lastScale: 1
                     property point lastCentroid
+                    property bool atZoomLimit: false
 
                     // Both signals fire for the same event; consuming the deltas makes
                     // the second call a no-op instead of a double application.
@@ -153,6 +154,10 @@ Item {
                         if (activeScale !== lastScale && lastScale > 0) {
                             viewport.zoomAt(c.x, c.y, activeScale / lastScale)
                             lastScale = activeScale
+                            const atLimit = viewport.userZoom === 0.25 || viewport.userZoom === 12.0
+                            if (atLimit && !atZoomLimit)
+                                Haptics.boundary()
+                            atZoomLimit = atLimit
                         }
                         viewport.panX += c.x - lastCentroid.x
                         viewport.panY += c.y - lastCentroid.y
@@ -160,10 +165,14 @@ Item {
                     }
 
                     onActiveChanged: {
-                        if (!active)
+                        atZoomLimit = false
+                        if (!active) {
+                            Haptics.drop()
                             return
+                        }
                         lastScale = activeScale
                         lastCentroid = centroid.position
+                        Haptics.pickUp()
                     }
                     onActiveScaleChanged: viewPinch.step()
                     onCentroidChanged: viewPinch.step()

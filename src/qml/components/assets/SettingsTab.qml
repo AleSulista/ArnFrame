@@ -241,6 +241,14 @@ Item {
                     onToggled: EditorState.invertTimelineScroll = checked
                 }
 
+                ThemedSwitch {
+                    visible: Haptics.supported
+                    checked: Haptics.enabled
+                    text: qsTr("Haptic feedback")
+                    tooltip: qsTr("Vibrate on taps, snaps, and edits. Uses this device’s own haptic effects when it has them.")
+                    onToggled: Haptics.enabled = checked
+                }
+
                 ThemedLabel {
                     visible: Theme.touchUi
                     text: qsTr("Language")

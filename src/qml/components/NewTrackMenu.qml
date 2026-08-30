@@ -21,11 +21,13 @@ Popup {
         // Popup itself is not an Item — Keys.* on the root fails with
         // "Could not attach Keys property". Focus the content column instead.
         contentItem.forceActiveFocus()
+        Haptics.press()
     }
 
     function addHighlighted() {
         if (highlightIndex < 0 || highlightIndex >= trackTypes.length)
             return
+        Haptics.confirm()
         EditorState.addTrack(trackTypes[highlightIndex].type)
         root.close()
     }
@@ -173,6 +175,7 @@ Popup {
                     cursorShape: Qt.PointingHandCursor
                     onEntered: root.highlightIndex = trackTypeRow.index
                     onClicked: {
+                        Haptics.confirm()
                         EditorState.addTrack(trackTypeRow.modelData.type)
                         root.close()
                     }

@@ -383,7 +383,10 @@ Item {
                 onPressed: (mouse) => {
                     grabX = mouse.x
                     grabY = mouse.y
+                    Haptics.pickUp()
                 }
+                onReleased: Haptics.drop()
+                onCanceled: Haptics.drop()
                 onPositionChanged: (mouse) => {
                     if (!pressed || cropHost.width <= 0)
                         return
@@ -434,6 +437,7 @@ Item {
                             startH = root.cropH
                             origX = mouseX
                             origY = mouseY
+                            Haptics.pickUp()
                         }
                         onPositionChanged: {
                             if (!pressed || cropHost.width <= 0)
@@ -458,6 +462,8 @@ Item {
                             }
                             cropHost.setCrop(nx, ny, nw, nh)
                         }
+                        onReleased: Haptics.drop()
+                        onCanceled: Haptics.drop()
                     }
                 }
             }
@@ -488,7 +494,10 @@ Item {
         MouseArea {
             anchors.fill: parent
             enabled: root.canPlay && root.mode !== "crop" && !root.saving
-            onClicked: root.togglePlay()
+            onClicked: {
+                Haptics.confirm()
+                root.togglePlay()
+            }
         }
 
         Rectangle {
@@ -640,6 +649,7 @@ Item {
                     enabled: !root.saving
                     onPressed: (mouse) => {
                         EditorState.pauseAssetPreview()
+                        Haptics.press()
                         root.seekTo(((mouse.x + 22) / Math.max(1, strip.width))
                                     * root.durationSeconds)
                     }
@@ -685,7 +695,12 @@ Item {
                             anchors.margins: -12
                             enabled: !root.saving
                             preventStealing: true
-                            onPressed: EditorState.pauseAssetPreview()
+                            onPressed: {
+                                EditorState.pauseAssetPreview()
+                                Haptics.pickUp()
+                            }
+                            onReleased: Haptics.drop()
+                            onCanceled: Haptics.drop()
                             onPositionChanged: (mouse) => {
                                 if (!pressed)
                                     return

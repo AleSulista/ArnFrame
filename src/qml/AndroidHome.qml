@@ -257,6 +257,7 @@ Item {
                                     onPressed: heldMenu = false
                                     onPressAndHold: {
                                         heldMenu = true
+                                        Haptics.pickUp()
                                         cardMenu.popup()
                                     }
                                     onClicked: {
@@ -266,6 +267,7 @@ Item {
                                             Toasts.warning(qsTr("That project file is missing."))
                                             return
                                         }
+                                        Haptics.select()
                                         root.openRecentRequested(card.modelData.path)
                                     }
                                 }

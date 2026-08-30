@@ -73,6 +73,8 @@ CheckBox {
         visible: root.tooltip.length > 0 && (root.hovered || root.visualFocus)
     }
 
+    onClicked: Haptics.toggle(root.checked)
+
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton

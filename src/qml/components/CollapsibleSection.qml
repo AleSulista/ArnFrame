@@ -98,7 +98,10 @@ Item {
                 anchors.fill: titleRow
                 enabled: root.collapsible
                 cursorShape: root.collapsible ? Qt.PointingHandCursor : Qt.ArrowCursor
-                onClicked: root.expanded = !root.expanded
+                onClicked: {
+                    root.expanded = !root.expanded
+                    Haptics.detent()
+                }
             }
 
             ThemedSwitch {

@@ -12,11 +12,12 @@ import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.Window;
 
-// Touch feedback for the timeline. Two routes, tried in that order:
+// Touch feedback for the editor. Two routes, tried in that order:
 //
 //   1. View.performHapticFeedback, which renders the OEM's own tuned effect for the interaction
 //      and needs no permission. It is the better feel wherever it works.
-//   2. Vibrator, when the first route declines.
+//   2. Vibrator, when the first route declines. API 30+ prefers VibrationEffect.Composition
+//      primitives (the actuator's own click/tick/rise) and falls back to predefined effects.
 //
 // The fallback is the whole point. performHapticFeedback's one-argument overload returns false and
 // does nothing whenever the system-wide touch-feedback setting is off ("Vibration & haptics →
@@ -25,9 +26,9 @@ import android.view.Window;
 // has been ignored since API 33 — so an app that only ever calls route 1 is silent on those devices
 // with no indication why. That was the bug: every call site was firing correctly and nothing moved.
 //
-// Route 2 therefore answers to Drift's own switch (Settings → Feedback) rather than to the system
-// touch-feedback setting: the C++ side never calls in here at all when that switch is off. The
-// system setting still wins wherever route 1 succeeds, which is the common case.
+// Route 2 therefore answers to Drift's own switch (Settings → Interface → Haptic feedback) rather
+// than to the system touch-feedback setting: the C++ side never calls in here at all when that
+// switch is off. The system setting still wins wherever route 1 succeeds, which is the common case.
 //
 // perform() must be called on the Android UI thread — performHapticFeedback goes through the view
 // hierarchy, which is not thread-safe, and Qt's GUI thread is a different thread. The C++ side
@@ -45,6 +46,11 @@ public class Haptics
     public static final int BOUNDARY = 4;
     public static final int DETENT = 5;
     public static final int CONFIRM = 6;
+    public static final int PRESS = 7;
+    public static final int TOGGLE_ON = 8;
+    public static final int TOGGLE_OFF = 9;
+    public static final int SUCCESS = 10;
+    public static final int ERROR = 11;
 
     // Process-wide and immutable once resolved, unlike the decor view below. Resolved lazily
     // because the first call happens well after the activity exists. Guarded by the lock on this
@@ -63,6 +69,8 @@ public class Haptics
         switch (intent) {
         case SELECT:
             return HapticFeedbackConstants.CLOCK_TICK;
+        case PRESS:
+            return HapticFeedbackConstants.CONTEXT_CLICK;
         case SNAP:
         case DETENT:
             return sdk >= 34 ? HapticFeedbackConstants.SEGMENT_TICK
@@ -78,12 +86,25 @@ public class Haptics
             return sdk >= 30 ? HapticFeedbackConstants.GESTURE_END
                              : HapticFeedbackConstants.CLOCK_TICK;
         case BOUNDARY:
+        case ERROR:
             // REJECT is the "that did not happen" effect — the right answer for an edge that
             // refuses to move, and distinct enough from SNAP that the two do not blur together
             // during a trim, which is the one drag that produces both.
             return sdk >= 30 ? HapticFeedbackConstants.REJECT
                              : HapticFeedbackConstants.CLOCK_TICK;
         case CONFIRM:
+            return sdk >= 30 ? HapticFeedbackConstants.CONFIRM
+                             : HapticFeedbackConstants.VIRTUAL_KEY;
+        case TOGGLE_ON:
+            return sdk >= 34 ? HapticFeedbackConstants.TOGGLE_ON
+                             : (sdk >= 30 ? HapticFeedbackConstants.CONFIRM
+                                          : HapticFeedbackConstants.VIRTUAL_KEY);
+        case TOGGLE_OFF:
+            return sdk >= 34 ? HapticFeedbackConstants.TOGGLE_OFF
+                             : HapticFeedbackConstants.CLOCK_TICK;
+        case SUCCESS:
+            // CONFIRM is the platform's "this completed" effect. A two-beat success lives on the
+            // vibrator fallback below; the view API has no richer success constant.
             return sdk >= 30 ? HapticFeedbackConstants.CONFIRM
                              : HapticFeedbackConstants.VIRTUAL_KEY;
         default:
@@ -133,19 +154,79 @@ public class Haptics
         return sVibrator;
     }
 
-    // The same seven intents again, this time as motor commands. API 29 predefined effects are
-    // preferred wherever they exist because the vendor tunes them per actuator; minSdk is 28, so
-    // exactly one level needs the hand-rolled durations underneath.
-    private static VibrationEffect effectFor(int intent)
+    // The same intents again, this time as motor commands. Composition primitives (API 30) are
+    // preferred wherever the actuator advertises them, because they are the same vocabulary the
+    // OEM uses for its own keyboard and switches. Predefined effects cover API 29; minSdk is 28,
+    // so exactly one level needs the hand-rolled durations underneath.
+    private static boolean primitiveOk(Vibrator vibrator, int primitive)
     {
+        return Build.VERSION.SDK_INT >= 30 && vibrator != null
+               && vibrator.areAllPrimitivesSupported(primitive);
+    }
+
+    private static VibrationEffect compositionFor(Vibrator vibrator, int intent)
+    {
+        if (Build.VERSION.SDK_INT < 30 || vibrator == null)
+            return null;
+        try {
+            VibrationEffect.Composition c = VibrationEffect.startComposition();
+            switch (intent) {
+            case PICK_UP:
+                if (!primitiveOk(vibrator, VibrationEffect.Composition.PRIMITIVE_QUICK_RISE))
+                    return null;
+                c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE, 1.0f);
+                return c.compose();
+            case TOGGLE_ON:
+                if (!primitiveOk(vibrator, VibrationEffect.Composition.PRIMITIVE_CLICK))
+                    return null;
+                if (primitiveOk(vibrator, VibrationEffect.Composition.PRIMITIVE_QUICK_RISE))
+                    c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE, 0.8f, 0);
+                c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 1.0f, 20);
+                return c.compose();
+            case TOGGLE_OFF:
+                if (!primitiveOk(vibrator, VibrationEffect.Composition.PRIMITIVE_QUICK_FALL))
+                    return null;
+                c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_FALL, 0.7f);
+                return c.compose();
+            case SUCCESS:
+                if (!primitiveOk(vibrator, VibrationEffect.Composition.PRIMITIVE_CLICK))
+                    return null;
+                c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 1.0f, 0);
+                if (primitiveOk(vibrator, VibrationEffect.Composition.PRIMITIVE_TICK))
+                    c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 0.8f, 70);
+                return c.compose();
+            case ERROR:
+                if (!primitiveOk(vibrator, VibrationEffect.Composition.PRIMITIVE_SLOW_RISE))
+                    return null;
+                c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_SLOW_RISE, 0.6f, 0);
+                if (primitiveOk(vibrator, VibrationEffect.Composition.PRIMITIVE_QUICK_FALL))
+                    c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_FALL, 1.0f, 30);
+                return c.compose();
+            default:
+                return null;
+            }
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
+    private static VibrationEffect effectFor(Vibrator vibrator, int intent)
+    {
+        VibrationEffect composed = compositionFor(vibrator, intent);
+        if (composed != null)
+            return composed;
         if (Build.VERSION.SDK_INT >= 29) {
             switch (intent) {
             case PICK_UP:
+            case ERROR:
                 return VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK);
             case BOUNDARY:
                 return VibrationEffect.createPredefined(VibrationEffect.EFFECT_DOUBLE_CLICK);
             case DROP:
             case CONFIRM:
+            case SUCCESS:
+            case TOGGLE_ON:
+            case PRESS:
                 return VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK);
             default:
                 return VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK);
@@ -153,13 +234,19 @@ public class Haptics
         }
         switch (intent) {
         case PICK_UP:
+        case ERROR:
             return VibrationEffect.createOneShot(28, 255);
         case BOUNDARY:
             // Two knocks with a gap, which is what EFFECT_DOUBLE_CLICK is above.
             return VibrationEffect.createWaveform(new long[] {0, 16, 70, 16},
                                                   new int[] {0, 200, 0, 200}, -1);
+        case SUCCESS:
+            return VibrationEffect.createWaveform(new long[] {0, 18, 55, 12},
+                                                  new int[] {0, 200, 0, 140}, -1);
         case DROP:
         case CONFIRM:
+        case TOGGLE_ON:
+        case PRESS:
             return VibrationEffect.createOneShot(18, 160);
         default:
             // Ticks ride under a moving finger and stack up over a drag: short and light, or the
@@ -173,7 +260,7 @@ public class Haptics
         Vibrator vibrator = vibrator(context);
         if (vibrator == null)
             return;
-        VibrationEffect effect = effectFor(intent);
+        VibrationEffect effect = effectFor(vibrator, intent);
         // Usage matters: tagged as touch feedback (or sonification below API 33) the platform
         // routes it as an interface response, so Do Not Disturb and the ringer's own vibrate
         // setting treat it the way they treat a keyboard tick rather than an alarm.

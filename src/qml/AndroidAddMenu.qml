@@ -158,6 +158,7 @@ AndroidBottomSheet {
                 }
 
                 onClicked: {
+                    Haptics.select()
                     root.dismiss()
                     root.picked(optionRow.modelData.id)
                 }

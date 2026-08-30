@@ -350,7 +350,10 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: EditorState.seekToScene(row.modelData.index)
+                onClicked: {
+                    Haptics.select()
+                    EditorState.seekToScene(row.modelData.index)
+                }
             }
         }
     }

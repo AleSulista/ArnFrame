@@ -3,9 +3,9 @@
 #include <QElapsedTimer>
 #include <QObject>
 
-// Touch feedback for the timeline, in the vocabulary of the interaction rather than of the
-// actuator: call sites say what just happened and this decides what it feels like. The mapping onto
-// platform constants lives in android/src/org/cutwire/drift/Haptics.java.
+// Touch feedback, in the vocabulary of the interaction rather than of the actuator: call sites say
+// what just happened and this decides what it feels like. The mapping onto platform constants lives
+// in android/src/org/cutwire/drift/Haptics.java.
 //
 // Two things every call site gets for free, and which are the difference between this feeling
 // deliberate and feeling broken:
@@ -58,6 +58,15 @@ public:
     // Something happened that the user cannot undo with the same gesture that caused it — a split,
     // a delete.
     Q_INVOKABLE void confirm();
+    // Generic control activation: a button, a menu row, a chip that is not a selection. Light.
+    Q_INVOKABLE void press();
+    // A binary control landed on or off. Distinct directions so a switch does not feel the same
+    // both ways.
+    Q_INVOKABLE void toggle(bool on);
+    // A task the user asked for finished: an export, a save, an import. Heavier than confirm().
+    Q_INVOKABLE void success();
+    // Something failed that the user needs to notice: a toast error, a rejected value.
+    Q_INVOKABLE void error();
 
     // --- Edge-triggered ------------------------------------------------------------------------
 
@@ -90,6 +99,11 @@ private:
         Boundary = 4,
         Detent = 5,
         Confirm = 6,
+        Press = 7,
+        ToggleOn = 8,
+        ToggleOff = 9,
+        Success = 10,
+        Error = 11,
     };
 
     void fire(Effect effect);

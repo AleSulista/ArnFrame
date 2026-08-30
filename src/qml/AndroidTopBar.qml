@@ -246,6 +246,7 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: {
+                            Haptics.press()
                             overflowMenu.close()
                             menuRow.triggered()
                         }

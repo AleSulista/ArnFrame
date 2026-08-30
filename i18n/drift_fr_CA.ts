@@ -6271,6 +6271,14 @@ En cas de saccades à la lecture, essayez un autre mode.</translation>
         <translation>Taille</translation>
     </message>
     <message>
+        <source>Haptic feedback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Vibrate on taps, snaps, and edits. Uses this device’s own haptic effects when it has them.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>App</source>
         <translation>Application</translation>
     </message>
