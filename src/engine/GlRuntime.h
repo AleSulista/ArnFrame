@@ -10,6 +10,7 @@
 
 #include "GpuEffectDefinition.h"
 #include "ModelAsset.h"
+#include "PreviewVideoFrame.h"
 #include "core/Time.h"
 
 #include <QByteArray>
@@ -36,6 +37,7 @@
 
 class QOffscreenSurface;
 class QOpenGLContext;
+struct SwsContext;
 
 namespace drift::gl {
 
@@ -222,6 +224,13 @@ private:
     bool initGlObjects();
     void waitPresentFence(int slotIndex);
     void destroyImageUploadCache();
+    void destroyVideoUploadState();
+    bool ensureVideoUploadTextures(QOpenGLExtraFunctions *gl, int width, int height);
+    bool uploadPlanePbo(QOpenGLExtraFunctions *gl, GLuint texture, int texW, int texH, GLenum internalFormat,
+                        GLenum format, const uint8_t *src, int srcPitch, int packedWidth);
+    void unregisterCudaResources();
+    bool importCudaNv12(QOpenGLExtraFunctions *gl, const AVFrame *frame);
+    AVFrame *ensureSoftwareNv12(const AVFrame *src);
 
     QMutex m_initMutex;
     bool m_initTried = false;
@@ -252,7 +261,23 @@ private:
     std::list<CachedUpload> m_imageUploadLru;
     static constexpr size_t kMaxCachedUploads = 48;
 
+    GLuint m_videoY = 0;
+    GLuint m_videoUV = 0;
+    int m_videoTexW = 0;
+    int m_videoTexH = 0;
+    GLuint m_videoPbo[2] = {0, 0};
+    int m_videoPboIndex = 0;
+    AVFrame *m_hwImportStaging = nullptr;
+    ::SwsContext *m_importSws = nullptr;
+    void *m_cudaYResource = nullptr;
+    void *m_cudaUvResource = nullptr;
+    int m_cudaTexW = 0;
+    int m_cudaTexH = 0;
+    bool m_cudaImportFailed = false;
+
     friend GLuint cachedUploadTexture(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QImage &image);
+    friend GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,
+                                              const PreviewVideoFrame &frame);
 };
 
 GlRuntime &runtime();
@@ -276,10 +301,11 @@ GlTarget promoteImageToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QI
 GlTarget promoteImageToTargetCached(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QImage &image,
                                     const QSize &fallbackSize);
 
-// NV12 (semi-planar Y + interleaved UV) → RGBA FBO via a convert shader. `nv12`
-// is height*width Y bytes followed by height/2*width UV bytes.
-GlTarget promoteNv12ToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QByteArray &nv12,
-                             int width, int height);
+// Preview video → RGBA FBO. Hardware CUDA frames copy GPU-to-GPU when the driver
+// allows; everything else uploads NV12 through a pooled PBO. Colour and display
+// rotation are applied in the convert shader.
+GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,
+                                   const PreviewVideoFrame &frame);
 
 void setPackageUniforms(QOpenGLShaderProgram *program, const QMap<QString, QVariant> &parameters,
                         const QSize &resolution, drift::TimeUs timeUs, double progress);

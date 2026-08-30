@@ -548,8 +548,8 @@ QImage gpuSourceForClip(const drift::Clip &clip, drift::TimeUs timelineUs, int m
     return CompositorFrameHistory::applyTimeEcho(samples, decay, blendMode);
 }
 
-// Prefer NV12 for plain video (preview upload path); fall back to RGBA QImage
-// when time_echo needs CPU blending or NV12 decode fails.
+// Prefer the preview AVFrame path for plain video; fall back to RGBA QImage
+// when time_echo needs CPU blending or preview decode fails.
 void fillGpuLayerPixels(GpuLayer &layer, const drift::Clip &clip, drift::TimeUs timelineUs, int maxWidth,
                         int maxHeight, int projectFps, int maxTimeEchoHistoryFrames)
 {
@@ -559,12 +559,10 @@ void fillGpuLayerPixels(GpuLayer &layer, const drift::Clip &clip, drift::TimeUs 
     const drift::Effect *timeEcho = findTimeEchoEffect(clip.effects);
     if (!timeEcho && clip.type == drift::ClipType::Video) {
         const drift::VideoRead read = drift::resolveVideoRead(clip, timelineUs);
-        const Nv12Frame nv12 = ClipReaderPool::instance().readVideoFrameNv12(
+        const PreviewVideoFrame video = ClipReaderPool::instance().readPreviewVideoFrame(
             read.path, ClipReaderPool::streamIdForClip(clip.id), read.sourceUs, maxWidth, maxHeight);
-        if (nv12.isValid()) {
-            layer.nv12 = nv12.data;
-            layer.nv12Width = nv12.width;
-            layer.nv12Height = nv12.height;
+        if (video.isValid()) {
+            layer.video = video;
             return;
         }
     }

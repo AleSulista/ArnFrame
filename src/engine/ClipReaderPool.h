@@ -51,7 +51,7 @@ public:
 
     // How far past the frame being composited each reader keeps decoding, in
     // source time. Set per composite from the render options; 0 (the default)
-    // leaves the plain one-frame-ahead prefetch. Only the NV12 preview path
+    // leaves the plain one-frame-ahead prefetch. Only the preview path
     // buffers — export and thumbnails consume as fast as they decode anyway.
     void setReadAheadUs(drift::TimeUs readAheadUs);
 
@@ -63,10 +63,11 @@ public:
     QImage readVideoFrame(const QString &path, quint64 streamId, drift::TimeUs sourceUs, int maxWidth,
                           int maxHeight, const QString &stabilizePath = QString(),
                           int stabilizeSmoothing = 15, bool stabilizeTripod = false);
-    // Preview path: NV12 for cheaper GPU upload. Falls back empty when decode fails.
-    Nv12Frame readVideoFrameNv12(const QString &path, quint64 streamId, drift::TimeUs sourceUs,
-                                 int maxWidth, int maxHeight, const QString &stabilizePath = QString(),
-                                 int stabilizeSmoothing = 15, bool stabilizeTripod = false);
+    // Preview path: AVFrame handle (hardware surfaces stay on the GPU). Empty when decode fails.
+    PreviewVideoFrame readPreviewVideoFrame(const QString &path, quint64 streamId, drift::TimeUs sourceUs,
+                                            int maxWidth, int maxHeight,
+                                            const QString &stabilizePath = QString(),
+                                            int stabilizeSmoothing = 15, bool stabilizeTripod = false);
     int readAudioInterleaved(const QString &path, quint64 streamId, drift::TimeUs sourceStartUs,
                              int sampleCount, int outputSampleRate, float *interleavedStereoOut);
     // Tell every audio reader its cursor is stale, so the next read seeks to the position asked

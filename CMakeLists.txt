@@ -437,6 +437,7 @@ add_library(driftengine STATIC
     src/engine/ObjectDetector.cpp
     src/engine/Exporter.h
     src/engine/Exporter.cpp
+    src/engine/PreviewVideoFrame.h
     src/engine/ClipReader.h
     src/engine/ClipReader.cpp
     src/engine/DebugReport.h

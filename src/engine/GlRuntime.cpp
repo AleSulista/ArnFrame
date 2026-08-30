@@ -4,6 +4,7 @@
 
 #include <QColor>
 #include <QCoreApplication>
+#include <QMatrix3x3>
 #include <QMutexLocker>
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
@@ -12,7 +13,23 @@
 #include <QVector3D>
 
 #include <cmath>
+#include <cstring>
 #include <mutex>
+
+extern "C" {
+#include <libavutil/hwcontext.h>
+#include <libavutil/pixdesc.h>
+#include <libswscale/swscale.h>
+}
+
+#if defined(Q_OS_WIN)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#elif !defined(Q_OS_MACOS)
+#include <dlfcn.h>
+#endif
 
 // Qt for Android is built against the GLES 2.0 headers so it can still run on ES2-only devices, and
 // qopengl.h includes <GLES2/gl2.h> accordingly. The ES 3.0 *functions* this file uses still resolve,
@@ -35,6 +52,21 @@
 #endif
 #ifndef GL_SYNC_FLUSH_COMMANDS_BIT
 #define GL_SYNC_FLUSH_COMMANDS_BIT 0x00000001
+#endif
+#ifndef GL_UNPACK_ROW_LENGTH
+#define GL_UNPACK_ROW_LENGTH 0x0CF2
+#endif
+#ifndef GL_PIXEL_UNPACK_BUFFER
+#define GL_PIXEL_UNPACK_BUFFER 0x88EC
+#endif
+#ifndef GL_STREAM_DRAW
+#define GL_STREAM_DRAW 0x88E0
+#endif
+#ifndef GL_MAP_WRITE_BIT
+#define GL_MAP_WRITE_BIT 0x0002
+#endif
+#ifndef GL_MAP_INVALIDATE_BUFFER_BIT
+#define GL_MAP_INVALIDATE_BUFFER_BIT 0x0008
 #endif
 
 namespace drift::gl {
@@ -82,23 +114,23 @@ void main() {
 }
 )";
 
-// BT.709 limited-range (TV) NV12 → straight RGBA (opaque).
-// Expand Y from 16–235 and Cb/Cr from 16–240 before the BT.709 matrix.
+// YUV → RGBA with caller-supplied matrix, range and a UV affine for display rotation.
 constexpr const char *kNv12FragShader = R"(#version 330 core
 in vec2 v_texCoord;
 out vec4 fragColor;
 uniform sampler2D u_y;
 uniform sampler2D u_uv;
+uniform mat3 u_yuvToRgb;
+uniform vec3 u_yuvOffset;
+uniform vec3 u_yuvScale;
+uniform mat3 u_texMap;
 void main() {
-    float y = texture(u_y, v_texCoord).r;
-    vec2 uv = texture(u_uv, v_texCoord).rg;
-    float Y = (y - 16.0 / 255.0) * (255.0 / 219.0);
-    float Cb = (uv.x - 128.0 / 255.0) * (255.0 / 224.0);
-    float Cr = (uv.y - 128.0 / 255.0) * (255.0 / 224.0);
-    float r = Y + 1.5748 * Cr;
-    float g = Y - 0.1873 * Cb - 0.4681 * Cr;
-    float b = Y + 1.8556 * Cb;
-    fragColor = vec4(clamp(vec3(r, g, b), 0.0, 1.0), 1.0);
+    vec2 src = (u_texMap * vec3(v_texCoord, 1.0)).xy;
+    float y = texture(u_y, src).r;
+    vec2 chroma = texture(u_uv, src).rg;
+    vec3 yuv = (vec3(y, chroma) - u_yuvOffset) * u_yuvScale;
+    vec3 rgb = u_yuvToRgb * yuv;
+    fragColor = vec4(clamp(rgb, 0.0, 1.0), 1.0);
 }
 )";
 
@@ -112,6 +144,198 @@ constexpr float kQuad[] = {
     -1.f,  1.f, 0.f, 1.f,
      1.f,  1.f, 1.f, 1.f,
 };
+
+QMatrix3x3 yuvToRgbMatrix(int colorspace)
+{
+    // Row-major, multiplies vec3(Y, Cb, Cr) after range expansion.
+    float m[9] = {1.f, 0.f, 1.5748f, 1.f, -0.1873f, -0.4681f, 1.f, 1.8556f, 0.f};
+    switch (colorspace) {
+    case AVCOL_SPC_BT470BG:
+    case AVCOL_SPC_SMPTE170M:
+        m[2] = 1.402f;
+        m[4] = -0.344f;
+        m[5] = -0.714f;
+        m[7] = 1.772f;
+        break;
+    case AVCOL_SPC_BT2020_NCL:
+    case AVCOL_SPC_BT2020_CL:
+        m[2] = 1.4746f;
+        m[4] = -0.1646f;
+        m[5] = -0.5714f;
+        m[7] = 1.8814f;
+        break;
+    default:
+        break;
+    }
+    return QMatrix3x3(m);
+}
+
+QMatrix3x3 texMapForRotation(int rotation)
+{
+    // codedUV = (mat * vec3(displayUV, 1)).xy. 90/270 are clockwise, matching Qt.
+    float m[9] = {1.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 1.f};
+    if (rotation == 90) {
+        const float r[9] = {0.f, 1.f, 0.f, -1.f, 0.f, 1.f, 0.f, 0.f, 1.f};
+        memcpy(m, r, sizeof(m));
+    } else if (rotation == 180) {
+        const float r[9] = {-1.f, 0.f, 1.f, 0.f, -1.f, 1.f, 0.f, 0.f, 1.f};
+        memcpy(m, r, sizeof(m));
+    } else if (rotation == 270) {
+        const float r[9] = {0.f, -1.f, 1.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f};
+        memcpy(m, r, sizeof(m));
+    }
+    return QMatrix3x3(m);
+}
+
+void yuvRangeUniforms(int colorRange, QVector3D *offset, QVector3D *scale)
+{
+    if (colorRange == AVCOL_RANGE_JPEG) {
+        *offset = QVector3D(0.f, 128.f / 255.f, 128.f / 255.f);
+        *scale = QVector3D(1.f, 1.f, 1.f);
+        return;
+    }
+    *offset = QVector3D(16.f / 255.f, 128.f / 255.f, 128.f / 255.f);
+    *scale = QVector3D(255.f / 219.f, 255.f / 224.f, 255.f / 224.f);
+}
+
+bool isHwPixelFormat(AVPixelFormat fmt)
+{
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(fmt);
+    return desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL);
+}
+
+#if !defined(Q_OS_MACOS)
+using CUresult = int;
+using CUdeviceptr = void *;
+using CUarray = void *;
+using CUcontext = void *;
+using CUstream = void *;
+using CUgraphicsResource = void *;
+
+enum { kCuSuccess = 0, kCuMemoryDevice = 2, kCuMemoryArray = 3, kCuRegisterWriteDiscard = 0x02 };
+
+struct CudaMemcpy2D
+{
+    size_t srcXInBytes = 0;
+    size_t srcY = 0;
+    int srcMemoryType = 0;
+    int srcPad = 0;
+    const void *srcHost = nullptr;
+    CUdeviceptr srcDevice = nullptr;
+    CUarray srcArray = nullptr;
+    size_t srcPitch = 0;
+    size_t dstXInBytes = 0;
+    size_t dstY = 0;
+    int dstMemoryType = 0;
+    int dstPad = 0;
+    void *dstHost = nullptr;
+    CUdeviceptr dstDevice = nullptr;
+    CUarray dstArray = nullptr;
+    size_t dstPitch = 0;
+    size_t WidthInBytes = 0;
+    size_t Height = 0;
+};
+
+struct CudaGlApi
+{
+    void *lib = nullptr;
+    CUresult (*cuInit)(unsigned int) = nullptr;
+    CUresult (*cuCtxPushCurrent)(CUcontext) = nullptr;
+    CUresult (*cuCtxPopCurrent)(CUcontext *) = nullptr;
+    CUresult (*cuGraphicsGLRegisterImage)(CUgraphicsResource *, unsigned int, unsigned int,
+                                          unsigned int) = nullptr;
+    CUresult (*cuGraphicsUnregisterResource)(CUgraphicsResource) = nullptr;
+    CUresult (*cuGraphicsMapResources)(unsigned int, CUgraphicsResource *, CUstream) = nullptr;
+    CUresult (*cuGraphicsUnmapResources)(unsigned int, CUgraphicsResource *, CUstream) = nullptr;
+    CUresult (*cuGraphicsSubResourceGetMappedArray)(CUarray *, CUgraphicsResource, unsigned int,
+                                                    unsigned int) = nullptr;
+    CUresult (*cuMemcpy2D)(const CudaMemcpy2D *) = nullptr;
+    bool ok = false;
+};
+
+CudaGlApi &cudaGlApi()
+{
+    static CudaGlApi api;
+    static std::once_flag once;
+    std::call_once(once, [] {
+#if defined(Q_OS_WIN)
+        api.lib = static_cast<void *>(LoadLibraryW(L"nvcuda.dll"));
+        auto sym = [&](const char *name) -> void * {
+            return api.lib ? static_cast<void *>(GetProcAddress(static_cast<HMODULE>(api.lib), name))
+                           : nullptr;
+        };
+#else
+        api.lib = dlopen("libcuda.so.1", RTLD_LAZY | RTLD_LOCAL);
+        auto sym = [&](const char *name) -> void * { return api.lib ? dlsym(api.lib, name) : nullptr; };
+#endif
+        if (!api.lib)
+            return;
+#define DRIFT_CUDA_SYM(field, name) \
+    api.field = reinterpret_cast<decltype(api.field)>(sym(name)); \
+    if (!api.field) \
+        return;
+        DRIFT_CUDA_SYM(cuInit, "cuInit");
+        DRIFT_CUDA_SYM(cuCtxPushCurrent, "cuCtxPushCurrent");
+        DRIFT_CUDA_SYM(cuCtxPopCurrent, "cuCtxPopCurrent");
+        DRIFT_CUDA_SYM(cuGraphicsGLRegisterImage, "cuGraphicsGLRegisterImage");
+        DRIFT_CUDA_SYM(cuGraphicsUnregisterResource, "cuGraphicsUnregisterResource");
+        DRIFT_CUDA_SYM(cuGraphicsMapResources, "cuGraphicsMapResources");
+        DRIFT_CUDA_SYM(cuGraphicsUnmapResources, "cuGraphicsUnmapResources");
+        DRIFT_CUDA_SYM(cuGraphicsSubResourceGetMappedArray, "cuGraphicsSubResourceGetMappedArray");
+        DRIFT_CUDA_SYM(cuMemcpy2D, "cuMemcpy2D");
+#undef DRIFT_CUDA_SYM
+        if (api.cuInit(0) != kCuSuccess)
+            return;
+        api.ok = true;
+    });
+    return api;
+}
+
+bool cudaContextOf(const AVFrame *frame, CUcontext *ctx, CUstream *stream)
+{
+    if (!frame || !frame->hw_frames_ctx)
+        return false;
+    const auto *fc = reinterpret_cast<const AVHWFramesContext *>(frame->hw_frames_ctx->data);
+    if (!fc || !fc->device_ctx || fc->device_ctx->type != AV_HWDEVICE_TYPE_CUDA || !fc->device_ctx->hwctx)
+        return false;
+    const char *hwctx = static_cast<const char *>(fc->device_ctx->hwctx);
+    *ctx = *reinterpret_cast<CUcontext const *>(hwctx);
+    *stream = *reinterpret_cast<CUstream const *>(hwctx + sizeof(void *));
+    return *ctx != nullptr;
+}
+
+bool cudaSwFormatIsNv12(const AVFrame *frame)
+{
+    if (!frame || !frame->hw_frames_ctx)
+        return false;
+    const auto *fc = reinterpret_cast<const AVHWFramesContext *>(frame->hw_frames_ctx->data);
+    return fc && fc->sw_format == AV_PIX_FMT_NV12;
+}
+
+bool copyCudaPlaneToTexture(CudaGlApi &api, CUstream stream, CUgraphicsResource resource,
+                            CUdeviceptr src, size_t srcPitch, size_t widthBytes, size_t height)
+{
+    CUarray array = nullptr;
+    if (api.cuGraphicsMapResources(1, &resource, stream) != kCuSuccess)
+        return false;
+    const bool gotArray =
+        api.cuGraphicsSubResourceGetMappedArray(&array, resource, 0, 0) == kCuSuccess && array;
+    bool copied = false;
+    if (gotArray) {
+        CudaMemcpy2D op{};
+        op.srcMemoryType = kCuMemoryDevice;
+        op.srcDevice = src;
+        op.srcPitch = srcPitch;
+        op.dstMemoryType = kCuMemoryArray;
+        op.dstArray = array;
+        op.WidthInBytes = widthBytes;
+        op.Height = height;
+        copied = api.cuMemcpy2D(&op) == kCuSuccess;
+    }
+    api.cuGraphicsUnmapResources(1, &resource, stream);
+    return copied;
+}
+#endif
 
 uint64_t targetPoolKey(int width, int height, bool wantDepth)
 {
@@ -357,6 +581,7 @@ void GlRuntime::releaseCaches()
 
     exec([this] {
         destroyImageUploadCache();
+        destroyVideoUploadState();
         m_targetPool.clear();
         m_pooledTargets = 0;
         if (auto *gl = functions())
@@ -385,6 +610,7 @@ void GlRuntime::shutdown()
                     }
                 }
                 destroyImageUploadCache();
+                destroyVideoUploadState();
             }
             for (GlTarget &target : m_presentRing)
                 target.fbo.reset();
@@ -508,6 +734,245 @@ void GlRuntime::destroyImageUploadCache()
     m_imageUploadIndex.clear();
 }
 
+void GlRuntime::destroyVideoUploadState()
+{
+    unregisterCudaResources();
+    auto *gl = functions();
+    if (gl) {
+        if (m_videoY) {
+            gl->glDeleteTextures(1, &m_videoY);
+            m_videoY = 0;
+        }
+        if (m_videoUV) {
+            gl->glDeleteTextures(1, &m_videoUV);
+            m_videoUV = 0;
+        }
+        if (m_videoPbo[0] || m_videoPbo[1]) {
+            gl->glDeleteBuffers(2, m_videoPbo);
+            m_videoPbo[0] = m_videoPbo[1] = 0;
+        }
+    }
+    m_videoTexW = 0;
+    m_videoTexH = 0;
+    m_videoPboIndex = 0;
+    av_frame_free(&m_hwImportStaging);
+    sws_freeContext(m_importSws);
+    m_importSws = nullptr;
+}
+
+bool GlRuntime::ensureVideoUploadTextures(QOpenGLExtraFunctions *gl, int width, int height)
+{
+    if (!gl || width < 2 || height < 2 || (width % 2) || (height % 2))
+        return false;
+    if (m_videoY && m_videoUV && m_videoTexW == width && m_videoTexH == height)
+        return true;
+
+    unregisterCudaResources();
+    if (m_videoY)
+        gl->glDeleteTextures(1, &m_videoY);
+    if (m_videoUV)
+        gl->glDeleteTextures(1, &m_videoUV);
+    m_videoY = m_videoUV = 0;
+
+    gl->glGenTextures(1, &m_videoY);
+    gl->glBindTexture(GL_TEXTURE_2D, m_videoY);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+
+    gl->glGenTextures(1, &m_videoUV);
+    gl->glBindTexture(GL_TEXTURE_2D, m_videoUV);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, width / 2, height / 2, 0, GL_RG, GL_UNSIGNED_BYTE,
+                     nullptr);
+
+    m_videoTexW = width;
+    m_videoTexH = height;
+    return m_videoY != 0 && m_videoUV != 0;
+}
+
+bool GlRuntime::uploadPlanePbo(QOpenGLExtraFunctions *gl, GLuint texture, int texW, int texH,
+                               GLenum internalFormat, GLenum format, const uint8_t *src, int srcPitch,
+                               int packedWidth)
+{
+    Q_UNUSED(internalFormat);
+    if (!gl || !texture || !src || texW <= 0 || texH <= 0 || packedWidth <= 0 || srcPitch <= 0)
+        return false;
+    const qsizetype packed = qsizetype(packedWidth) * texH;
+    if (!m_videoPbo[0])
+        gl->glGenBuffers(2, m_videoPbo);
+    const GLuint pbo = m_videoPbo[m_videoPboIndex];
+    m_videoPboIndex ^= 1;
+    gl->glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+    gl->glBufferData(GL_PIXEL_UNPACK_BUFFER, packed, nullptr, GL_STREAM_DRAW);
+    void *dst = gl->glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, packed,
+                                     GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+    if (!dst) {
+        gl->glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        return false;
+    }
+    if (srcPitch == packedWidth) {
+        memcpy(dst, src, size_t(packed));
+    } else {
+        auto *out = static_cast<uint8_t *>(dst);
+        const int rowBytes = qMin(packedWidth, srcPitch);
+        for (int y = 0; y < texH; ++y)
+            memcpy(out + size_t(y) * packedWidth, src + size_t(y) * srcPitch, size_t(rowBytes));
+    }
+    gl->glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+    gl->glBindTexture(GL_TEXTURE_2D, texture);
+    gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    gl->glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    gl->glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texW, texH, format, GL_UNSIGNED_BYTE, nullptr);
+    gl->glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    return true;
+}
+
+void GlRuntime::unregisterCudaResources()
+{
+#if !defined(Q_OS_MACOS)
+    CudaGlApi &api = cudaGlApi();
+    if (!api.ok)
+        return;
+    if (m_cudaYResource) {
+        api.cuGraphicsUnregisterResource(static_cast<CUgraphicsResource>(m_cudaYResource));
+        m_cudaYResource = nullptr;
+    }
+    if (m_cudaUvResource) {
+        api.cuGraphicsUnregisterResource(static_cast<CUgraphicsResource>(m_cudaUvResource));
+        m_cudaUvResource = nullptr;
+    }
+    m_cudaTexW = 0;
+    m_cudaTexH = 0;
+#endif
+}
+
+bool GlRuntime::importCudaNv12(QOpenGLExtraFunctions *gl, const AVFrame *frame)
+{
+#if defined(Q_OS_MACOS)
+    Q_UNUSED(gl);
+    Q_UNUSED(frame);
+    return false;
+#else
+    if (m_cudaImportFailed || !frame || frame->format != AV_PIX_FMT_CUDA || !cudaSwFormatIsNv12(frame))
+        return false;
+    CudaGlApi &api = cudaGlApi();
+    if (!api.ok) {
+        m_cudaImportFailed = true;
+        return false;
+    }
+    CUcontext ctx = nullptr;
+    CUstream stream = nullptr;
+    if (!cudaContextOf(frame, &ctx, &stream))
+        return false;
+
+    const int w = frame->width;
+    const int h = frame->height;
+    if (!ensureVideoUploadTextures(gl, w, h))
+        return false;
+
+    if (api.cuCtxPushCurrent(ctx) != kCuSuccess)
+        return false;
+
+    bool ok = false;
+    if (m_cudaTexW != w || m_cudaTexH != h || !m_cudaYResource || !m_cudaUvResource) {
+        unregisterCudaResources();
+        CUgraphicsResource yRes = nullptr;
+        CUgraphicsResource uvRes = nullptr;
+        if (api.cuGraphicsGLRegisterImage(&yRes, m_videoY, GL_TEXTURE_2D, kCuRegisterWriteDiscard)
+                == kCuSuccess
+            && api.cuGraphicsGLRegisterImage(&uvRes, m_videoUV, GL_TEXTURE_2D, kCuRegisterWriteDiscard)
+                == kCuSuccess) {
+            m_cudaYResource = yRes;
+            m_cudaUvResource = uvRes;
+            m_cudaTexW = w;
+            m_cudaTexH = h;
+        } else {
+            if (yRes)
+                api.cuGraphicsUnregisterResource(yRes);
+            if (uvRes)
+                api.cuGraphicsUnregisterResource(uvRes);
+            m_cudaImportFailed = true;
+        }
+    }
+
+    if (m_cudaYResource && m_cudaUvResource) {
+        ok = copyCudaPlaneToTexture(api, stream, static_cast<CUgraphicsResource>(m_cudaYResource),
+                                    frame->data[0], size_t(qMax(0, frame->linesize[0])), size_t(w),
+                                    size_t(h))
+            && copyCudaPlaneToTexture(api, stream, static_cast<CUgraphicsResource>(m_cudaUvResource),
+                                      frame->data[1], size_t(qMax(0, frame->linesize[1])), size_t(w),
+                                      size_t(h / 2));
+        if (!ok)
+            m_cudaImportFailed = true;
+    }
+
+    CUcontext popped = nullptr;
+    api.cuCtxPopCurrent(&popped);
+    return ok;
+#endif
+}
+
+AVFrame *GlRuntime::ensureSoftwareNv12(const AVFrame *src)
+{
+    if (!src)
+        return nullptr;
+    if (src->format == AV_PIX_FMT_NV12)
+        return const_cast<AVFrame *>(src);
+
+    if (isHwPixelFormat(static_cast<AVPixelFormat>(src->format))) {
+        if (!m_hwImportStaging)
+            m_hwImportStaging = av_frame_alloc();
+        if (!m_hwImportStaging)
+            return nullptr;
+        av_frame_unref(m_hwImportStaging);
+        if (av_hwframe_transfer_data(m_hwImportStaging, src, 0) < 0) {
+            av_frame_unref(m_hwImportStaging);
+            return nullptr;
+        }
+        src = m_hwImportStaging;
+        if (src->format == AV_PIX_FMT_NV12)
+            return m_hwImportStaging;
+    }
+
+    const int tw = src->width & ~1;
+    const int th = src->height & ~1;
+    if (tw < 2 || th < 2)
+        return nullptr;
+
+    m_importSws = sws_getCachedContext(m_importSws, src->width, src->height,
+                                       static_cast<AVPixelFormat>(src->format), tw, th, AV_PIX_FMT_NV12,
+                                       SWS_BILINEAR, nullptr, nullptr, nullptr);
+    if (!m_importSws)
+        return nullptr;
+
+    if (!m_hwImportStaging)
+        m_hwImportStaging = av_frame_alloc();
+    if (!m_hwImportStaging)
+        return nullptr;
+    if (m_hwImportStaging->format != AV_PIX_FMT_NV12 || m_hwImportStaging->width != tw
+        || m_hwImportStaging->height != th || !m_hwImportStaging->data[0]) {
+        av_frame_unref(m_hwImportStaging);
+        m_hwImportStaging->format = AV_PIX_FMT_NV12;
+        m_hwImportStaging->width = tw;
+        m_hwImportStaging->height = th;
+        if (av_frame_get_buffer(m_hwImportStaging, 0) < 0) {
+            av_frame_unref(m_hwImportStaging);
+            return nullptr;
+        }
+    }
+    sws_scale(m_importSws, src->data, src->linesize, 0, src->height, m_hwImportStaging->data,
+              m_hwImportStaging->linesize);
+    m_hwImportStaging->colorspace = src->colorspace;
+    m_hwImportStaging->color_range = src->color_range;
+    return m_hwImportStaging;
+}
+
 GlTarget &GlRuntime::acquirePresentTarget(int width, int height)
 {
     const int w = qMax(1, width);
@@ -547,15 +1012,14 @@ void GlRuntime::markPresentReady(GlTarget &presentTarget)
     if (slotIndex < 0)
         return;
 
-    waitPresentFence(slotIndex);
+    // Publish without a client wait: Qt Quick draws on the next vsync. The ring
+    // waits this fence in acquirePresentTarget before reuse of the same slot.
+    if (m_presentFence[slotIndex]) {
+        gl->glDeleteSync(m_presentFence[slotIndex]);
+        m_presentFence[slotIndex] = nullptr;
+    }
     gl->glFlush();
     m_presentFence[slotIndex] = gl->glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-    // Ensure the just-inserted fence has completed before the texture id is
-    // published to the scene graph (avoids sampling a half-drawn frame).
-    if (m_presentFence[slotIndex]) {
-        gl->glClientWaitSync(m_presentFence[slotIndex], GL_SYNC_FLUSH_COMMANDS_BIT,
-                             GLuint64(16'000'000)); // ~1 frame @ 60 Hz
-    }
 }
 
 QOpenGLShaderProgram *GlRuntime::builtinProgram(const QString &id, const char *vertexSource,
@@ -778,18 +1242,36 @@ GlTarget promoteImageToTargetCached(GlRuntime &rt, QOpenGLExtraFunctions *gl, co
     return target;
 }
 
-GlTarget promoteNv12ToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QByteArray &nv12,
-                             int width, int height)
+GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,
+                                   const PreviewVideoFrame &frame)
 {
-    if (!gl || width <= 0 || height <= 0 || (height % 2) != 0 || (width % 2) != 0)
+    if (!gl || !frame.isValid())
         return {};
 
-    const qsizetype yBytes = qsizetype(width) * height;
-    const qsizetype uvBytes = qsizetype(width) * (height / 2);
-    if (nv12.size() < yBytes + uvBytes)
+    const AVFrame *av = frame.frame.get();
+    const int codedW = av->width & ~1;
+    const int codedH = av->height & ~1;
+    if (codedW < 2 || codedH < 2)
         return {};
 
-    GlTarget target = rt.acquireTarget(width, height);
+    bool uploaded = rt.importCudaNv12(gl, av);
+    if (!uploaded) {
+        AVFrame *nv12 = rt.ensureSoftwareNv12(av);
+        if (!nv12 || nv12->format != AV_PIX_FMT_NV12)
+            return {};
+        const int w = nv12->width;
+        const int h = nv12->height;
+        if (!rt.ensureVideoUploadTextures(gl, w, h))
+            return {};
+        if (!rt.uploadPlanePbo(gl, rt.m_videoY, w, h, GL_R8, GL_RED, nv12->data[0], nv12->linesize[0], w)
+            || !rt.uploadPlanePbo(gl, rt.m_videoUV, w / 2, h / 2, GL_RG8, GL_RG, nv12->data[1],
+                                  nv12->linesize[1], w))
+            return {};
+    }
+
+    const int destW = qMax(2, frame.displayWidth() & ~1);
+    const int destH = qMax(2, frame.displayHeight() & ~1);
+    GlTarget target = rt.acquireTarget(destW, destH);
     if (!target.isValid())
         return {};
 
@@ -800,46 +1282,31 @@ GlTarget promoteNv12ToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QBy
         return {};
     }
 
-    GLuint textures[2] = {0, 0};
-    gl->glGenTextures(2, textures);
-
-    gl->glBindTexture(GL_TEXTURE_2D, textures[0]);
-    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE,
-                     nv12.constData());
-
-    gl->glBindTexture(GL_TEXTURE_2D, textures[1]);
-    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, width / 2, height / 2, 0, GL_RG, GL_UNSIGNED_BYTE,
-                     nv12.constData() + yBytes);
+    QVector3D offset;
+    QVector3D scale;
+    yuvRangeUniforms(frame.colorRange, &offset, &scale);
 
     target.fbo->bind();
-    gl->glViewport(0, 0, width, height);
+    gl->glViewport(0, 0, destW, destH);
     gl->glDisable(GL_BLEND);
     gl->glClearColor(0.f, 0.f, 0.f, 0.f);
     gl->glClear(GL_COLOR_BUFFER_BIT);
     program->bind();
     program->setUniformValue("u_y", 0);
     program->setUniformValue("u_uv", 1);
+    program->setUniformValue("u_yuvToRgb", yuvToRgbMatrix(frame.colorspace));
+    program->setUniformValue("u_yuvOffset", offset);
+    program->setUniformValue("u_yuvScale", scale);
+    program->setUniformValue("u_texMap", texMapForRotation(frame.rotation));
     gl->glActiveTexture(GL_TEXTURE0);
-    gl->glBindTexture(GL_TEXTURE_2D, textures[0]);
+    gl->glBindTexture(GL_TEXTURE_2D, rt.m_videoY);
     gl->glActiveTexture(GL_TEXTURE1);
-    gl->glBindTexture(GL_TEXTURE_2D, textures[1]);
+    gl->glBindTexture(GL_TEXTURE_2D, rt.m_videoUV);
     gl->glBindVertexArray(rt.vao);
     gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     gl->glBindVertexArray(0);
     program->release();
     target.fbo->release();
-
-    gl->glDeleteTextures(2, textures);
     return target;
 }
 

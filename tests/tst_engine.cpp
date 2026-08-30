@@ -2126,15 +2126,39 @@ void EngineTest::clipReaderAppliesDisplayRotation()
     QVERIFY(qRed(red) > qBlue(red));
     QVERIFY(qBlue(blue) > qRed(blue));
 
-    // The preview path converts to NV12 separately and needs the same treatment.
-    Nv12Frame nv12;
-    QVERIFY(reader.readVideoFrameAtNv12(500'000, nv12, expectedSize.width(), expectedSize.height()));
-    QCOMPARE(QSize(nv12.width, nv12.height), expectedSize);
-    // Red is markedly brighter than blue, so luma alone shows the halves are upright.
-    const auto lumaAt = [&](QPoint p) {
-        return uchar(nv12.data.at(qsizetype(p.y()) * nv12.width + p.x()));
-    };
-    QVERIFY(lumaAt(redAt) > lumaAt(blueAt));
+    // Preview keeps coded orientation and applies rotation in the GL shader.
+    PreviewVideoFrame preview;
+    QVERIFY(reader.readPreviewVideoFrame(500'000, preview, expectedSize.width(), expectedSize.height()));
+    QVERIFY(preview.isValid());
+    QCOMPARE(preview.rotation, displayDegrees);
+    QCOMPARE(QSize(preview.displayWidth(), preview.displayHeight()), expectedSize);
+
+    if (!GpuCompositor::isAvailable())
+        return;
+
+    drift::Project project;
+    project.setResolution(expectedSize.width(), expectedSize.height());
+    project.setFps(30);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("rot");
+    clip.type = drift::ClipType::Video;
+    clip.path = path;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(1.0);
+    project.tracks()[0].clips.append(clip);
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+    const QImage composited = compositor.compositeAt(500'000);
+    QVERIFY(!composited.isNull());
+    QCOMPARE(composited.size(), expectedSize);
+    const QRgb cred = composited.pixel(redAt);
+    const QRgb cblue = composited.pixel(blueAt);
+    QVERIFY(qRed(cred) > qBlue(cred));
+    QVERIFY(qBlue(cblue) > qRed(cblue));
 }
 
 QString EngineTest::makeAv1ColorVideo(QTemporaryDir &dir)
@@ -2468,10 +2492,10 @@ void EngineTest::videoStreamsDoNotReseekPerFrame()
     const quint64 twoFileBefore = ClipReader::videoFramesDecoded();
     for (int i = 0; i < kFrames; ++i) {
         QVERIFY(ClipReaderPool::instance()
-                    .readVideoFrameNv12(path, 101, drift::TimeUs(i) * kStep, 640, 360)
+                    .readPreviewVideoFrame(path, 101, drift::TimeUs(i) * kStep, 640, 360)
                     .isValid());
         QVERIFY(ClipReaderPool::instance()
-                    .readVideoFrameNv12(copy, 202, kSecondStart + drift::TimeUs(i) * kStep, 640, 360)
+                    .readPreviewVideoFrame(copy, 202, kSecondStart + drift::TimeUs(i) * kStep, 640, 360)
                     .isValid());
     }
     const quint64 twoFileDecoded = ClipReader::videoFramesDecoded() - twoFileBefore;
@@ -2480,10 +2504,10 @@ void EngineTest::videoStreamsDoNotReseekPerFrame()
     const quint64 oneFileBefore = ClipReader::videoFramesDecoded();
     for (int i = 0; i < kFrames; ++i) {
         QVERIFY(ClipReaderPool::instance()
-                    .readVideoFrameNv12(path, 303, drift::TimeUs(i) * kStep, 640, 360)
+                    .readPreviewVideoFrame(path, 303, drift::TimeUs(i) * kStep, 640, 360)
                     .isValid());
         QVERIFY(ClipReaderPool::instance()
-                    .readVideoFrameNv12(path, 404, kSecondStart + drift::TimeUs(i) * kStep, 640, 360)
+                    .readPreviewVideoFrame(path, 404, kSecondStart + drift::TimeUs(i) * kStep, 640, 360)
                     .isValid());
     }
     const quint64 oneFileDecoded = ClipReader::videoFramesDecoded() - oneFileBefore;

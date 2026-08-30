@@ -222,8 +222,8 @@ GlTarget buildLayerTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const GpuLay
         return {};
 
     GlTarget target;
-    if (!layer.nv12.isEmpty() && layer.nv12Width > 0 && layer.nv12Height > 0) {
-        target = promoteNv12ToTarget(rt, gl, layer.nv12, layer.nv12Width, layer.nv12Height);
+    if (layer.video.isValid()) {
+        target = promoteVideoFrameToTarget(rt, gl, layer.video);
     } else {
         target = promoteImageToTargetCached(rt, gl, layer.source, layer.source.size());
     }
@@ -725,8 +725,8 @@ GpuFrameTexture renderToTexture(const GpuScene &scene)
 
         composeOnGlThread(rt, scene, canvas);
 
-        // Fence + short client wait instead of glFinish: only this present slot's
-        // work must complete before the scene graph samples the texture.
+        // Insert a present fence without waiting: Qt Quick samples on the next
+        // vsync. acquirePresentTarget waits this fence before reusing the slot.
         rt.markPresentReady(canvas);
 
         out.textureId = canvas.texture();
