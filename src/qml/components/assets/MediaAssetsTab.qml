@@ -31,38 +31,114 @@ Item {
     signal exportRequested(int assetIndex)
     // Emitted when the empty-state action asks to import media.
     signal importRequested()
+    // Emitted from the card/row context menu — the only way to move an asset into a folder;
+    // there is no drag-onto-a-folder-tile path on desktop or touch. The parent owns the
+    // folder-picker dialog.
+    signal moveToFolderRequested(int assetIndex)
+    // Emitted from a folder tile's context menu. The parent owns the rename dialog.
+    signal folderRenameRequested(string folderId, string folderName)
 
-    function assetMatches(name, kind) {
-        if (!root.assetVisibleFn(kind))
-            return false
-        if (root.query.length === 0)
-            return true
-        return name.toLowerCase().indexOf(root.query) >= 0
+    // Bumped on every project edit (rename, folder create/delete/reparent, move-to-folder,
+    // undo/redo — anything that goes through pushProjectEdit) and on every async metadata
+    // update (import probe/thumbnail landing, replace finishing) so combinedItems below
+    // recomputes for changes a plain JS array wouldn't otherwise notice: unlike binding a
+    // view's `model` straight to AssetLibrary, this array is a one-shot snapshot with no
+    // subscription to the model's own dataChanged — without this tick, a card would keep
+    // showing its provisional kind/duration/thumbnail until an unrelated edit happened to
+    // rebuild the array.
+    //
+    // Routed through a short debounce rather than bumped directly: assigning a freshly-built
+    // array to a view's `model` reconstructs every delegate, not just the row that changed.
+    // A bulk import lands a metadata signal per file per probe/thumbnail stage in quick
+    // succession, and without coalescing that into one rebuild, the whole grid would be torn
+    // down and rebuilt once per signal — quadratic work, and a chance of destroying a delegate
+    // out from under a card that owns an active drag or has its context menu open.
+    property int _refreshTick: 0
+    Timer {
+        id: refreshCoalesceTimer
+        interval: 100
+        onTriggered: root._refreshTick++
+    }
+    Connections {
+        target: EditorState
+        function onUndoStackChanged() { refreshCoalesceTimer.restart() }
+    }
+    Connections {
+        target: AssetLibrary
+        function onAssetMetadataChanged(assetId) { refreshCoalesceTimer.restart() }
     }
 
-    // How many bin rows pass kind + search — drives the "no matches" empty state.
-    readonly property int matchCount: {
+    // Single source of truth for what's shown: folders in the current bin folder first, then
+    // its media, one flat array — not two separately-scrolling views. Every entry carries the
+    // same set of keys regardless of kind (folder rows get placeholder asset fields and vice
+    // versa) so one delegate below can bind every field as `required` without runtime errors.
+    readonly property var combinedItems: {
+        void root._refreshTick
         const q = root.query
-        let n = 0
+        const currentFolder = EditorState.currentBinFolderId
+        const items = []
+
+        for (let j = 0; j < BinFolderModel.count; ++j) {
+            const folder = BinFolderModel.folderAt(j)
+            if (folder.parentId !== currentFolder)
+                continue
+            if (q.length > 0 && folder.name.toLowerCase().indexOf(q) < 0)
+                continue
+            items.push({
+                isFolder: true,
+                folderId: folder.id,
+                name: folder.name,
+                assetIndex: -1,
+                kind: "",
+                duration: "",
+                durationSeconds: 0,
+                path: "",
+                thumbnailPath: "",
+                filmstripPath: ""
+            })
+        }
+
         for (let i = 0; i < AssetLibrary.count; ++i) {
             const asset = AssetLibrary.assetAt(i)
+            if (asset.folderId !== currentFolder)
+                continue
             if (!root.assetVisibleFn(asset.kind))
                 continue
             if (q.length > 0 && asset.name.toLowerCase().indexOf(q) < 0)
                 continue
-            ++n
+            items.push({
+                isFolder: false,
+                folderId: "",
+                name: asset.name,
+                assetIndex: asset.assetIndex,
+                kind: asset.kind,
+                duration: asset.duration,
+                durationSeconds: asset.durationSeconds,
+                path: asset.path,
+                thumbnailPath: asset.thumbnailPath,
+                filmstripPath: asset.filmstripPath
+            })
         }
-        return n
+
+        return items
     }
 
+    // One delegate type for both folder and asset rows — not a DelegateChooser. A
+    // DelegateChooser turned out to change enough about how the chosen delegate is parented
+    // that it broke the drag: the asset card's Drag.active binding started detecting a binding
+    // loop the instant a drag began, and the drag died before DragHandler.active ever went
+    // true. Keeping one concrete item type, with the folder/asset visuals as sibling blocks
+    // toggled by `isFolder`, keeps the exact Column/Rectangle/DragHandler nesting that already
+    // works for the timeline drop.
     Component {
         id: gridDelegate
         Column {
-            width: visible ? Theme.assetCardWidth : 0
+            id: cardRoot
+            width: Theme.assetCardWidth
             spacing: 4
-            visible: root.assetMatches(name, kind)
 
-            required property int index
+            required property bool isFolder
+            required property string folderId
             required property string name
             required property string kind
             required property string duration
@@ -70,8 +146,7 @@ Item {
             required property string path
             required property string thumbnailPath
             required property string filmstripPath
-
-            property int assetIndex: index
+            required property int assetIndex
 
             // Lift on grab: dims and grows slightly, so the card reads as
             // picked up rather than just sitting there while a ghost moves.
@@ -85,7 +160,7 @@ Item {
                 NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
             }
 
-            Drag.active: assetDrag.active
+            Drag.active: !isFolder && assetDrag.active
             Drag.dragType: Drag.Automatic
             Drag.supportedActions: Qt.CopyAction
             Drag.keys: ["text/plain"]
@@ -100,12 +175,18 @@ Item {
             // cursor, while the list rows had both.
             HoverHandler {
                 id: cardHover
-                cursorShape: assetDrag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                cursorShape: cardRoot.isFolder ? Qt.PointingHandCursor
+                             : (assetDrag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
             }
 
             ThemedToolTip {
-                text: qsTr("%1 — drag to the timeline, right-click to preview").arg(name)
+                text: cardRoot.isFolder ? name
+                      : qsTr("%1 — drag to the timeline, right-click to preview").arg(name)
                 visible: cardHover.hovered
+                // Explicit rather than the default above-parent Popup placement: for the top
+                // row, that placement had no room to spare and overlapped the folder row/search
+                // field above the grid.
+                y: parent.height + 4
             }
 
             Rectangle {
@@ -116,13 +197,24 @@ Item {
                 clip: true
                 border.width: cardHover.hovered ? Theme.borderWidth : 0
                 border.color: Theme.primary
-                scale: cardHover.hovered ? 1.03 : 1.0
+                scale: (!cardRoot.isFolder && cardHover.hovered) ? 1.03 : 1.0
 
                 Behavior on scale {
                     NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
                 }
                 Behavior on border.width {
                     NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                }
+                Behavior on color {
+                    ColorAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
+                }
+
+                IconGlyph {
+                    visible: cardRoot.isFolder
+                    anchors.centerIn: parent
+                    glyph: Theme.icons.folder
+                    iconSize: Theme.spacing3xl
+                    iconColor: Theme.mutedForeground
                 }
 
                 // Placeholder while the thumbnail decodes. The
@@ -131,15 +223,15 @@ Item {
                 SkeletonBox {
                     anchors.fill: parent
                     radius: parent.radius
-                    visible: thumbnailPath.length > 0
+                    visible: !cardRoot.isFolder && thumbnailPath.length > 0
                                 && gridThumb.status === Image.Loading
                 }
 
                 Image {
                     id: gridThumb
                     anchors.fill: parent
-                    visible: thumbnailPath.length > 0 && status === Image.Ready
-                    source: thumbnailPath.length > 0 ? EditorState.imageUrl(thumbnailPath) : ""
+                    visible: !cardRoot.isFolder && thumbnailPath.length > 0 && status === Image.Ready
+                    source: !cardRoot.isFolder && thumbnailPath.length > 0 ? EditorState.imageUrl(thumbnailPath) : ""
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
                     // Fades in rather than popping at full opacity.
@@ -155,8 +247,8 @@ Item {
                     // Also covers Image.Error, so a missing
                     // thumbnail file falls back to the kind icon
                     // instead of staying blank forever.
-                    visible: thumbnailPath.length === 0
-                                || gridThumb.status === Image.Error
+                    visible: !cardRoot.isFolder
+                             && (thumbnailPath.length === 0 || gridThumb.status === Image.Error)
                     glyph: kind === "audio" ? Theme.icons.music
                             : kind === "image" ? Theme.icons.image
                             : Theme.icons.film
@@ -175,7 +267,7 @@ Item {
                     radius: parent.radius
                     color: Theme.scrimStrong
                     readonly property bool busy:
-                        EditorState.replacingAssetId.length > 0
+                        !cardRoot.isFolder && EditorState.replacingAssetId.length > 0
                         && EditorState.replacingAssetId === AssetLibrary.assetIdAt(assetIndex)
                     visible: opacity > 0
                     opacity: busy ? 1 : 0
@@ -201,7 +293,7 @@ Item {
                 }
 
                 Rectangle {
-                    visible: duration.length > 0
+                    visible: !cardRoot.isFolder && duration.length > 0
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     anchors.margins: Theme.spacingSm
@@ -232,7 +324,8 @@ Item {
                     // Touch keeps press-and-hold for the lift below — the menu
                     // is a tap there.
                     enabled: !Theme.touchUi && !assetDrag.active
-                    onLongPressed: cardMenu.popup()
+                    onDoubleTapped: if (cardRoot.isFolder) EditorState.currentBinFolderId = cardRoot.folderId
+                    onLongPressed: cardRoot.isFolder ? folderMenu.popup() : cardMenu.popup()
                 }
                 DragHandler {
                     id: assetDrag
@@ -240,8 +333,10 @@ Item {
                     // clobbering the Grid positioner's x/y.
                     target: null
                     // Touch lifts through TouchDrag instead: a platform drag has
-                    // no touch gesture and cannot leave the sheet.
-                    enabled: !Theme.touchUi
+                    // no touch gesture and cannot leave the sheet. Folders aren't
+                    // draggable at all — moving an asset into one is a context-menu
+                    // action only ("Move to folder…"), not a drag-and-drop target.
+                    enabled: !Theme.touchUi && !cardRoot.isFolder
                     acceptedButtons: Qt.LeftButton
                     onActiveChanged: {
                         if (active) {
@@ -256,21 +351,25 @@ Item {
                 }
                 TapHandler {
                     acceptedButtons: Qt.RightButton
-                    onTapped: cardMenu.popup()
+                    onTapped: cardRoot.isFolder ? folderMenu.popup() : cardMenu.popup()
                 }
 
-                // Hold to carry the asset onto the timeline, tap for the menu.
-                // The phone's asset browser is a modal sheet, which the platform
-                // drag above cannot leave, so touch gets the lift instead.
+                // Hold to carry the asset onto the timeline, tap for the menu. The phone's
+                // asset browser is a modal sheet, which the platform drag above cannot leave,
+                // so touch gets the lift instead. Folders aren't draggable, but this is still
+                // the only tap surface touch has here — leaving it disabled for folder rows
+                // left touch with no way to open a folder or reach its rename/delete menu at
+                // all. A folder's dragKind is left empty so a stray press-and-hold doesn't
+                // start a lift no drop target recognizes as media.
                 TouchLiftArea {
-                    dragKind: "media"
-                    payload: assetIndex
+                    dragKind: cardRoot.isFolder ? "" : "media"
+                    payload: cardRoot.isFolder ? cardRoot.folderId : assetIndex
                     label: name
                     thumbnail: thumbnailPath
                     glyph: kind === "audio" ? Theme.icons.music
                             : kind === "image" ? Theme.icons.image
                             : Theme.icons.film
-                    onLiftTapped: cardMenu.popup()
+                    onLiftTapped: cardRoot.isFolder ? folderMenu.popup() : cardMenu.popup()
                 }
 
                 ThemedContextMenu {
@@ -292,6 +391,12 @@ Item {
                         onTriggered: root.replaceRequested(assetIndex)
                     }
                     ThemedMenuItem {
+                        text: qsTr("Move to folder…")
+                        icon.name: Theme.icons.folder
+                        visible: BinFolderModel.count > 0
+                        onTriggered: root.moveToFolderRequested(assetIndex)
+                    }
+                    ThemedMenuItem {
                         text: qsTr("Export image…")
                         icon.name: Theme.icons.save
                         visible: kind === "image"
@@ -301,6 +406,27 @@ Item {
                         text: qsTr("Remove from project")
                         icon.name: Theme.icons.trash
                         onTriggered: root.removeRequested(assetIndex)
+                    }
+                }
+
+                ThemedContextMenu {
+                    id: folderMenu
+
+                    ThemedMenuItem {
+                        text: qsTr("Open")
+                        icon.name: Theme.icons.folder
+                        onTriggered: EditorState.currentBinFolderId = cardRoot.folderId
+                    }
+                    ThemedMenuItem {
+                        text: qsTr("Rename…")
+                        icon.name: Theme.icons.pencil
+                        onTriggered: root.folderRenameRequested(cardRoot.folderId, cardRoot.name)
+                    }
+                    ThemedMenuSeparator { }
+                    ThemedMenuItem {
+                        text: qsTr("Delete")
+                        icon.name: Theme.icons.trash
+                        onTriggered: EditorState.deleteBinFolder(cardRoot.folderId)
                     }
                 }
             }
@@ -320,11 +446,10 @@ Item {
         id: listDelegate
         Rectangle {
             id: listRow
-            width: listColumn.width
-            height: visible ? 48 : 0
+            width: ListView.view ? ListView.view.width : 0
+            height: 48
             radius: Theme.radiusSm
             color: rowHover.hovered ? Theme.popoverHover : Theme.panelAccent
-            visible: root.assetMatches(name, kind)
             opacity: rowDrag.active ? 0.85 : 1
             scale: rowDrag.active ? 1.02 : 1.0
 
@@ -338,18 +463,18 @@ Item {
                 NumberAnimation { duration: Theme.durationFast; easing.type: Theme.easing }
             }
 
-            required property int index
+            required property bool isFolder
+            required property string folderId
             required property string name
             required property string kind
             required property string duration
             required property string thumbnailPath
-
-            property int assetIndex: index
+            required property int assetIndex
             readonly property bool replaceBusy:
-                EditorState.replacingAssetId.length > 0
+                !isFolder && EditorState.replacingAssetId.length > 0
                 && EditorState.replacingAssetId === AssetLibrary.assetIdAt(assetIndex)
 
-            Drag.active: rowDrag.active
+            Drag.active: !isFolder && rowDrag.active
             Drag.dragType: Drag.Automatic
             Drag.supportedActions: Qt.CopyAction
             Drag.keys: ["text/plain"]
@@ -359,7 +484,8 @@ Item {
 
             HoverHandler {
                 id: rowHover
-                cursorShape: rowDrag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                cursorShape: isFolder ? Qt.PointingHandCursor
+                             : (rowDrag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
             }
 
             Row {
@@ -379,15 +505,15 @@ Item {
                     SkeletonBox {
                         anchors.fill: parent
                         radius: parent.radius
-                        visible: thumbnailPath.length > 0
+                        visible: !listRow.isFolder && thumbnailPath.length > 0
                                     && listThumb.status === Image.Loading
                     }
 
                     Image {
                         id: listThumb
                         anchors.fill: parent
-                        visible: thumbnailPath.length > 0 && status === Image.Ready
-                        source: thumbnailPath.length > 0 ? EditorState.imageUrl(thumbnailPath) : ""
+                        visible: !listRow.isFolder && thumbnailPath.length > 0 && status === Image.Ready
+                        source: !listRow.isFolder && thumbnailPath.length > 0 ? EditorState.imageUrl(thumbnailPath) : ""
                         fillMode: Image.PreserveAspectFit
                         // Was missing, so list thumbnails decoded
                         // on the UI thread and stalled scrolling.
@@ -396,9 +522,10 @@ Item {
 
                     IconGlyph {
                         anchors.centerIn: parent
-                        visible: thumbnailPath.length === 0
-                                    || listThumb.status === Image.Error
-                        glyph: kind === "audio" ? Theme.icons.music : Theme.icons.film
+                        visible: listRow.isFolder
+                                    || thumbnailPath.length === 0 || listThumb.status === Image.Error
+                        glyph: listRow.isFolder ? Theme.icons.folder
+                               : (kind === "audio" ? Theme.icons.music : Theme.icons.film)
                         iconSize: Theme.iconSizeBase
                         iconColor: Theme.mutedForeground
                     }
@@ -439,6 +566,7 @@ Item {
                         width: parent.width
                     }
                     Text {
+                        visible: !listRow.isFolder
                         text: kind + (duration.length > 0 ? " · " + duration : "")
                         color: Theme.mutedForeground
                         font.pixelSize: Theme.fontSizeXs
@@ -452,8 +580,10 @@ Item {
             }
 
             ThemedToolTip {
-                text: qsTr("%1 — drag to the timeline, right-click to preview").arg(name)
+                text: listRow.isFolder ? name
+                      : qsTr("%1 — drag to the timeline, right-click to preview").arg(name)
                 visible: rowHover.hovered
+                y: parent.height + 4
             }
 
             Item {
@@ -463,12 +593,13 @@ Item {
                 TapHandler {
                     acceptedButtons: Qt.LeftButton
                     enabled: !Theme.touchUi && !rowDrag.active
-                    onLongPressed: rowMenu.popup()
+                    onDoubleTapped: if (listRow.isFolder) EditorState.currentBinFolderId = listRow.folderId
+                    onLongPressed: listRow.isFolder ? folderRowMenu.popup() : rowMenu.popup()
                 }
                 DragHandler {
                     id: rowDrag
                     target: null
-                    enabled: !Theme.touchUi
+                    enabled: !Theme.touchUi && !listRow.isFolder
                     acceptedButtons: Qt.LeftButton
                     onActiveChanged: {
                         if (active) {
@@ -483,19 +614,21 @@ Item {
                 }
                 TapHandler {
                     acceptedButtons: Qt.RightButton
-                    onTapped: rowMenu.popup()
+                    onTapped: listRow.isFolder ? folderRowMenu.popup() : rowMenu.popup()
                 }
 
-                // See the grid card: hold lifts, tap opens the menu.
+                // See the grid card: hold lifts, tap opens the menu — also a folder row's
+                // only touch surface, so it stays enabled there too (empty dragKind so a
+                // stray press-and-hold doesn't start a lift no drop target recognizes).
                 TouchLiftArea {
-                    dragKind: "media"
-                    payload: assetIndex
+                    dragKind: listRow.isFolder ? "" : "media"
+                    payload: listRow.isFolder ? listRow.folderId : assetIndex
                     label: name
                     thumbnail: thumbnailPath
                     glyph: kind === "audio" ? Theme.icons.music
                             : kind === "image" ? Theme.icons.image
                             : Theme.icons.film
-                    onLiftTapped: rowMenu.popup()
+                    onLiftTapped: listRow.isFolder ? folderRowMenu.popup() : rowMenu.popup()
                 }
             }
 
@@ -518,6 +651,12 @@ Item {
                     onTriggered: root.replaceRequested(assetIndex)
                 }
                 ThemedMenuItem {
+                    text: qsTr("Move to folder…")
+                    icon.name: Theme.icons.folder
+                    visible: BinFolderModel.count > 0
+                    onTriggered: root.moveToFolderRequested(assetIndex)
+                }
+                ThemedMenuItem {
                     text: qsTr("Export image…")
                     icon.name: Theme.icons.save
                     visible: kind === "image"
@@ -529,16 +668,37 @@ Item {
                     onTriggered: root.removeRequested(assetIndex)
                 }
             }
+
+            ThemedContextMenu {
+                id: folderRowMenu
+
+                ThemedMenuItem {
+                    text: qsTr("Open")
+                    icon.name: Theme.icons.folder
+                    onTriggered: EditorState.currentBinFolderId = listRow.folderId
+                }
+                ThemedMenuItem {
+                    text: qsTr("Rename…")
+                    icon.name: Theme.icons.pencil
+                    onTriggered: root.folderRenameRequested(listRow.folderId, listRow.name)
+                }
+                ThemedMenuSeparator { }
+                ThemedMenuItem {
+                    text: qsTr("Delete")
+                    icon.name: Theme.icons.trash
+                    onTriggered: EditorState.deleteBinFolder(listRow.folderId)
+                }
+            }
         }
     }
 
-    // First-run screen for a project with no media. This area used to
-    // render as a blank rectangle, with no hint that the panel accepts
-    // drops or that an Import button exists.
+    // First-run screen for a project with no media at all — folders included. This area used
+    // to render as a blank rectangle, with no hint that the panel accepts drops or that an
+    // Import button exists.
     EmptyState {
         width: parent.width
         height: parent.height
-        visible: AssetLibrary.count === 0 && !root.importing
+        visible: AssetLibrary.count === 0 && BinFolderModel.count === 0 && !root.importing
         glyph: Theme.icons.film
         title: qsTr("No media yet")
         hint: qsTr("Import video, audio or images, then drag them onto the timeline. Right-click a clip to preview and trim it first.")
@@ -547,37 +707,62 @@ Item {
         onActionTriggered: root.importRequested()
     }
 
-    ThemedTextField {
-        id: search
+    BinBreadcrumb {
+        id: breadcrumb
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.margins: Theme.pagePadding
-        visible: AssetLibrary.count > 0
+        anchors.bottomMargin: 0
+        currentFolderId: EditorState.currentBinFolderId
+        onNavigate: (folderId) => EditorState.currentBinFolderId = folderId
+    }
+
+    ThemedTextField {
+        id: search
+        anchors.top: breadcrumb.visible ? breadcrumb.bottom : parent.top
+        anchors.topMargin: breadcrumb.visible ? Theme.spacingSm : 0
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: Theme.pagePadding
+        visible: AssetLibrary.count > 0 || BinFolderModel.count > 0
         placeholderText: qsTr("Search media")
         font.family: Theme.fontFamily
     }
 
+    // Search matched nothing in this folder.
     EmptyState {
         anchors.centerIn: parent
         width: parent.width
-        visible: AssetLibrary.count > 0 && root.matchCount === 0
+        visible: root.query.length > 0 && root.combinedItems.length === 0
         compact: true
         glyph: Theme.icons.search
         title: qsTr("No media match “%1”").arg(search.text.trim())
         hint: qsTr("Try a different name.")
     }
 
+    // This folder (or root, once other folders exist) has nothing in it, but the project
+    // isn't empty — distinct from the "No media yet" first-run state above.
+    EmptyState {
+        anchors.centerIn: parent
+        width: parent.width
+        visible: root.query.length === 0 && root.combinedItems.length === 0
+                 && (AssetLibrary.count > 0 || BinFolderModel.count > 0)
+        compact: true
+        glyph: Theme.icons.folder
+        title: qsTr("This folder is empty")
+        hint: qsTr("Drag media here, or import more.")
+    }
+
     GridView {
         id: grid
-        visible: root.gridMode && AssetLibrary.count > 0
-        
+        visible: root.gridMode && root.combinedItems.length > 0
+
         anchors.top: search.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        
-        
+
         anchors.margins: Theme.pagePadding
         anchors.topMargin: Theme.spacingMd
         anchors.rightMargin: Theme.pagePadding - Theme.assetCardGap
@@ -588,13 +773,13 @@ Item {
         clip: true
         ScrollBar.vertical: AppScrollBar { }
 
-        model: AssetLibrary
+        model: root.combinedItems
         delegate: gridDelegate
     }
 
     ListView {
         id: listColumn
-        visible: !root.gridMode && AssetLibrary.count > 0
+        visible: !root.gridMode && root.combinedItems.length > 0
 
         anchors.top: search.bottom
         anchors.left: parent.left
@@ -609,7 +794,7 @@ Item {
         clip: true
         ScrollBar.vertical: AppScrollBar { }
 
-        model: AssetLibrary
+        model: root.combinedItems
         delegate: listDelegate
     }
 }

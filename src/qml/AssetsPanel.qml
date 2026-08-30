@@ -161,6 +161,190 @@ PanelFrame {
         onRejected: root.pendingRenameIndex = -1
     }
 
+    ThemedDialog {
+        id: newFolderDialog
+        title: qsTr("New folder")
+        acceptText: qsTr("Create")
+        preferredWidth: Theme.dialogWidthSm
+
+        contentItem: Column {
+            width: parent ? parent.width : Theme.dialogWidthSm
+            spacing: Theme.spacingMd
+
+            ThemedLabel {
+                width: parent.width
+                text: qsTr("Name")
+                size: "sm"
+            }
+            ThemedTextField {
+                id: newFolderNameField
+                width: parent.width
+                placeholderText: qsTr("Folder name")
+            }
+        }
+
+        onOpened: {
+            newFolderNameField.text = ""
+            newFolderNameField.forceActiveFocus()
+        }
+        onAccepted: {
+            const label = newFolderNameField.text.trim()
+            if (label.length > 0)
+                EditorState.createBinFolder(label, EditorState.currentBinFolderId)
+        }
+    }
+
+    property string pendingFolderRenameId: ""
+
+    function requestRenameFolder(folderId, folderName) {
+        root.pendingFolderRenameId = folderId
+        folderRenameField.text = folderName || ""
+        folderRenameDialog.open()
+    }
+
+    ThemedDialog {
+        id: folderRenameDialog
+        title: qsTr("Rename folder")
+        acceptText: qsTr("Rename")
+        preferredWidth: Theme.dialogWidthSm
+
+        contentItem: Column {
+            width: parent ? parent.width : Theme.dialogWidthSm
+            spacing: Theme.spacingMd
+
+            ThemedLabel {
+                width: parent.width
+                text: qsTr("Name")
+                size: "sm"
+            }
+            ThemedTextField {
+                id: folderRenameField
+                width: parent.width
+                placeholderText: qsTr("Folder name")
+            }
+        }
+
+        onOpened: {
+            folderRenameField.forceActiveFocus()
+            folderRenameField.selectAll()
+        }
+        onAccepted: {
+            if (root.pendingFolderRenameId.length === 0)
+                return
+            const label = folderRenameField.text.trim()
+            if (label.length > 0)
+                EditorState.renameBinFolder(root.pendingFolderRenameId, label)
+            root.pendingFolderRenameId = ""
+        }
+        onRejected: root.pendingFolderRenameId = ""
+    }
+
+    // The "move to folder" path — right-click on a card, choose a destination from a flat list.
+    property int pendingMoveAssetIndex: -1
+    // The folder the asset is in right now, so the picker can omit it — moving it "into" the
+    // folder it's already in isn't a real destination.
+    property string pendingMoveAssetCurrentFolderId: ""
+
+    function requestMoveAssetToFolder(assetIndex) {
+        root.pendingMoveAssetIndex = assetIndex
+        root.pendingMoveAssetCurrentFolderId = AssetLibrary.assetAt(assetIndex).folderId || ""
+        folderPickerDialog.open()
+    }
+
+    ThemedDialog {
+        id: folderPickerDialog
+        title: qsTr("Move to folder")
+        showFooter: false
+        preferredWidth: Theme.dialogWidthSm
+
+        // Flat list, root first, minus the folder the asset is already in — nesting depth is
+        // not shown, matching the breadcrumb's "where you are" rather than "the whole tree"
+        // framing.
+        //
+        // folderAt() is a plain invokable call, not a property read, so it isn't by itself
+        // enough to make this binding re-evaluate after a rename (BinFolderModel.count doesn't
+        // change either). Reading undoAvailable is a cheap way to add that dependency: its
+        // NOTIFY is undoStackChanged, which fires after every project edit including a rename.
+        readonly property var folderOptions: {
+            void EditorState.undoAvailable
+            const currentFolderId = root.pendingMoveAssetCurrentFolderId
+            const out = []
+            if (currentFolderId !== "")
+                out.push({ id: "", name: qsTr("Media") })
+            for (let i = 0; i < BinFolderModel.count; ++i) {
+                const folder = BinFolderModel.folderAt(i)
+                if (folder.id !== currentFolderId)
+                    out.push(folder)
+            }
+            return out
+        }
+
+        // A Rectangle used directly as contentItem never reports its explicit `height` as
+        // `implicitHeight`, so the Dialog (which sizes off contentItem.implicitHeight) sees zero
+        // and clips the list away entirely. Wrapping in a Column — which does propagate its
+        // children's real heights into implicitHeight — is the same fix LanguageChooserDialog
+        // already uses for the identical list-in-a-dialog shape.
+        contentItem: Column {
+            width: parent ? parent.width : Theme.dialogWidthSm
+
+            Rectangle {
+                width: parent.width
+                height: Math.min(pickerList.contentHeight + 2, 280)
+                radius: Theme.radiusSm
+                color: Theme.appBackground
+                border.width: Theme.borderWidth
+                border.color: Theme.panelBorder
+                clip: true
+
+                ListView {
+                    id: pickerList
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    clip: true
+                    model: folderPickerDialog.folderOptions
+                    interactive: contentHeight > height
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: AppScrollBar { }
+
+                    delegate: ItemDelegate {
+                        id: optionRow
+                        required property var modelData
+                        width: pickerList.width
+                        height: 40
+                        hoverEnabled: true
+
+                        HoverHandler {
+                            cursorShape: Qt.PointingHandCursor
+                        }
+
+                        background: Rectangle {
+                            color: optionRow.hovered ? Theme.popoverHover : "transparent"
+                        }
+
+                        contentItem: Text {
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            verticalAlignment: Text.AlignVCenter
+                            text: optionRow.modelData.name
+                            elide: Text.ElideRight
+                            color: Theme.panelForeground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSm
+                        }
+
+                        onClicked: {
+                            if (root.pendingMoveAssetIndex >= 0)
+                                EditorState.moveAssetToFolder(root.pendingMoveAssetIndex, optionRow.modelData.id)
+                            root.pendingMoveAssetIndex = -1
+                            folderPickerDialog.close()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Points a bin row at a different file while every clip using it stays put, so a project set
     // up once — music, outro, CTA — can be re-pointed at the next video instead of rebuilt.
     function requestReplaceAsset(assetIndex) {
@@ -552,6 +736,15 @@ PanelFrame {
                                 AssetLibrary.sortByKind()
                             root.sortByKind = !root.sortByKind
                         }
+                    }
+
+                    ThemedButton {
+                        text: qsTr("New Folder")
+                        variant: "ghost"
+                        glyph: Theme.icons.folder
+                        tooltip: qsTr("Create a new folder here")
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: newFolderDialog.open()
                     }
 
                     ThemedButton {
@@ -971,6 +1164,8 @@ PanelFrame {
                 onRenameRequested: (assetIndex) => root.requestRenameAsset(assetIndex)
                 onExportRequested: (assetIndex) => root.requestExportAsset(assetIndex)
                 onImportRequested: root.importMedia()
+                onMoveToFolderRequested: (assetIndex) => root.requestMoveAssetToFolder(assetIndex)
+                onFolderRenameRequested: (folderId, folderName) => root.requestRenameFolder(folderId, folderName)
             }
         }
     }

@@ -35,6 +35,7 @@ public:
         PathRole,
         ThumbnailPathRole,
         FilmstripPathRole,
+        FolderIdRole,
     };
     Q_ENUM(Role)
 
@@ -78,6 +79,13 @@ public:
     // Drops the row from the project's asset table. Callers own the undo
     // snapshot and the in-use check; this only touches the bin.
     bool removeAssetAt(int index);
+    // Reassigns which bin folder the row lives in (empty = root). Callers own the undo snapshot.
+    bool moveAssetToFolder(int index, const QString &folderId);
+    // Moves every asset currently in `folderId` to `newFolderId` in one pass — used when a folder
+    // is deleted, to carry its direct-child assets up to the parent. Callers own the undo snapshot.
+    int reparentAssetsInFolder(const QString &folderId, const QString &newFolderId);
+    // Folder a new import lands in; empty = bin root. Set by AppController as the user navigates.
+    void setImportFolderId(const QString &folderId) { m_importFolderId = folderId; }
     // Probes `absolutePath` off-thread and reports it back through assetSourceProbed without
     // touching the project, so the caller can apply the swap, the clip fixups and the undo
     // snapshot as one transaction. Returns false when nothing was started.
@@ -109,10 +117,15 @@ signals:
 
 private:
     // `sourceUris` maps an absolute path to the content:// URI it was materialized from, so the
-    // asset can be rehydrated after its copy is gone. Empty on desktop.
-    void importFiles(const QStringList &paths, const QHash<QString, QString> &sourceUris = {});
+    // asset can be rehydrated after its copy is gone. Empty on desktop. `destinationFolderId` is
+    // captured by the caller at import *start*, not read from m_importFolderId here — the async
+    // path's copy stage can outlive the user navigating to a different folder, and a member read
+    // at completion would land new assets wherever they'd navigated to instead.
+    void importFiles(const QStringList &paths, const QHash<QString, QString> &sourceUris,
+                     const QString &destinationFolderId);
     QStringList importFilesReturningIds(const QStringList &paths,
-                                        const QHash<QString, QString> &sourceUris = {});
+                                        const QHash<QString, QString> &sourceUris,
+                                        const QString &destinationFolderId);
     bool containsPath(const QString &path) const;
     void refreshMediaAt(int index);
     void startImportJob(const QString &assetId, const QString &absolutePath, bool imageOnly);
@@ -127,6 +140,7 @@ private:
     void emitAssetRowChanged(int index, const QList<int> &roles);
     void snapshotAssets();
     QList<QString> currentPaths() const;
+    QList<QString> currentFolderIds() const;
     const drift::MediaAsset *assetAtIndex(int index) const;
     drift::MediaAsset *assetAtIndex(int index);
 
@@ -137,6 +151,8 @@ private:
     // leaves the order alone and only moves a path, which is why both are tracked.
     QList<QString> m_syncedOrder;
     QList<QString> m_syncedPaths;
+    QList<QString> m_syncedFolderIds;
+    QString m_importFolderId;
     QSet<QString> m_importPending;
     QSet<QString> m_thumbPending;
     QSet<QString> m_audioProbePending;

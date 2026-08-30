@@ -323,6 +323,7 @@ add_library(driftcore STATIC
     src/core/Effect.h
     src/core/Effect.cpp
     src/core/EffectPreset.h
+    src/core/BinFolder.h
     src/core/MediaAsset.h
     src/core/MediaAsset.cpp
     src/core/Clip.h
@@ -580,6 +581,8 @@ qt_add_executable(drift
     src/models/Haptics.cpp
     src/models/AssetLibrary.h
     src/models/AssetLibrary.cpp
+    src/models/BinFolderListModel.h
+    src/models/BinFolderListModel.cpp
     src/models/TimelineModel.h
     src/models/TimelineModel.cpp
     src/models/ClipListModel.h
@@ -734,6 +737,7 @@ qt_add_qml_module(drift
         src/qml/components/assets/SettingsTab.qml
         src/qml/components/assets/ShortcutsTab.qml
         src/qml/components/assets/MediaAssetsTab.qml
+        src/qml/components/assets/BinBreadcrumb.qml
         src/qml/components/assets/AssetCategoryChips.qml
         src/qml/components/assets/EffectStacksSection.qml
         src/qml/components/assets/AssetFavoriteButton.qml

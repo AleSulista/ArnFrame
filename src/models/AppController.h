@@ -14,6 +14,7 @@
 #include "ClipListModel.h"
 #include "TimelineModel.h"
 #include "models/AssetLibrary.h"
+#include "models/BinFolderListModel.h"
 
 #include <QAtomicInt>
 #include <QFuture>
@@ -54,6 +55,11 @@ class AppController : public QObject
     Q_OBJECT
 
     Q_PROPERTY(AssetLibrary *assetLibrary READ assetLibrary CONSTANT)
+    Q_PROPERTY(BinFolderListModel *binFolderModel READ binFolderModel CONSTANT)
+    // Which bin folder is currently being viewed; empty = bin root. Transient navigation state —
+    // not persisted, not undoable, same treatment as mediaGridMode's touch-only sibling.
+    Q_PROPERTY(QString currentBinFolderId READ currentBinFolderId WRITE setCurrentBinFolderId
+                   NOTIFY currentBinFolderIdChanged)
     Q_PROPERTY(TimelineModel *timelineModel READ timelineModel CONSTANT)
     Q_PROPERTY(ClipListModel *clipListModel READ clipListModel CONSTANT)
     Q_PROPERTY(PlaybackEngine *playback READ playback CONSTANT)
@@ -280,6 +286,9 @@ public:
     ~AppController() override;
 
     AssetLibrary *assetLibrary() const { return m_assetLibrary; }
+    BinFolderListModel *binFolderModel() { return &m_binFolderModel; }
+    QString currentBinFolderId() const { return m_currentBinFolderId; }
+    void setCurrentBinFolderId(const QString &folderId);
     TimelineModel *timelineModel() { return &m_timelineModel; }
     ClipListModel *clipListModel() { return &m_clipListModel; }
     PlaybackEngine *playback() { return &m_playback; }
@@ -521,6 +530,13 @@ public:
     Q_INVOKABLE bool removeAsset(int assetIndex);
     // Bin label only — does not rename the file on disk or rewrite clip names.
     Q_INVOKABLE bool renameAsset(int assetIndex, const QString &name);
+    // Bin folder CRUD. parentId empty = bin root; nesting is arbitrary depth.
+    Q_INVOKABLE QString createBinFolder(const QString &name, const QString &parentId);
+    Q_INVOKABLE bool renameBinFolder(const QString &folderId, const QString &name);
+    // Moves the folder's direct children (assets and subfolders) up to its own parent, then
+    // removes it. Never blocks and never recurses into deleting contents.
+    Q_INVOKABLE bool deleteBinFolder(const QString &folderId);
+    Q_INVOKABLE bool moveAssetToFolder(int assetIndex, const QString &folderId);
     // Points an existing bin row at a different file, keeping every clip that uses it where it
     // is — its position, trim, effects and transitions all survive. Asynchronous: true only means
     // the probe started, and the outcome arrives as assetReplaceFinished.
@@ -1178,6 +1194,7 @@ signals:
     void sceneDetectProgressChanged();
     void sceneDetectStatusChanged();
     void sceneDetectionFinished(bool ok, const QString &message);
+    void currentBinFolderIdChanged();
     void selectionChanged();
     void editCapabilitiesChanged();
     void selectedClipDataChanged();
@@ -1394,6 +1411,8 @@ protected:
 
     AssetLibrary *m_assetLibrary = nullptr;
     AddonManager *m_addonManager = nullptr;
+    BinFolderListModel m_binFolderModel;
+    QString m_currentBinFolderId;
     TimelineModel m_timelineModel;
     ClipListModel m_clipListModel;
     // These trees must outlive m_playback: the compositor thread holds a bare

@@ -665,6 +665,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     m_project.setAuthor(QSettings().value(QStringLiteral("authorName")).toString());
     if (m_assetLibrary)
         m_assetLibrary->setProject(&m_project);
+    m_binFolderModel.setProject(&m_project);
 
     m_timelineModel.setProject(&m_project);
     m_clipListModel.setProject(&m_project);
@@ -709,6 +710,12 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
         // model with a stale row count.
         if (m_assetLibrary)
             m_assetLibrary->syncToProject();
+        m_binFolderModel.syncToProject();
+        // An undo/redo can restore a project state where the folder currently being viewed no
+        // longer exists (its creation was undone) — back the viewer out to root rather than
+        // leaving it pointed at nothing.
+        if (!m_currentBinFolderId.isEmpty() && !m_project.binFolder(m_currentBinFolderId))
+            setCurrentBinFolderId(QString());
         normalizeSelection();
         setDirty(true);
         emit tracksChanged();
@@ -2272,6 +2279,87 @@ bool AppController::renameAsset(int assetIndex, const QString &name)
 
     pushProjectEdit(before, tr("Rename media"));
     finishEdit(tr("Media renamed"));
+    return true;
+}
+
+void AppController::setCurrentBinFolderId(const QString &folderId)
+{
+    if (m_currentBinFolderId == folderId)
+        return;
+    m_currentBinFolderId = folderId;
+    if (m_assetLibrary)
+        m_assetLibrary->setImportFolderId(folderId);
+    emit currentBinFolderIdChanged();
+}
+
+QString AppController::createBinFolder(const QString &name, const QString &parentId)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty())
+        return {};
+
+    // Plain copy, not detachedCopy(): nothing here runs off the GUI thread, so there's no
+    // concurrent reader to race — the same reasoning removeAsset already relies on. A full
+    // detach walks every clip's keyframes/masks/effects across the whole timeline, which is
+    // real, perceptible latency on a project of any size for an edit that touches none of it.
+    const drift::Project before = m_project;
+    const QString id = m_binFolderModel.createFolder(trimmed, parentId);
+    pushProjectEdit(before, tr("Folder created"));
+    return id;
+}
+
+bool AppController::renameBinFolder(const QString &folderId, const QString &name)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty())
+        return false;
+
+    // Plain copy, not detachedCopy(): nothing here runs off the GUI thread, so there's no
+    // concurrent reader to race — the same reasoning removeAsset already relies on. A full
+    // detach walks every clip's keyframes/masks/effects across the whole timeline, which is
+    // real, perceptible latency on a project of any size for an edit that touches none of it.
+    const drift::Project before = m_project;
+    if (!m_binFolderModel.renameFolder(folderId, trimmed))
+        return false;
+
+    pushProjectEdit(before, tr("Folder renamed"));
+    return true;
+}
+
+bool AppController::deleteBinFolder(const QString &folderId)
+{
+    // Plain copy, not detachedCopy(): nothing here runs off the GUI thread, so there's no
+    // concurrent reader to race — the same reasoning removeAsset already relies on. A full
+    // detach walks every clip's keyframes/masks/effects across the whole timeline, which is
+    // real, perceptible latency on a project of any size for an edit that touches none of it.
+    const drift::Project before = m_project;
+    const QString parentId = m_binFolderModel.parentIdOf(folderId);
+    if (!m_binFolderModel.deleteFolder(folderId))
+        return false;
+
+    if (m_assetLibrary)
+        m_assetLibrary->reparentAssetsInFolder(folderId, parentId);
+    if (m_currentBinFolderId == folderId)
+        setCurrentBinFolderId(parentId);
+
+    pushProjectEdit(before, tr("Folder deleted"));
+    return true;
+}
+
+bool AppController::moveAssetToFolder(int assetIndex, const QString &folderId)
+{
+    if (!m_assetLibrary)
+        return false;
+
+    // Plain copy, not detachedCopy(): nothing here runs off the GUI thread, so there's no
+    // concurrent reader to race — the same reasoning removeAsset already relies on. A full
+    // detach walks every clip's keyframes/masks/effects across the whole timeline, which is
+    // real, perceptible latency on a project of any size for an edit that touches none of it.
+    const drift::Project before = m_project;
+    if (!m_assetLibrary->moveAssetToFolder(assetIndex, folderId))
+        return false;
+
+    pushProjectEdit(before, tr("Media moved"));
     return true;
 }
 
@@ -13291,6 +13379,8 @@ bool AppController::applyProjectJson(const QByteArray &data, QString *error)
 
     if (m_assetLibrary)
         m_assetLibrary->setProject(&m_project);
+    m_binFolderModel.setProject(&m_project);
+    setCurrentBinFolderId(QString());
 
     rehydrateMissingSources();
 
@@ -13882,6 +13972,7 @@ void AppController::rehydrateMissingSources()
                 // to be told; a load has already cleared undo, and a restored file is not an edit.
                 if (m_assetLibrary)
                     m_assetLibrary->setProject(&m_project);
+                m_binFolderModel.setProject(&m_project);
                 restoreFilmstripsAfterLoad();
                 emit tracksChanged();
             });
@@ -13912,6 +14003,8 @@ void AppController::newProject()
     m_embeddedSources.clear();
     if (m_assetLibrary)
         m_assetLibrary->setProject(&m_project);
+    m_binFolderModel.setProject(&m_project);
+    setCurrentBinFolderId(QString());
     m_playback.setProject(&m_project);
     m_undoStack.clear();
     clearSelection();

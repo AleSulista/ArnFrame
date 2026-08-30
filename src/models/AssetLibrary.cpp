@@ -311,10 +311,25 @@ QList<QString> AssetLibrary::currentPaths() const
     return paths;
 }
 
+QList<QString> AssetLibrary::currentFolderIds() const
+{
+    if (!m_project)
+        return {};
+
+    QList<QString> folderIds;
+    folderIds.reserve(m_project->assetOrder().size());
+    for (const QString &id : m_project->assetOrder()) {
+        const drift::MediaAsset *asset = m_project->asset(id);
+        folderIds.append(asset ? asset->folderId : QString{});
+    }
+    return folderIds;
+}
+
 void AssetLibrary::snapshotAssets()
 {
     m_syncedOrder = m_project ? m_project->assetOrder() : QList<QString>{};
     m_syncedPaths = currentPaths();
+    m_syncedFolderIds = currentFolderIds();
 }
 
 void AssetLibrary::syncToProject()
@@ -331,20 +346,28 @@ void AssetLibrary::syncToProject()
         return;
     }
 
-    // An undone source replace leaves the order untouched — same row, same id, different file —
-    // so the paths have to be compared too or the card keeps showing the media it no longer
-    // points at. Only the rows that actually moved are re-read.
+    // An undone source replace or folder move leaves the order untouched — same row, same id,
+    // different file or folder — so both have to be compared too or the card keeps showing stale
+    // data. Only the rows that actually changed are re-read.
     const QList<QString> paths = currentPaths();
-    if (paths == m_syncedPaths)
+    const QList<QString> folderIds = currentFolderIds();
+    if (paths == m_syncedPaths && folderIds == m_syncedFolderIds)
         return;
 
     for (int i = 0; i < paths.size(); ++i) {
-        if (i < m_syncedPaths.size() && m_syncedPaths.at(i) == paths.at(i))
+        const bool pathChanged = i >= m_syncedPaths.size() || m_syncedPaths.at(i) != paths.at(i);
+        const bool folderChanged =
+            i >= m_syncedFolderIds.size() || m_syncedFolderIds.at(i) != folderIds.at(i);
+        if (!pathChanged && !folderChanged)
             continue;
-        emitAssetRowChanged(i, {}); // empty roles: every role may have moved with the file
-        emit assetMetadataChanged(m_project->assetIdAt(i));
+        // Empty roles: every role may have moved with the file. A folder-only change only
+        // touches FolderIdRole.
+        emitAssetRowChanged(i, pathChanged ? QList<int>{} : QList<int>{FolderIdRole});
+        if (pathChanged)
+            emit assetMetadataChanged(m_project->assetIdAt(i));
     }
     m_syncedPaths = paths;
+    m_syncedFolderIds = folderIds;
 }
 
 void AssetLibrary::setProject(drift::Project *project)
@@ -401,6 +424,8 @@ QVariant AssetLibrary::data(const QModelIndex &index, int role) const
         return asset->thumbnailPath;
     case FilmstripPathRole:
         return asset->filmstripPath;
+    case FolderIdRole:
+        return asset->folderId;
     default:
         return {};
     }
@@ -417,6 +442,7 @@ QHash<int, QByteArray> AssetLibrary::roleNames() const
         {PathRole, "path"},
         {ThumbnailPathRole, "thumbnailPath"},
         {FilmstripPathRole, "filmstripPath"},
+        {FolderIdRole, "folderId"},
     };
 }
 
@@ -605,8 +631,10 @@ bool AssetLibrary::applyProbedSource(const QString &assetId, const drift::MediaA
         return false;
 
     const QString id = asset->id;
+    const QString folderId = asset->folderId;
     *asset = filled;
     asset->id = id;
+    asset->folderId = folderId;
 
     // Jobs still in flight were started against the old file. They drop themselves on landing
     // because the path they probed no longer matches; clearing the pending flags is what lets
@@ -687,6 +715,7 @@ QVariantMap AssetLibrary::assetAt(int index) const
         {QStringLiteral("thumbnailPath"), asset->thumbnailPath},
         {QStringLiteral("filmstripPath"), asset->filmstripPath},
         {QStringLiteral("assetIndex"), index},
+        {QStringLiteral("folderId"), asset->folderId},
     };
 }
 
@@ -813,6 +842,37 @@ bool AssetLibrary::setAssetName(int index, const QString &name)
     emitAssetRowChanged(index, {NameRole});
     snapshotAssets();
     return true;
+}
+
+bool AssetLibrary::moveAssetToFolder(int index, const QString &folderId)
+{
+    drift::MediaAsset *asset = assetAtIndex(index);
+    if (!asset || asset->folderId == folderId)
+        return false;
+
+    asset->folderId = folderId;
+    emitAssetRowChanged(index, {FolderIdRole});
+    snapshotAssets();
+    return true;
+}
+
+int AssetLibrary::reparentAssetsInFolder(const QString &folderId, const QString &newFolderId)
+{
+    if (!m_project)
+        return 0;
+
+    int moved = 0;
+    for (int i = 0; i < m_project->assetOrder().size(); ++i) {
+        drift::MediaAsset *asset = assetAtIndex(i);
+        if (!asset || asset->folderId != folderId)
+            continue;
+        asset->folderId = newFolderId;
+        emitAssetRowChanged(i, {FolderIdRole});
+        ++moved;
+    }
+    if (moved > 0)
+        snapshotAssets();
+    return moved;
 }
 
 void AssetLibrary::sortByKind()
@@ -1023,7 +1083,7 @@ void AssetLibrary::importUrls(const QList<QUrl> &urls)
         if (!sourceUri.isEmpty())
             sourceUris.insert(QFileInfo(path).absoluteFilePath(), sourceUri);
     }
-    importFiles(paths, sourceUris);
+    importFiles(paths, sourceUris, m_importFolderId);
 }
 
 bool AssetLibrary::importUrlsAsync(const QList<QUrl> &urls)
@@ -1038,15 +1098,20 @@ bool AssetLibrary::importUrlsAsync(const QList<QUrl> &urls)
     m_importing = true;
     emit importingChanged();
 
+    // Captured now, not read from m_importFolderId when the copy finishes: the user can
+    // navigate to a different folder while a large/slow copy is still running, and the import
+    // should land wherever they were when they started it, not wherever they ended up.
+    const QString destinationFolderId = m_importFolderId;
     const int total = urls.size();
     auto *watcher = new QFutureWatcher<Materialized>(this);
-    connect(watcher, &QFutureWatcher<Materialized>::finished, this, [this, watcher]() {
+    connect(watcher, &QFutureWatcher<Materialized>::finished, this,
+            [this, watcher, destinationFolderId]() {
         watcher->deleteLater();
         const Materialized result = watcher->result();
 
         // The rows have to exist before importFinished lands: AndroidHome walks countBefore..count
         // and turns every new asset into a clip the moment it sees the signal.
-        importFiles(result.paths, result.sourceUris);
+        importFiles(result.paths, result.sourceUris, destinationFolderId);
 
         m_importing = false;
         emit importingChanged();
@@ -1082,7 +1147,7 @@ bool AssetLibrary::importUrlsAsync(const QList<QUrl> &urls)
 
 QStringList AssetLibrary::importLocalPaths(const QStringList &paths)
 {
-    return importFilesReturningIds(paths);
+    return importFilesReturningIds(paths, {}, m_importFolderId);
 }
 
 bool AssetLibrary::isImportPending(const QString &assetId) const
@@ -1106,17 +1171,29 @@ QString AssetLibrary::addGeneratedAsset(drift::MediaAsset asset)
     return id;
 }
 
-void AssetLibrary::importFiles(const QStringList &paths, const QHash<QString, QString> &sourceUris)
+void AssetLibrary::importFiles(const QStringList &paths, const QHash<QString, QString> &sourceUris,
+                               const QString &destinationFolderId)
 {
-    importFilesReturningIds(paths, sourceUris);
+    importFilesReturningIds(paths, sourceUris, destinationFolderId);
 }
 
 QStringList AssetLibrary::importFilesReturningIds(const QStringList &paths,
-                                                  const QHash<QString, QString> &sourceUris)
+                                                  const QHash<QString, QString> &sourceUris,
+                                                  const QString &destinationFolderId)
 {
     QStringList ids;
     if (!m_project)
         return ids;
+
+    // The destination was captured when the import started, but completion can land well after
+    // that — long enough for the folder to have been deleted, or for the whole project to have
+    // been replaced by a load. An asset filed under an id that no longer names a folder would be
+    // unreachable from the bin (nothing lists "every asset regardless of folder"), so re-check
+    // against the project as it stands now and fall back to root rather than orphan it.
+    const QString validatedFolderId =
+        (destinationFolderId.isEmpty() || m_project->binFolder(destinationFolderId))
+            ? destinationFolderId
+            : QString();
 
     for (const QString &path : paths) {
         const QFileInfo fileInfo(path);
@@ -1137,6 +1214,7 @@ QStringList AssetLibrary::importFilesReturningIds(const QStringList &paths,
         placeholder.path = absolutePath;
         placeholder.sourceUri = sourceUris.value(absolutePath);
         placeholder.kind = provisionalKind(absolutePath);
+        placeholder.folderId = validatedFolderId;
 
         const int row = m_project->assetOrder().size();
         beginInsertRows({}, row, row);

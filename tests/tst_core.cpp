@@ -37,6 +37,8 @@ private slots:
     void legacyTrackInterpolationMigratesLosslessly();
     void keyframeNearestQuery();
     void projectSerializationRoundTrip();
+    void binFolderSerializationRoundTrip();
+    void binFolderDeletionMovesChildrenToParent();
     void projectMetadataRoundTrip();
     void effectColorParamSurvivesRoundTrip();
     void clipTransformSerialization();
@@ -401,6 +403,83 @@ void CoreTest::projectSerializationRoundTrip()
     QVERIFY(loaded.hasWorkArea());
     QCOMPARE(loaded.workAreaInUs(), drift::secondsToUs(1.0));
     QCOMPARE(loaded.workAreaOutUs(), drift::secondsToUs(4.0));
+}
+
+void CoreTest::binFolderSerializationRoundTrip()
+{
+    drift::Project project;
+
+    drift::BinFolder root;
+    root.name = QStringLiteral("B-Roll");
+    const QString rootFolderId = project.addBinFolder(root);
+
+    drift::BinFolder nested;
+    nested.name = QStringLiteral("Drone");
+    nested.parentId = rootFolderId;
+    const QString nestedFolderId = project.addBinFolder(nested);
+
+    drift::MediaAsset asset;
+    asset.name = QStringLiteral("aerial.mp4");
+    asset.kind = drift::MediaKind::Video;
+    asset.path = QStringLiteral("/tmp/aerial.mp4");
+    asset.folderId = nestedFolderId;
+    const QString assetId = project.addAsset(asset);
+
+    const QJsonObject json = project.toJson();
+    QString error;
+    const drift::Project loaded = drift::Project::fromJson(json, &error);
+
+    QVERIFY(error.isEmpty());
+    QCOMPARE(loaded.binFolders().size(), 2);
+    QVERIFY(loaded.binFolder(rootFolderId));
+    QCOMPARE(loaded.binFolder(rootFolderId)->parentId, QString());
+    QVERIFY(loaded.binFolder(nestedFolderId));
+    QCOMPARE(loaded.binFolder(nestedFolderId)->parentId, rootFolderId);
+    QVERIFY(loaded.asset(assetId));
+    QCOMPARE(loaded.asset(assetId)->folderId, nestedFolderId);
+}
+
+void CoreTest::binFolderDeletionMovesChildrenToParent()
+{
+    drift::Project project;
+
+    drift::BinFolder parent;
+    parent.name = QStringLiteral("Interviews");
+    const QString parentId = project.addBinFolder(parent);
+
+    drift::BinFolder child;
+    child.name = QStringLiteral("Day 1");
+    child.parentId = parentId;
+    const QString childId = project.addBinFolder(child);
+
+    drift::MediaAsset asset;
+    asset.name = QStringLiteral("clip.mp4");
+    asset.kind = drift::MediaKind::Video;
+    asset.path = QStringLiteral("/tmp/clip.mp4");
+    asset.folderId = childId;
+    const QString assetId = project.addAsset(asset);
+
+    // Mirrors BinFolderListModel::deleteFolder + AssetLibrary::reparentAssetsInFolder:
+    // reparent everything that pointed at the deleted folder up to its own parent, then
+    // remove the folder row.
+    const QString deletedParentId = project.binFolder(childId)->parentId;
+    for (const QString &id : project.binFolderOrder()) {
+        drift::BinFolder *folder = project.binFolder(id);
+        if (folder && folder->parentId == childId)
+            folder->parentId = deletedParentId;
+    }
+    for (const QString &id : project.assetOrder()) {
+        drift::MediaAsset *a = project.asset(id);
+        if (a && a->folderId == childId)
+            a->folderId = deletedParentId;
+    }
+    project.binFolders().remove(childId);
+    project.binFolderOrder().removeAll(childId);
+
+    QCOMPARE(project.binFolders().size(), 1);
+    QVERIFY(!project.binFolder(childId));
+    QVERIFY(project.binFolder(parentId));
+    QCOMPARE(project.asset(assetId)->folderId, parentId);
 }
 
 // A colour parameter is stored as a "#rrggbb" string rather than a number, so it has to survive the

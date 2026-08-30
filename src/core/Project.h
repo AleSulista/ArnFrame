@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BinFolder.h"
 #include "MediaAsset.h"
 #include "Track.h"
 #include "Time.h"
@@ -74,6 +75,11 @@ public:
     const QHash<QString, MediaAsset> &assets() const { return m_assetsById; }
     QHash<QString, MediaAsset> &assets() { return m_assetsById; }
 
+    const QList<QString> &binFolderOrder() const { return m_binFolderOrder; }
+    QList<QString> &binFolderOrder() { return m_binFolderOrder; }
+    const QHash<QString, BinFolder> &binFolders() const { return m_binFoldersById; }
+    QHash<QString, BinFolder> &binFolders() { return m_binFoldersById; }
+
     const QList<Bookmark> &bookmarks() const { return m_bookmarks; }
     QList<Bookmark> &bookmarks() { return m_bookmarks; }
 
@@ -106,6 +112,12 @@ public:
     int assetIndex(const QString &id) const;
     QString assetIdAt(int index) const;
 
+    QString addBinFolder(BinFolder folder);
+    BinFolder *binFolder(const QString &id);
+    const BinFolder *binFolder(const QString &id) const;
+    int binFolderIndex(const QString &id) const;
+    QString binFolderIdAt(int index) const;
+
     static Project fromJson(const QJsonObject &object, QString *errorOut = nullptr);
     QJsonObject toJson() const;
     // Compact JSON of toJson(); SHA-256 hex of those bytes. Undo history and on-disk
@@ -131,6 +143,8 @@ private:
     Background m_background;
     QList<QString> m_assetOrder;
     QHash<QString, MediaAsset> m_assetsById;
+    QList<QString> m_binFolderOrder;
+    QHash<QString, BinFolder> m_binFoldersById;
 };
 
 } // namespace drift
