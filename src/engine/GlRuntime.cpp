@@ -31,6 +31,13 @@ extern "C" {
 #include <dlfcn.h>
 #endif
 
+// VAAPI dma-buf import. Android is GLES on a MediaCodec decoder that never produces a VAAPI
+// surface, so it is excluded along with the two platforms that have no libva at all.
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS) && !defined(Q_OS_ANDROID)
+#define DRIFT_VAAPI_IMPORT 1
+#include <unistd.h>
+#endif
+
 // Qt for Android is built against the GLES 2.0 headers so it can still run on ES2-only devices, and
 // qopengl.h includes <GLES2/gl2.h> accordingly. The ES 3.0 *functions* this file uses still resolve,
 // because QOpenGLExtraFunctions looks them up at runtime — but the ES 3.0 *enum constants* are
@@ -336,6 +343,188 @@ bool copyCudaPlaneToTexture(CudaGlApi &api, CUstream stream, CUgraphicsResource 
     return copied;
 }
 #endif
+
+#if defined(DRIFT_VAAPI_IMPORT)
+// libva and the EGL dma-buf import extension, resolved at runtime for the same reason CUDA is:
+// the binary has to start on a host with neither. Only the handful of declarations the import
+// needs are reproduced here — a compile-time dependency on va/va.h and EGL/eglext.h would buy
+// nothing but a build-time failure on machines that never decode with VAAPI.
+
+using VASurfaceID = unsigned int;
+using VAStatus = int;
+
+enum {
+    kVaStatusSuccess = 0,
+    kVaMemTypeDrmPrime2 = 0x40000000,
+    kVaExportReadOnly = 0x0001,
+    kVaExportSeparateLayers = 0x0004,
+};
+
+// Mirrors VADRMPRIMESurfaceDescriptor from va/va_drmcommon.h. The objects[] entry pads to 16
+// bytes (int + uint32_t, then an 8-aligned uint64_t); getting that wrong silently shifts every
+// field after it, which is what the sanity check in importVaapiNv12 exists to catch.
+struct VaDrmPrimeSurfaceDescriptor
+{
+    uint32_t fourcc;
+    uint32_t width;
+    uint32_t height;
+    uint32_t num_objects;
+    struct
+    {
+        int fd;
+        uint32_t size;
+        uint64_t drm_format_modifier;
+    } objects[4];
+    uint32_t num_layers;
+    struct
+    {
+        uint32_t drm_format;
+        uint32_t num_planes;
+        uint32_t object_index[4];
+        uint32_t offset[4];
+        uint32_t pitch[4];
+    } layers[4];
+};
+
+constexpr uint32_t fourcc(char a, char b, char c, char d)
+{
+    return uint32_t(uint8_t(a)) | (uint32_t(uint8_t(b)) << 8) | (uint32_t(uint8_t(c)) << 16)
+        | (uint32_t(uint8_t(d)) << 24);
+}
+
+constexpr uint32_t kDrmFormatR8 = fourcc('R', '8', ' ', ' ');
+constexpr uint32_t kDrmFormatGr88 = fourcc('G', 'R', '8', '8');
+constexpr uint64_t kDrmFormatModInvalid = 0x00ffffffffffffffull;
+
+using EGLDisplayHandle = void *;
+using EGLImageHandle = void *;
+using EGLClientBufferHandle = void *;
+
+enum {
+    kEglExtensions = 0x3055,
+    kEglWidth = 0x3057,
+    kEglHeight = 0x3056,
+    kEglNone = 0x3038,
+    kEglLinuxDmaBufExt = 0x3270,
+    kEglLinuxDrmFourccExt = 0x3271,
+    kEglDmaBufPlane0FdExt = 0x3272,
+    kEglDmaBufPlane0OffsetExt = 0x3273,
+    kEglDmaBufPlane0PitchExt = 0x3274,
+    kEglDmaBufPlane0ModifierLoExt = 0x3443,
+    kEglDmaBufPlane0ModifierHiExt = 0x3444,
+};
+
+struct VaEglApi
+{
+    void *va = nullptr;
+    void *egl = nullptr;
+    VAStatus (*vaExportSurfaceHandle)(void *, VASurfaceID, uint32_t, uint32_t, void *) = nullptr;
+    VAStatus (*vaSyncSurface)(void *, VASurfaceID) = nullptr;
+    EGLDisplayHandle (*eglGetCurrentDisplay)() = nullptr;
+    const char *(*eglQueryString)(EGLDisplayHandle, int) = nullptr;
+    // The KHR entry point takes 32-bit EGLint attributes, not the EGLAttrib (intptr_t) list
+    // EGL 1.5's eglCreateImage takes. That is why the modifier arrives as two halves.
+    EGLImageHandle (*eglCreateImageKHR)(EGLDisplayHandle, void *, unsigned int, EGLClientBufferHandle,
+                                        const int32_t *) = nullptr;
+    unsigned int (*eglDestroyImageKHR)(EGLDisplayHandle, EGLImageHandle) = nullptr;
+    void (*glEGLImageTargetTexture2DOES)(unsigned int, EGLImageHandle) = nullptr;
+    bool ok = false;
+};
+
+VaEglApi &vaEglApi()
+{
+    static VaEglApi api;
+    static std::once_flag once;
+    std::call_once(once, [] {
+        api.va = dlopen("libva.so.2", RTLD_LAZY | RTLD_LOCAL);
+        api.egl = dlopen("libEGL.so.1", RTLD_LAZY | RTLD_LOCAL);
+        if (!api.va || !api.egl)
+            return;
+#define DRIFT_VA_SYM(handle, field, name) \
+    api.field = reinterpret_cast<decltype(api.field)>(dlsym(handle, name)); \
+    if (!api.field) \
+        return;
+        DRIFT_VA_SYM(api.va, vaExportSurfaceHandle, "vaExportSurfaceHandle");
+        DRIFT_VA_SYM(api.va, vaSyncSurface, "vaSyncSurface");
+        DRIFT_VA_SYM(api.egl, eglGetCurrentDisplay, "eglGetCurrentDisplay");
+        DRIFT_VA_SYM(api.egl, eglQueryString, "eglQueryString");
+#undef DRIFT_VA_SYM
+
+        // eglCreateImageKHR is an extension entry point, so it comes from eglGetProcAddress
+        // rather than the library's symbol table. glEGLImageTargetTexture2DOES comes from Qt's
+        // context, which knows which GL implementation is actually current.
+        auto *getProc = reinterpret_cast<void *(*)(const char *)>(dlsym(api.egl, "eglGetProcAddress"));
+        QOpenGLContext *ctx = QOpenGLContext::currentContext();
+        if (!getProc || !ctx)
+            return;
+        api.eglCreateImageKHR =
+            reinterpret_cast<decltype(api.eglCreateImageKHR)>(getProc("eglCreateImageKHR"));
+        api.eglDestroyImageKHR =
+            reinterpret_cast<decltype(api.eglDestroyImageKHR)>(getProc("eglDestroyImageKHR"));
+        api.glEGLImageTargetTexture2DOES =
+            reinterpret_cast<decltype(api.glEGLImageTargetTexture2DOES)>(
+                ctx->getProcAddress("glEGLImageTargetTexture2DOES"));
+        if (!api.eglCreateImageKHR || !api.eglDestroyImageKHR || !api.glEGLImageTargetTexture2DOES)
+            return;
+
+        // Under libglvnd every one of those pointers is a dispatch stub that exists whether or
+        // not the driver implements the entry point, so the extension strings are the only real
+        // availability test.
+        if (!ctx->hasExtension(QByteArrayLiteral("GL_OES_EGL_image")))
+            return;
+        api.ok = true;
+    });
+    return api;
+}
+
+// Reads AVVAAPIDeviceContext::display, whose VADisplay is the first and only member.
+void *vaapiDisplayOf(const AVFrame *frame)
+{
+    if (!frame || !frame->hw_frames_ctx)
+        return nullptr;
+    const auto *fc = reinterpret_cast<const AVHWFramesContext *>(frame->hw_frames_ctx->data);
+    if (!fc || !fc->device_ctx || fc->device_ctx->type != AV_HWDEVICE_TYPE_VAAPI
+        || !fc->device_ctx->hwctx)
+        return nullptr;
+    return *reinterpret_cast<void *const *>(fc->device_ctx->hwctx);
+}
+
+bool vaapiSwFormatIsNv12(const AVFrame *frame)
+{
+    if (!frame || !frame->hw_frames_ctx)
+        return false;
+    const auto *fc = reinterpret_cast<const AVHWFramesContext *>(frame->hw_frames_ctx->data);
+    return fc && fc->sw_format == AV_PIX_FMT_NV12;
+}
+
+// vaExportSurfaceHandle hands over owned fds. They have to be closed on every path out,
+// including the ones that reject the descriptor before an EGLImage is ever created — at 60 fps
+// a leak there exhausts the process fd table in under a minute, and it surfaces as unrelated
+// file-open failures elsewhere in the app.
+struct ExportedSurfaceFds
+{
+    VaDrmPrimeSurfaceDescriptor *desc = nullptr;
+
+    ~ExportedSurfaceFds()
+    {
+        if (!desc)
+            return;
+        const uint32_t count = qMin(desc->num_objects, 4u);
+        for (uint32_t i = 0; i < count; ++i) {
+            if (desc->objects[i].fd >= 0)
+                ::close(desc->objects[i].fd);
+        }
+    }
+};
+
+// A zero-copy path that silently falls back is pixel-identical to one that works, so say once
+// why it did not engage. Anything else leaves "preview did not get faster" unfalsifiable.
+void logVaapiImportOnce(const char *reason)
+{
+    static std::once_flag once;
+    std::call_once(once, [reason] { qInfo("GlRuntime: VAAPI zero-copy import unavailable (%s)", reason); });
+}
+#endif // DRIFT_VAAPI_IMPORT
 
 uint64_t targetPoolKey(int width, int height, bool wantDepth)
 {
@@ -747,6 +936,14 @@ void GlRuntime::destroyVideoUploadState()
             gl->glDeleteTextures(1, &m_videoUV);
             m_videoUV = 0;
         }
+        if (m_importY) {
+            gl->glDeleteTextures(1, &m_importY);
+            m_importY = 0;
+        }
+        if (m_importUV) {
+            gl->glDeleteTextures(1, &m_importUV);
+            m_importUV = 0;
+        }
         if (m_videoPbo[0] || m_videoPbo[1]) {
             gl->glDeleteBuffers(2, m_videoPbo);
             m_videoPbo[0] = m_videoPbo[1] = 0;
@@ -915,6 +1112,181 @@ bool GlRuntime::importCudaNv12(QOpenGLExtraFunctions *gl, const AVFrame *frame)
     CUcontext popped = nullptr;
     api.cuCtxPopCurrent(&popped);
     return ok;
+#endif
+}
+
+bool GlRuntime::ensureImportTextureNames(QOpenGLExtraFunctions *gl)
+{
+    if (!gl)
+        return false;
+    if (m_importY && m_importUV)
+        return true;
+
+    // Lazily, not once at init: destroyVideoUploadState() deletes these, and releaseCaches()
+    // calls it mid-session. Creating them up front would leave the next import binding name 0.
+    for (GLuint *tex : {&m_importY, &m_importUV}) {
+        if (*tex)
+            continue;
+        gl->glGenTextures(1, tex);
+        gl->glBindTexture(GL_TEXTURE_2D, *tex);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    // No glTexImage2D: glEGLImageTargetTexture2DOES supplies the storage.
+    return m_importY != 0 && m_importUV != 0;
+}
+
+// VAAPI surface -> dma-buf -> two EGLImages -> the same R8 + RG8 pair the convert shader already
+// samples. Replaces an av_hwframe_transfer_data of the displayed frame on every Intel/AMD host.
+bool GlRuntime::importVaapiNv12(QOpenGLExtraFunctions *gl, const AVFrame *frame)
+{
+#if !defined(DRIFT_VAAPI_IMPORT)
+    Q_UNUSED(gl);
+    Q_UNUSED(frame);
+    return false;
+#else
+    if (m_vaapiImportFailed || !gl || !frame || frame->format != AV_PIX_FMT_VAAPI)
+        return false;
+
+    // Content and configuration mismatches fall through to the PBO path for this frame only.
+    // Marking them sticky would let one 10-bit clip disable zero-copy for every 8-bit clip
+    // beside it on the timeline: scale_vaapi's size-only retry keeps the native sw_format.
+    if (!vaapiSwFormatIsNv12(frame))
+        return false;
+    void *display = vaapiDisplayOf(frame);
+    if (!display)
+        return false;
+
+    // Opt-in, not opt-out. Every *detectable* failure below falls back to the PBO upload, but a
+    // driver that exports a surface we import successfully and sample wrongly shows up as
+    // corrupt preview with nothing to catch. That has been verified on Mesa iris + iHD and
+    // nowhere else, so until other drivers have been through it the default stays off: slower
+    // preview is a far better failure than a broken picture.
+    if (!qEnvironmentVariableIsSet("DRIFT_VAAPI_ZEROCOPY")) {
+        logVaapiImportOnce("set DRIFT_VAAPI_ZEROCOPY=1 to enable");
+        m_vaapiImportFailed = true;
+        return false;
+    }
+
+    VaEglApi &api = vaEglApi();
+    if (!api.ok) {
+        logVaapiImportOnce("libva/EGL entry points or GL_OES_EGL_image missing");
+        m_vaapiImportFailed = true;
+        return false;
+    }
+
+    // Only valid while the context is current, which exec() guarantees. Under Qt's xcb plugin
+    // the GL context is GLX and there is no EGL display to import into at all.
+    EGLDisplayHandle egl = api.eglGetCurrentDisplay();
+    if (!egl) {
+        logVaapiImportOnce("no current EGL display; Qt is probably on GLX rather than EGL");
+        m_vaapiImportFailed = true;
+        return false;
+    }
+    const char *eglExts = api.eglQueryString(egl, kEglExtensions);
+    if (!eglExts || !strstr(eglExts, "EGL_EXT_image_dma_buf_import")) {
+        logVaapiImportOnce("EGL_EXT_image_dma_buf_import missing");
+        m_vaapiImportFailed = true;
+        return false;
+    }
+    // Tiled surfaces need their modifier passed through or the import is refused or garbled,
+    // but sending modifier attribs without this extension is EGL_BAD_ATTRIBUTE.
+    const bool useModifiers = strstr(eglExts, "EGL_EXT_image_dma_buf_import_modifiers") != nullptr;
+
+    const int codedW = frame->width & ~1;
+    const int codedH = frame->height & ~1;
+    if (codedW < 2 || codedH < 2)
+        return false;
+
+    VaDrmPrimeSurfaceDescriptor desc{};
+    for (auto &object : desc.objects)
+        object.fd = -1;
+    const auto surface = VASurfaceID(uintptr_t(frame->data[3]));
+    if (api.vaExportSurfaceHandle(display, surface, kVaMemTypeDrmPrime2,
+                                  kVaExportReadOnly | kVaExportSeparateLayers, &desc)
+        != kVaStatusSuccess) {
+        logVaapiImportOnce("vaExportSurfaceHandle failed");
+        m_vaapiImportFailed = true;
+        return false;
+    }
+    const ExportedSurfaceFds fds{&desc};
+    // The decoder or VPP may still be writing. Failing to sync is not a reason to abandon the
+    // path, so its result is deliberately not checked — this matches mpv.
+    api.vaSyncSurface(display, surface);
+
+    // Guards against a libva ABI change shifting every field past objects[]: without them a
+    // mismatched struct imports plausible-looking garbage instead of failing.
+    if (desc.num_objects < 1 || desc.num_objects > 4 || desc.num_layers != 2)
+        return false;
+    if (desc.layers[0].drm_format != kDrmFormatR8 || desc.layers[1].drm_format != kDrmFormatGr88)
+        return false;
+    for (uint32_t i = 0; i < desc.num_layers; ++i) {
+        if (desc.layers[i].num_planes != 1 || desc.layers[i].object_index[0] >= desc.num_objects
+            || desc.layers[i].pitch[0] == 0)
+            return false;
+    }
+
+    if (!ensureImportTextureNames(gl))
+        return false;
+
+    const GLuint textures[2] = {m_importY, m_importUV};
+    for (uint32_t i = 0; i < 2; ++i) {
+        const auto &layer = desc.layers[i];
+        const auto &object = desc.objects[layer.object_index[0]];
+
+        // The surface allocation is padded (1080 -> 1088); the picture is not. Sizing the image
+        // from the descriptor would sample that padding, and because kQuad puts v=0 at the NDC
+        // bottom it would land as a garbage strip along the visual bottom edge. The pitch
+        // attribute already carries the stride, so the padded height is never needed.
+        int32_t attribs[32];
+        int n = 0;
+        attribs[n++] = kEglWidth;
+        attribs[n++] = i == 0 ? codedW : codedW / 2;
+        attribs[n++] = kEglHeight;
+        attribs[n++] = i == 0 ? codedH : codedH / 2;
+        attribs[n++] = kEglLinuxDrmFourccExt;
+        attribs[n++] = int32_t(layer.drm_format);
+        attribs[n++] = kEglDmaBufPlane0FdExt;
+        attribs[n++] = object.fd;
+        attribs[n++] = kEglDmaBufPlane0OffsetExt;
+        attribs[n++] = int32_t(layer.offset[0]);
+        attribs[n++] = kEglDmaBufPlane0PitchExt;
+        attribs[n++] = int32_t(layer.pitch[0]);
+        if (useModifiers && object.drm_format_modifier != kDrmFormatModInvalid) {
+            attribs[n++] = kEglDmaBufPlane0ModifierLoExt;
+            attribs[n++] = int32_t(object.drm_format_modifier & 0xffffffffu);
+            attribs[n++] = kEglDmaBufPlane0ModifierHiExt;
+            attribs[n++] = int32_t(object.drm_format_modifier >> 32);
+        }
+        attribs[n++] = kEglNone;
+
+        // EGL_NO_CONTEXT is required for EGL_LINUX_DMA_BUF_EXT.
+        EGLImageHandle image =
+            api.eglCreateImageKHR(egl, nullptr, kEglLinuxDmaBufExt, nullptr, attribs);
+        if (!image) {
+            logVaapiImportOnce("eglCreateImageKHR rejected the exported dma-buf");
+            m_vaapiImportFailed = true;
+            return false;
+        }
+        gl->glBindTexture(GL_TEXTURE_2D, textures[i]);
+        api.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
+        // Destroying the image only orphans the handle; the texture sibling keeps the buffer.
+        // Doing it here rather than after the convert draw means the early returns between the
+        // two cannot leak one.
+        api.eglDestroyImageKHR(egl, image);
+    }
+
+    // The same two texture names are re-targeted every frame, and a crossfade imports twice
+    // within one exec(). That is safe because commands in one context are ordered and the
+    // driver holds a reference to what an already-recorded draw sampled.
+    //
+    // The VA surface itself has to outlive the draw: GpuLayer holds the AVFrame across the
+    // whole exec() lambda, markPresentReady's glFlush submits the batch inside it, and
+    // ClipReader's preview cache holds further refs. Past that — a teardown that clears the
+    // cache mid-flight — this relies on the kernel's implicit fencing on the shared buffer.
+    return true;
 #endif
 }
 
@@ -1254,7 +1626,16 @@ GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,
     if (codedW < 2 || codedH < 2)
         return {};
 
+    // CUDA copies into the pooled textures; VAAPI binds the decoder's own dma-buf into a
+    // separate pair, so the draw below has to be told which one holds this frame.
+    GLuint texY = rt.m_videoY;
+    GLuint texUV = rt.m_videoUV;
     bool uploaded = rt.importCudaNv12(gl, av);
+    if (!uploaded && rt.importVaapiNv12(gl, av)) {
+        uploaded = true;
+        texY = rt.m_importY;
+        texUV = rt.m_importUV;
+    }
     if (!uploaded) {
         AVFrame *nv12 = rt.ensureSoftwareNv12(av);
         if (!nv12 || nv12->format != AV_PIX_FMT_NV12)
@@ -1267,6 +1648,8 @@ GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,
             || !rt.uploadPlanePbo(gl, rt.m_videoUV, w / 2, h / 2, GL_RG8, GL_RG, nv12->data[1],
                                   nv12->linesize[1], w))
             return {};
+        texY = rt.m_videoY;
+        texUV = rt.m_videoUV;
     }
 
     const int destW = qMax(2, frame.displayWidth() & ~1);
@@ -1299,9 +1682,9 @@ GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,
     program->setUniformValue("u_yuvScale", scale);
     program->setUniformValue("u_texMap", texMapForRotation(frame.rotation));
     gl->glActiveTexture(GL_TEXTURE0);
-    gl->glBindTexture(GL_TEXTURE_2D, rt.m_videoY);
+    gl->glBindTexture(GL_TEXTURE_2D, texY);
     gl->glActiveTexture(GL_TEXTURE1);
-    gl->glBindTexture(GL_TEXTURE_2D, rt.m_videoUV);
+    gl->glBindTexture(GL_TEXTURE_2D, texUV);
     gl->glBindVertexArray(rt.vao);
     gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     gl->glBindVertexArray(0);

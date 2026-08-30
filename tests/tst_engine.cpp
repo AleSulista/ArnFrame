@@ -123,6 +123,9 @@ private slots:
     void clipReaderAppliesDisplayRotation_data();
     void clipReaderAppliesDisplayRotation();
     void hwAccelBackendIdsRoundTrip();
+    void previewFrameAcceptsHardwareSurfaces();
+    void vaapiPreviewMatchesSoftwareDecode();
+    void hardwareDecodeSurvivesScrubbing();
     void clipReaderPicksHwAv1Decoder();
     void clipReaderStaysOnSoftwareWhenHardwareDisabled();
     void clipReaderAutoKeepsCheapClipsOnSoftware();
@@ -256,6 +259,7 @@ private slots:
 private:
     static QString makeColorSegmentsVideo(QTemporaryDir &dir);
     static QString makeRotatedHalvesVideo(QTemporaryDir &dir, int displayDegrees);
+    static QString makeHdHalvesVideo(QTemporaryDir &dir);
     static QString makeAv1ColorVideo(QTemporaryDir &dir);
     static QString makeToneAudio(QTemporaryDir &dir);
     static QString makeSweepAudio(QTemporaryDir &dir);
@@ -2043,6 +2047,35 @@ void EngineTest::clipReaderSequentialAndSeek()
 // 64x32 landscape, red left half / blue right half, tagged with a display matrix.
 // `displayDegrees` is the clockwise turn a player should apply, i.e. what
 // displayRotationOf() reports; the matrix stores its negation.
+// 1080p, so the VAAPI surface is padded to 1088 and a wrongly-sized dma-buf import shows up as
+// a garbage strip along the bottom edge rather than as a clean failure.
+QString EngineTest::makeHdHalvesVideo(QTemporaryDir &dir)
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        return {};
+
+    const QString out = dir.filePath(QStringLiteral("hd-halves.mp4"));
+    QStringList args{
+        QStringLiteral("-y"),
+        QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+        QStringLiteral("color=c=red:s=960x1080:r=25:d=1"),
+        QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+        QStringLiteral("color=c=blue:s=960x1080:r=25:d=1"),
+        QStringLiteral("-filter_complex"), QStringLiteral("[0][1]hstack=inputs=2[v]"),
+        QStringLiteral("-map"), QStringLiteral("[v]"),
+        QStringLiteral("-c:v"), QStringLiteral("libx264"),
+        QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+        out,
+    };
+
+    QProcess proc;
+    proc.start(ffmpeg, args);
+    if (!proc.waitForFinished(60000) || proc.exitCode() != 0)
+        return {};
+    return QFileInfo::exists(out) ? out : QString{};
+}
+
 QString EngineTest::makeRotatedHalvesVideo(QTemporaryDir &dir, int displayDegrees)
 {
     const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
@@ -2188,6 +2221,203 @@ QString EngineTest::makeAv1ColorVideo(QTemporaryDir &dir)
 
 // The picker and the saved setting both key off these ids, so a backend whose id does
 // not round-trip would silently become Auto on the next launch.
+// A VAAPI or VideoToolbox surface lives in data[3], not data[0], and for VAAPI data[3] is a
+// VASurfaceID cast to a pointer — surface id 0 is legal and iHD hands it out first. Testing
+// either data slot therefore rejects real frames, and ClipReader reads that rejection as a
+// decoder failure and drops the whole reader to software for good.
+void EngineTest::previewFrameAcceptsHardwareSurfaces()
+{
+    auto hardwareFrame = [](AVPixelFormat format, uintptr_t surface) {
+        AVFrame *raw = av_frame_alloc();
+        raw->format = format;
+        raw->width = 1920;
+        raw->height = 1080;
+        raw->data[3] = reinterpret_cast<uint8_t *>(surface);
+        // What actually keeps the surface alive; the pool buffer's payload is the id itself.
+        raw->buf[0] = av_buffer_alloc(1);
+        PreviewVideoFrame out;
+        out.frame.reset(raw, [](AVFrame *f) {
+            f->data[3] = nullptr;
+            av_frame_free(&f);
+        });
+        return out;
+    };
+
+    for (const AVPixelFormat format : {AV_PIX_FMT_VAAPI, AV_PIX_FMT_VIDEOTOOLBOX}) {
+        // Surface id 0 is the regression that matters: it makes data[3] a null pointer.
+        for (const uintptr_t surface : {uintptr_t(0), uintptr_t(7)}) {
+            const PreviewVideoFrame frame = hardwareFrame(format, surface);
+            QVERIFY(frame.isValid());
+            QVERIFY(frame.isHardware());
+            QCOMPARE(frame.displayWidth(), 1920);
+            QCOMPARE(frame.displayHeight(), 1080);
+        }
+    }
+
+    // A hardware frame with no surface reference at all is still invalid.
+    PreviewVideoFrame empty;
+    QVERIFY(!empty.isValid());
+    AVFrame *bare = av_frame_alloc();
+    bare->format = AV_PIX_FMT_VAAPI;
+    bare->width = 1920;
+    bare->height = 1080;
+    empty.frame.reset(bare, avFrameDeleter);
+    QVERIFY(!empty.isValid());
+
+    // And a software frame still needs its pixels.
+    PreviewVideoFrame blank;
+    AVFrame *sw = av_frame_alloc();
+    sw->format = AV_PIX_FMT_NV12;
+    sw->width = 64;
+    sw->height = 64;
+    blank.frame.reset(sw, avFrameDeleter);
+    QVERIFY(!blank.isValid());
+}
+
+// Preview hardware decode had never actually run before the isValid() fix, so this covers the
+// path that fix switched on — not the dma-buf importer, which is off by default. Two overlapping
+// clips of one file share a reader and halve the hardware preview cache, which is the case most
+// likely to exhaust the decoder's surface pool.
+void EngineTest::hardwareDecodeSurvivesScrubbing()
+{
+    if (!drift::hwaccel::availableDecodeBackends().contains(drift::hwaccel::Backend::Vaapi))
+        QSKIP("no vaapi");
+    if (!GpuCompositor::isAvailable())
+        QSKIP("no gl");
+    QTemporaryDir dir;
+    const QString path = makeHdHalvesVideo(dir);
+    if (path.isEmpty())
+        QSKIP("no ffmpeg");
+
+    ClipReader::setHardwareDecodeMode(ClipReader::HardwareDecodeMode::Hardware,
+                                      drift::hwaccel::Backend::Vaapi);
+    drift::Project project;
+    project.setResolution(1920, 1080);
+    project.setFps(25);
+    project.tracks().clear();
+    // Two overlapping clips of one file: shares a reader, halves the hw preview cache.
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+    for (int t = 0; t < 2; ++t) {
+        drift::Clip c;
+        c.id = QStringLiteral("c%1").arg(t);
+        c.type = drift::ClipType::Video;
+        c.path = path;
+        c.timelineStart = 0;
+        c.timelineDuration = drift::secondsToUs(1.0);
+        if (t == 1)
+            c.opacity.setKeyframe(0, 0.5);
+        project.tracks()[t].clips.append(c);
+    }
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+
+    const quint64 before = ClipReader::hardwareFallbackCount();
+    // Forward playback, reverse playback, then out-of-order scrubs.
+    for (int pass = 0; pass < 4; ++pass) {
+        for (int i = 0; i < 25; ++i) {
+            const drift::TimeUs at = (pass % 3 == 0)   ? i * 40'000
+                                     : (pass % 3 == 1) ? (24 - i) * 40'000
+                                                       : ((i * 7) % 25) * 40'000;
+            const QImage img = compositor.compositeAt(at);
+            QVERIFY2(!img.isNull(), qPrintable(QStringLiteral("null at pass %1 t=%2").arg(pass).arg(at)));
+            QCOMPARE(img.size(), QSize(1920, 1080));
+            QVERIFY(qRed(img.pixel(200, 540)) > qBlue(img.pixel(200, 540)));
+            QVERIFY(qBlue(img.pixel(1700, 540)) > qRed(img.pixel(1700, 540)));
+        }
+    }
+    // A demotion to software would still render correctly, so the picture checks alone cannot
+    // tell whether hardware decode actually held up across the scrubbing.
+    QCOMPARE(ClipReader::hardwareFallbackCount(), before);
+    ClipReader::setHardwareDecodeMode(ClipReader::HardwareDecodeMode::Auto,
+                                      drift::hwaccel::Backend::None);
+}
+
+void EngineTest::vaapiPreviewMatchesSoftwareDecode()
+{
+    if (!drift::hwaccel::availableDecodeBackends().contains(drift::hwaccel::Backend::Vaapi))
+        QSKIP("No VAAPI device");
+    if (!GpuCompositor::isAvailable())
+        QSKIP("OpenGL offscreen context unavailable");
+
+    // The importer is off by default; opting in here is what a user would do, and it keeps this
+    // test meaningful rather than silently measuring the PBO path against itself.
+    qputenv("DRIFT_VAAPI_ZEROCOPY", "1");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeHdHalvesVideo(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a 1080p test clip");
+
+    const QSize size(1920, 1080);
+    auto composite = [&](ClipReader::HardwareDecodeMode mode, drift::hwaccel::Backend backend,
+                         drift::TimeUs at) {
+        ClipReader::setHardwareDecodeMode(mode, backend);
+
+        drift::Project project;
+        project.setResolution(size.width(), size.height());
+        project.setFps(25);
+        project.tracks().clear();
+        project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+        drift::Clip clip;
+        clip.id = QStringLiteral("hd");
+        clip.type = drift::ClipType::Video;
+        clip.path = path;
+        clip.timelineStart = 0;
+        clip.timelineDuration = drift::secondsToUs(1.0);
+        project.tracks()[0].clips.append(clip);
+
+        FrameCompositor compositor;
+        compositor.setProject(&project);
+        return compositor.compositeAt(at);
+    };
+
+    // t=0 first: that frame lands on the first surface the driver allocates, whose VASurfaceID
+    // is 0 — the case that makes AVFrame::data[3] a null pointer.
+    for (const drift::TimeUs at : {drift::TimeUs(0), drift::TimeUs(400'000)}) {
+        const quint64 fallbacksBefore = ClipReader::hardwareFallbackCount();
+        const QImage hardware =
+            composite(ClipReader::HardwareDecodeMode::Hardware, drift::hwaccel::Backend::Vaapi, at);
+        // Without this the test would still pass on the PBO fallback, which is pixel-identical:
+        // a reader that demoted itself to software proves nothing about the import.
+        QCOMPARE(ClipReader::hardwareFallbackCount(), fallbacksBefore);
+        const QImage software =
+            composite(ClipReader::HardwareDecodeMode::Software, drift::hwaccel::Backend::None, at);
+
+        QVERIFY(!hardware.isNull());
+        QVERIFY(!software.isNull());
+        QCOMPARE(hardware.size(), size);
+        QCOMPARE(software.size(), size);
+
+        // Sample the bottom rows too: a dma-buf import sized from the padded 1088-tall surface
+        // instead of the 1080-tall picture leaks decoder padding into exactly that band.
+        const QList<QPoint> probes{{200, 40},   {1700, 40},   {200, 540}, {1700, 540},
+                                   {200, 1074}, {1700, 1074}, {960, 1078}};
+        for (const QPoint &probe : probes) {
+            const QRgb hw = hardware.pixel(probe);
+            const QRgb sw = software.pixel(probe);
+            QVERIFY2(qAbs(qRed(hw) - qRed(sw)) <= 6 && qAbs(qGreen(hw) - qGreen(sw)) <= 6
+                         && qAbs(qBlue(hw) - qBlue(sw)) <= 6,
+                     qPrintable(QStringLiteral("t=%1 at %2,%3: hw #%4 sw #%5")
+                                    .arg(at)
+                                    .arg(probe.x())
+                                    .arg(probe.y())
+                                    .arg(hw, 8, 16, QLatin1Char('0'))
+                                    .arg(sw, 8, 16, QLatin1Char('0'))));
+        }
+
+        // And that the picture is the one we encoded, not two matching shades of wrong.
+        QVERIFY(qRed(hardware.pixel(200, 540)) > qBlue(hardware.pixel(200, 540)));
+        QVERIFY(qBlue(hardware.pixel(1700, 540)) > qRed(hardware.pixel(1700, 540)));
+    }
+
+    ClipReader::setHardwareDecodeMode(ClipReader::HardwareDecodeMode::Auto,
+                                      drift::hwaccel::Backend::None);
+    qunsetenv("DRIFT_VAAPI_ZEROCOPY");
+}
+
 void EngineTest::hwAccelBackendIdsRoundTrip()
 {
     const QList<drift::hwaccel::Backend> order = drift::hwaccel::decodeBackendOrder();

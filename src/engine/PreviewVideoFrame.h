@@ -23,9 +23,20 @@ struct PreviewVideoFrame
     int colorspace = AVCOL_SPC_UNSPECIFIED;
     int colorRange = AVCOL_RANGE_UNSPECIFIED;
 
+    // VAAPI and VideoToolbox surfaces live in data[3] and leave data[0] null, so testing
+    // data[0] alone rejected every one of them — and ClipReader reads that rejection as a
+    // decoder failure and disables hardware decode for the rest of the reader's life.
+    //
+    // data[3] is not a pointer either: for VAAPI it is a VASurfaceID cast to one, and id 0 is
+    // a legal surface that iHD hands out first. So what says a hardware frame holds a surface
+    // is the buffer reference, not either data slot.
     bool isValid() const
     {
-        return frame && frame->width > 0 && frame->height > 0 && frame->data[0] != nullptr;
+        if (!frame || frame->width <= 0 || frame->height <= 0)
+            return false;
+        if (isHardware())
+            return frame->buf[0] != nullptr;
+        return frame->data[0] != nullptr;
     }
 
     int codedWidth() const { return frame ? frame->width : 0; }

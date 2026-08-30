@@ -230,6 +230,11 @@ private:
                         GLenum format, const uint8_t *src, int srcPitch, int packedWidth);
     void unregisterCudaResources();
     bool importCudaNv12(QOpenGLExtraFunctions *gl, const AVFrame *frame);
+    // Texture names for importers whose storage comes from the imported surface rather than
+    // from glTexImage2D. Kept apart from m_videoY/m_videoUV: a later PBO frame reusing those
+    // would glTexSubImage2D straight into the decoder's dma-buf.
+    bool ensureImportTextureNames(QOpenGLExtraFunctions *gl);
+    bool importVaapiNv12(QOpenGLExtraFunctions *gl, const AVFrame *frame);
     AVFrame *ensureSoftwareNv12(const AVFrame *src);
 
     QMutex m_initMutex;
@@ -274,6 +279,9 @@ private:
     int m_cudaTexW = 0;
     int m_cudaTexH = 0;
     bool m_cudaImportFailed = false;
+    GLuint m_importY = 0;
+    GLuint m_importUV = 0;
+    bool m_vaapiImportFailed = false;
 
     friend GLuint cachedUploadTexture(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QImage &image);
     friend GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,
