@@ -24,6 +24,9 @@ class AssetLibrary : public QAbstractListModel
     // CTAs and raises a progress overlay on it; on desktop it is never true for long enough to
     // see, because nothing has to be copied.
     Q_PROPERTY(bool importing READ importing NOTIFY importingChanged)
+    // Flatpak (and Snap) hide host paths that the file picker would have granted through the
+    // portal. A dropped file:// URL then fails to open — not because the format is unsupported.
+    Q_PROPERTY(bool sandboxed READ sandboxed CONSTANT)
 
 public:
     enum Role {
@@ -58,6 +61,7 @@ public:
     // is emitted.
     Q_INVOKABLE bool importUrlsAsync(const QList<QUrl> &urls);
     bool importing() const { return m_importing; }
+    bool sandboxed() const;
     // Import local paths and return the asset ids involved (new or already-present).
     QStringList importLocalPaths(const QStringList &paths);
     bool isImportPending(const QString &assetId) const;

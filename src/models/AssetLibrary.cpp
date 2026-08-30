@@ -283,6 +283,16 @@ std::optional<drift::MediaAsset> probeAsset(const QString &absolutePath, bool im
 
 } // namespace
 
+bool AssetLibrary::sandboxed() const
+{
+#if defined(Q_OS_ANDROID)
+    return false;
+#else
+    return qEnvironmentVariableIsSet("FLATPAK_ID") || QFile::exists(QStringLiteral("/.flatpak-info"))
+        || qEnvironmentVariableIsSet("SNAP");
+#endif
+}
+
 AssetLibrary::AssetLibrary(QObject *parent)
     : QAbstractListModel(parent)
 {
@@ -1029,11 +1039,26 @@ struct Materialized
     int failed = 0;
 };
 
+// Host path that this process can actually open. A Flatpak drop hands us file:// of a path
+// outside the sandbox: QUrl::toLocalFile() succeeds, then every later open fails. Returning
+// empty here is what lets importFinished report `failed` instead of a silent skip.
+QString readableLocalPath(const QString &path)
+{
+    if (path.isEmpty())
+        return {};
+    const QFileInfo info(path);
+    if (!info.isFile() || !info.isReadable()) {
+        qWarning("import: cannot read %s", qPrintable(path));
+        return {};
+    }
+    return path;
+}
+
 QString materializeOne(const QUrl &url, QString *sourceUri)
 {
     sourceUri->clear();
     if (url.isLocalFile())
-        return url.toLocalFile();
+        return readableLocalPath(url.toLocalFile());
     if (url.isEmpty())
         return {};
 
@@ -1053,7 +1078,7 @@ QString materializeOne(const QUrl &url, QString *sourceUri)
 
     const QString asString = url.toString();
     if (asString.startsWith(QLatin1String("file://"), Qt::CaseInsensitive))
-        return QUrl(asString).toLocalFile();
+        return readableLocalPath(QUrl(asString).toLocalFile());
     return asString;
 }
 // What to show while this URL is being copied. A SAF document's URI carries only an opaque id,

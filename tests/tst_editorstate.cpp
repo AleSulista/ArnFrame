@@ -59,6 +59,7 @@ private slots:
     void createRenameAndDeleteBinFolder();
     void undoingBinFolderRenameEmitsDataChanged();
     void importIntoDeletedFolderFallsBackToRoot();
+    void importUnreadableUrlReportsFailed();
     void moveAssetToFolderAndUndo();
     void deleteBinFolderMovesChildrenAndUndo();
     void moveTrackReordersAndRemapsSelection();
@@ -458,6 +459,24 @@ void EditorStateTest::importIntoDeletedFolderFallsBackToRoot()
     // worker is still running and dereferences that pointer after `library` goes out of scope at
     // the end of this function. Wait for the probe to actually finish first.
     QTRY_VERIFY_WITH_TIMEOUT(!library.isImportPending(ids.first()), 5000);
+}
+
+void EditorStateTest::importUnreadableUrlReportsFailed()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    // A dropped host path the sandbox cannot see used to land as a local URL, skip isFile(),
+    // and toast "the format may be unsupported". Counting it as failed is what lets the UI
+    // tell those two cases apart.
+    QSignalSpy finished(&library, &AssetLibrary::importFinished);
+    QVERIFY(library.importUrlsAsync(
+        {QUrl::fromLocalFile(QStringLiteral("/no/such/drift-unreadable-import.mp4"))}));
+    QVERIFY(finished.wait(5000));
+    QCOMPARE(finished.size(), 1);
+    QCOMPARE(finished.first().at(0).toInt(), 0);
+    QCOMPARE(finished.first().at(1).toInt(), 1);
+    QCOMPARE(library.count(), 0);
 }
 
 void EditorStateTest::moveAssetToFolderAndUndo()

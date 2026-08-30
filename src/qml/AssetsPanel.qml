@@ -26,7 +26,9 @@ PanelFrame {
     // Imports and reports the outcome. `importUrls` skips anything it cannot
     // probe, so a bad file used to just never appear with no explanation at all.
     // Comparing the row count before and after tells us how many were rejected.
-    function importUrlsReporting(urls) {
+    // `fromDrop` is the Flatpak case: a drag hands us a host path the sandbox
+    // cannot open, which used to be reported as an unsupported format.
+    function importUrlsReporting(urls, fromDrop) {
         if (!urls || urls.length === 0)
             return
         // Async, because on Android reading a picked file means copying it out of the
@@ -40,10 +42,23 @@ PanelFrame {
         }
         root._importRequested = urls.length
         root._countBefore = before
+        root._importFromDrop = !!fromDrop
+    }
+
+    function importOpenFailedMessage(requested) {
+        if (root._importFromDrop && AssetLibrary.sandboxed) {
+            return requested === 1
+                ? qsTr("Could not open that file. This package cannot read files dropped from other apps — use Import to pick them instead.")
+                : qsTr("Could not open those files. This package cannot read files dropped from other apps — use Import to pick them instead.")
+        }
+        return requested === 1
+            ? qsTr("Could not open that file. It may have been moved, or you may not have permission to read it.")
+            : qsTr("Could not open any of the selected files.")
     }
 
     property int _importRequested: 0
     property int _countBefore: 0
+    property bool _importFromDrop: false
 
     Connections {
         target: AssetLibrary
@@ -54,15 +69,24 @@ PanelFrame {
             root._importRequested = 0
             const added = AssetLibrary.count - root._countBefore
             const skipped = requested - added
-            if (added > 0 && skipped > 0)
-                Toasts.warning(qsTr("Imported %1 of %2 files. %3 could not be read.")
-                               .arg(added).arg(requested).arg(skipped))
-            else if (added > 0)
+            if (added > 0 && skipped > 0) {
+                if (root._importFromDrop && AssetLibrary.sandboxed)
+                    Toasts.warning(qsTr("Imported %1 of %2 files. The rest could not be opened — this package cannot read files dropped from other apps. Use Import instead.")
+                                   .arg(added).arg(requested))
+                else
+                    Toasts.warning(qsTr("Imported %1 of %2 files. %3 could not be read.")
+                                   .arg(added).arg(requested).arg(skipped))
+            } else if (added > 0) {
                 Toasts.success(qsTr("Imported %n files.", "", added))
-            else if (requested === 1)
+            } else if (failed > 0) {
+                Toasts.error(root.importOpenFailedMessage(requested))
+            } else if (materialized > 0) {
+                Toasts.success(qsTr("Imported %n files.", "", requested))
+            } else if (requested === 1) {
                 Toasts.error(qsTr("Could not import that file — the format may be unsupported."))
-            else
+            } else {
                 Toasts.error(qsTr("Could not import any of the %n selected files.", "", requested))
+            }
         }
     }
 
@@ -516,7 +540,7 @@ PanelFrame {
         keys: ["text/uri-list"]
         onDropped: (drop) => {
             if (drop.hasUrls)
-                root.importUrlsReporting(drop.urls)
+                root.importUrlsReporting(drop.urls, true)
         }
     }
 
