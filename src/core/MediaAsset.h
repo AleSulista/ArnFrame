@@ -42,6 +42,11 @@ struct MediaAsset
     QString durationLabel;
     QString thumbnailPath;
     QString filmstripPath;
+
+    // Id of a BinFolder in Project::binFolders(). Empty = bin root. Purely an
+    // organizational attribute — clips address media through MediaAsset::id, so moving
+    // an asset between folders never touches anything on the timeline.
+    QString folderId;
 };
 
 } // namespace drift

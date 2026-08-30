@@ -2822,6 +2822,22 @@
         <source>Export complete</source>
         <translation>Exportation terminée</translation>
     </message>
+    <message>
+        <source>Folder created</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder renamed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder deleted</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media moved</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>AssetCategoryChips</name>
@@ -3099,6 +3115,34 @@
         <source>%1 — drag onto an overlap between two clips</source>
         <translation>%1 — faites glisser sur un chevauchement entre deux clips</translation>
     </message>
+    <message>
+        <source>New folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create</source>
+        <translation type="unfinished">Créer</translation>
+    </message>
+    <message>
+        <source>Folder name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rename folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Move to folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>New Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create a new folder here</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>AudioEffectBrowser</name>
@@ -3321,6 +3365,13 @@
     <message>
         <source>The audio device does not support playback of this project.</source>
         <translation>Le périphérique audio ne prend pas en charge la lecture de ce projet.</translation>
+    </message>
+</context>
+<context>
+    <name>BinBreadcrumb</name>
+    <message>
+        <source>Media</source>
+        <translation type="unfinished">Média</translation>
     </message>
 </context>
 <context>
@@ -4935,6 +4986,26 @@
     <message>
         <source>Import video, audio or images, then drag them onto the timeline. Right-click a clip to preview and trim it first.</source>
         <translation>Importez de la vidéo, de l’audio ou des images, puis faites-les glisser sur la timeline. Faites un clic droit sur un clip pour le prévisualiser et le découper au préalable.</translation>
+    </message>
+    <message>
+        <source>Move to folder…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This folder is empty</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Drag media here, or import more.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open</source>
+        <translation type="unfinished">Ouvrir</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation type="unfinished">Supprimer</translation>
     </message>
 </context>
 <context>

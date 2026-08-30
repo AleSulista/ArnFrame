@@ -424,6 +424,8 @@ QJsonObject assetToJson(const MediaAsset &asset)
     // existed. Older builds ignore the key; a project without it simply reads back empty.
     if (!asset.sourceUri.isEmpty())
         object.insert(QStringLiteral("sourceUri"), asset.sourceUri);
+    if (!asset.folderId.isEmpty())
+        object.insert(QStringLiteral("folderId"), asset.folderId);
     return object;
 }
 
@@ -446,6 +448,7 @@ MediaAsset assetFromJsonV2(const QJsonObject &object)
     asset.codecName = object.value(QStringLiteral("codecName")).toString();
     asset.thumbnailPath = object.value(QStringLiteral("thumbnailPath")).toString();
     asset.filmstripPath = object.value(QStringLiteral("filmstripPath")).toString();
+    asset.folderId = object.value(QStringLiteral("folderId")).toString();
     if (object.contains(QStringLiteral("hasAudio"))) {
         asset.hasAudioKnown = true;
         asset.hasAudio = object.value(QStringLiteral("hasAudio")).toBool();
@@ -548,6 +551,8 @@ Project Project::detachedCopy() const
     out.m_bookmarks.detach();
     out.m_assetOrder.detach();
     out.m_assetsById.detach();
+    out.m_binFolderOrder.detach();
+    out.m_binFoldersById.detach();
     return out;
 }
 
@@ -584,6 +589,41 @@ QString Project::assetIdAt(int index) const
     if (index < 0 || index >= m_assetOrder.size())
         return {};
     return m_assetOrder.at(index);
+}
+
+QString Project::addBinFolder(BinFolder folder)
+{
+    if (folder.id.isEmpty())
+        folder.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+    m_binFoldersById.insert(folder.id, folder);
+    if (!m_binFolderOrder.contains(folder.id))
+        m_binFolderOrder.append(folder.id);
+    return folder.id;
+}
+
+BinFolder *Project::binFolder(const QString &id)
+{
+    auto it = m_binFoldersById.find(id);
+    return it == m_binFoldersById.end() ? nullptr : &it.value();
+}
+
+const BinFolder *Project::binFolder(const QString &id) const
+{
+    auto it = m_binFoldersById.constFind(id);
+    return it == m_binFoldersById.constEnd() ? nullptr : &it.value();
+}
+
+int Project::binFolderIndex(const QString &id) const
+{
+    return m_binFolderOrder.indexOf(id);
+}
+
+QString Project::binFolderIdAt(int index) const
+{
+    if (index < 0 || index >= m_binFolderOrder.size())
+        return {};
+    return m_binFolderOrder.at(index);
 }
 
 Project Project::fromJson(const QJsonObject &object, QString *errorOut)
@@ -631,6 +671,17 @@ Project Project::fromJson(const QJsonObject &object, QString *errorOut)
             project.addAsset(assetFromJsonV2(assetObject));
         else
             project.addAsset(assetFromJsonV1(assetObject));
+    }
+
+    const QJsonArray binFoldersArray = object.value(QStringLiteral("binFolders")).toArray();
+    for (const QJsonValue &value : binFoldersArray) {
+        const QJsonObject folderObject = value.toObject();
+        BinFolder folder;
+        folder.id = folderObject.value(QStringLiteral("id")).toString();
+        folder.name = folderObject.value(QStringLiteral("name")).toString();
+        folder.parentId = folderObject.value(QStringLiteral("parentId")).toString();
+        if (!folder.id.isEmpty())
+            project.addBinFolder(folder);
     }
 
     // Rebuild tracks from JSON. The Project ctor seeds a 1-track default, so
@@ -721,6 +772,18 @@ QJsonObject Project::toJson() const
             assetsArray.append(assetToJson(*assetPtr));
     }
 
+    QJsonArray binFoldersArray;
+    for (const QString &id : m_binFolderOrder) {
+        const BinFolder *folderPtr = binFolder(id);
+        if (folderPtr) {
+            binFoldersArray.append(QJsonObject{
+                {QStringLiteral("id"), folderPtr->id},
+                {QStringLiteral("name"), folderPtr->name},
+                {QStringLiteral("parentId"), folderPtr->parentId},
+            });
+        }
+    }
+
     QJsonArray tracksArray;
     for (const Track &track : m_tracks) {
         QJsonArray clipsArray;
@@ -764,6 +827,7 @@ QJsonObject Project::toJson() const
         {QStringLiteral("height"), m_height},
         {QStringLiteral("sampleRate"), m_sampleRate},
         {QStringLiteral("assets"), assetsArray},
+        {QStringLiteral("binFolders"), binFoldersArray},
         {QStringLiteral("tracks"), tracksArray},
         {QStringLiteral("bookmarks"), bookmarksArray},
         {QStringLiteral("background"), backgroundToJson(m_background)},

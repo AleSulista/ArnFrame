@@ -2820,6 +2820,22 @@
         <source>Close gap</source>
         <translation>හිඩැස වසන්න</translation>
     </message>
+    <message>
+        <source>Folder created</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder renamed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder deleted</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media moved</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>AssetCategoryChips</name>
@@ -3097,6 +3113,34 @@
         <source>%1 — drag onto an overlap between two clips</source>
         <translation>%1 — ක්ලිප් දෙකක් අතර අතිච්ඡාදනය වන තැනට අදින්න</translation>
     </message>
+    <message>
+        <source>New folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create</source>
+        <translation type="unfinished">සාදන්න</translation>
+    </message>
+    <message>
+        <source>Folder name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rename folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Move to folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>New Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create a new folder here</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>AudioEffectBrowser</name>
@@ -3319,6 +3363,13 @@
     <message>
         <source>The audio device does not support playback of this project.</source>
         <translation>මෙම ව්‍යාපෘතිය ධාවනය කිරීමට ශ්‍රව්‍ය උපාංගය සහාය නොදක්වයි.</translation>
+    </message>
+</context>
+<context>
+    <name>BinBreadcrumb</name>
+    <message>
+        <source>Media</source>
+        <translation type="unfinished">මාධ්‍ය</translation>
     </message>
 </context>
 <context>
@@ -4932,6 +4983,26 @@
     <message>
         <source>Import video, audio or images, then drag them onto the timeline. Right-click a clip to preview and trim it first.</source>
         <translation>වීඩියෝ, ශ්‍රව්‍ය හෝ පින්තූර ආයාත කර, පසුව ඒවා කාලරේඛාව වෙත අදින්න. ප්‍රථමයෙන් පෙරදසුන් කිරීමට සහ කප්පාදු කිරීමට ක්ලිප් එකක් මත දකුණු-ක්ලික් කරන්න.</translation>
+    </message>
+    <message>
+        <source>Move to folder…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This folder is empty</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Drag media here, or import more.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open</source>
+        <translation type="unfinished">විවෘත කරන්න</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation type="unfinished">මකන්න</translation>
     </message>
 </context>
 <context>

@@ -56,6 +56,11 @@ private slots:
     void workAreaMarkClearAndUndo();
     void bookmarkSnapTarget();
     void renameClipAndAsset();
+    void createRenameAndDeleteBinFolder();
+    void undoingBinFolderRenameEmitsDataChanged();
+    void importIntoDeletedFolderFallsBackToRoot();
+    void moveAssetToFolderAndUndo();
+    void deleteBinFolderMovesChildrenAndUndo();
     void moveTrackReordersAndRemapsSelection();
     void addTrackInsertsEmptyTrackByType();
     void projectPersistenceRoundTrip();
@@ -368,6 +373,141 @@ void EditorStateTest::renameClipAndAsset()
     QCOMPARE(library.assetAt(0).value(QStringLiteral("name")).toString(), QStringLiteral("A-roll"));
     // Existing timeline text clip is untouched.
     QCOMPARE(state.clipAt(0, 0).value(QStringLiteral("name")).toString(), QStringLiteral("Hello"));
+}
+
+void EditorStateTest::createRenameAndDeleteBinFolder()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    const QString id = state.createBinFolder(QStringLiteral("B-Roll"), QString());
+    QVERIFY(!id.isEmpty());
+    QCOMPARE(state.binFolderModel()->count(), 1);
+    QCOMPARE(state.binFolderModel()->folderById(id).value(QStringLiteral("name")).toString(),
+             QStringLiteral("B-Roll"));
+
+    QVERIFY(state.renameBinFolder(id, QStringLiteral("A-Roll")));
+    QCOMPARE(state.binFolderModel()->folderById(id).value(QStringLiteral("name")).toString(),
+             QStringLiteral("A-Roll"));
+
+    QVERIFY(state.deleteBinFolder(id));
+    QCOMPARE(state.binFolderModel()->count(), 0);
+
+    QVERIFY(state.undoAvailable());
+    state.undo();
+    QCOMPARE(state.binFolderModel()->count(), 1);
+    state.undo();
+    QCOMPARE(state.binFolderModel()->folderById(id).value(QStringLiteral("name")).toString(),
+             QStringLiteral("B-Roll"));
+    state.undo();
+    QCOMPARE(state.binFolderModel()->count(), 0);
+}
+
+void EditorStateTest::undoingBinFolderRenameEmitsDataChanged()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    const QString id = state.createBinFolder(QStringLiteral("B-Roll"), QString());
+    QVERIFY(state.renameBinFolder(id, QStringLiteral("A-Roll")));
+
+    // Consumers bound to BinFolderModel (the breadcrumb, folder tiles) rely on dataChanged to
+    // notice a rename that undo/redo reverted behind their backs — the row's own value changing
+    // isn't enough if nothing signals that it did.
+    QSignalSpy dataChangedSpy(state.binFolderModel(), &QAbstractItemModel::dataChanged);
+    state.undo();
+    QVERIFY(dataChangedSpy.count() >= 1);
+    const QModelIndex changedIndex = state.binFolderModel()->index(state.binFolderModel()->indexOfId(id));
+    bool sawNameRole = false;
+    for (const QList<QVariant> &args : dataChangedSpy) {
+        const QModelIndex topLeft = args.at(0).toModelIndex();
+        const QList<int> roles = args.at(2).value<QList<int>>();
+        if (topLeft == changedIndex && roles.contains(int(BinFolderListModel::NameRole)))
+            sawNameRole = true;
+    }
+    QVERIFY(sawNameRole);
+    QCOMPARE(state.binFolderModel()->folderById(id).value(QStringLiteral("name")).toString(),
+             QStringLiteral("B-Roll"));
+}
+
+void EditorStateTest::importIntoDeletedFolderFallsBackToRoot()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    const QString folderId = state.createBinFolder(QStringLiteral("Temp"), QString());
+    library.setImportFolderId(folderId);
+    // Mirrors a slow async import completing after its destination folder was deleted out from
+    // under it — the captured id is stale by the time the placeholder row is created.
+    QVERIFY(state.deleteBinFolder(folderId));
+
+    QTemporaryFile file(QDir::tempPath() + QStringLiteral("/drift-import-XXXXXX.mp4"));
+    QVERIFY(file.open());
+    file.write("not a real media file");
+    file.close();
+
+    const QStringList ids = library.importLocalPaths({file.fileName()});
+    QCOMPARE(ids.size(), 1);
+    const int index = library.indexOfId(ids.first());
+    QVERIFY(index >= 0);
+    QCOMPARE(library.assetAt(index).value(QStringLiteral("folderId")).toString(), QString());
+
+    // The probe this kicked off runs on a QtConcurrent worker thread that captures `library` by
+    // raw pointer. Qt's queued-connection context-object safety only protects the case where the
+    // object is destroyed after the worker has already posted its result; it does nothing if the
+    // worker is still running and dereferences that pointer after `library` goes out of scope at
+    // the end of this function. Wait for the probe to actually finish first.
+    QTRY_VERIFY_WITH_TIMEOUT(!library.isImportPending(ids.first()), 5000);
+}
+
+void EditorStateTest::moveAssetToFolderAndUndo()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    drift::MediaAsset asset;
+    asset.id = QStringLiteral("asset-1");
+    asset.name = QStringLiteral("clip.mp4");
+    asset.path = QStringLiteral("/tmp/clip.mp4");
+    asset.kind = drift::MediaKind::Video;
+    state.project()->assets().insert(asset.id, asset);
+    state.project()->assetOrder().append(asset.id);
+    library.syncToProject();
+    QCOMPARE(library.count(), 1);
+
+    const QString folderId = state.createBinFolder(QStringLiteral("B-Roll"), QString());
+    QVERIFY(state.moveAssetToFolder(0, folderId));
+    QCOMPARE(library.assetAt(0).value(QStringLiteral("folderId")).toString(), folderId);
+
+    state.undo();
+    QCOMPARE(library.assetAt(0).value(QStringLiteral("folderId")).toString(), QString());
+}
+
+void EditorStateTest::deleteBinFolderMovesChildrenAndUndo()
+{
+    AssetLibrary library;
+    AppController state(&library);
+
+    const QString parentId = state.createBinFolder(QStringLiteral("Interviews"), QString());
+    const QString childId = state.createBinFolder(QStringLiteral("Day 1"), parentId);
+
+    drift::MediaAsset asset;
+    asset.id = QStringLiteral("asset-1");
+    asset.name = QStringLiteral("clip.mp4");
+    asset.path = QStringLiteral("/tmp/clip.mp4");
+    asset.kind = drift::MediaKind::Video;
+    asset.folderId = childId;
+    state.project()->assets().insert(asset.id, asset);
+    state.project()->assetOrder().append(asset.id);
+    library.syncToProject();
+
+    QVERIFY(state.deleteBinFolder(childId));
+    QCOMPARE(state.binFolderModel()->count(), 1);
+    QCOMPARE(library.assetAt(0).value(QStringLiteral("folderId")).toString(), parentId);
+
+    state.undo();
+    QCOMPARE(state.binFolderModel()->count(), 2);
+    QCOMPARE(library.assetAt(0).value(QStringLiteral("folderId")).toString(), childId);
 }
 
 void EditorStateTest::moveTrackReordersAndRemapsSelection()
