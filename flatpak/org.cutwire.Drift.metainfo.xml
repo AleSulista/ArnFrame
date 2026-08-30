@@ -89,6 +89,37 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.5.0" date="2026-08-30">
+      <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.5.0</url>
+      <description>
+        <p>This is the first public release of Drift for Android. On the desktop, preview and
+        export stay on the GPU, the media bin gets folders, and Face Swap, video
+        stabilization, and several new languages land in this version.</p>
+        <ul>
+          <li>First public Android app — edit on a phone with a touch UI, including crop and
+          trim from the bin, and AV1 playback</li>
+          <li>Preview stays on the GPU instead of copying every frame through the CPU, so
+          Full / Half / Quarter match the preview panel size</li>
+          <li>Export converts frames to the encoder format on the GPU; typical 8-bit exports
+          are faster</li>
+          <li>Folders in the media bin: create, rename, nest, and move clips between them</li>
+          <li>Preview, trim, and crop a clip from the bin before putting it on the timeline</li>
+          <li>Face Swap effect: replace a face in a clip with a still photo</li>
+          <li>Video stabilization to smooth camera shake, with a smoothness slider and
+          optional tripod lock</li>
+          <li>Settings → Interface scale (100–200%), and a first-launch language chooser</li>
+          <li>Timeline scroll pans left and right, Shift+scroll moves between tracks, and
+          middle-click drag also pans</li>
+          <li>Closing a project with unsaved changes now asks Save / Don't Save / Cancel</li>
+          <li>Translations: Brazilian Portuguese, Chinese (Simplified), French (Canada),
+          Spanish, Italian, and Sinhala</li>
+        </ul>
+        <p>Thanks to @CathodeAnode for the French (Canada) translation, SVG icons, translatable UI
+        strings, and restoring a maximized window after fullscreen on KDE; to @yosenstar for
+        Chinese (Simplified); to @alexbassani for Brazilian Portuguese; to @roger-fernandes-Dev
+        for timeline scroll and pan; and to @jmn8718 for folders in the media bin.</p>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-08-25">
       <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.4.0</url>
       <description>
