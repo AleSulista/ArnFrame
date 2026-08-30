@@ -5,6 +5,7 @@
 
 #include <QTransform>
 #include <QtMath>
+#include <QByteArray>
 #include <QFile>
 #include <QDir>
 #include <QUuid>
@@ -152,60 +153,6 @@ AVPixelFormat hwGetFormat(AVCodecContext *ctx, const AVPixelFormat *pixFmts)
     return pixFmts ? pixFmts[0] : AV_PIX_FMT_NONE;
 }
 
-// Rotate a plane of Sample-sized elements. NV12's UV plane is half-resolution
-// interleaved U,V pairs, and 4:2:0's 2x2 subsampling is symmetric, so rotating it as
-// 16-bit samples keeps each pair's U,V order intact. Templated on the sample so the
-// inner loop is a plain typed store — this runs per preview frame.
-template <typename Sample>
-void rotatePlane(const Sample *src, Sample *dst, int srcW, int srcH, int rotation)
-{
-    const int dstW = (rotation == 180) ? srcW : srcH;
-    for (int y = 0; y < srcH; ++y) {
-        const Sample *row = src + qsizetype(y) * srcW;
-        for (int x = 0; x < srcW; ++x) {
-            int dx = 0;
-            int dy = 0;
-            switch (rotation) {
-            case 90:
-                dx = srcH - 1 - y;
-                dy = x;
-                break;
-            case 180:
-                dx = srcW - 1 - x;
-                dy = srcH - 1 - y;
-                break;
-            default: // 270
-                dx = y;
-                dy = srcW - 1 - x;
-                break;
-            }
-            dst[qsizetype(dy) * dstW + dx] = row[x];
-        }
-    }
-}
-
-Nv12Frame rotateNv12(const Nv12Frame &frame, int rotation)
-{
-    if (rotation == 0 || !frame.isValid())
-        return frame;
-
-    Nv12Frame out;
-    out.width = (rotation == 180) ? frame.width : frame.height;
-    out.height = (rotation == 180) ? frame.height : frame.width;
-    out.data.resize(frame.data.size());
-
-    const qsizetype yBytes = qsizetype(frame.width) * frame.height;
-    const uchar *src = reinterpret_cast<const uchar *>(frame.data.constData());
-    uchar *dst = reinterpret_cast<uchar *>(out.data.data());
-    rotatePlane(src, dst, frame.width, frame.height, rotation);
-    // Both dimensions are even (frameToNv12 masks them), so yBytes is even and the UV
-    // plane is 2-byte aligned — safe to walk it as U,V pairs.
-    rotatePlane(reinterpret_cast<const quint16 *>(src + yBytes),
-                reinterpret_cast<quint16 *>(dst + yBytes), frame.width / 2, frame.height / 2,
-                rotation);
-    return out;
-}
-
 QImage frameToRgba(const AVFrame *frame, SwsContext *&sws, int targetWidth, int targetHeight,
                    int rotation)
 {
@@ -246,75 +193,47 @@ QImage frameToRgba(const AVFrame *frame, SwsContext *&sws, int targetWidth, int 
     return copy;
 }
 
-// Pack an NV12 AVFrame into the flat Y-then-UV buffer the compositor uploads.
-Nv12Frame packNv12(const AVFrame *nv12, int targetWidth, int targetHeight)
+// Software preview frames: NV12 at the decode size, still an AVFrame (no packed
+// QByteArray, no CPU rotate). The GL importer honours linesize and applies rotation.
+AVFrame *softwareFrameToNv12(const AVFrame *frame, SwsContext *&sws, int targetWidth, int targetHeight)
 {
-    Nv12Frame out;
-    const qsizetype yBytes = qsizetype(targetWidth) * targetHeight;
-    const qsizetype uvBytes = qsizetype(targetWidth) * (targetHeight / 2);
-    out.data.resize(yBytes + uvBytes);
-    // Copy plane-by-plane in case linesize > width.
-    for (int y = 0; y < targetHeight; ++y) {
-        memcpy(out.data.data() + qsizetype(y) * targetWidth, nv12->data[0] + y * nv12->linesize[0],
-               size_t(targetWidth));
-    }
-    for (int y = 0; y < targetHeight / 2; ++y) {
-        memcpy(out.data.data() + yBytes + qsizetype(y) * targetWidth,
-               nv12->data[1] + y * nv12->linesize[1], size_t(targetWidth));
-    }
-    out.width = targetWidth;
-    out.height = targetHeight;
-    return out;
-}
-
-Nv12Frame frameToNv12(const AVFrame *frame, SwsContext *&sws, int targetWidth, int targetHeight,
-                      int rotation)
-{
-    Nv12Frame out;
     if (!frame || targetWidth <= 0 || targetHeight <= 0)
-        return out;
+        return nullptr;
     if (isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format)))
-        return out;
+        return nullptr;
 
-    // NV12 requires even dimensions.
     targetWidth &= ~1;
     targetHeight &= ~1;
     if (targetWidth < 2 || targetHeight < 2)
-        return out;
+        return nullptr;
 
-    // The VAAPI VPP path already produced NV12 at exactly this size — packing it
-    // directly skips a full-frame scale that would only be a copy.
     if (frame->format == AV_PIX_FMT_NV12 && frame->width == targetWidth
-        && frame->height == targetHeight) {
-        return rotateNv12(packNv12(frame, targetWidth, targetHeight), rotation);
-    }
+        && frame->height == targetHeight)
+        return av_frame_clone(frame);
 
     const int flags = swsFlagsForResize(frame->width, frame->height, targetWidth, targetHeight);
     sws = sws_getCachedContext(sws, frame->width, frame->height,
                                static_cast<AVPixelFormat>(frame->format), targetWidth, targetHeight,
                                AV_PIX_FMT_NV12, flags, nullptr, nullptr, nullptr);
     if (!sws)
-        return out;
-    // Keep limited-range YUV so GlRuntime's TV-range BT.709 shader expands correctly.
-    configureDecodeSws(sws, frame, 0 /* limited-range NV12 */);
+        return nullptr;
+    configureDecodeSws(sws, frame, frame->color_range == AVCOL_RANGE_JPEG ? 1 : 0);
 
     AVFrame *nv12 = av_frame_alloc();
     if (!nv12)
-        return out;
-
+        return nullptr;
     nv12->format = AV_PIX_FMT_NV12;
     nv12->width = targetWidth;
     nv12->height = targetHeight;
+    nv12->colorspace = frame->colorspace;
+    nv12->color_range = frame->color_range;
+    nv12->pts = frame->pts;
     if (av_frame_get_buffer(nv12, 0) < 0) {
         av_frame_free(&nv12);
-        return out;
+        return nullptr;
     }
-
     sws_scale(sws, frame->data, frame->linesize, 0, frame->height, nv12->data, nv12->linesize);
-
-    out = rotateNv12(packNv12(nv12, targetWidth, targetHeight), rotation);
-    av_frame_free(&nv12);
-    return out;
+    return nv12;
 }
 
 drift::TimeUs ptsToUs(const AVFrame *frame, const AVRational &timeBase)
@@ -358,7 +277,7 @@ void ClipReader::teardownVideoDecoder()
     m_decodeW = 0;
     m_decodeH = 0;
     m_videoCache.clear();
-    m_nv12Cache.clear();
+    m_previewCache.clear();
 }
 
 QSize ClipReader::decodeSizeFor(int maxWidth, int maxHeight) const
@@ -400,7 +319,7 @@ void ClipReader::applyDecodeSize(const QSize &size)
     m_decodeW = size.width();
     m_decodeH = size.height();
     m_videoCache.clear();
-    m_nv12Cache.clear();
+    m_previewCache.clear();
 }
 
 namespace {
@@ -506,13 +425,13 @@ void ClipReader::storeCachedFrame(drift::TimeUs ptsUs, const QImage &image)
         m_videoCache.removeLast();
 }
 
-bool ClipReader::lookupCachedNv12(drift::TimeUs sourceUs, Nv12Frame &out) const
+bool ClipReader::lookupCachedPreview(drift::TimeUs sourceUs, PreviewVideoFrame &out) const
 {
     const drift::TimeUs tolerance = frameToleranceUs();
     drift::TimeUs bestDelta = tolerance + 1;
     int bestIndex = -1;
-    for (int i = 0; i < m_nv12Cache.size(); ++i) {
-        const drift::TimeUs delta = qAbs(m_nv12Cache.at(i).ptsUs - sourceUs);
+    for (int i = 0; i < m_previewCache.size(); ++i) {
+        const drift::TimeUs delta = qAbs(m_previewCache.at(i).ptsUs - sourceUs);
         if (delta <= tolerance && delta < bestDelta) {
             bestDelta = delta;
             bestIndex = i;
@@ -521,76 +440,79 @@ bool ClipReader::lookupCachedNv12(drift::TimeUs sourceUs, Nv12Frame &out) const
     if (bestIndex < 0)
         return false;
 
-    out = m_nv12Cache.at(bestIndex).frame;
+    out = m_previewCache.at(bestIndex).frame;
     return out.isValid();
 }
 
-void ClipReader::storeCachedNv12(drift::TimeUs ptsUs, const Nv12Frame &frame)
+void ClipReader::storeCachedPreview(drift::TimeUs ptsUs, const PreviewVideoFrame &frame)
 {
     if (!frame.isValid())
         return;
 
-    for (int i = 0; i < m_nv12Cache.size(); ++i) {
-        if (m_nv12Cache.at(i).ptsUs == ptsUs) {
-            m_nv12Cache.move(i, 0);
+    for (int i = 0; i < m_previewCache.size(); ++i) {
+        if (m_previewCache.at(i).ptsUs == ptsUs) {
+            m_previewCache.move(i, 0);
             return;
         }
     }
 
-    m_nv12Cache.prepend(CachedNv12{ptsUs, frame});
-    trimNv12Cache();
+    m_previewCache.prepend(CachedPreview{ptsUs, frame});
+    trimPreviewCache();
 }
 
-int ClipReader::nv12CacheCapacity() const
+int ClipReader::previewCacheCapacity() const
 {
+    const int historyFrames = qMax(kMinCachedFrames, kMaxCachedFrames / m_previewCacheShares);
+
+    const bool hw = !m_previewCache.isEmpty() && m_previewCache.constFirst().frame.isHardware();
+    if (hw) {
+        return qMax(2, kMaxHwCachedFrames / m_previewCacheShares);
+    }
+
     if (m_readAheadUs <= 0 || m_sourceFrameDurationUs <= 0)
         return kMaxCachedFrames;
 
     const int aheadFrames =
         qBound(0, static_cast<int>(m_readAheadUs / m_sourceFrameDurationUs), kMaxReadAheadFrames);
-    // The history slots stay reserved on top of the read-ahead: time_echo and
-    // backward scrubbing read behind the playhead and must not lose their frames
-    // to the buffer in front of it.
-    const int historyFrames = qMax(kMinCachedFrames, kMaxCachedFrames / m_nv12CacheShares);
     int capacity = historyFrames + aheadFrames;
 
-    const qsizetype frameBytes = m_nv12Cache.isEmpty() ? 0 : m_nv12Cache.constFirst().frame.data.size();
+    qsizetype frameBytes = 0;
+    if (!m_previewCache.isEmpty() && m_previewCache.constFirst().frame.frame) {
+        const AVFrame *f = m_previewCache.constFirst().frame.frame.get();
+        frameBytes = av_image_get_buffer_size(static_cast<AVPixelFormat>(f->format), f->width, f->height, 1);
+    }
     if (frameBytes > 0) {
-        const qsizetype budget = kNv12CacheByteBudget / m_nv12CacheShares;
+        const qsizetype budget = kPreviewCacheByteBudget / m_previewCacheShares;
         capacity = qMin<qsizetype>(capacity, qMax<qsizetype>(historyFrames, budget / frameBytes));
     }
     return capacity;
 }
 
-void ClipReader::trimNv12Cache()
+void ClipReader::trimPreviewCache()
 {
-    const int capacity = nv12CacheCapacity();
-    while (m_nv12Cache.size() > capacity) {
-        // Evict what playback is furthest past, not what was decoded longest ago:
-        // plain insertion order would drop the read-ahead frames first, which are
-        // precisely the ones about to be shown. Frames behind the last requested
-        // position go before any frame in front of it.
+    const int capacity = previewCacheCapacity();
+    while (m_previewCache.size() > capacity) {
         int worst = 0;
         drift::TimeUs worstRank = std::numeric_limits<drift::TimeUs>::min();
-        for (int i = 0; i < m_nv12Cache.size(); ++i) {
-            const drift::TimeUs delta = m_lastRequestedNv12Us - m_nv12Cache.at(i).ptsUs;
+        for (int i = 0; i < m_previewCache.size(); ++i) {
+            const drift::TimeUs delta = m_lastRequestedPreviewUs - m_previewCache.at(i).ptsUs;
             const drift::TimeUs rank = delta >= 0 ? delta + std::numeric_limits<qint32>::max() : -delta;
             if (rank > worstRank) {
                 worstRank = rank;
                 worst = i;
             }
         }
-        m_nv12Cache.removeAt(worst);
+        m_previewCache.removeAt(worst);
     }
 }
 
-bool ClipReader::wantsMoreNv12ReadAhead() const
+bool ClipReader::wantsMorePreviewReadAhead() const
 {
     if (m_readAheadUs <= 0 || !m_videoPositioned || m_sourceFrameDurationUs <= 0)
         return false;
-    if (m_nv12Cache.size() >= nv12CacheCapacity())
+    if (m_previewCache.size() >= previewCacheCapacity())
         return false;
-    return m_lastVideoPtsUs - m_lastRequestedNv12Us < m_readAheadUs;
+    return m_lastVideoPtsUs - m_lastRequestedPreviewUs < m_readAheadUs;
 }
 
 void ClipReader::close()
@@ -755,6 +677,9 @@ bool ClipReader::openHardwareDecoderWith(drift::hwaccel::Backend backend)
     m_videoCtx->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
     m_videoCtx->opaque = &m_hwPixFmt;
     m_videoCtx->get_format = hwGetFormat;
+    // Preview caches a short ring of hardware surfaces. Without extra pool slots
+    // the decoder stalls once those refs are outstanding.
+    m_videoCtx->extra_hw_frames = kHwExtraFrames;
 
     if (avcodec_open2(m_videoCtx, codec, nullptr) < 0) {
         avcodec_free_context(&m_videoCtx);
@@ -1044,112 +969,111 @@ bool ClipReader::ensureHwScaler(const AVFrame *hwFrame, int targetWidth, int tar
     if (m_hwScalerFailed || !hwFrame->hw_frames_ctx)
         return false;
 
-    // A backend with no surface scaler (D3D11VA) has to read back full-size surfaces;
-    // the sticky flag routes hwFrameToSoftware() straight to that path from here on.
+    // A backend with no surface scaler (D3D11VA) leaves the full-size hardware
+    // frame for the GL importer to downscale.
     const char *scalerName = drift::hwaccel::scaleFilter(m_hwBackend);
     if (!scalerName) {
         m_hwScalerFailed = true;
         return false;
     }
 
-    // Rebuild when the caller's decode size changes, or when the decoder handed us
-    // a new frame pool (it reallocates on resolution changes and after a flush).
     if (m_vppGraph && m_vppW == targetWidth && m_vppH == targetHeight && m_vppFramesCtx
         && m_vppFramesCtx->data == hwFrame->hw_frames_ctx->data) {
         return true;
-    }
-
-    teardownHwScaler();
-
-    m_vppGraph = avfilter_graph_alloc();
-    m_vppScaled = av_frame_alloc();
-    m_swFrame = av_frame_alloc();
-    if (!m_vppGraph || !m_vppScaled || !m_swFrame) {
-        teardownHwScaler();
-        m_hwScalerFailed = true;
-        return false;
     }
 
     const AVFilter *bufferFilter = avfilter_get_by_name("buffer");
     const AVFilter *sinkFilter = avfilter_get_by_name("buffersink");
     const AVFilter *scaleFilter = avfilter_get_by_name(scalerName);
     if (!bufferFilter || !sinkFilter || !scaleFilter) {
-        teardownHwScaler();
         m_hwScalerFailed = true;
         return false;
     }
 
-    // The source has to know the hw frame pool before it is initialized —
-    // "buffer" rejects a hardware pix_fmt with a null hw_frames_ctx.
-    m_vppSrc = avfilter_graph_alloc_filter(m_vppGraph, bufferFilter, "in");
-    if (!m_vppSrc) {
-        teardownHwScaler();
-        m_hwScalerFailed = true;
-        return false;
-    }
-
-    AVBufferSrcParameters *params = av_buffersrc_parameters_alloc();
-    if (!params) {
-        teardownHwScaler();
-        m_hwScalerFailed = true;
-        return false;
-    }
-    params->format = hwFrame->format;
-    params->width = hwFrame->width;
-    params->height = hwFrame->height;
-    params->time_base = m_fmt->streams[m_videoStream]->time_base;
-    params->hw_frames_ctx = hwFrame->hw_frames_ctx;
-    const int paramsRc = av_buffersrc_parameters_set(m_vppSrc, params);
-    av_free(params);
-    if (paramsRc < 0 || avfilter_init_str(m_vppSrc, nullptr) < 0) {
-        teardownHwScaler();
-        m_hwScalerFailed = true;
-        return false;
-    }
-
-    AVFilterContext *scale = nullptr;
-    const QByteArray scaleArgs =
+    const QByteArray sizeArgs =
         QByteArray("w=") + QByteArray::number(targetWidth) + ":h=" + QByteArray::number(targetHeight);
-    if (avfilter_graph_create_filter(&scale, scaleFilter, "vpp", scaleArgs.constData(), nullptr,
-                                     m_vppGraph)
-            < 0
-        || avfilter_graph_create_filter(&m_vppSink, sinkFilter, "out", nullptr, nullptr, m_vppGraph) < 0
-        || avfilter_link(m_vppSrc, 0, scale, 0) < 0 || avfilter_link(scale, 0, m_vppSink, 0) < 0
-        || avfilter_graph_config(m_vppGraph, nullptr) < 0) {
+    const QByteArray args[2] = {sizeArgs + ":format=nv12", sizeArgs};
+
+    for (const QByteArray &scaleArgs : args) {
         teardownHwScaler();
-        m_hwScalerFailed = true;
-        return false;
+
+        m_vppGraph = avfilter_graph_alloc();
+        m_vppScaled = av_frame_alloc();
+        m_swFrame = av_frame_alloc();
+        if (!m_vppGraph || !m_vppScaled || !m_swFrame)
+            continue;
+
+        m_vppSrc = avfilter_graph_alloc_filter(m_vppGraph, bufferFilter, "in");
+        if (!m_vppSrc)
+            continue;
+
+        AVBufferSrcParameters *params = av_buffersrc_parameters_alloc();
+        if (!params)
+            continue;
+        params->format = hwFrame->format;
+        params->width = hwFrame->width;
+        params->height = hwFrame->height;
+        params->time_base = m_fmt->streams[m_videoStream]->time_base;
+        params->hw_frames_ctx = hwFrame->hw_frames_ctx;
+        const int paramsRc = av_buffersrc_parameters_set(m_vppSrc, params);
+        av_free(params);
+        if (paramsRc < 0 || avfilter_init_str(m_vppSrc, nullptr) < 0)
+            continue;
+
+        AVFilterContext *scale = nullptr;
+        if (avfilter_graph_create_filter(&scale, scaleFilter, "vpp", scaleArgs.constData(), nullptr,
+                                         m_vppGraph)
+                < 0
+            || avfilter_graph_create_filter(&m_vppSink, sinkFilter, "out", nullptr, nullptr, m_vppGraph)
+                < 0
+            || avfilter_link(m_vppSrc, 0, scale, 0) < 0 || avfilter_link(scale, 0, m_vppSink, 0) < 0
+            || avfilter_graph_config(m_vppGraph, nullptr) < 0)
+            continue;
+
+        m_vppFramesCtx = av_buffer_ref(hwFrame->hw_frames_ctx);
+        m_vppW = targetWidth;
+        m_vppH = targetHeight;
+        return true;
     }
 
-    m_vppFramesCtx = av_buffer_ref(hwFrame->hw_frames_ctx);
-    m_vppW = targetWidth;
-    m_vppH = targetHeight;
-    return true;
+    teardownHwScaler();
+    m_hwScalerFailed = true;
+    return false;
+}
+
+const AVFrame *ClipReader::scaleHwFrame(const AVFrame *hwFrame, int targetWidth, int targetHeight)
+{
+    if (!hwFrame)
+        return nullptr;
+
+    bool needsFormat = false;
+    if (hwFrame->hw_frames_ctx) {
+        const auto *fc = reinterpret_cast<const AVHWFramesContext *>(hwFrame->hw_frames_ctx->data);
+        needsFormat = fc && fc->sw_format != AV_PIX_FMT_NV12;
+    }
+    if (hwFrame->width == targetWidth && hwFrame->height == targetHeight && !needsFormat)
+        return hwFrame;
+
+    if (!ensureHwScaler(hwFrame, targetWidth, targetHeight))
+        return hwFrame;
+
+    av_frame_unref(m_vppScaled);
+    if (av_buffersrc_add_frame_flags(m_vppSrc, const_cast<AVFrame *>(hwFrame),
+                                     AV_BUFFERSRC_FLAG_KEEP_REF)
+            >= 0
+        && av_buffersink_get_frame(m_vppSink, m_vppScaled) >= 0)
+        return m_vppScaled;
+
+    m_hwScalerFailed = true;
+    teardownHwScaler();
+    return hwFrame;
 }
 
 AVFrame *ClipReader::hwFrameToSoftware(const AVFrame *hwFrame, int targetWidth, int targetHeight)
 {
-    // Downscale on the GPU first when we can: the readback is the dominant cost of
-    // the whole hwaccel path and it is proportional to the surface area, so moving
-    // preview-sized pixels instead of full-resolution ones is most of the win.
-    // Backends without a surface scaler skip this and transfer at full size.
-    if (ensureHwScaler(hwFrame, targetWidth, targetHeight)) {
-        av_frame_unref(m_vppScaled);
-        av_frame_unref(m_swFrame);
-        if (av_buffersrc_add_frame_flags(m_vppSrc, const_cast<AVFrame *>(hwFrame),
-                                         AV_BUFFERSRC_FLAG_KEEP_REF)
-                >= 0
-            && av_buffersink_get_frame(m_vppSink, m_vppScaled) >= 0) {
-            const int rc = av_hwframe_transfer_data(m_swFrame, m_vppScaled, 0);
-            av_frame_unref(m_vppScaled);
-            if (rc >= 0)
-                return m_swFrame;
-            av_frame_unref(m_swFrame);
-        }
-        // The scaler is configured but misbehaving — stop using it, transfer full size.
-        m_hwScalerFailed = true;
-        teardownHwScaler();
-    }
+    const AVFrame *scaled = scaleHwFrame(hwFrame, targetWidth, targetHeight);
+    if (!scaled)
+        return nullptr;
 
     if (!m_swFrame) {
         m_swFrame = av_frame_alloc();
@@ -1157,10 +1081,12 @@ AVFrame *ClipReader::hwFrameToSoftware(const AVFrame *hwFrame, int targetWidth, 
             return nullptr;
     }
     av_frame_unref(m_swFrame);
-    if (av_hwframe_transfer_data(m_swFrame, hwFrame, 0) < 0) {
+    if (av_hwframe_transfer_data(m_swFrame, scaled, 0) < 0) {
         av_frame_unref(m_swFrame);
         return nullptr;
     }
+    if (scaled == m_vppScaled)
+        av_frame_unref(m_vppScaled);
     return m_swFrame;
 }
 
@@ -1263,20 +1189,24 @@ bool ClipReader::convertFrame(const AVFrame *frame, QImage &out, int targetWidth
     return true;
 }
 
-bool ClipReader::convertFrameNv12(const AVFrame *frame, Nv12Frame &out, int targetWidth, int targetHeight)
+bool ClipReader::convertFramePreview(const AVFrame *frame, PreviewVideoFrame &out, int targetWidth,
+                                     int targetHeight)
 {
     if (!frame)
         return false;
 
-    const AVFrame *swFrame = frame;
-    if ((m_hwAccelActive && frame->format == m_hwPixFmt)
-        || isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format))) {
-        swFrame = hwFrameToSoftware(frame, targetWidth, targetHeight);
-        if (!swFrame)
-            return false;
+    const bool hw = (m_hwAccelActive && frame->format == m_hwPixFmt)
+        || isHardwarePixelFormat(static_cast<AVPixelFormat>(frame->format));
+    if (hw) {
+        const AVFrame *scaled = scaleHwFrame(frame, targetWidth, targetHeight);
+        out = makePreviewFrame(scaled, m_sourceRotation);
+        if (scaled == m_vppScaled)
+            av_frame_unref(m_vppScaled);
+        return out.isValid();
     }
 
-    out = frameToNv12(swFrame, m_swsNv12, targetWidth, targetHeight, m_sourceRotation);
+    AVFrame *nv12 = softwareFrameToNv12(frame, m_swsNv12, targetWidth, targetHeight);
+    out = takePreviewFrame(nv12, m_sourceRotation);
     return out.isValid();
 }
 
@@ -1528,8 +1458,8 @@ bool ClipReader::readVideoFrameAt(drift::TimeUs sourceUs, QImage &out, int maxWi
     return decodeVideoFrameAtOnce(sourceUs, out, maxWidth, maxHeight, nullptr);
 }
 
-bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &out, int maxWidth,
-                                            int maxHeight, bool *hwFailure)
+bool ClipReader::decodePreviewVideoFrameAtOnce(drift::TimeUs sourceUs, PreviewVideoFrame &out, int maxWidth,
+                                               int maxHeight, bool *hwFailure)
 {
     if (hwFailure)
         *hwFailure = false;
@@ -1538,7 +1468,7 @@ bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &o
 
     applyDecodeSize(decodeSizeFor(maxWidth, maxHeight));
 
-    if (lookupCachedNv12(sourceUs, out))
+    if (lookupCachedPreview(sourceUs, out))
         return true;
 
     const drift::TimeUs tolerance = frameToleranceUs();
@@ -1653,10 +1583,10 @@ bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &o
         drained = true;
     }
 
-    Nv12Frame converted;
+    PreviewVideoFrame converted;
     bool convertedOk = false;
     if (found && !sawHwFailure) {
-        convertedOk = convertFrameNv12(best, converted, m_decodeW, m_decodeH);
+        convertedOk = convertFramePreview(best, converted, m_decodeW, m_decodeH);
         if (!convertedOk && m_hwAccelActive
             && (best->format == m_hwPixFmt
                 || isHardwarePixelFormat(static_cast<AVPixelFormat>(best->format)))) {
@@ -1679,7 +1609,7 @@ bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &o
 
     if (convertedOk) {
         out = converted;
-        storeCachedNv12(bestPtsUs, converted);
+        storeCachedPreview(bestPtsUs, converted);
         m_videoPositioned = !drained && !droppedPacket;
         return true;
     }
@@ -1688,13 +1618,14 @@ bool ClipReader::decodeVideoFrameAtOnceNv12(drift::TimeUs sourceUs, Nv12Frame &o
     return false;
 }
 
-bool ClipReader::readVideoFrameAtNv12(drift::TimeUs sourceUs, Nv12Frame &out, int maxWidth, int maxHeight)
+bool ClipReader::readPreviewVideoFrame(drift::TimeUs sourceUs, PreviewVideoFrame &out, int maxWidth,
+                                       int maxHeight)
 {
     if (!m_prefetching)
-        m_lastRequestedNv12Us = sourceUs;
+        m_lastRequestedPreviewUs = sourceUs;
 
     bool hwFailure = false;
-    if (decodeVideoFrameAtOnceNv12(sourceUs, out, maxWidth, maxHeight, &hwFailure))
+    if (decodePreviewVideoFrameAtOnce(sourceUs, out, maxWidth, maxHeight, &hwFailure))
         return true;
 
     if (!hwFailure)
@@ -1703,7 +1634,7 @@ bool ClipReader::readVideoFrameAtNv12(drift::TimeUs sourceUs, Nv12Frame &out, in
     if (!fallbackFromHardwareDecoder())
         return false;
 
-    return decodeVideoFrameAtOnceNv12(sourceUs, out, maxWidth, maxHeight, nullptr);
+    return decodePreviewVideoFrameAtOnce(sourceUs, out, maxWidth, maxHeight, nullptr);
 }
 
 void ClipReader::prefetchNextVideoFrame(int maxWidth, int maxHeight)
@@ -1715,34 +1646,28 @@ void ClipReader::prefetchNextVideoFrame(int maxWidth, int maxHeight)
     readVideoFrameAt(m_lastVideoPtsUs + m_sourceFrameDurationUs, ignored, maxWidth, maxHeight);
 }
 
-bool ClipReader::prefetchNextVideoFrameNv12(int maxWidth, int maxHeight, drift::TimeUs readAheadUs)
+bool ClipReader::prefetchNextPreviewVideoFrame(int maxWidth, int maxHeight, drift::TimeUs readAheadUs)
 {
-    // Sticky: the caller passes the current depth on every prefetch, so dropping
-    // to 0 (playback stopped) shrinks the cache back on the next call.
     m_readAheadUs = qMax<drift::TimeUs>(0, readAheadUs);
-    trimNv12Cache();
+    trimPreviewCache();
 
     if (!m_videoPositioned || m_sourceFrameDurationUs <= 0)
         return false;
 
-    // Step over frames the buffer already holds. A cache hit leaves the decoder
-    // where it is, so walking by decoder position alone would ask for the same
-    // frame forever once the walk reaches an earlier run's frames — which is
-    // exactly what a backward seek into a buffered region sets up.
     drift::TimeUs target = m_lastVideoPtsUs + m_sourceFrameDurationUs;
-    Nv12Frame cached;
-    while (target - m_lastRequestedNv12Us < m_readAheadUs && lookupCachedNv12(target, cached))
+    PreviewVideoFrame cached;
+    while (target - m_lastRequestedPreviewUs < m_readAheadUs && lookupCachedPreview(target, cached))
         target += m_sourceFrameDurationUs;
 
-    if (m_readAheadUs > 0 && target - m_lastRequestedNv12Us >= m_readAheadUs)
+    if (m_readAheadUs > 0 && target - m_lastRequestedPreviewUs >= m_readAheadUs)
         return false;
 
-    Nv12Frame ignored;
+    PreviewVideoFrame ignored;
     m_prefetching = true;
-    const bool decoded = readVideoFrameAtNv12(target, ignored, maxWidth, maxHeight);
+    const bool decoded = readPreviewVideoFrame(target, ignored, maxWidth, maxHeight);
     m_prefetching = false;
 
-    return decoded && wantsMoreNv12ReadAhead();
+    return decoded && wantsMorePreviewReadAhead();
 }
 
 int ClipReader::readAudioInterleaved(drift::TimeUs sourceStartUs, int sampleCount, int outputSampleRate,

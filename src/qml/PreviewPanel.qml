@@ -166,8 +166,8 @@ PanelFrame {
                         id: preview
                         anchors.fill: parent
 
-                        // Auto quality sizes its canvas from this, so it has to be
-                        // real screen pixels: item geometry is in logical units, and
+                        // Canvas size is derived from this, so it has to be real
+                        // screen pixels: item geometry is in logical units, and
                         // on a scaled display a canvas built from those is upscaled
                         // by the ratio before it ever reaches the screen.
                         readonly property real pixelRatio: Screen.devicePixelRatio

@@ -222,8 +222,8 @@ GlTarget buildLayerTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const GpuLay
         return {};
 
     GlTarget target;
-    if (!layer.nv12.isEmpty() && layer.nv12Width > 0 && layer.nv12Height > 0) {
-        target = promoteNv12ToTarget(rt, gl, layer.nv12, layer.nv12Width, layer.nv12Height);
+    if (layer.video.isValid()) {
+        target = promoteVideoFrameToTarget(rt, gl, layer.video);
     } else {
         target = promoteImageToTargetCached(rt, gl, layer.source, layer.source.size());
     }
@@ -725,14 +725,48 @@ GpuFrameTexture renderToTexture(const GpuScene &scene)
 
         composeOnGlThread(rt, scene, canvas);
 
-        // Fence + short client wait instead of glFinish: only this present slot's
-        // work must complete before the scene graph samples the texture.
+        // Insert a present fence without waiting: Qt Quick samples on the next
+        // vsync. acquirePresentTarget waits this fence before reusing the slot.
         rt.markPresentReady(canvas);
 
         out.textureId = canvas.texture();
         out.size = canvas.size();
     });
     return out;
+}
+
+static_assert(kExportNv12Slots == GlRuntime::kExportNv12Slots);
+
+bool beginExportNv12(const GpuScene &scene, int outW, int outH, int slot)
+{
+    if (scene.canvasSize.isEmpty() || outW < 2 || outH < 2 || (outW % 2) || (outH % 2)
+        || slot < 0 || slot >= kExportNv12Slots)
+        return false;
+
+    GlRuntime &rt = runtime();
+    bool ok = false;
+    rt.exec([&] {
+        GlTarget canvas = rt.acquireTarget(scene.canvasSize.width(), scene.canvasSize.height());
+        if (!canvas.isValid())
+            return;
+
+        composeOnGlThread(rt, scene, canvas);
+        ok = rt.packCanvasToNv12Slot(canvas, outW, outH, slot);
+        rt.releaseTarget(std::move(canvas));
+    });
+    return ok;
+}
+
+bool finishExportNv12(int slot, uint8_t *y, int yStride, uint8_t *uv, int uvStride, int width,
+                      int height)
+{
+    if (!y || !uv || slot < 0 || slot >= kExportNv12Slots)
+        return false;
+
+    GlRuntime &rt = runtime();
+    bool ok = false;
+    rt.exec([&] { ok = rt.mapNv12Slot(slot, y, yStride, uv, uvStride, width, height); });
+    return ok;
 }
 
 } // namespace GpuCompositor

@@ -55,6 +55,7 @@
 #include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
 #include "engine/FrameCompositor.h"
+#include "engine/GpuCompositor.h"
 #include "engine/TextRaster.h"
 #include "engine/GpuEffectExecutor.h"
 #include "engine/GpuPackageParse.h"
@@ -75,6 +76,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/pixfmt.h>
+#include <libswscale/swscale.h>
 }
 
 class EngineTest : public QObject
@@ -123,6 +125,10 @@ private slots:
     void clipReaderAppliesDisplayRotation_data();
     void clipReaderAppliesDisplayRotation();
     void hwAccelBackendIdsRoundTrip();
+    void previewFrameAcceptsHardwareSurfaces();
+    void vaapiPreviewMatchesSoftwareDecode();
+    void p010PreviewConvertsThroughSoftwarePath();
+    void hardwareDecodeSurvivesScrubbing();
     void clipReaderPicksHwAv1Decoder();
     void clipReaderStaysOnSoftwareWhenHardwareDisabled();
     void clipReaderAutoKeepsCheapClipsOnSoftware();
@@ -204,6 +210,7 @@ private slots:
     void exporterProducesPlayableFileWithBackground();
     void exporterProducesAudioOnlyMp3();
     void exporterTagsSdrBt709ColorMetadata();
+    void gpuNv12MatchesSwsBt709();
     void exporterDefaultCrfIsNearLosslessForH264();
     void exporterHardwareCodecsListedForThisOs();
     void exporterHardwarePreferredContainerIsMp4();
@@ -256,6 +263,7 @@ private slots:
 private:
     static QString makeColorSegmentsVideo(QTemporaryDir &dir);
     static QString makeRotatedHalvesVideo(QTemporaryDir &dir, int displayDegrees);
+    static QString makeHdHalvesVideo(QTemporaryDir &dir);
     static QString makeAv1ColorVideo(QTemporaryDir &dir);
     static QString makeToneAudio(QTemporaryDir &dir);
     static QString makeSweepAudio(QTemporaryDir &dir);
@@ -2043,6 +2051,35 @@ void EngineTest::clipReaderSequentialAndSeek()
 // 64x32 landscape, red left half / blue right half, tagged with a display matrix.
 // `displayDegrees` is the clockwise turn a player should apply, i.e. what
 // displayRotationOf() reports; the matrix stores its negation.
+// 1080p, so the VAAPI surface is padded to 1088 and a wrongly-sized dma-buf import shows up as
+// a garbage strip along the bottom edge rather than as a clean failure.
+QString EngineTest::makeHdHalvesVideo(QTemporaryDir &dir)
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        return {};
+
+    const QString out = dir.filePath(QStringLiteral("hd-halves.mp4"));
+    QStringList args{
+        QStringLiteral("-y"),
+        QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+        QStringLiteral("color=c=red:s=960x1080:r=25:d=1"),
+        QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+        QStringLiteral("color=c=blue:s=960x1080:r=25:d=1"),
+        QStringLiteral("-filter_complex"), QStringLiteral("[0][1]hstack=inputs=2[v]"),
+        QStringLiteral("-map"), QStringLiteral("[v]"),
+        QStringLiteral("-c:v"), QStringLiteral("libx264"),
+        QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+        out,
+    };
+
+    QProcess proc;
+    proc.start(ffmpeg, args);
+    if (!proc.waitForFinished(60000) || proc.exitCode() != 0)
+        return {};
+    return QFileInfo::exists(out) ? out : QString{};
+}
+
 QString EngineTest::makeRotatedHalvesVideo(QTemporaryDir &dir, int displayDegrees)
 {
     const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
@@ -2126,15 +2163,39 @@ void EngineTest::clipReaderAppliesDisplayRotation()
     QVERIFY(qRed(red) > qBlue(red));
     QVERIFY(qBlue(blue) > qRed(blue));
 
-    // The preview path converts to NV12 separately and needs the same treatment.
-    Nv12Frame nv12;
-    QVERIFY(reader.readVideoFrameAtNv12(500'000, nv12, expectedSize.width(), expectedSize.height()));
-    QCOMPARE(QSize(nv12.width, nv12.height), expectedSize);
-    // Red is markedly brighter than blue, so luma alone shows the halves are upright.
-    const auto lumaAt = [&](QPoint p) {
-        return uchar(nv12.data.at(qsizetype(p.y()) * nv12.width + p.x()));
-    };
-    QVERIFY(lumaAt(redAt) > lumaAt(blueAt));
+    // Preview keeps coded orientation and applies rotation in the GL shader.
+    PreviewVideoFrame preview;
+    QVERIFY(reader.readPreviewVideoFrame(500'000, preview, expectedSize.width(), expectedSize.height()));
+    QVERIFY(preview.isValid());
+    QCOMPARE(preview.rotation, displayDegrees);
+    QCOMPARE(QSize(preview.displayWidth(), preview.displayHeight()), expectedSize);
+
+    if (!GpuCompositor::isAvailable())
+        return;
+
+    drift::Project project;
+    project.setResolution(expectedSize.width(), expectedSize.height());
+    project.setFps(30);
+    project.tracks().clear();
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+    drift::Clip clip;
+    clip.id = QStringLiteral("rot");
+    clip.type = drift::ClipType::Video;
+    clip.path = path;
+    clip.timelineStart = 0;
+    clip.timelineDuration = drift::secondsToUs(1.0);
+    project.tracks()[0].clips.append(clip);
+
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+    const QImage composited = compositor.compositeAt(500'000);
+    QVERIFY(!composited.isNull());
+    QCOMPARE(composited.size(), expectedSize);
+    const QRgb cred = composited.pixel(redAt);
+    const QRgb cblue = composited.pixel(blueAt);
+    QVERIFY(qRed(cred) > qBlue(cred));
+    QVERIFY(qBlue(cblue) > qRed(cblue));
 }
 
 QString EngineTest::makeAv1ColorVideo(QTemporaryDir &dir)
@@ -2164,6 +2225,257 @@ QString EngineTest::makeAv1ColorVideo(QTemporaryDir &dir)
 
 // The picker and the saved setting both key off these ids, so a backend whose id does
 // not round-trip would silently become Auto on the next launch.
+// A VAAPI or VideoToolbox surface lives in data[3], not data[0], and for VAAPI data[3] is a
+// VASurfaceID cast to a pointer — surface id 0 is legal and iHD hands it out first. Testing
+// either data slot therefore rejects real frames, and ClipReader reads that rejection as a
+// decoder failure and drops the whole reader to software for good.
+void EngineTest::previewFrameAcceptsHardwareSurfaces()
+{
+    auto hardwareFrame = [](AVPixelFormat format, uintptr_t surface) {
+        AVFrame *raw = av_frame_alloc();
+        raw->format = format;
+        raw->width = 1920;
+        raw->height = 1080;
+        raw->data[3] = reinterpret_cast<uint8_t *>(surface);
+        // What actually keeps the surface alive; the pool buffer's payload is the id itself.
+        raw->buf[0] = av_buffer_alloc(1);
+        PreviewVideoFrame out;
+        out.frame.reset(raw, [](AVFrame *f) {
+            f->data[3] = nullptr;
+            av_frame_free(&f);
+        });
+        return out;
+    };
+
+    for (const AVPixelFormat format : {AV_PIX_FMT_VAAPI, AV_PIX_FMT_VIDEOTOOLBOX}) {
+        // Surface id 0 is the regression that matters: it makes data[3] a null pointer.
+        for (const uintptr_t surface : {uintptr_t(0), uintptr_t(7)}) {
+            const PreviewVideoFrame frame = hardwareFrame(format, surface);
+            QVERIFY(frame.isValid());
+            QVERIFY(frame.isHardware());
+            QCOMPARE(frame.displayWidth(), 1920);
+            QCOMPARE(frame.displayHeight(), 1080);
+        }
+    }
+
+    // A hardware frame with no surface reference at all is still invalid.
+    PreviewVideoFrame empty;
+    QVERIFY(!empty.isValid());
+    AVFrame *bare = av_frame_alloc();
+    bare->format = AV_PIX_FMT_VAAPI;
+    bare->width = 1920;
+    bare->height = 1080;
+    empty.frame.reset(bare, avFrameDeleter);
+    QVERIFY(!empty.isValid());
+
+    // And a software frame still needs its pixels.
+    PreviewVideoFrame blank;
+    AVFrame *sw = av_frame_alloc();
+    sw->format = AV_PIX_FMT_NV12;
+    sw->width = 64;
+    sw->height = 64;
+    blank.frame.reset(sw, avFrameDeleter);
+    QVERIFY(!blank.isValid());
+}
+
+// Preview hardware decode had never actually run before the isValid() fix, so this covers the
+// path that fix switched on — not the dma-buf importer, which is off by default. Two overlapping
+// clips of one file share a reader and halve the hardware preview cache, which is the case most
+// likely to exhaust the decoder's surface pool.
+void EngineTest::hardwareDecodeSurvivesScrubbing()
+{
+    if (!drift::hwaccel::availableDecodeBackends().contains(drift::hwaccel::Backend::Vaapi))
+        QSKIP("no vaapi");
+    if (!GpuCompositor::isAvailable())
+        QSKIP("no gl");
+    QTemporaryDir dir;
+    const QString path = makeHdHalvesVideo(dir);
+    if (path.isEmpty())
+        QSKIP("no ffmpeg");
+
+    ClipReader::setHardwareDecodeMode(ClipReader::HardwareDecodeMode::Hardware,
+                                      drift::hwaccel::Backend::Vaapi);
+    drift::Project project;
+    project.setResolution(1920, 1080);
+    project.setFps(25);
+    project.tracks().clear();
+    // Two overlapping clips of one file: shares a reader, halves the hw preview cache.
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+    project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+    for (int t = 0; t < 2; ++t) {
+        drift::Clip c;
+        c.id = QStringLiteral("c%1").arg(t);
+        c.type = drift::ClipType::Video;
+        c.path = path;
+        c.timelineStart = 0;
+        c.timelineDuration = drift::secondsToUs(1.0);
+        if (t == 1)
+            c.opacity.setKeyframe(0, 0.5);
+        project.tracks()[t].clips.append(c);
+    }
+    FrameCompositor compositor;
+    compositor.setProject(&project);
+
+    const quint64 before = ClipReader::hardwareFallbackCount();
+    // Forward playback, reverse playback, then out-of-order scrubs.
+    for (int pass = 0; pass < 4; ++pass) {
+        for (int i = 0; i < 25; ++i) {
+            const drift::TimeUs at = (pass % 3 == 0)   ? i * 40'000
+                                     : (pass % 3 == 1) ? (24 - i) * 40'000
+                                                       : ((i * 7) % 25) * 40'000;
+            const QImage img = compositor.compositeAt(at);
+            QVERIFY2(!img.isNull(), qPrintable(QStringLiteral("null at pass %1 t=%2").arg(pass).arg(at)));
+            QCOMPARE(img.size(), QSize(1920, 1080));
+            QVERIFY(qRed(img.pixel(200, 540)) > qBlue(img.pixel(200, 540)));
+            QVERIFY(qBlue(img.pixel(1700, 540)) > qRed(img.pixel(1700, 540)));
+        }
+    }
+    // A demotion to software would still render correctly, so the picture checks alone cannot
+    // tell whether hardware decode actually held up across the scrubbing.
+    QCOMPARE(ClipReader::hardwareFallbackCount(), before);
+    ClipReader::setHardwareDecodeMode(ClipReader::HardwareDecodeMode::Auto,
+                                      drift::hwaccel::Backend::None);
+}
+
+void EngineTest::vaapiPreviewMatchesSoftwareDecode()
+{
+    if (!drift::hwaccel::availableDecodeBackends().contains(drift::hwaccel::Backend::Vaapi))
+        QSKIP("No VAAPI device");
+    if (!GpuCompositor::isAvailable())
+        QSKIP("OpenGL offscreen context unavailable");
+
+    // The importer is off by default; opting in here is what a user would do, and it keeps this
+    // test meaningful rather than silently measuring the PBO path against itself.
+    qputenv("DRIFT_VAAPI_ZEROCOPY", "1");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = makeHdHalvesVideo(dir);
+    if (path.isEmpty())
+        QSKIP("ffmpeg not available to generate a 1080p test clip");
+
+    const QSize size(1920, 1080);
+    auto composite = [&](ClipReader::HardwareDecodeMode mode, drift::hwaccel::Backend backend,
+                         drift::TimeUs at) {
+        ClipReader::setHardwareDecodeMode(mode, backend);
+
+        drift::Project project;
+        project.setResolution(size.width(), size.height());
+        project.setFps(25);
+        project.tracks().clear();
+        project.tracks().append(drift::Track{.type = drift::TrackType::Video});
+
+        drift::Clip clip;
+        clip.id = QStringLiteral("hd");
+        clip.type = drift::ClipType::Video;
+        clip.path = path;
+        clip.timelineStart = 0;
+        clip.timelineDuration = drift::secondsToUs(1.0);
+        project.tracks()[0].clips.append(clip);
+
+        FrameCompositor compositor;
+        compositor.setProject(&project);
+        return compositor.compositeAt(at);
+    };
+
+    // t=0 first: that frame lands on the first surface the driver allocates, whose VASurfaceID
+    // is 0 — the case that makes AVFrame::data[3] a null pointer.
+    for (const drift::TimeUs at : {drift::TimeUs(0), drift::TimeUs(400'000)}) {
+        const quint64 fallbacksBefore = ClipReader::hardwareFallbackCount();
+        const QImage hardware =
+            composite(ClipReader::HardwareDecodeMode::Hardware, drift::hwaccel::Backend::Vaapi, at);
+        // Without this the test would still pass on the PBO fallback, which is pixel-identical:
+        // a reader that demoted itself to software proves nothing about the import.
+        QCOMPARE(ClipReader::hardwareFallbackCount(), fallbacksBefore);
+        const QImage software =
+            composite(ClipReader::HardwareDecodeMode::Software, drift::hwaccel::Backend::None, at);
+
+        QVERIFY(!hardware.isNull());
+        QVERIFY(!software.isNull());
+        QCOMPARE(hardware.size(), size);
+        QCOMPARE(software.size(), size);
+
+        // Sample the bottom rows too: a dma-buf import sized from the padded 1088-tall surface
+        // instead of the 1080-tall picture leaks decoder padding into exactly that band.
+        const QList<QPoint> probes{{200, 40},   {1700, 40},   {200, 540}, {1700, 540},
+                                   {200, 1074}, {1700, 1074}, {960, 1078}};
+        for (const QPoint &probe : probes) {
+            const QRgb hw = hardware.pixel(probe);
+            const QRgb sw = software.pixel(probe);
+            QVERIFY2(qAbs(qRed(hw) - qRed(sw)) <= 6 && qAbs(qGreen(hw) - qGreen(sw)) <= 6
+                         && qAbs(qBlue(hw) - qBlue(sw)) <= 6,
+                     qPrintable(QStringLiteral("t=%1 at %2,%3: hw #%4 sw #%5")
+                                    .arg(at)
+                                    .arg(probe.x())
+                                    .arg(probe.y())
+                                    .arg(hw, 8, 16, QLatin1Char('0'))
+                                    .arg(sw, 8, 16, QLatin1Char('0'))));
+        }
+
+        // And that the picture is the one we encoded, not two matching shades of wrong.
+        QVERIFY(qRed(hardware.pixel(200, 540)) > qBlue(hardware.pixel(200, 540)));
+        QVERIFY(qBlue(hardware.pixel(1700, 540)) > qRed(hardware.pixel(1700, 540)));
+    }
+
+    ClipReader::setHardwareDecodeMode(ClipReader::HardwareDecodeMode::Auto,
+                                      drift::hwaccel::Backend::None);
+    qunsetenv("DRIFT_VAAPI_ZEROCOPY");
+}
+
+// Locks in the two-frame invariant in ensureSoftwareNv12: a software P010 frame
+// (the shape of a hwframe transfer that kept a 10-bit format) must sws into a
+// separate destination, not into itself after realloc. Does not reproduce the
+// original aliasing, which needs a hardware frame whose transfer yields P010.
+void EngineTest::p010PreviewConvertsThroughSoftwarePath()
+{
+    if (!GpuCompositor::isAvailable())
+        QSKIP("OpenGL offscreen context unavailable");
+
+    AVFrame *raw = av_frame_alloc();
+    QVERIFY(raw);
+    raw->format = AV_PIX_FMT_P010LE;
+    raw->width = 64;
+    raw->height = 64;
+    raw->colorspace = AVCOL_SPC_BT709;
+    raw->color_range = AVCOL_RANGE_JPEG;
+    QVERIFY(av_frame_get_buffer(raw, 0) >= 0);
+
+    const uint16_t y10 = uint16_t(1023u << 6);
+    const uint16_t uv10 = uint16_t(512u << 6);
+    for (int y = 0; y < raw->height; ++y) {
+        auto *row = reinterpret_cast<uint16_t *>(raw->data[0] + y * raw->linesize[0]);
+        for (int x = 0; x < raw->width; ++x)
+            row[x] = y10;
+    }
+    for (int y = 0; y < raw->height / 2; ++y) {
+        auto *row = reinterpret_cast<uint16_t *>(raw->data[1] + y * raw->linesize[1]);
+        for (int x = 0; x < raw->width; ++x)
+            row[x] = uv10;
+    }
+
+    GpuLayer layer;
+    layer.video = takePreviewFrame(raw, 0);
+    layer.rect = QRectF(0, 0, 64, 64);
+    layer.valid = true;
+
+    GpuItem item;
+    item.layer = layer;
+
+    GpuScene scene;
+    scene.canvasSize = QSize(64, 64);
+    scene.backgroundColor = Qt::black;
+    scene.items.append(item);
+
+    const QImage out = GpuCompositor::render(scene);
+    QVERIFY(!out.isNull());
+    QCOMPARE(out.size(), QSize(64, 64));
+
+    const QRgb centre = out.pixel(32, 32);
+    QVERIFY2(qRed(centre) > 230 && qGreen(centre) > 230 && qBlue(centre) > 230,
+             qPrintable(QStringLiteral("expected near-white, got #%1")
+                            .arg(centre, 8, 16, QLatin1Char('0'))));
+}
+
 void EngineTest::hwAccelBackendIdsRoundTrip()
 {
     const QList<drift::hwaccel::Backend> order = drift::hwaccel::decodeBackendOrder();
@@ -2301,6 +2613,15 @@ void EngineTest::debugReportListsCommonCodecs()
     QVERIFY(!info.value(QStringLiteral("system")).toList().isEmpty());
     QVERIFY(!info.value(QStringLiteral("package")).toString().isEmpty());
     QVERIFY(info.contains(QStringLiteral("hardwareDecodeAvailable")));
+
+    QStringList systemLabels;
+    for (const QVariant &entry : info.value(QStringLiteral("system")).toList())
+        systemLabels.append(entry.toMap().value(QStringLiteral("label")).toString());
+    QVERIFY(systemLabels.contains(QStringLiteral("Preview decode")));
+    QVERIFY(systemLabels.contains(QStringLiteral("Active decode")));
+    QVERIFY(systemLabels.contains(QStringLiteral("Window platform")));
+    QVERIFY(systemLabels.contains(QStringLiteral("Preview upload")));
+    QVERIFY(systemLabels.contains(QStringLiteral("Zero-copy")));
 
     const QVariantList encoders = info.value(QStringLiteral("encoders")).toList();
     QCOMPARE(encoders.size(), 5);
@@ -2468,10 +2789,10 @@ void EngineTest::videoStreamsDoNotReseekPerFrame()
     const quint64 twoFileBefore = ClipReader::videoFramesDecoded();
     for (int i = 0; i < kFrames; ++i) {
         QVERIFY(ClipReaderPool::instance()
-                    .readVideoFrameNv12(path, 101, drift::TimeUs(i) * kStep, 640, 360)
+                    .readPreviewVideoFrame(path, 101, drift::TimeUs(i) * kStep, 640, 360)
                     .isValid());
         QVERIFY(ClipReaderPool::instance()
-                    .readVideoFrameNv12(copy, 202, kSecondStart + drift::TimeUs(i) * kStep, 640, 360)
+                    .readPreviewVideoFrame(copy, 202, kSecondStart + drift::TimeUs(i) * kStep, 640, 360)
                     .isValid());
     }
     const quint64 twoFileDecoded = ClipReader::videoFramesDecoded() - twoFileBefore;
@@ -2480,10 +2801,10 @@ void EngineTest::videoStreamsDoNotReseekPerFrame()
     const quint64 oneFileBefore = ClipReader::videoFramesDecoded();
     for (int i = 0; i < kFrames; ++i) {
         QVERIFY(ClipReaderPool::instance()
-                    .readVideoFrameNv12(path, 303, drift::TimeUs(i) * kStep, 640, 360)
+                    .readPreviewVideoFrame(path, 303, drift::TimeUs(i) * kStep, 640, 360)
                     .isValid());
         QVERIFY(ClipReaderPool::instance()
-                    .readVideoFrameNv12(path, 404, kSecondStart + drift::TimeUs(i) * kStep, 640, 360)
+                    .readPreviewVideoFrame(path, 404, kSecondStart + drift::TimeUs(i) * kStep, 640, 360)
                     .isValid());
     }
     const quint64 oneFileDecoded = ClipReader::videoFramesDecoded() - oneFileBefore;
@@ -5197,6 +5518,109 @@ void EngineTest::exporterTagsSdrBt709ColorMetadata()
     QCOMPARE(vstream->codecpar->color_space, AVCOL_SPC_BT709);
 
     avformat_close_input(&fmt);
+}
+
+void EngineTest::gpuNv12MatchesSwsBt709()
+{
+    if (!GpuCompositor::isAvailable())
+        QSKIP("OpenGL unavailable");
+
+    const auto convertSws = [](const QImage &img, std::vector<uint8_t> *y, std::vector<uint8_t> *uv) {
+        const int w = img.width();
+        const int h = img.height();
+        y->assign(size_t(w) * h, 0);
+        uv->assign(size_t(w) * (h / 2), 0);
+        SwsContext *sws = sws_getContext(w, h, AV_PIX_FMT_RGBA, w, h, AV_PIX_FMT_NV12, SWS_BICUBIC,
+                                         nullptr, nullptr, nullptr);
+        if (!sws)
+            return false;
+        const int *coeff = sws_getCoefficients(SWS_CS_ITU709);
+        if (sws_setColorspaceDetails(sws, coeff, 1, coeff, 0, 0, 1 << 16, 1 << 16) < 0) {
+            sws_freeContext(sws);
+            return false;
+        }
+        uint8_t *dstData[4] = {y->data(), uv->data(), nullptr, nullptr};
+        int dstStride[4] = {w, w, 0, 0};
+        const uint8_t *srcData[4] = {img.constBits(), nullptr, nullptr, nullptr};
+        const int srcStride[4] = {int(img.bytesPerLine()), 0, 0, 0};
+        sws_scale(sws, srcData, srcStride, 0, h, dstData, dstStride);
+        sws_freeContext(sws);
+        return true;
+    };
+
+    const auto convertGpu = [](const QImage &img, std::vector<uint8_t> *y, std::vector<uint8_t> *uv) {
+        const int w = img.width();
+        const int h = img.height();
+        GpuScene scene;
+        scene.canvasSize = QSize(w, h);
+        scene.backgroundColor = Qt::black;
+        GpuItem item;
+        item.layer.valid = true;
+        item.layer.source = img;
+        item.layer.rect = QRectF(0, 0, w, h);
+        item.layer.opacity = 1.0;
+        scene.items.append(item);
+        y->assign(size_t(w) * h, 0);
+        uv->assign(size_t(w) * (h / 2), 0);
+        if (!GpuCompositor::beginExportNv12(scene, w, h, 0))
+            return false;
+        return GpuCompositor::finishExportNv12(0, y->data(), w, uv->data(), w, w, h);
+    };
+
+    const auto maxAbs = [](const std::vector<uint8_t> &a, const std::vector<uint8_t> &b) {
+        int m = 0;
+        for (size_t i = 0; i < a.size(); ++i)
+            m = qMax(m, qAbs(int(a[i]) - int(b[i])));
+        return m;
+    };
+
+    const QRgb solids[] = {qRgba(0, 0, 0, 255),       qRgba(255, 255, 255, 255),
+                           qRgba(255, 0, 0, 255),     qRgba(0, 255, 0, 255),
+                           qRgba(0, 0, 255, 255),     qRgba(128, 128, 128, 255)};
+    for (QRgb color : solids) {
+        QImage img(32, 32, QImage::Format_RGBA8888);
+        img.fill(color);
+        std::vector<uint8_t> gy, gu, sy, su;
+        QVERIFY(convertGpu(img, &gy, &gu));
+        QVERIFY(convertSws(img, &sy, &su));
+        QVERIFY2(maxAbs(gy, sy) <= 1, "solid Y");
+        QVERIFY2(maxAbs(gu, su) <= 2, "solid UV");
+    }
+
+    constexpr int kW = 64;
+    constexpr int kH = 64;
+    QImage img(kW, kH, QImage::Format_RGBA8888);
+    const QRgb tiles[] = {
+        qRgba(0, 0, 0, 255),     qRgba(255, 255, 255, 255), qRgba(255, 0, 0, 255),
+        qRgba(0, 255, 0, 255),   qRgba(0, 0, 255, 255),     qRgba(128, 128, 128, 255),
+        qRgba(255, 255, 0, 255), qRgba(0, 255, 255, 255),
+    };
+    for (int y = 0; y < kH; ++y) {
+        for (int x = 0; x < kW; ++x) {
+            const int tile = (y / 16) * 4 + (x / 16);
+            img.setPixel(x, y, tiles[tile % 8]);
+        }
+    }
+
+    std::vector<uint8_t> gpuY, gpuUv, swsY, swsUv;
+    QVERIFY(convertGpu(img, &gpuY, &gpuUv));
+    QVERIFY(convertSws(img, &swsY, &swsUv));
+    QVERIFY2(maxAbs(gpuY, swsY) <= 1,
+             qPrintable(QStringLiteral("tiled Y delta %1").arg(maxAbs(gpuY, swsY))));
+
+    int maxUv = 0;
+    for (int cy = 2; cy < kH / 2 - 2; ++cy) {
+        for (int cx = 2; cx < kW / 2 - 2; ++cx) {
+            const int px = cx * 2;
+            const int py = cy * 2;
+            if ((px % 16) < 2 || (px % 16) > 13 || (py % 16) < 2 || (py % 16) > 13)
+                continue;
+            const int i = cy * kW + cx * 2;
+            maxUv = qMax(maxUv, qAbs(int(gpuUv[size_t(i)]) - int(swsUv[size_t(i)])));
+            maxUv = qMax(maxUv, qAbs(int(gpuUv[size_t(i) + 1]) - int(swsUv[size_t(i) + 1])));
+        }
+    }
+    QVERIFY2(maxUv <= 2, qPrintable(QStringLiteral("tiled interior UV delta %1").arg(maxUv)));
 }
 
 void EngineTest::exporterDefaultCrfIsNearLosslessForH264()

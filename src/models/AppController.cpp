@@ -19,6 +19,7 @@
 #include "engine/AudioMixer.h"
 #include "engine/ClipReaderPool.h"
 #include "engine/DebugReport.h"
+#include "engine/HwAccel.h"
 #include "engine/ProjectDependencies.h"
 #include "engine/AudioEffectCatalog.h"
 #include "engine/EffectCatalog.h"
@@ -895,6 +896,7 @@ AppController::AppController(AssetLibrary *assetLibrary, QObject *parent)
     // keyframe, and an animation appears where the user only meant to reposition something.
     m_autoKeyEnabled = settings.value(QStringLiteral("editor/autoKeyEnabled"), false).toBool();
     m_reopenLastProject = settings.value(QStringLiteral("editor/reopenLastProject"), false).toBool();
+    m_vaapiZeroCopy = settings.value(QStringLiteral("preview/vaapiZeroCopy"), false).toBool();
     m_invertTimelineScroll = settings.value(QStringLiteral("timeline/invertScroll"), false).toBool();
     m_uiLanguage = storedUiLanguage();
     m_needsUiLanguagePrompt = needsFirstLaunchLanguagePrompt();
@@ -2977,6 +2979,27 @@ void AppController::setReopenLastProject(bool enabled)
     QSettings settings;
     settings.setValue(QStringLiteral("editor/reopenLastProject"), m_reopenLastProject);
     emit reopenLastProjectChanged();
+}
+
+void AppController::setVaapiZeroCopy(bool enabled)
+{
+    if (m_vaapiZeroCopy == enabled)
+        return;
+    m_vaapiZeroCopy = enabled;
+    QSettings settings;
+    settings.setValue(QStringLiteral("preview/vaapiZeroCopy"), m_vaapiZeroCopy);
+    emit vaapiZeroCopyChanged();
+    setLastMessage(tr("Faster preview takes effect after you restart Drift."),
+                   QStringLiteral("info"));
+}
+
+bool AppController::vaapiZeroCopySupported() const
+{
+#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
+    return drift::hwaccel::availableDecodeBackends().contains(drift::hwaccel::Backend::Vaapi);
+#else
+    return false;
+#endif
 }
 
 void AppController::setInvertTimelineScroll(bool enabled)

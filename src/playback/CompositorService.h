@@ -55,10 +55,9 @@ public:
     void setDropLateFrames(bool drop);
 
     // Automatic preview quality. Off — the default — every frame renders at exactly
-    // the previewScale the caller asked for: choosing Full means Full, whatever the
-    // machine is doing. On, the service walks that scale down while composites
-    // overrun their frame budget and back up once they stop, which only ever
-    // happens during fast-mode playback.
+    // the previewScale the caller asked for (Full/Half/Quarter stay put). On, the
+    // service walks that scale down while composites overrun their frame budget
+    // and back up once they stop, which only ever happens during fast-mode playback.
     void setAdaptiveQuality(bool enabled);
 
     // Realtime playback running. Adaptation measures playback frames only — paused

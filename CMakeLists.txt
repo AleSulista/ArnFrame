@@ -438,6 +438,7 @@ add_library(driftengine STATIC
     src/engine/ObjectDetector.cpp
     src/engine/Exporter.h
     src/engine/Exporter.cpp
+    src/engine/PreviewVideoFrame.h
     src/engine/ClipReader.h
     src/engine/ClipReader.cpp
     src/engine/DebugReport.h
@@ -473,6 +474,7 @@ add_library(driftengine STATIC
     src/engine/GpuCompositor.cpp
     src/engine/GlRuntime.h
     src/engine/GlRuntime.cpp
+    src/engine/VaapiZeroCopy.h
     src/engine/GpuEffectExecutor.h
     src/engine/GpuEffectExecutor.cpp
     src/engine/CompositorFrameHistory.h

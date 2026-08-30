@@ -132,13 +132,45 @@ int main(int argc, char *argv[])
 
     // DRIFT_BENCH_TEXTURE=1 times the preview path (composite to a GL texture,
     // no readback) instead of the export path (composite and read back).
+    // DRIFT_BENCH_NV12=1 times compose + GPU RGBA→NV12 + async PBO map.
     const bool texturePath = qEnvironmentVariableIsSet("DRIFT_BENCH_TEXTURE");
+    const bool nv12Path = qEnvironmentVariableIsSet("DRIFT_BENCH_NV12");
 
     QElapsedTimer timer;
+    std::vector<uint8_t> nv12Y;
+    std::vector<uint8_t> nv12Uv;
+    int nv12Slot = 0;
+    if (nv12Path) {
+        nv12Y.resize(size_t(project.width()) * size_t(project.height()));
+        nv12Uv.resize(size_t(project.width()) * size_t(project.height() / 2));
+    }
+
     for (int i = 0; i < frames; ++i) {
         const drift::TimeUs t = static_cast<drift::TimeUs>(i) * step;
         timer.start();
-        if (texturePath) {
+        if (nv12Path) {
+            GpuScene scene;
+            if (!compositor.buildSceneAt(t, options, &scene)) {
+                err << "null scene at " << t << "\n";
+                return 1;
+            }
+            const int slot = nv12Slot;
+            nv12Slot ^= 1;
+            if (!GpuCompositor::beginExportNv12(scene, project.width(), project.height(), slot)) {
+                err << "nv12 pack failed at " << t << "\n";
+                return 1;
+            }
+            if (i > 0) {
+                const int prev = slot ^ 1;
+                if (!GpuCompositor::finishExportNv12(prev, nv12Y.data(), project.width(),
+                                                     nv12Uv.data(), project.width(), project.width(),
+                                                     project.height())) {
+                    err << "nv12 map failed at " << t << "\n";
+                    return 1;
+                }
+            }
+            samples.push_back(timer.nsecsElapsed() / 1e6);
+        } else if (texturePath) {
             const GpuFrameTexture frame = compositor.compositeToTextureAt(t, options);
             samples.push_back(timer.nsecsElapsed() / 1e6);
             if (!frame.isValid()) {
@@ -152,6 +184,15 @@ int main(int argc, char *argv[])
                 err << "null frame at " << t << "\n";
                 return 1;
             }
+        }
+    }
+
+    if (nv12Path) {
+        const int last = nv12Slot ^ 1;
+        if (!GpuCompositor::finishExportNv12(last, nv12Y.data(), project.width(), nv12Uv.data(),
+                                             project.width(), project.width(), project.height())) {
+            err << "nv12 map failed on drain\n";
+            return 1;
         }
     }
 

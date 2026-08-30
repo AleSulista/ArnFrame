@@ -7,6 +7,11 @@
 #include <QImage>
 #include <QString>
 
+// Preview canvas as a fraction of project resolution. Below this, text and effect
+// radii collapse to subpixels. The compositor never upscales past 1.0.
+inline constexpr double kMinPreviewScale = 0.02;
+inline constexpr int kMinPreviewScalePercent = 2;
+
 // Composites all visible tracks into a single RGBA frame at timeline time T.
 class FrameCompositor
 {
@@ -37,6 +42,10 @@ public:
     // Composite and leave the frame on the GPU. Returns an invalid handle when
     // OpenGL is unavailable, in which case callers should use compositeAt.
     GpuFrameTexture compositeToTextureAt(drift::TimeUs timelineUs, const RenderOptions &options) const;
+
+    // Builds the GPU scene for T without composing. Used by the export pipeline
+    // so decode/scene-build can overlap the previous frame's GL work.
+    bool buildSceneAt(drift::TimeUs timelineUs, const RenderOptions &options, GpuScene *sceneOut) const;
 
 private:
     // Shared by both entry points: resolves the canvas size, warms the decoders

@@ -13,6 +13,7 @@
 #include "models/Haptics.h"
 #include "models/LayoutStore.h"
 #include "models/UpdateChecker.h"
+#include "engine/VaapiZeroCopy.h"
 #include "ClipPreviewImageProvider.h"
 #include "DriftImageProvider.h"
 #include "MulticamImageProvider.h"
@@ -226,6 +227,10 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName("CutWire Drift");
     QCoreApplication::setOrganizationName("CutWire Drift");
     AppController::applyStoredUiScale();
+    // Qt's xcb plugin defaults to GLX, so eglGetCurrentDisplay() is null and
+    // zero-copy sticky-disables. Only force EGL when the user opted in — default
+    // X11 behaviour stays byte-identical. An explicit QT_XCB_GL_INTEGRATION still wins.
+    drift::applyVaapiZeroCopyXcbEgl();
 
     QApplication app(argc, argv);
     if (!QImageReader::supportedImageFormats().contains("svg")) {

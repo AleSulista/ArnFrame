@@ -35,7 +35,7 @@ public:
     // that step re-arms itself until the reader has readAheadUs of decoded source buffered.
     // Keeping a single step in flight per stream is what bounds a decode request's wait to one
     // frame — a queue of them would serialize ahead of it.
-    void requestPrefetchNv12(quint64 streamId, int maxWidth, int maxHeight, drift::TimeUs readAheadUs);
+    void requestPrefetchPreview(quint64 streamId, int maxWidth, int maxHeight, drift::TimeUs readAheadUs);
 
     // Callable from any thread. Marks every audio reader here as unpositioned, so the next decode
     // seeks to the position it is asked for instead of continuing its stream. Set as a flag rather
@@ -49,13 +49,14 @@ public slots:
     QImage decodeVideo(quint64 streamId, drift::TimeUs sourceUs, int maxWidth, int maxHeight,
                        const QString &stabilizePath = QString(), int stabilizeSmoothing = 15,
                        bool stabilizeTripod = false);
-    Nv12Frame decodeVideoNv12(quint64 streamId, drift::TimeUs sourceUs, int maxWidth, int maxHeight,
-                              const QString &stabilizePath = QString(), int stabilizeSmoothing = 15,
-                              bool stabilizeTripod = false);
+    PreviewVideoFrame decodePreviewVideo(quint64 streamId, drift::TimeUs sourceUs, int maxWidth,
+                                         int maxHeight, const QString &stabilizePath = QString(),
+                                         int stabilizeSmoothing = 15, bool stabilizeTripod = false);
     int decodeAudio(quint64 streamId, drift::TimeUs sourceStartUs, int sampleCount,
                     int outputSampleRate, float *interleavedStereoOut);
     void prefetchNextVideo(quint64 streamId, int maxWidth, int maxHeight);
-    void prefetchNextVideoNv12(quint64 streamId, int maxWidth, int maxHeight, drift::TimeUs readAheadUs);
+    void prefetchNextPreviewVideo(quint64 streamId, int maxWidth, int maxHeight,
+                                  drift::TimeUs readAheadUs);
     void resetVideoDecoders();
 
 private:

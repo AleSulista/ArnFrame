@@ -13,7 +13,7 @@ ClipReaderPool &ClipReaderPool::instance()
     static bool registered = false;
     if (!registered) {
         qRegisterMetaType<drift::TimeUs>("drift::TimeUs");
-        qRegisterMetaType<Nv12Frame>("Nv12Frame");
+        qRegisterMetaType<PreviewVideoFrame>("PreviewVideoFrame");
         registered = true;
     }
     return pool;
@@ -132,8 +132,8 @@ void ClipReaderPool::warmVideoFrames(const QList<VideoRequest> &requests)
         // The post happens under the pool mutex: it does not block, and holding the lock is what
         // stops the idle release from deleting the worker between resolving it and posting to it.
         QMutexLocker lock(&m_mutex);
-        // Prefer NV12 warm — matches the live-preview decode path.
-        QMetaObject::invokeMethod(ensureWorker(m_videoWorkers, request.path).worker, "decodeVideoNv12",
+        // Prefer the preview decode path so warm hits the same cache as composite.
+        QMetaObject::invokeMethod(ensureWorker(m_videoWorkers, request.path).worker, "decodePreviewVideo",
                                   Qt::QueuedConnection,
                                   Q_ARG(quint64, request.streamId), Q_ARG(drift::TimeUs, request.sourceUs),
                                   Q_ARG(int, request.maxWidth), Q_ARG(int, request.maxHeight));
@@ -176,10 +176,10 @@ QImage ClipReaderPool::readVideoFrame(const QString &path, quint64 streamId, dri
     return frame;
 }
 
-Nv12Frame ClipReaderPool::readVideoFrameNv12(const QString &path, quint64 streamId,
-                                             drift::TimeUs sourceUs, int maxWidth, int maxHeight,
-                                             const QString &stabilizePath,
-                                             int stabilizeSmoothing, bool stabilizeTripod)
+PreviewVideoFrame ClipReaderPool::readPreviewVideoFrame(const QString &path, quint64 streamId,
+                                                        drift::TimeUs sourceUs, int maxWidth, int maxHeight,
+                                                        const QString &stabilizePath,
+                                                        int stabilizeSmoothing, bool stabilizeTripod)
 {
     if (path.isEmpty())
         return {};
@@ -192,15 +192,16 @@ Nv12Frame ClipReaderPool::readVideoFrameNv12(const QString &path, quint64 stream
     }
     ClipReaderWorker *worker = entry->worker;
 
-    Nv12Frame frame;
-    QMetaObject::invokeMethod(worker, "decodeVideoNv12", Qt::BlockingQueuedConnection,
-                               Q_RETURN_ARG(Nv12Frame, frame), Q_ARG(quint64, streamId),
+    PreviewVideoFrame frame;
+    QMetaObject::invokeMethod(worker, "decodePreviewVideo", Qt::BlockingQueuedConnection,
+                               Q_RETURN_ARG(PreviewVideoFrame, frame), Q_ARG(quint64, streamId),
                                Q_ARG(drift::TimeUs, sourceUs), Q_ARG(int, maxWidth),
                                Q_ARG(int, maxHeight),
-                               Q_ARG(QString, stabilizePath), Q_ARG(int, stabilizeSmoothing), Q_ARG(bool, stabilizeTripod));
+                               Q_ARG(QString, stabilizePath), Q_ARG(int, stabilizeSmoothing),
+                               Q_ARG(bool, stabilizeTripod));
 
-    worker->requestPrefetchNv12(streamId, maxWidth, maxHeight,
-                                m_readAheadUs.load(std::memory_order_relaxed));
+    worker->requestPrefetchPreview(streamId, maxWidth, maxHeight,
+                                   m_readAheadUs.load(std::memory_order_relaxed));
 
     QMutexLocker lock(&m_mutex);
     --entry->inFlight;

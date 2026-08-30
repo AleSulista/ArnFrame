@@ -80,9 +80,10 @@ constexpr drift::TimeUs kReadAheadUs = 2 * drift::kUsPerSecond;
 // (kMinCurveSpeed..kMaxCurveSpeed), and nothing outside this list is accepted.
 constexpr std::array<double, 6> kPlaybackRates{0.25, 0.5, 1.0, 1.5, 2.0, 4.0};
 
-// "full", "half" and "quarter" are exact: the preview renders at the fraction
-// asked for and nothing changes it underneath. "auto" starts from what "full"
-// would give and lets the compositor trade resolution for cadence.
+// "full", "half" and "quarter" are fractions of the preview panel (device pixels),
+// never of the project: Full matches the panel, Half/Quarter are 1/2 and 1/4 of
+// that, all capped at project resolution. "auto" is Full plus a compositor ratchet
+// that trades remaining resolution for cadence when playback cannot keep up.
 bool isKnownPreviewQuality(const QString &quality)
 {
     return quality == QStringLiteral("full") || quality == QStringLiteral("half")
@@ -431,10 +432,9 @@ void PlaybackEngine::setPreviewRenderSize(int width, int height)
 
     m_previewRenderWidth = width;
     m_previewRenderHeight = height;
-    // Only Auto derives its scale from this size; re-compositing at a fixed
-    // fraction would render the identical frame again on every pixel of a drag.
-    if (!isAutoQuality())
-        return;
+    // Every quality mode sizes the canvas from the panel, so a resize has to
+    // rebuild the frame. Decode size is quantized, which keeps the reader cache
+    // from dropping on every pixel of a drag.
     if (m_playing)
         onCompositeTick();
     else
@@ -635,13 +635,25 @@ void PlaybackEngine::onFrameReady(const GpuFrameTexture &frame)
 FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
 {
     FrameCompositor::RenderOptions options;
-    if (m_previewQuality == QStringLiteral("quarter")) {
-        options.previewScale = 0.25;
-    } else if (m_previewQuality == QStringLiteral("half")) {
-        options.previewScale = 0.5;
-    } else {
-        options.previewScale = 1.0;
+    double qualityFraction = 1.0;
+    if (m_previewQuality == QStringLiteral("quarter"))
+        qualityFraction = 0.25;
+    else if (m_previewQuality == QStringLiteral("half"))
+        qualityFraction = 0.5;
+
+    // Fit the project into the panel (device pixels), never larger than 1:1 with
+    // the export frame. Until the panel has reported a size, stay at project
+    // resolution so the first composite is not a stub.
+    double fit = 1.0;
+    if (m_project && m_previewRenderWidth > 0 && m_previewRenderHeight > 0) {
+        const double widthScale =
+            static_cast<double>(m_previewRenderWidth) / qMax(1, m_project->width());
+        const double heightScale =
+            static_cast<double>(m_previewRenderHeight) / qMax(1, m_project->height());
+        fit = qMin(1.0, qMin(widthScale, heightScale));
     }
+    options.previewScale = qBound(kMinPreviewScale, fit * qualityFraction, 1.0);
+
     // During fast playback, cap temporal history so time_echo cannot multiply
     // decode work unboundedly. Paused, scrubbed and quality-mode frames keep the
     // full history: those are exactly the cases where fidelity is the point.
@@ -651,20 +663,6 @@ FrameCompositor::RenderOptions PlaybackEngine::playbackRenderOptions() const
     // actually running: paused and quality-mode frames have no deadline to miss,
     // and read-ahead during editing is thrown away by the next edit.
     options.readAheadUs = m_playing && !isQualityMode() ? kReadAheadUs : 0;
-
-    // Auto is the only mode that looks at how big the preview is on screen: it
-    // renders no more pixels than are actually displayed, and the compositor may
-    // take it further down while playback cannot keep up. Full, Half and Quarter
-    // are fractions of the project resolution and nothing else — Full composites
-    // the same frame the export would, whatever size the panel happens to be.
-    // That matters beyond the video: renderScale also sizes text rasterisation,
-    // shape strokes and every effect's pixel radii, so a canvas fitted to a small
-    // panel renders coarse titles and graphics, not just a smaller picture.
-    if (isAutoQuality() && m_project && m_previewRenderWidth > 0 && m_previewRenderHeight > 0) {
-        const double widthScale = static_cast<double>(m_previewRenderWidth) / qMax(1, m_project->width());
-        const double heightScale = static_cast<double>(m_previewRenderHeight) / qMax(1, m_project->height());
-        options.previewScale = qBound(0.1, qMin(widthScale, heightScale), 1.0);
-    }
 
     // Hide the text clip being edited in place so the QML inline editor stands in
     // for it. Never applies while playing (no inline edit during playback).

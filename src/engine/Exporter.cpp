@@ -2,6 +2,7 @@
 
 #include "AudioMixer.h"
 #include "FrameCompositor.h"
+#include "GpuCompositor.h"
 #include "HwAccel.h"
 #include "core/Project.h"
 #include "core/Time.h"
@@ -10,6 +11,7 @@
 #include <QHash>
 #include <QImage>
 #include <QMutex>
+#include <QtGlobal>
 
 #ifdef Q_OS_ANDROID
 #include "AndroidUri.h"
@@ -541,6 +543,50 @@ void scaleSize(int projW, int projH, int targetH, int &outW, int &outH)
     outH = targetH > 0 ? targetH : projH;
     outW = static_cast<int>(std::llround(static_cast<double>(projW) * outH / projH));
     evenDims(outW, outH);
+}
+
+void fillLimitedBlackNv12(uint8_t *y, int yStride, uint8_t *uv, int uvStride, int w, int h)
+{
+    for (int row = 0; row < h; ++row)
+        memset(y + row * yStride, 16, size_t(w));
+    for (int row = 0; row < h / 2; ++row)
+        memset(uv + row * uvStride, 128, size_t(w));
+}
+
+void fillLimitedBlackFrame(AVFrame *frame)
+{
+    if (!frame || !frame->data[0])
+        return;
+    if (frame->format == AV_PIX_FMT_NV12 && frame->data[1]) {
+        fillLimitedBlackNv12(frame->data[0], frame->linesize[0], frame->data[1], frame->linesize[1],
+                             frame->width, frame->height);
+        return;
+    }
+    if (frame->format == AV_PIX_FMT_YUV420P && frame->data[1] && frame->data[2]) {
+        for (int row = 0; row < frame->height; ++row)
+            memset(frame->data[0] + row * frame->linesize[0], 16, size_t(frame->width));
+        for (int row = 0; row < frame->height / 2; ++row) {
+            memset(frame->data[1] + row * frame->linesize[1], 128, size_t(frame->width / 2));
+            memset(frame->data[2] + row * frame->linesize[2], 128, size_t(frame->width / 2));
+        }
+    }
+}
+
+void nv12ToYuv420p(const uint8_t *y, int yStride, const uint8_t *uv, int uvStride, AVFrame *dst)
+{
+    const int w = dst->width;
+    const int h = dst->height;
+    for (int row = 0; row < h; ++row)
+        memcpy(dst->data[0] + row * dst->linesize[0], y + row * yStride, size_t(w));
+    for (int row = 0; row < h / 2; ++row) {
+        const uint8_t *src = uv + row * uvStride;
+        uint8_t *u = dst->data[1] + row * dst->linesize[1];
+        uint8_t *v = dst->data[2] + row * dst->linesize[2];
+        for (int x = 0; x < w / 2; ++x) {
+            u[x] = src[2 * x];
+            v[x] = src[2 * x + 1];
+        }
+    }
 }
 
 // Sends a frame (or nullptr to flush) to the encoder and interleaves the packets.
@@ -2030,17 +2076,25 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
         }
         headerWritten = true;
 
-        // Lanczos when down/upscaling; bicubic is enough for a pure format convert.
-        const int swsFlags = (projW != outW || projH != outH) ? SWS_LANCZOS : SWS_BICUBIC;
-        sws = sws_getContext(projW, projH, AV_PIX_FMT_RGBA, outW, outH, swPixFmt, swsFlags, nullptr,
-                             nullptr, nullptr);
-        if (!sws) {
-            error = QStringLiteral("Could not create the scaler");
-            goto cleanup;
-        }
-        if (!configureExportSws(sws)) {
-            error = QStringLiteral("Could not configure export colour conversion");
-            goto cleanup;
+        const bool forceCpuSws = qEnvironmentVariableIsSet("DRIFT_EXPORT_SWSCALE")
+                                 && qgetenv("DRIFT_EXPORT_SWSCALE") != "0";
+        const bool useGpuNv12 = !forceCpuSws && GpuCompositor::isAvailable()
+            && (swPixFmt == AV_PIX_FMT_NV12 || swPixFmt == AV_PIX_FMT_YUV420P) && (outW % 2 == 0)
+            && (outH % 2 == 0);
+
+        if (!useGpuNv12) {
+            // Lanczos when down/upscaling; bicubic is enough for a pure format convert.
+            const int swsFlags = (projW != outW || projH != outH) ? SWS_LANCZOS : SWS_BICUBIC;
+            sws = sws_getContext(projW, projH, AV_PIX_FMT_RGBA, outW, outH, swPixFmt, swsFlags,
+                                 nullptr, nullptr, nullptr);
+            if (!sws) {
+                error = QStringLiteral("Could not create the scaler");
+                goto cleanup;
+            }
+            if (!configureExportSws(sws)) {
+                error = QStringLiteral("Could not configure export colour conversion");
+                goto cleanup;
+            }
         }
 
         pkt = av_packet_alloc();
@@ -2110,6 +2164,96 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
             return true;
         };
 
+        auto sendVideoAndAudio = [&](int64_t pts) -> bool {
+            applySdrBt709Tags(vframe);
+            vframe->pts = pts;
+            AVFrame *encodeFrame = vframe;
+            if (hwUpload) {
+                av_frame_unref(hwframe);
+                if (av_hwframe_get_buffer(vctx->hw_frames_ctx, hwframe, 0) < 0) {
+                    error = QStringLiteral("Could not allocate a hardware frame");
+                    return false;
+                }
+                if (av_hwframe_transfer_data(hwframe, vframe, 0) < 0) {
+                    error = QStringLiteral("Could not upload a frame to the encoder");
+                    return false;
+                }
+                applySdrBt709Tags(hwframe);
+                hwframe->pts = pts;
+                encodeFrame = hwframe;
+            }
+            if (!encodeWriteFrame(fmt, vctx, vstream, encodeFrame, pkt, &error))
+                return false;
+
+            const int64_t targetSamples =
+                qMin(totalAudioSamples,
+                     ((pts + 1) * static_cast<int64_t>(sampleRate) * frameRate.den) / frameRate.num);
+            const int need = static_cast<int>(targetSamples - audioSamplesGenerated);
+            if (need > 0) {
+                const size_t base = audioBuffer.size();
+                audioBuffer.resize(base + static_cast<size_t>(need) * 2);
+                const drift::TimeUs audioStartUs = rangeStartUs
+                    + static_cast<drift::TimeUs>(
+                        (static_cast<int64_t>(audioSamplesGenerated) * drift::kUsPerSecond)
+                        / sampleRate);
+                mixer.mix(audioStartUs, need, sampleRate, audioBuffer.data() + base);
+                audioSamplesGenerated = targetSamples;
+            }
+            return flushAudioFrames(false);
+        };
+
+        FrameCompositor::RenderOptions composeOptions;
+        if (outH < projH)
+            composeOptions.previewScale = double(outH) / double(projH);
+        composeOptions.readAheadUs = static_cast<drift::TimeUs>(
+            std::llround(2.0 * 1e6 * frameRate.den / frameRate.num));
+
+        std::vector<uint8_t> nv12Y;
+        std::vector<uint8_t> nv12Uv;
+        if (useGpuNv12 && swPixFmt == AV_PIX_FMT_YUV420P) {
+            nv12Y.resize(size_t(outW) * size_t(outH));
+            nv12Uv.resize(size_t(outW) * size_t(outH / 2));
+        }
+
+        struct InflightNv12
+        {
+            int slot = 0;
+            int64_t pts = 0;
+            bool packed = false;
+        };
+        InflightNv12 inflight[GpuCompositor::kExportNv12Slots];
+        int inflightCount = 0;
+
+        auto consumeNv12Head = [&]() -> bool {
+            const InflightNv12 job = inflight[0];
+            for (int i = 0; i < inflightCount - 1; ++i)
+                inflight[i] = inflight[i + 1];
+            --inflightCount;
+
+            if (av_frame_make_writable(vframe) < 0) {
+                error = QStringLiteral("Video frame not writable");
+                return false;
+            }
+
+            bool mapped = false;
+            if (job.packed) {
+                if (swPixFmt == AV_PIX_FMT_NV12) {
+                    mapped = GpuCompositor::finishExportNv12(job.slot, vframe->data[0],
+                                                             vframe->linesize[0], vframe->data[1],
+                                                             vframe->linesize[1], outW, outH);
+                } else {
+                    mapped = GpuCompositor::finishExportNv12(job.slot, nv12Y.data(), outW,
+                                                             nv12Uv.data(), outW, outW, outH);
+                    if (mapped)
+                        nv12ToYuv420p(nv12Y.data(), outW, nv12Uv.data(), outW, vframe);
+                }
+            }
+            if (!mapped)
+                fillLimitedBlackFrame(vframe);
+
+            return sendVideoAndAudio(job.pts);
+        };
+
         for (int64_t i = 0; i < totalFrames; ++i) {
             if (onProgress && !onProgress(static_cast<double>(i) / totalFrames)) {
                 cancelled = true;
@@ -2118,6 +2262,26 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
 
             const drift::TimeUs t = rangeStartUs + static_cast<drift::TimeUs>(
                 std::llround(static_cast<double>(i) * 1e6 * frameRate.den / frameRate.num));
+
+            if (useGpuNv12) {
+                if (inflightCount == GpuCompositor::kExportNv12Slots) {
+                    if (!consumeNv12Head())
+                        goto cleanup;
+                }
+
+                GpuScene scene;
+                if (!compositor.buildSceneAt(t, composeOptions, &scene)) {
+                    scene = GpuScene{};
+                    scene.canvasSize = QSize(outW, outH);
+                    scene.backgroundColor = Qt::black;
+                }
+
+                const int slot = int(i % GpuCompositor::kExportNv12Slots);
+                const bool packed = GpuCompositor::beginExportNv12(scene, outW, outH, slot);
+                inflight[inflightCount++] = InflightNv12{slot, i, packed};
+                continue;
+            }
+
             QImage img = compositor.compositeAt(t);
             if (img.isNull()) {
                 img = QImage(projW, projH, QImage::Format_RGBA8888);
@@ -2137,42 +2301,28 @@ bool Exporter::run(const drift::Project &project, const ExportSettings &settings
                 const int srcStride[4] = {static_cast<int>(img.bytesPerLine()), 0, 0, 0};
                 sws_scale(sws, srcData, srcStride, 0, projH, vframe->data, vframe->linesize);
             }
-            applySdrBt709Tags(vframe);
-            vframe->pts = i;
-            AVFrame *encodeFrame = vframe;
-            if (hwUpload) {
-                av_frame_unref(hwframe);
-                if (av_hwframe_get_buffer(vctx->hw_frames_ctx, hwframe, 0) < 0) {
-                    error = QStringLiteral("Could not allocate a hardware frame");
-                    goto cleanup;
-                }
-                if (av_hwframe_transfer_data(hwframe, vframe, 0) < 0) {
-                    error = QStringLiteral("Could not upload a frame to the encoder");
-                    goto cleanup;
-                }
-                applySdrBt709Tags(hwframe);
-                hwframe->pts = i;
-                encodeFrame = hwframe;
-            }
-            if (!encodeWriteFrame(fmt, vctx, vstream, encodeFrame, pkt, &error))
+            if (!sendVideoAndAudio(i))
                 goto cleanup;
+        }
 
-            // Integer math keeps A/V in exact lockstep even on 1001-denominator rates.
-            const int64_t targetSamples =
-                qMin(totalAudioSamples,
-                     ((i + 1) * static_cast<int64_t>(sampleRate) * frameRate.den) / frameRate.num);
-            const int need = static_cast<int>(targetSamples - audioSamplesGenerated);
-            if (need > 0) {
-                const size_t base = audioBuffer.size();
-                audioBuffer.resize(base + static_cast<size_t>(need) * 2);
-                const drift::TimeUs audioStartUs = rangeStartUs
-                    + static_cast<drift::TimeUs>(
-                        (static_cast<int64_t>(audioSamplesGenerated) * drift::kUsPerSecond) / sampleRate);
-                mixer.mix(audioStartUs, need, sampleRate, audioBuffer.data() + base);
-                audioSamplesGenerated = targetSamples;
+        if (useGpuNv12 && !cancelled) {
+            while (inflightCount > 0) {
+                if (!consumeNv12Head())
+                    goto cleanup;
             }
-            if (!flushAudioFrames(false))
-                goto cleanup;
+        } else if (useGpuNv12) {
+            while (inflightCount > 0) {
+                const InflightNv12 job = inflight[0];
+                for (int i = 0; i < inflightCount - 1; ++i)
+                    inflight[i] = inflight[i + 1];
+                --inflightCount;
+                if (!job.packed)
+                    continue;
+                std::vector<uint8_t> dumpY(size_t(outW) * size_t(outH));
+                std::vector<uint8_t> dumpUv(size_t(outW) * size_t(outH / 2));
+                GpuCompositor::finishExportNv12(job.slot, dumpY.data(), outW, dumpUv.data(), outW,
+                                                outW, outH);
+            }
         }
 
         if (!cancelled) {

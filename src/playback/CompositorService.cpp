@@ -140,7 +140,7 @@ FrameCompositor::RenderOptions CompositorService::effectiveOptions(
 {
     if (!m_adaptiveQuality)
         return options;
-    options.previewScale = qBound(0.1, options.previewScale * m_adaptiveScale, 1.0);
+    options.previewScale = qBound(kMinPreviewScale, options.previewScale * m_adaptiveScale, 1.0);
     return options;
 }
 
@@ -191,7 +191,7 @@ void CompositorService::dispatch(drift::TimeUs timeUs, const FrameCompositor::Re
 
 void CompositorService::requestComposite(drift::TimeUs timeUs, FrameCompositor::RenderOptions options)
 {
-    options.previewScale = qBound(0.1, options.previewScale, 1.0);
+    options.previewScale = qBound(kMinPreviewScale, options.previewScale, 1.0);
 
     // The pending scale is published as whole percent, and the catch-up dispatch in
     // onWorkerFrameReady reads it back as percent/100. Dispatching the unrounded value here
@@ -203,7 +203,7 @@ void CompositorService::requestComposite(drift::TimeUs timeUs, FrameCompositor::
     // scale; the adaptive multiplier is a discrete ratchet applied at dispatch, so both paths
     // still derive the same size from it until the ratchet deliberately moves.
     const int previewScalePercent =
-        qBound(10, static_cast<int>(std::lround(options.previewScale * 100.0)), 100);
+        qBound(kMinPreviewScalePercent, static_cast<int>(std::lround(options.previewScale * 100.0)), 100);
     options.previewScale = previewScalePercent / 100.0;
 
     m_pendingTimeUs.store(timeUs, std::memory_order_release);
