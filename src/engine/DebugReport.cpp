@@ -2,8 +2,10 @@
 
 #include "ClipReader.h"
 #include "Exporter.h"
+#include "GlRuntime.h"
 #include "HwAccel.h"
 #include "OrtRuntime.h"
+#include "VaapiZeroCopy.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -479,6 +481,37 @@ bool gpuIsNvidia(const GpuAdapter &gpu)
            || gpu.vendor.compare(QLatin1String("NVIDIA"), Qt::CaseInsensitive) == 0;
 }
 
+bool gpuIsAmd(const GpuAdapter &gpu)
+{
+    return gpu.vendorId == 0x1002 || gpu.vendorId == 0x1022
+           || gpu.driver == QLatin1String("amdgpu") || gpu.driver == QLatin1String("radeon")
+           || gpu.vendor.compare(QLatin1String("AMD"), Qt::CaseInsensitive) == 0;
+}
+
+QString previewUploadLabel()
+{
+    using Path = drift::gl::GlRuntime::PreviewUploadPath;
+    switch (drift::gl::GlRuntime::lastPreviewUploadPath()) {
+    case Path::CudaInterop:
+        return QStringLiteral("CUDA interop");
+    case Path::VaapiDmaBuf:
+        return QStringLiteral("VAAPI dma-buf");
+    case Path::CpuRoundTrip:
+        return QStringLiteral("CPU round-trip");
+    case Path::None:
+        break;
+    }
+    return trReport("Nothing uploaded yet");
+}
+
+QString zeroCopyLabel()
+{
+    if (!drift::vaapiZeroCopyEnabled())
+        return trReport("Off");
+    const QString reason = drift::gl::GlRuntime::lastVaapiImportReason();
+    return reason.isEmpty() ? trReport("Active") : reason;
+}
+
 QVariantMap hintRow(const QString &id, const QString &title, const QString &detail,
                     const QString &command = {}, const QString &action = {})
 {
@@ -640,6 +673,13 @@ QVariantMap DebugReport::collect()
     }
     system.append(systemRow(trReport("Preview decode"), decodeModeLabel()));
     system.append(systemRow(trReport("Active decode"), activeDecodeLabel()));
+    {
+        const QString platform = QGuiApplication::platformName();
+        system.append(systemRow(trReport("Window platform"),
+                                platform.isEmpty() ? trReport("Unknown") : platform));
+    }
+    system.append(systemRow(trReport("Preview upload"), previewUploadLabel()));
+    system.append(systemRow(trReport("Zero-copy"), zeroCopyLabel()));
     system.append(systemRow(trReport("Locale"), QLocale::system().name()));
     if (drift::hwaccel::disabledByEnv())
         system.append(systemRow(QStringLiteral("DRIFT_NO_HWACCEL"), trReport("Set")));
@@ -671,8 +711,23 @@ QVariantMap DebugReport::collect()
                 trReport("VAAPI encode on NVIDIA needs the NVIDIA VAAPI extension, and so does "
                          "hardware decode when NVDEC is unavailable. Install it, then restart "
                          "Drift."),
-                QStringLiteral("flatpak install org.freedesktop.Platform.VAAPI.nvidia")));
+                    QStringLiteral("flatpak install org.freedesktop.Platform.VAAPI.nvidia")));
         }
+    }
+    bool amd = false;
+    for (const GpuAdapter &gpu : gpus) {
+        if (gpuIsAmd(gpu)) {
+            amd = true;
+            break;
+        }
+    }
+    if (amd) {
+        hints.append(hintRow(
+            QStringLiteral("amd-gfx6-8"), trReport("Pre-Vega AMD skips zero-copy preview"),
+            trReport("GCN 1–4 GPUs (HD 7000 through Polaris / RX 500) export tiled surfaces "
+                     "without a DRM modifier, so Drift refuses zero-copy preview and copies "
+                     "each frame through system memory. Vega, Navi and newer can enable "
+                     "Settings → Preview → Faster preview.")));
     }
     if (ortRuntimes.isEmpty()) {
         hints.append(hintRow(

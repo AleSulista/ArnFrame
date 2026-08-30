@@ -55,6 +55,7 @@
 #include "engine/EmojiCatalog.h"
 #include "engine/FontCatalog.h"
 #include "engine/FrameCompositor.h"
+#include "engine/GpuCompositor.h"
 #include "engine/TextRaster.h"
 #include "engine/GpuEffectExecutor.h"
 #include "engine/GpuPackageParse.h"
@@ -125,6 +126,7 @@ private slots:
     void hwAccelBackendIdsRoundTrip();
     void previewFrameAcceptsHardwareSurfaces();
     void vaapiPreviewMatchesSoftwareDecode();
+    void p010PreviewConvertsThroughSoftwarePath();
     void hardwareDecodeSurvivesScrubbing();
     void clipReaderPicksHwAv1Decoder();
     void clipReaderStaysOnSoftwareWhenHardwareDisabled();
@@ -2418,6 +2420,60 @@ void EngineTest::vaapiPreviewMatchesSoftwareDecode()
     qunsetenv("DRIFT_VAAPI_ZEROCOPY");
 }
 
+// Locks in the two-frame invariant in ensureSoftwareNv12: a software P010 frame
+// (the shape of a hwframe transfer that kept a 10-bit format) must sws into a
+// separate destination, not into itself after realloc. Does not reproduce the
+// original aliasing, which needs a hardware frame whose transfer yields P010.
+void EngineTest::p010PreviewConvertsThroughSoftwarePath()
+{
+    if (!GpuCompositor::isAvailable())
+        QSKIP("OpenGL offscreen context unavailable");
+
+    AVFrame *raw = av_frame_alloc();
+    QVERIFY(raw);
+    raw->format = AV_PIX_FMT_P010LE;
+    raw->width = 64;
+    raw->height = 64;
+    raw->colorspace = AVCOL_SPC_BT709;
+    raw->color_range = AVCOL_RANGE_JPEG;
+    QVERIFY(av_frame_get_buffer(raw, 0) >= 0);
+
+    const uint16_t y10 = uint16_t(1023u << 6);
+    const uint16_t uv10 = uint16_t(512u << 6);
+    for (int y = 0; y < raw->height; ++y) {
+        auto *row = reinterpret_cast<uint16_t *>(raw->data[0] + y * raw->linesize[0]);
+        for (int x = 0; x < raw->width; ++x)
+            row[x] = y10;
+    }
+    for (int y = 0; y < raw->height / 2; ++y) {
+        auto *row = reinterpret_cast<uint16_t *>(raw->data[1] + y * raw->linesize[1]);
+        for (int x = 0; x < raw->width; ++x)
+            row[x] = uv10;
+    }
+
+    GpuLayer layer;
+    layer.video = takePreviewFrame(raw, 0);
+    layer.rect = QRectF(0, 0, 64, 64);
+    layer.valid = true;
+
+    GpuItem item;
+    item.layer = layer;
+
+    GpuScene scene;
+    scene.canvasSize = QSize(64, 64);
+    scene.backgroundColor = Qt::black;
+    scene.items.append(item);
+
+    const QImage out = GpuCompositor::render(scene);
+    QVERIFY(!out.isNull());
+    QCOMPARE(out.size(), QSize(64, 64));
+
+    const QRgb centre = out.pixel(32, 32);
+    QVERIFY2(qRed(centre) > 230 && qGreen(centre) > 230 && qBlue(centre) > 230,
+             qPrintable(QStringLiteral("expected near-white, got #%1")
+                            .arg(centre, 8, 16, QLatin1Char('0'))));
+}
+
 void EngineTest::hwAccelBackendIdsRoundTrip()
 {
     const QList<drift::hwaccel::Backend> order = drift::hwaccel::decodeBackendOrder();
@@ -2555,6 +2611,15 @@ void EngineTest::debugReportListsCommonCodecs()
     QVERIFY(!info.value(QStringLiteral("system")).toList().isEmpty());
     QVERIFY(!info.value(QStringLiteral("package")).toString().isEmpty());
     QVERIFY(info.contains(QStringLiteral("hardwareDecodeAvailable")));
+
+    QStringList systemLabels;
+    for (const QVariant &entry : info.value(QStringLiteral("system")).toList())
+        systemLabels.append(entry.toMap().value(QStringLiteral("label")).toString());
+    QVERIFY(systemLabels.contains(QStringLiteral("Preview decode")));
+    QVERIFY(systemLabels.contains(QStringLiteral("Active decode")));
+    QVERIFY(systemLabels.contains(QStringLiteral("Window platform")));
+    QVERIFY(systemLabels.contains(QStringLiteral("Preview upload")));
+    QVERIFY(systemLabels.contains(QStringLiteral("Zero-copy")));
 
     const QVariantList encoders = info.value(QStringLiteral("encoders")).toList();
     QCOMPARE(encoders.size(), 5);

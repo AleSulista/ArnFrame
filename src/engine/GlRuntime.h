@@ -219,6 +219,11 @@ public:
     // Tear down GL objects and stop the GL thread. Called at app exit.
     void shutdown();
 
+    // Last preview import path and VAAPI zero-copy rejection, for the debug report.
+    enum class PreviewUploadPath { None, CudaInterop, VaapiDmaBuf, CpuRoundTrip };
+    static PreviewUploadPath lastPreviewUploadPath();
+    static QString lastVaapiImportReason();
+
 private:
     bool ensureReady();
     bool initGlObjects();
@@ -273,6 +278,7 @@ private:
     GLuint m_videoPbo[2] = {0, 0};
     int m_videoPboIndex = 0;
     AVFrame *m_hwImportStaging = nullptr;
+    AVFrame *m_importNv12 = nullptr;
     ::SwsContext *m_importSws = nullptr;
     void *m_cudaYResource = nullptr;
     void *m_cudaUvResource = nullptr;

@@ -1,13 +1,16 @@
 #include "GlRuntime.h"
 
 #include "GlModelRenderer.h"
+#include "VaapiZeroCopy.h"
 
 #include <QColor>
 #include <QCoreApplication>
 #include <QMatrix3x3>
+#include <QMutex>
 #include <QMutexLocker>
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
+#include <QSettings>
 #include <QSurfaceFormat>
 #include <QVector2D>
 #include <QVector3D>
@@ -75,6 +78,36 @@ extern "C" {
 #ifndef GL_MAP_INVALIDATE_BUFFER_BIT
 #define GL_MAP_INVALIDATE_BUFFER_BIT 0x0008
 #endif
+
+namespace drift {
+
+bool vaapiZeroCopyEnabled()
+{
+    // Env is read live so tests can qputenv after other imports have already
+    // resolved the settings half. QSettings is what must not run per frame.
+    if (qEnvironmentVariableIsSet("DRIFT_VAAPI_ZEROCOPY"))
+        return qgetenv("DRIFT_VAAPI_ZEROCOPY") != "0";
+    static bool settingsEnabled = false;
+    static std::once_flag once;
+    std::call_once(once, [] {
+        settingsEnabled =
+            QSettings().value(QStringLiteral("preview/vaapiZeroCopy"), false).toBool();
+    });
+    return settingsEnabled;
+}
+
+void applyVaapiZeroCopyXcbEgl()
+{
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS) && !defined(Q_OS_ANDROID)
+    if (!vaapiZeroCopyEnabled())
+        return;
+    if (!qEnvironmentVariableIsEmpty("QT_XCB_GL_INTEGRATION"))
+        return;
+    qputenv("QT_XCB_GL_INTEGRATION", "xcb_egl");
+#endif
+}
+
+} // namespace drift
 
 namespace drift::gl {
 
@@ -344,6 +377,29 @@ bool copyCudaPlaneToTexture(CudaGlApi &api, CUstream stream, CUgraphicsResource 
 }
 #endif
 
+QMutex g_previewImportMutex;
+GlRuntime::PreviewUploadPath g_previewUploadPath = GlRuntime::PreviewUploadPath::None;
+QString g_vaapiImportReason;
+
+void recordPreviewUploadPath(GlRuntime::PreviewUploadPath path)
+{
+    QMutexLocker lock(&g_previewImportMutex);
+    g_previewUploadPath = path;
+}
+
+void logVaapiImportOnce(const QString &reason)
+{
+    {
+        QMutexLocker lock(&g_previewImportMutex);
+        if (g_vaapiImportReason.isEmpty())
+            g_vaapiImportReason = reason;
+    }
+    static std::once_flag once;
+    std::call_once(once, [reason] {
+        qWarning("GlRuntime: VAAPI zero-copy import unavailable (%s)", qUtf8Printable(reason));
+    });
+}
+
 #if defined(DRIFT_VAAPI_IMPORT)
 // libva and the EGL dma-buf import extension, resolved at runtime for the same reason CUDA is:
 // the binary has to start on a host with neither. Only the handful of declarations the import
@@ -394,7 +450,9 @@ constexpr uint32_t fourcc(char a, char b, char c, char d)
 
 constexpr uint32_t kDrmFormatR8 = fourcc('R', '8', ' ', ' ');
 constexpr uint32_t kDrmFormatGr88 = fourcc('G', 'R', '8', '8');
+constexpr uint32_t kDrmFormatNv12 = fourcc('N', 'V', '1', '2');
 constexpr uint64_t kDrmFormatModInvalid = 0x00ffffffffffffffull;
+constexpr uint64_t kDrmFormatModLinear = 0;
 
 using EGLDisplayHandle = void *;
 using EGLImageHandle = void *;
@@ -517,12 +575,30 @@ struct ExportedSurfaceFds
     }
 };
 
-// A zero-copy path that silently falls back is pixel-identical to one that works, so say once
-// why it did not engage. Anything else leaves "preview did not get faster" unfalsifiable.
-void logVaapiImportOnce(const char *reason)
+QString fourccString(uint32_t value)
 {
-    static std::once_flag once;
-    std::call_once(once, [reason] { qInfo("GlRuntime: VAAPI zero-copy import unavailable (%s)", reason); });
+    char s[5] = {char(value), char(value >> 8), char(value >> 16), char(value >> 24), 0};
+    for (char &c : s) {
+        if (c != 0 && (c < 32 || c > 126))
+            c = '?';
+    }
+    return QString::fromLatin1(s);
+}
+
+QString describePrime(const VaDrmPrimeSurfaceDescriptor &desc)
+{
+    QString text = QStringLiteral("fourcc=%1 objects=%2 layers=%3")
+                       .arg(fourccString(desc.fourcc))
+                       .arg(desc.num_objects)
+                       .arg(desc.num_layers);
+    const uint32_t n = qMin(desc.num_layers, 4u);
+    for (uint32_t i = 0; i < n; ++i) {
+        text += QStringLiteral(" layer%1={format=%2 planes=%3}")
+                    .arg(i)
+                    .arg(fourccString(desc.layers[i].drm_format))
+                    .arg(desc.layers[i].num_planes);
+    }
+    return text;
 }
 #endif // DRIFT_VAAPI_IMPORT
 
@@ -953,6 +1029,7 @@ void GlRuntime::destroyVideoUploadState()
     m_videoTexH = 0;
     m_videoPboIndex = 0;
     av_frame_free(&m_hwImportStaging);
+    av_frame_free(&m_importNv12);
     sws_freeContext(m_importSws);
     m_importSws = nullptr;
 }
@@ -1164,11 +1241,11 @@ bool GlRuntime::importVaapiNv12(QOpenGLExtraFunctions *gl, const AVFrame *frame)
     // corrupt preview with nothing to catch. That has been verified on Mesa iris + iHD and
     // nowhere else, so until other drivers have been through it the default stays off: slower
     // preview is a far better failure than a broken picture.
-    if (!qEnvironmentVariableIsSet("DRIFT_VAAPI_ZEROCOPY")) {
-        logVaapiImportOnce("set DRIFT_VAAPI_ZEROCOPY=1 to enable");
-        m_vaapiImportFailed = true;
+    //
+    // Off is not sticky: a later test (or a restart after flipping the setting) must still be
+    // able to engage the path. Real import failures below are.
+    if (!drift::vaapiZeroCopyEnabled())
         return false;
-    }
 
     VaEglApi &api = vaEglApi();
     if (!api.ok) {
@@ -1217,24 +1294,85 @@ bool GlRuntime::importVaapiNv12(QOpenGLExtraFunctions *gl, const AVFrame *frame)
     api.vaSyncSurface(display, surface);
 
     // Guards against a libva ABI change shifting every field past objects[]: without them a
-    // mismatched struct imports plausible-looking garbage instead of failing.
-    if (desc.num_objects < 1 || desc.num_objects > 4 || desc.num_layers != 2)
-        return false;
-    if (desc.layers[0].drm_format != kDrmFormatR8 || desc.layers[1].drm_format != kDrmFormatGr88)
-        return false;
-    for (uint32_t i = 0; i < desc.num_layers; ++i) {
-        if (desc.layers[i].num_planes != 1 || desc.layers[i].object_index[0] >= desc.num_objects
-            || desc.layers[i].pitch[0] == 0)
-            return false;
+    // mismatched struct imports plausible-looking garbage instead of failing. SEPARATE_LAYERS
+    // is still the export request; the composed NV12 shape is accepted because some drivers
+    // ignore that flag.
+    struct ImportPlane
+    {
+        int fd = -1;
+        uint32_t offset = 0;
+        uint32_t pitch = 0;
+        uint32_t fourcc = 0;
+        uint64_t modifier = kDrmFormatModInvalid;
+    };
+    ImportPlane planes[2];
+    bool shapeOk = false;
+    if (desc.num_objects >= 1 && desc.num_objects <= 4) {
+        if (desc.num_layers == 2 && desc.layers[0].drm_format == kDrmFormatR8
+            && desc.layers[1].drm_format == kDrmFormatGr88) {
+            shapeOk = true;
+            for (uint32_t i = 0; i < 2; ++i) {
+                const auto &layer = desc.layers[i];
+                if (layer.num_planes != 1 || layer.object_index[0] >= desc.num_objects
+                    || layer.pitch[0] == 0) {
+                    shapeOk = false;
+                    break;
+                }
+                const auto &object = desc.objects[layer.object_index[0]];
+                planes[i] = {object.fd, layer.offset[0], layer.pitch[0], layer.drm_format,
+                             object.drm_format_modifier};
+            }
+        } else if (desc.num_layers == 1 && desc.layers[0].drm_format == kDrmFormatNv12
+                   && desc.layers[0].num_planes == 2) {
+            const auto &layer = desc.layers[0];
+            if (layer.object_index[0] < desc.num_objects && layer.object_index[1] < desc.num_objects
+                && layer.pitch[0] != 0 && layer.pitch[1] != 0) {
+                const auto &obj0 = desc.objects[layer.object_index[0]];
+                const auto &obj1 = desc.objects[layer.object_index[1]];
+                planes[0] = {obj0.fd, layer.offset[0], layer.pitch[0], kDrmFormatR8,
+                             obj0.drm_format_modifier};
+                planes[1] = {obj1.fd, layer.offset[1], layer.pitch[1], kDrmFormatGr88,
+                             obj1.drm_format_modifier};
+                shapeOk = true;
+            }
+        }
     }
+    if (!shapeOk) {
+        logVaapiImportOnce(
+            QStringLiteral("unexpected drm-prime descriptor (%1)").arg(describePrime(desc)));
+        m_vaapiImportFailed = true;
+        return false;
+    }
+
+    // Decide once per frame, before any EGLImage is created. Importing a tiled buffer as
+    // implicit-linear (what radeonsi GFX6–8 exports as MOD_INVALID) samples garbage.
+    const uint64_t mod0 = planes[0].modifier;
+    const uint64_t mod1 = planes[1].modifier;
+    const bool modifierUnknown = mod0 == kDrmFormatModInvalid || mod1 == kDrmFormatModInvalid;
+    const bool tiled = (mod0 != kDrmFormatModInvalid && mod0 != kDrmFormatModLinear)
+                       || (mod1 != kDrmFormatModInvalid && mod1 != kDrmFormatModLinear);
+    if (modifierUnknown) {
+        logVaapiImportOnce(
+            QStringLiteral("driver reports no DRM modifier (tiling unknown); pre-GFX9 radeonsi "
+                           "does this"));
+        m_vaapiImportFailed = true;
+        return false;
+    }
+    if (tiled && !useModifiers) {
+        logVaapiImportOnce(
+            QStringLiteral("EGL_EXT_image_dma_buf_import_modifiers missing; cannot describe tiled "
+                           "surface"));
+        m_vaapiImportFailed = true;
+        return false;
+    }
+    const bool passModifierAttribs = tiled;
 
     if (!ensureImportTextureNames(gl))
         return false;
 
     const GLuint textures[2] = {m_importY, m_importUV};
     for (uint32_t i = 0; i < 2; ++i) {
-        const auto &layer = desc.layers[i];
-        const auto &object = desc.objects[layer.object_index[0]];
+        const ImportPlane &plane = planes[i];
 
         // The surface allocation is padded (1080 -> 1088); the picture is not. Sizing the image
         // from the descriptor would sample that padding, and because kQuad puts v=0 at the NDC
@@ -1247,18 +1385,18 @@ bool GlRuntime::importVaapiNv12(QOpenGLExtraFunctions *gl, const AVFrame *frame)
         attribs[n++] = kEglHeight;
         attribs[n++] = i == 0 ? codedH : codedH / 2;
         attribs[n++] = kEglLinuxDrmFourccExt;
-        attribs[n++] = int32_t(layer.drm_format);
+        attribs[n++] = int32_t(plane.fourcc);
         attribs[n++] = kEglDmaBufPlane0FdExt;
-        attribs[n++] = object.fd;
+        attribs[n++] = plane.fd;
         attribs[n++] = kEglDmaBufPlane0OffsetExt;
-        attribs[n++] = int32_t(layer.offset[0]);
+        attribs[n++] = int32_t(plane.offset);
         attribs[n++] = kEglDmaBufPlane0PitchExt;
-        attribs[n++] = int32_t(layer.pitch[0]);
-        if (useModifiers && object.drm_format_modifier != kDrmFormatModInvalid) {
+        attribs[n++] = int32_t(plane.pitch);
+        if (passModifierAttribs) {
             attribs[n++] = kEglDmaBufPlane0ModifierLoExt;
-            attribs[n++] = int32_t(object.drm_format_modifier & 0xffffffffu);
+            attribs[n++] = int32_t(plane.modifier & 0xffffffffu);
             attribs[n++] = kEglDmaBufPlane0ModifierHiExt;
-            attribs[n++] = int32_t(object.drm_format_modifier >> 32);
+            attribs[n++] = int32_t(plane.modifier >> 32);
         }
         attribs[n++] = kEglNone;
 
@@ -1323,26 +1461,26 @@ AVFrame *GlRuntime::ensureSoftwareNv12(const AVFrame *src)
     if (!m_importSws)
         return nullptr;
 
-    if (!m_hwImportStaging)
-        m_hwImportStaging = av_frame_alloc();
-    if (!m_hwImportStaging)
+    if (!m_importNv12)
+        m_importNv12 = av_frame_alloc();
+    if (!m_importNv12)
         return nullptr;
-    if (m_hwImportStaging->format != AV_PIX_FMT_NV12 || m_hwImportStaging->width != tw
-        || m_hwImportStaging->height != th || !m_hwImportStaging->data[0]) {
-        av_frame_unref(m_hwImportStaging);
-        m_hwImportStaging->format = AV_PIX_FMT_NV12;
-        m_hwImportStaging->width = tw;
-        m_hwImportStaging->height = th;
-        if (av_frame_get_buffer(m_hwImportStaging, 0) < 0) {
-            av_frame_unref(m_hwImportStaging);
+    if (m_importNv12->format != AV_PIX_FMT_NV12 || m_importNv12->width != tw
+        || m_importNv12->height != th || !m_importNv12->data[0]) {
+        av_frame_unref(m_importNv12);
+        m_importNv12->format = AV_PIX_FMT_NV12;
+        m_importNv12->width = tw;
+        m_importNv12->height = th;
+        if (av_frame_get_buffer(m_importNv12, 0) < 0) {
+            av_frame_unref(m_importNv12);
             return nullptr;
         }
     }
-    sws_scale(m_importSws, src->data, src->linesize, 0, src->height, m_hwImportStaging->data,
-              m_hwImportStaging->linesize);
-    m_hwImportStaging->colorspace = src->colorspace;
-    m_hwImportStaging->color_range = src->color_range;
-    return m_hwImportStaging;
+    sws_scale(m_importSws, src->data, src->linesize, 0, src->height, m_importNv12->data,
+              m_importNv12->linesize);
+    m_importNv12->colorspace = src->colorspace;
+    m_importNv12->color_range = src->color_range;
+    return m_importNv12;
 }
 
 GlTarget &GlRuntime::acquirePresentTarget(int width, int height)
@@ -1631,10 +1769,13 @@ GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,
     GLuint texY = rt.m_videoY;
     GLuint texUV = rt.m_videoUV;
     bool uploaded = rt.importCudaNv12(gl, av);
-    if (!uploaded && rt.importVaapiNv12(gl, av)) {
+    if (uploaded) {
+        recordPreviewUploadPath(GlRuntime::PreviewUploadPath::CudaInterop);
+    } else if (rt.importVaapiNv12(gl, av)) {
         uploaded = true;
         texY = rt.m_importY;
         texUV = rt.m_importUV;
+        recordPreviewUploadPath(GlRuntime::PreviewUploadPath::VaapiDmaBuf);
     }
     if (!uploaded) {
         AVFrame *nv12 = rt.ensureSoftwareNv12(av);
@@ -1650,6 +1791,7 @@ GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,
             return {};
         texY = rt.m_videoY;
         texUV = rt.m_videoUV;
+        recordPreviewUploadPath(GlRuntime::PreviewUploadPath::CpuRoundTrip);
     }
 
     const int destW = qMax(2, frame.displayWidth() & ~1);
@@ -1691,6 +1833,18 @@ GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,
     program->release();
     target.fbo->release();
     return target;
+}
+
+GlRuntime::PreviewUploadPath GlRuntime::lastPreviewUploadPath()
+{
+    QMutexLocker lock(&g_previewImportMutex);
+    return g_previewUploadPath;
+}
+
+QString GlRuntime::lastVaapiImportReason()
+{
+    QMutexLocker lock(&g_previewImportMutex);
+    return g_vaapiImportReason;
 }
 
 void setPackageUniforms(QOpenGLShaderProgram *program, const QMap<QString, QVariant> &parameters,

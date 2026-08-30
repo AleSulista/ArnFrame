@@ -158,6 +158,14 @@ Item {
                         }
                     }
                 }
+
+                ThemedSwitch {
+                    visible: EditorState.vaapiZeroCopySupported
+                    checked: EditorState.vaapiZeroCopy
+                    text: qsTr("Faster preview (experimental)")
+                    tooltip: qsTr("Can make playback smoother by keeping video on the graphics card. Turn it off if the picture looks wrong. Takes effect after restart.")
+                    onToggled: EditorState.vaapiZeroCopy = checked
+                }
             }
 
             SettingsSection {

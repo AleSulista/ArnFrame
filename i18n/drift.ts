@@ -1429,6 +1429,10 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Faster preview takes effect after you restart Drift.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>System default</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6239,6 +6243,14 @@ If playback stutters, try another.</source>
     </message>
     <message>
         <source>100% (system)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Faster preview (experimental)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Can make playback smoother by keeping video on the graphics card. Turn it off if the picture looks wrong. Takes effect after restart.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
