@@ -135,10 +135,6 @@
         <translation>%1 අංග</translation>
     </message>
     <message>
-        <source>Starting…</source>
-        <translation>ආරම්භ කරමින්…</translation>
-    </message>
-    <message>
         <source>Cancel</source>
         <translation>අවලංගු කරන්න</translation>
     </message>

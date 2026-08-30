@@ -135,10 +135,6 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Starting…</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Cancel</source>
         <translation type="unfinished"></translation>
     </message>

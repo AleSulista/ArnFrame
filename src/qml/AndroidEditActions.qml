@@ -289,14 +289,14 @@ Item {
         // long-press on a track header, one lane at a time. So the pair moves the axis
         // the gesture cannot, and pinch keeps the one it owns.
         ActionButton {
-            glyph: Theme.icons.foldVertical
+            glyph: Theme.icons.listChevronsDownUp
             tooltip: qsTr("Shorter layers")
             enabled: EditorState.canShrinkTrackHeights
             onClicked: EditorState.nudgeAllTrackHeightScales(-1)
         }
 
         ActionButton {
-            glyph: Theme.icons.unfoldVertical
+            glyph: Theme.icons.listChevronsUpDown
             tooltip: qsTr("Taller layers")
             enabled: EditorState.canGrowTrackHeights
             onClicked: EditorState.nudgeAllTrackHeightScales(1)

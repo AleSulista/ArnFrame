@@ -47,7 +47,8 @@ icons=(
   # Preview transport: frame step and time jump, either side of play/pause.
   step-back step-forward rewind fast-forward
   # Timeline / media
-  captions list-video move-horizontal mouse-pointer audio-lines video
+  captions list-video list-chevrons-down-up list-chevrons-up-down
+  move-horizontal mouse-pointer audio-lines video
   smartphone monitor square ratio
   # Shortcuts tab and canvas crop tool
   keyboard crop minimize

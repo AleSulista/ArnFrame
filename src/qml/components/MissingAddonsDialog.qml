@@ -33,7 +33,7 @@ ThemedDialog {
     Connections {
         target: Addons
         function onProgressChanged(id, fraction, phase) {
-            var next = root.transfers
+            var next = Object.assign({}, root.transfers)
             next[id] = { fraction: fraction, phase: phase }
             root.transfers = next
         }

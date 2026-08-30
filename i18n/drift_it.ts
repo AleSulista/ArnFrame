@@ -135,10 +135,6 @@
         <translation>%1 elementi</translation>
     </message>
     <message>
-        <source>Starting…</source>
-        <translation>Avvio in corso…</translation>
-    </message>
-    <message>
         <source>Cancel</source>
         <translation>Annulla</translation>
     </message>

@@ -135,10 +135,6 @@
         <translation>%1 件对象</translation>
     </message>
     <message>
-        <source>Starting…</source>
-        <translation>启动中…</translation>
-    </message>
-    <message>
         <source>Cancel</source>
         <translation>取消</translation>
     </message>

@@ -288,6 +288,11 @@ Item {
                     Rectangle {
                         anchors.fill: parent
                         visible: {
+                            // A lift from the asset sheet has to see the lanes it is
+                            // aiming at. Covering them for the empty-state copy made
+                            // the drop target invisible for the whole gesture.
+                            if (TouchDrag.active)
+                                return false
                             void EditorState.tracks
                             const tracks = EditorState.tracks
                             if (!tracks || tracks.length === 0)

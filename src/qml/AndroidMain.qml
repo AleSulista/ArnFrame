@@ -23,6 +23,19 @@ ApplicationWindow {
     // opaque popup items, so there is nothing to enumerate — each themed menu registers
     // itself here instead, and Back closes the top one.
     property var _openMenus: []
+    // How many Overlay-hosted dialogs/sheets are open. PointerHandlers on the
+    // editor hit-test their parent bounds, not z-order, so a tap on empty dialog
+    // chrome still reached the timeline; this count drives a guard over the page.
+    property int overlayModalCount: 0
+
+    function pushOverlayModal() {
+        overlayModalCount++
+    }
+
+    function popOverlayModal() {
+        overlayModalCount = Math.max(0, overlayModalCount - 1)
+    }
+
     // The live AndroidEditor instance, so Back can ask it to close a sheet first.
     property var editorPage: null
     // The live AndroidHome instance, so Back can refuse to leave mid-import.
@@ -629,6 +642,37 @@ ApplicationWindow {
         }
         replaceEnter: pushEnter
         replaceExit: pushExit
+    }
+
+    // Under the Overlay, over the page. Overlay popups stay interactive; the
+    // editor cannot. Hidden during TouchDrag so a lift-from-sheet can still land.
+    MouseArea {
+        id: overlayInputGuard
+        anchors.fill: parent
+        visible: window.overlayModalCount > 0 && !TouchDrag.active
+        acceptedButtons: Qt.AllButtons
+        hoverEnabled: true
+        preventStealing: true
+        onPressed: (mouse) => { mouse.accepted = true }
+        onWheel: (wheel) => { wheel.accepted = true }
+
+        readonly property int _stealHandlers: PointerHandler.CanTakeOverFromHandlersOfSameType
+                                            | PointerHandler.CanTakeOverFromHandlersOfDifferentType
+
+        TapHandler {
+            acceptedButtons: Qt.AllButtons
+            grabPermissions: overlayInputGuard._stealHandlers
+        }
+
+        PinchHandler {
+            target: null
+            grabPermissions: overlayInputGuard._stealHandlers
+        }
+
+        DragHandler {
+            target: null
+            grabPermissions: overlayInputGuard._stealHandlers
+        }
     }
 
     Component {

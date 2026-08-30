@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Window
 import Drift
 import "components"
 
@@ -87,6 +88,18 @@ Popup {
     Connections {
         target: root
         function onClosed() { root.steppedAside = false }
+    }
+
+    onOpened: {
+        const host = Overlay.overlay ? Overlay.overlay.Window.window : null
+        if (host && host.pushOverlayModal)
+            host.pushOverlayModal()
+    }
+
+    onClosed: {
+        const host = Overlay.overlay ? Overlay.overlay.Window.window : null
+        if (host && host.popOverlayModal)
+            host.popOverlayModal()
     }
 
     function expand() {
@@ -279,7 +292,23 @@ Popup {
         }
         MouseArea {
             anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+            hoverEnabled: true
+            preventStealing: true
             onClicked: root.dismiss()
+        }
+
+        readonly property int _stealHandlers: PointerHandler.CanTakeOverFromHandlersOfSameType
+                                            | PointerHandler.CanTakeOverFromHandlersOfDifferentType
+
+        TapHandler {
+            acceptedButtons: Qt.AllButtons
+            grabPermissions: parent._stealHandlers
+        }
+
+        PinchHandler {
+            target: null
+            grabPermissions: parent._stealHandlers
         }
     }
 
@@ -292,6 +321,8 @@ Popup {
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.bottom: panel.top
+            acceptedButtons: Qt.AllButtons
+            hoverEnabled: true
             onClicked: root.dismiss()
         }
 
@@ -311,12 +342,27 @@ Popup {
                 y: (1 - root._asideFade) * (root.panelHeight + root.safeBottom)
             }
 
-            // Catch presses on empty (non-scrolling) sheet chrome and drag the sheet.
-            // Flickables / buttons sit above this and keep their own gestures.
+            // PointerHandlers (preview pinch, clip taps) hit-test their parent's
+            // bounds, not z-order. A sibling MouseArea behind the body never saw
+            // empty-chrome presses — they punched through. The grabber has to be
+            // an ancestor of header and content; Flickables still steal because
+            // stealTouches is false.
             SheetDragArea {
+                id: panelGrab
                 anchors.fill: parent
                 stealTouches: false
-            }
+
+                TapHandler {
+                    acceptedButtons: Qt.AllButtons
+                    grabPermissions: PointerHandler.CanTakeOverFromHandlersOfSameType
+                                     | PointerHandler.CanTakeOverFromHandlersOfDifferentType
+                }
+
+                PinchHandler {
+                    target: null
+                    grabPermissions: PointerHandler.CanTakeOverFromHandlersOfSameType
+                                     | PointerHandler.CanTakeOverFromHandlersOfDifferentType
+                }
 
             Rectangle {
                 anchors.left: parent.left
@@ -406,6 +452,7 @@ Popup {
                 anchors.leftMargin: root.safeLeft
                 anchors.rightMargin: root.safeRight
                 clip: true
+            }
             }
         }
 

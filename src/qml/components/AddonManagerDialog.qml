@@ -126,7 +126,9 @@ ThemedDialog {
     Connections {
         target: Addons
         function onProgressChanged(id, fraction, phase) {
-            var next = root.transfers
+            // A var property does not notify when the same object is assigned back, so
+            // mutating in place left every `row.transfer` binding on the empty map.
+            var next = Object.assign({}, root.transfers)
             next[id] = { fraction: fraction, phase: phase }
             root.transfers = next
         }
@@ -135,11 +137,15 @@ ThemedDialog {
     contentItem: Item {
         implicitHeight: 460
 
-        Row {
+        // Eight category chips do not fit a single row once the dialog is clamped to
+        // the window (and Android chips are wider). Wrap so "AI tools" / "AI engine"
+        // stay on screen instead of clipping off the right edge.
+        Flow {
             id: filters
-            spacing: 6
+            spacing: Theme.spacingMd
             anchors.top: parent.top
             anchors.left: parent.left
+            anchors.right: parent.right
 
             Repeater {
                 model: [
@@ -408,6 +414,7 @@ ThemedDialog {
                     }
 
                     ThemedLabel {
+                        width: body.width
                         text: {
                             if (row.active && row.transfer)
                                 return qsTr("%1… %2%").arg(row.transfer.phase)
@@ -441,16 +448,19 @@ ThemedDialog {
                         // looks like "not started".
                         indeterminate: !row.transfer || row.transfer.fraction <= 0
                         value: row.transfer ? row.transfer.fraction : 0
+                    }
 
-                        ThemedToolTip {
-                            text: row.transfer
-                                  ? qsTr("%1… %2%").arg(row.transfer.phase)
-                                                   .arg(Math.round(row.transfer.fraction * 100))
-                                  : qsTr("Starting…")
-                            visible: progressHover.hovered
-                        }
-
-                        HoverHandler { id: progressHover }
+                    // Next to the ring, not in a hover tooltip: touch has no hover, and a
+                    // 28px ring cannot fit a readable number inside it.
+                    ThemedLabel {
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: row.active && row.transfer && row.transfer.fraction > 0
+                        text: row.transfer
+                              ? Math.round(row.transfer.fraction * 100) + "%"
+                              : ""
+                        size: "sm"
+                        tone: "default"
+                        font.weight: Font.Medium
                     }
 
                     ThemedButton {
