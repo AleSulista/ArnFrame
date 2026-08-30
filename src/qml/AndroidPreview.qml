@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import Drift
 import "components"
 import "components/preview"
@@ -16,6 +17,18 @@ Item {
     signal fullscreenToggleRequested()
 
     property bool optionsOpen: false
+
+    // PointerHandlers (clip DragHandler, view pinch) hit-test their parent's
+    // bounds, not z-order. A sheet in Overlay is visually on top of this preview
+    // but is not an ancestor of those handlers, so a press on a sheet button that
+    // then moves — or a gesture that the sheet does not keep a grab on — was
+    // taken over as a clip drag. overlayModalCount is the same latch the window
+    // uses for its input guard; TouchDrag is not an exception here: a lift is
+    // meant for the timeline, not for a transform handle.
+    readonly property bool overlayBlocksPreview: {
+        const w = root.Window.window
+        return !!(w && w.overlayModalCount > 0)
+    }
 
     readonly property real currentSeconds: EditorState.playheadSeconds
     readonly property real durationSeconds: EditorState.durationSeconds
@@ -140,6 +153,7 @@ Item {
                 PinchHandler {
                     id: viewPinch
                     target: null
+                    enabled: !root.overlayBlocksPreview
 
                     property real lastScale: 1
                     property point lastCentroid
@@ -294,13 +308,18 @@ Item {
                     z: 100
                     visible: !root.playing && EditorState.projectWidth() > 0
                              && !EditorState.canvasCropMode
+                    // Disables every DragHandler / TapHandler / MouseArea in the
+                    // overlay: PointerHandler::wantsEvent walks isEnabled() on
+                    // ancestors. Hiding would also work, but the boxes should stay
+                    // drawn under the scrim so the project does not appear to jump.
+                    enabled: !root.overlayBlocksPreview
                 }
 
                 AndroidCropOverlay {
                     id: cropOverlay
                     anchors.fill: parent
                     visible: EditorState.canvasCropMode
-                    enabled: visible
+                    enabled: visible && !root.overlayBlocksPreview
                     z: 200
                     previewViewport: viewport
                     previewCanvas: canvasRect
