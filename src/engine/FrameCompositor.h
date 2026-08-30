@@ -7,6 +7,11 @@
 #include <QImage>
 #include <QString>
 
+// Preview canvas as a fraction of project resolution. Below this, text and effect
+// radii collapse to subpixels. The compositor never upscales past 1.0.
+inline constexpr double kMinPreviewScale = 0.02;
+inline constexpr int kMinPreviewScalePercent = 2;
+
 // Composites all visible tracks into a single RGBA frame at timeline time T.
 class FrameCompositor
 {
