@@ -1406,6 +1406,9 @@ void GlRuntime::unregisterCudaResources()
 #endif
 }
 
+// Intentionally unused from promoteVideoFrameToTarget: the GPU-to-GPU copy
+// flickered black on NVIDIA. Re-enable only after cuMemcpy2DAsync runs on the
+// same decoder stream as map/unmap.
 bool GlRuntime::importCudaNv12(QOpenGLExtraFunctions *gl, const AVFrame *frame)
 {
 #if defined(Q_OS_MACOS)
@@ -2044,14 +2047,16 @@ GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,
     if (codedW < 2 || codedH < 2)
         return {};
 
-    // CUDA copies into the pooled textures; VAAPI binds the decoder's own dma-buf into a
-    // separate pair, so the draw below has to be told which one holds this frame.
+    // CUDA-GL interop is off: map/unmap use FFmpeg's CU_STREAM_NON_BLOCKING
+    // decoder stream while cuMemcpy2D runs on the null stream, so GL can sample a
+    // WRITE_DISCARD texture before the copy lands (black flicker on NVIDIA).
+    // CUDA decode is unchanged; frames fall through to hw transfer + PBO.
+    // VAAPI binds the decoder's own dma-buf into a separate pair, so the draw
+    // below has to be told which one holds this frame.
     GLuint texY = rt.m_videoY;
     GLuint texUV = rt.m_videoUV;
-    bool uploaded = rt.importCudaNv12(gl, av);
-    if (uploaded) {
-        recordPreviewUploadPath(GlRuntime::PreviewUploadPath::CudaInterop);
-    } else if (rt.importVaapiNv12(gl, av)) {
+    bool uploaded = false;
+    if (rt.importVaapiNv12(gl, av)) {
         uploaded = true;
         texY = rt.m_importY;
         texUV = rt.m_importUV;

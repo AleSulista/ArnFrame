@@ -341,9 +341,9 @@ GlTarget promoteImageToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QI
 GlTarget promoteImageToTargetCached(GlRuntime &rt, QOpenGLExtraFunctions *gl, const QImage &image,
                                     const QSize &fallbackSize);
 
-// Preview video → RGBA FBO. Hardware CUDA frames copy GPU-to-GPU when the driver
-// allows; everything else uploads NV12 through a pooled PBO. Colour and display
-// rotation are applied in the convert shader.
+// Preview video → RGBA FBO. CUDA-GL interop is disabled (NVIDIA black flicker);
+// CUDA frames download via hw transfer and upload NV12 through a pooled PBO, same
+// as other backends. Colour and display rotation are applied in the convert shader.
 GlTarget promoteVideoFrameToTarget(GlRuntime &rt, QOpenGLExtraFunctions *gl,
                                    const PreviewVideoFrame &frame);
 
