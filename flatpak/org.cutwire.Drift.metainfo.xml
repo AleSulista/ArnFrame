@@ -89,6 +89,16 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.5.1" date="2026-08-31">
+      <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.5.1</url>
+      <description>
+        <p>A quick bug-fix release for NVIDIA users. If playback looks fine on your machine,
+        you can skip this update.</p>
+        <ul>
+          <li>Fixed black flicker between frames during NVIDIA hardware-decoded preview.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-08-30">
       <url type="details">https://github.com/CutWire-Studios/Drift/releases/tag/v0.5.0</url>
       <description>
