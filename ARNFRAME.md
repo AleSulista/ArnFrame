@@ -36,3 +36,16 @@ estiverem instalados.
 O DMG inclui as bibliotecas necessárias para execução, não exigindo que o usuário instale o
 Homebrew. Em computadores Intel mais antigos, análises de IA em vídeos longos ou de alta resolução
 podem levar mais tempo.
+
+## Compatibilidade
+
+- Processador: Mac Intel `x86_64`
+- Sistema mínimo: macOS 12 Monterey
+- Compatível em princípio com Monterey, Ventura, Sonoma e Sequoia
+- Testado no macOS Sequoia 15.7.3
+- Memória recomendada: 8 GB ou mais
+- Os recursos de IA exigem os respectivos modelos instalados
+- A IA pode processar lentamente em Macs Intel antigos
+
+Esta compilação não é nativa para Macs Apple Silicon. Nesses computadores, utilize uma versão
+ARM64 apropriada ou execute por meio do Rosetta 2, sem garantia de funcionamento.
