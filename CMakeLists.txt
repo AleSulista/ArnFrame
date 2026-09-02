@@ -641,9 +641,9 @@ endif()
 # It also collides with the <build>/Drift/ directory qt_add_qml_module(URI Drift) writes, which
 # on case-insensitive APFS fails the link with EISDIR.
 if(APPLE)
-    set(DRIFT_MACOS_EXECUTABLE "Drift")
-    set(DRIFT_MACOS_BUNDLE_ID "org.cutwire.Drift")
-    set(DRIFT_MACOS_ICON_FILE "Drift.icns")
+    set(DRIFT_MACOS_EXECUTABLE "ArnFrame")
+    set(DRIFT_MACOS_BUNDLE_ID "studio.arn.ArnFrame")
+    set(DRIFT_MACOS_ICON_FILE "ArnFrame.icns")
 
     # Not CMake's MACOSX_BUNDLE_* properties: the NS* and LSMinimumSystemVersion keys have none.
     configure_file(
@@ -667,7 +667,7 @@ endif()
 qt_add_resources(drift "drift_app_icon"
     PREFIX "/app"
     BASE resources
-    FILES resources/drift.png
+    FILES resources/arnframe.png
 )
 
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE true)

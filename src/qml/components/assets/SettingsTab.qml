@@ -327,7 +327,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             text: Updates.status.length > 0
                                   ? Updates.status
-                                  : qsTr("Drift %1").arg(Updates.currentVersion)
+                                  : qsTr("ArnFrame %1 Intel").arg(Updates.currentVersion)
                         }
                     }
                 }
@@ -354,6 +354,22 @@ Item {
                     text: qsTr("Remind about pack updates")
                     tooltip: qsTr("Pulse the Extras icon when updates are available for packs you already have installed")
                     onToggled: Addons.remindUpdates = checked
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: Theme.borderWidth
+                    color: Theme.panelBorder
+                }
+
+                ThemedLabel {
+                    text: qsTr("Sobre o ArnFrame")
+                }
+
+                ThemedLabel {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: qsTr("ArnFrame by Studio Arn — adaptação, identidade visual e suporte para macOS Intel por Alessandro Henriques Teixeira. Baseado no editor de código aberto Drift, desenvolvido pela CutWire Studios. Distribuído sob a licença GNU GPLv3.")
                 }
             }
         }

@@ -18,7 +18,7 @@ ApplicationWindow {
     // Use visibility only — setting both this and `visible` makes Qt warn
     // "Conflicting properties 'visible' and 'visibility'" (Maximized + hidden).
     visibility: Window.Hidden
-    title: "CutWire Drift"
+    title: "ArnFrame — Studio Arn"
     color: Theme.appBackground
 
     LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft

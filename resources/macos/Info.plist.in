@@ -13,9 +13,9 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Drift</string>
+    <string>ArnFrame</string>
     <key>CFBundleDisplayName</key>
-    <string>Drift</string>
+    <string>ArnFrame</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -34,19 +34,19 @@
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © CutWire Studios. GPL-3.0-or-later.</string>
+    <string>ArnFrame adaptation © Studio Arn. Based on Drift © CutWire Studios. GPL-3.0-or-later.</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
             <key>CFBundleTypeName</key>
-            <string>Drift Project</string>
+            <string>ArnFrame Project</string>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>LSHandlerRank</key>
             <string>Owner</string>
             <key>LSItemContentTypes</key>
             <array>
-                <string>org.cutwire.drift.project</string>
+                <string>studio.arn.arnframe.project</string>
             </array>
         </dict>
     </array>
@@ -54,9 +54,9 @@
     <array>
         <dict>
             <key>UTTypeIdentifier</key>
-            <string>org.cutwire.drift.project</string>
+            <string>studio.arn.arnframe.project</string>
             <key>UTTypeDescription</key>
-            <string>Drift Project</string>
+            <string>ArnFrame Project</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.data</string>

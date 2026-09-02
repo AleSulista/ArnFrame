@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Drift.app and wrap it in a self-contained, signed .dmg.
+# Build ArnFrame.app and wrap it in a self-contained, signed Intel .dmg.
 #
 #   scripts/package-macos.sh
 #   scripts/package-macos.sh --identity "Developer ID Application: ..." --notarize
@@ -57,7 +57,7 @@ if [[ $NOTARIZE -eq 1 ]]; then
 fi
 
 BREW_PREFIX="$(brew --prefix 2>/dev/null || echo /opt/homebrew)"
-QT_PREFIX="${QT_PREFIX:-$BREW_PREFIX/opt/qt6}"
+QT_PREFIX="${QT_PREFIX:-$(brew --prefix qt)}"
 MACDEPLOYQT="$QT_PREFIX/bin/macdeployqt"
 
 if [[ ! -x "$MACDEPLOYQT" ]]; then
@@ -68,15 +68,18 @@ fi
 
 VERSION="$(sed -n 's/^project(Drift VERSION \([0-9.]*\).*/\1/p' "$ROOT/CMakeLists.txt")"
 ARCH="$(uname -m)"
-APP="$BUILD_DIR/Drift.app"
-DMG="$DIST_DIR/Drift-$VERSION-$ARCH.dmg"
+APP="$BUILD_DIR/ArnFrame.app"
+DMG="$DIST_DIR/ArnFrame-$VERSION-Intel-$ARCH.dmg"
 
 if [[ $SKIP_BUILD -eq 0 ]]; then
   # No inference runtime ships, as on Linux and Windows; the user installs an Acceleration addon.
   cmake -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_OSX_ARCHITECTURES=x86_64 \
     -DCMAKE_PREFIX_PATH="$QT_PREFIX;$BREW_PREFIX/opt/openssl@3;$BREW_PREFIX" \
-    -DDRIFT_BUNDLE_ONNXRUNTIME=OFF
+    -DDRIFT_FETCH_ONNXRUNTIME=OFF \
+    -DDRIFT_BUNDLE_ONNXRUNTIME=OFF \
+    -DONNXRUNTIME_ROOT="${ONNXRUNTIME_ROOT:-$ROOT/onnxruntime-linux-x64-1.27.0}"
   cmake --build "$BUILD_DIR" --target drift --parallel "$(sysctl -n hw.ncpu)"
 fi
 
@@ -90,7 +93,7 @@ fi
 
 # macdeployqt leaves the build tree's rpaths in place, and dyld searches those before the
 # @loader_path entries in the frameworks, so the host's Qt would win over the bundled one.
-EXE="$APP/Contents/MacOS/Drift"
+EXE="$APP/Contents/MacOS/ArnFrame"
 rpaths() { otool -l "$EXE" | awk '/LC_RPATH/{f=1} f&&/ path /{print $2; f=0}'; }
 
 while IFS= read -r RPATH; do
@@ -170,19 +173,19 @@ notarize() {
 # carries its own ticket and validates with no network. Stapling only the .dmg leaves the app
 # relying on an online check.
 if [[ $NOTARIZE -eq 1 ]]; then
-  ditto -c -k --keepParent "$APP" "$STAGING/Drift.zip"
-  notarize "$STAGING/Drift.zip"
+  ditto -c -k --keepParent "$APP" "$STAGING/ArnFrame.zip"
+  notarize "$STAGING/ArnFrame.zip"
   xcrun stapler staple "$APP"
 fi
 
 mkdir -p "$DIST_DIR"
 rm -f "$DMG"
 
-cp -R "$APP" "$STAGING/Drift.app"
+cp -R "$APP" "$STAGING/ArnFrame.app"
 ln -s /Applications "$STAGING/Applications"
-rm -f "$STAGING/Drift.zip"
+rm -f "$STAGING/ArnFrame.zip"
 
-hdiutil create -volname "Drift $VERSION" -srcfolder "$STAGING" \
+hdiutil create -volname "ArnFrame $VERSION Intel" -srcfolder "$STAGING" \
   -ov -format UDZO -quiet "$DMG"
 
 if [[ -n "$IDENTITY" ]]; then
