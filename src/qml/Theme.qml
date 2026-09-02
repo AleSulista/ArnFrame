@@ -278,7 +278,7 @@ QtObject {
 
     // --- Layout: assets panel -----------------------------------------------
     readonly property real panelHeaderHeight: touchUi ? 52 : 44
-    readonly property real tabRailWidth: touchUi ? 52 : 48
+    readonly property real tabRailWidth: 52
     readonly property real assetCardWidth: 112
     readonly property real assetCardGap: 16
 
