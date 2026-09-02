@@ -64,3 +64,9 @@ third_party/prebuilt/
 # Local credential files — never commit
 .env
 .env.*
+
+# ArnFrame local build dependencies
+/ArnFrame-Intel-rebrand.patch
+/completar_ptbr_arnframe.py
+/onnxruntime-linux-x64-*.tgz
+/onnxruntime-linux-x64-*/

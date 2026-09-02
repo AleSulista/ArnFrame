@@ -6313,7 +6313,15 @@ If playback stutters, try another.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Drift %1</source>
+        <source>ArnFrame %1 Intel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sobre o ArnFrame</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ArnFrame by Studio Arn — adaptação, identidade visual e suporte para macOS Intel por Alessandro Henriques Teixeira. Baseado no editor de código aberto Drift, desenvolvido pela CutWire Studios. Distribuído sob a licença GNU GPLv3.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
