@@ -70,3 +70,6 @@ third_party/prebuilt/
 /completar_ptbr_arnframe.py
 /onnxruntime-linux-x64-*.tgz
 /onnxruntime-linux-x64-*/
+
+# ONNX Runtime Intel compilado localmente
+onnxruntime-macos-x86_64-1.27.0/

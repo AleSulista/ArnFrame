@@ -71,15 +71,28 @@ ARCH="$(uname -m)"
 APP="$BUILD_DIR/ArnFrame.app"
 DMG="$DIST_DIR/ArnFrame-$VERSION-Intel-$ARCH.dmg"
 
+ORT_ROOT="${ONNXRUNTIME_ROOT:-$ROOT/onnxruntime-macos-x86_64-1.27.0}"
+
+if [[ ! -f "$ORT_ROOT/lib/libonnxruntime.dylib" ]]; then
+  echo "ONNX Runtime não encontrado em: $ORT_ROOT" >&2
+  exit 1
+fi
+
+if [[ ! -f "$ORT_ROOT/lib/libprotobuf-lite.32.dylib" ]]; then
+  echo "Protobuf Lite não encontrado em: $ORT_ROOT/lib" >&2
+  exit 1
+fi
+
 if [[ $SKIP_BUILD -eq 0 ]]; then
-  # No inference runtime ships, as on Linux and Windows; the user installs an Acceleration addon.
+  # Inclui o ONNX Runtime Intel dentro do ArnFrame para os recursos locais de IA.
   cmake -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_OSX_ARCHITECTURES=x86_64 \
     -DCMAKE_PREFIX_PATH="$QT_PREFIX;$BREW_PREFIX/opt/openssl@3;$BREW_PREFIX" \
     -DDRIFT_FETCH_ONNXRUNTIME=OFF \
-    -DDRIFT_BUNDLE_ONNXRUNTIME=OFF \
-    -DONNXRUNTIME_ROOT="${ONNXRUNTIME_ROOT:-$ROOT/onnxruntime-linux-x64-1.27.0}"
+    -DDRIFT_BUNDLE_ONNXRUNTIME=ON \
+    -DONNXRUNTIME_ROOT="$ORT_ROOT" \
+    -DOnnxRuntime_LIBRARY="$ORT_ROOT/lib/libonnxruntime.dylib"
   cmake --build "$BUILD_DIR" --target drift --parallel "$(sysctl -n hw.ncpu)"
 fi
 
@@ -90,6 +103,11 @@ fi
 
 # -qmldir: the imported Qt Quick modules are separate plugins, found by scanning the sources.
 "$MACDEPLOYQT" "$APP" -qmldir="$ROOT/src/qml" -no-codesign -verbose=1
+
+# O ONNX Runtime Intel foi compilado com Protobuf Lite; ambas precisam viajar juntas.
+ORT_APP_DIR="$APP/Contents/Resources/onnxruntime/lib"
+mkdir -p "$ORT_APP_DIR"
+cp -f "$ORT_ROOT/lib/libprotobuf-lite.32.dylib" "$ORT_APP_DIR/"
 
 # macdeployqt leaves the build tree's rpaths in place, and dyld searches those before the
 # @loader_path entries in the frameworks, so the host's Qt would win over the bundled one.
